@@ -1,31 +1,347 @@
 # KPI: Add to Cart Rate
-# Generated: 2025-12-06T21:40:35.559Z
+# Generated: 2025-12-25T00:06:02.231Z
 # Contributed by: swapnamagantius
-
+# Last modified by: devyendarm
 
 KPI Name: Add to Cart Rate
-Formula: Add to Cart Rate = (Number of sessions with ≥1 add_to_cart) / (Number of sessions with ≥1 product_view)
+Formula: count(add_to_cart)/count(product_view)*100
 
 Description: |
-  The percentage of product engagement sessions (or product views) that progress to an Add to Cart action. It measures how effectively product pages and merchandising convert interest into cart intent. Typically calculated as sessions with at least one add_to_cart divided by sessions with at least one product_view within a given time window.
+  The percentage of product views that result in an Add to Cart action, indicating how effectively product placement converts browsing interest into initial purchase intent.
 
 Category: Conversion
 
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Digital Analytics
 
+Scope: Session
 
+Measure Type: Rate
 
+Aggregation Window: Session; User
 
+GA4 Event: |
+  add_to_cart
+  view_item
 
+Adobe Event: |
+  scAdd
+  prodView
 
+W3 Data Layer: |
+  // =================================
+  // Add to Cart (Numerator)
+  // =================================
+  window.digitalData.cart.price = {
+    currency: "USD",
+    cartTotal: 50.0
+  };
+  
+  window.digitalData.cart.item = [
+    {
+      productInfo: {
+        sku: "SKU-001",
+        productName: "Wireless Mouse",
+        manufacturer: "LogiTech",
+        color: "Black"
+      },
+      category: {
+        primaryCategory: "Electronics",
+        subCategory1: "Accessories"
+      },
+      quantity: 2,
+      price: {
+        currency: "USD",
+        basePrice: 25.0
+      },
+      attributes: {
+        item_list_id: "related_products",
+        item_list_name: "Related Products"
+      }
+    }
+  ];
+  
+  // =================================
+  // Event journal
+  // =================================
+  window.digitalData.event = window.digitalData.event || [];
+  window.digitalData.event.push({
+    eventInfo: {
+      eventName: "Add to Cart",
+      eventAction: "add_to_cart",
+      timeStamp: new Date()
+    },
+    category: {
+      primaryCategory: "Commerce"
+    },
+    attributes: {
+      sku: "SKU-001",
+      quantity: 2,
+      value: 50.0,
+      currency: "USD",
+      item_list_id: "related_products",
+      item_list_name: "Related Products"
+    }
+  });
+  
+  // =================================
+  // Product View (Denominator)
+  // =================================
+  window.digitalData.product = [
+    {
+      productInfo: {
+        sku: "SKU-001",
+        productName: "Wireless Mouse",
+        manufacturer: "LogiTech",
+        color: "Black"
+      },
+      category: {
+        primaryCategory: "Electronics",
+        subCategory1: "Accessories"
+      },
+      attributes: {
+        item_list_id: "related_products",
+        item_list_name: "Related Products"
+      }
+    }
+  ];
+  
+  // =================================
+  // Event journal (CEDDL uses digitalData.event[n] as an array)
+  // =================================
+  window.digitalData.event = window.digitalData.event || [];
+  window.digitalData.event.push({
+    eventInfo: {
+      eventName: "Product View",
+      eventAction: "view_item",
+      timeStamp: new Date()
+    },
+    category: {
+      primaryCategory: "Commerce"
+    },
+    attributes: {
+      sku: "SKU-001",
+      item_list_id: "related_products",
+      item_list_name: "Related Products"
+    }
+  });
+  
 
+GA4 Data Layer: |
+  // ===============================
+  // GA4 Event for Numerator: Add to Cart
+  // ===============================
+  window.dataLayer.push({
+    event: "add_to_cart",
+    ecommerce: {
+      currency: "USD",
+      value: 50.0,     // total value for items in this add-to-cart action
+      items: [
+        {
+          item_id: "SKU-001",
+          item_name: "Wireless Mouse",
+          item_category: "Electronics > Accessories",
+          item_brand: "LogiTech",
+          item_variant: "Black",
+  		item_list_id: "related_products",
+          item_list_name: "Related Products",
+          price: 25.0,
+          quantity: 2
+        }
+      ]
+    },
+  });
+  
+  // ===============================
+  // GA4 Event for Denominator: Product View
+  // ===============================
+  
+  window.dataLayer.push({
+    event: "view_item",
+    ecommerce: {
+      items: [
+        {
+          item_id: "SKU-001",
+          item_name: "Wireless Mouse",
+          item_category: "Electronics > Accessories",
+          item_brand: "LogiTech",
+          item_variant: "Black",
+          price: 25.0,
+          currency: "USD",
+  		quantity: 1
+  		item_list_id: "related_products",
+          item_list_name: "Related Products",
+        }
+      ]
+    },
+  });
+  
 
+Adobe Client Data Layer: |
+  // =================================
+  // Add to Cart (Numerator)
+  // =================================
+  window.adobeDataLayer.push({
+    event: "add-to-cart",
+    data: {
+      commerce: {
+        currency: "USD",
+        value: 50.0,
+        items: [
+          {
+            sku: "SKU-001",
+            name: "Wireless Mouse",
+            category: "Electronics > Accessories",
+            brand: "LogiTech",
+            variant: "Black",
+            listId: "related_products",
+            listName: "Related Products",
+            price: 25.0,
+            quantity: 2
+          }
+        ]
+      }
+    }
+  });
+  
+  // =================================
+  // Product View (Denominator)
+  // =================================
+  window.adobeDataLayer.push({
+    event: "product-view",
+    data: {
+      commerce: {
+        currency: "USD",
+        items: [
+          {
+            sku: "SKU-001",
+            name: "Wireless Mouse",
+            category: "Electronics > Accessories",
+            brand: "LogiTech",
+            variant: "Black",
+            listId: "related_products",
+            listName: "Related Products",
+            price: 25.0,
+            quantity: 1
+          }
+        ]
+      }
+    }
+  });
+  
 
+XDM Mapping: |
+  // =================================
+  //Add to Cart (Numerator)
+  // =================================
+  
+  alloy("sendEvent", {
+    xdm: {
+      commerce: {
+        productListAdds: { value: 1 }
+      },
+      productListItems: [
+        {
+          SKU: "SKU-001",
+          name: "Wireless Mouse",
+          quantity: 2,
+          priceTotal: 50.0,
+          currencyCode: "USD",
+          productAddMethod: "Add to Cart Button"
+        }
+      ]
+    }
+  });
+  
+  // =================================
+  //Product View (Denominator)
+  // =================================
+  
+  alloy("sendEvent", {
+    xdm: {
+      commerce: {
+        productViews: { value: 1 }
+      },
+      productListItems: [
+        {
+          SKU: "SKU-001",
+          name: "Wireless Mouse"
+          // priceTotal is often omitted for product view (Adobe even calls this out as sometimes not applicable)
+        }
+      ]
+    }
+  });
+  
 
+SQL Query: |
+  WITH product_views AS (
+    SELECT DISTINCT
+      session_id,
+      product_id
+    FROM events
+    WHERE event_name = 'product_view'
+  ),
+  
+  add_to_carts AS (
+    SELECT DISTINCT
+      session_id,
+      product_id
+    FROM events
+    WHERE event_name = 'add_to_cart'
+  )
+  
+  SELECT
+    pv.product_id,
+    COUNT(*) AS product_view_sessions,
+    COUNT(atc.product_id) AS sessions_with_add_to_cart,
+    COUNT(atc.product_id) * 1.0 / COUNT(*) AS add_to_cart_rate
+  FROM product_views pv
+  LEFT JOIN add_to_carts atc
+    ON pv.session_id = atc.session_id
+   AND pv.product_id = atc.product_id
+  GROUP BY pv.product_id;
+  
 
+Calculation Notes: |
+  1️⃣ Time lag (e.g., same session, same day/custom time, User level) is another variant for analyzing ATC performance.
+  2️⃣ Default ATC Rate counts events, not units. Do not use quantity in the calculation, it is a different KPI - Add to Cart Quantity Rate.
+  3️⃣ Both events must share the same product identifier and time window.
+  
 
+Business Use Case: |
+  1️⃣ Product & Merchandising Effectiveness - Are customers interested enough in a product to express purchase intent?
+  2️⃣ Product Detail Page (PDP) Optimization - Does the PDP convince users to take the next step in purchase intent?
+  3️⃣ Pricing & Promotion Sensitivity - Does a price change or promotion improve intent?
+  4️⃣ Traffic Quality & Channel Evaluation - Which traffic sources bring quality users with real buying intent?
+  5️⃣ Search, Product Finding Methods & Recommendation Effectiveness - Are users finding relevant products, which site feature generating most purchase intents?
+  6️⃣ Funnel Drop-off Diagnosis - Where does intent break down before checkout?
+
+Dependencies:
+  Events: [add_to_cart, scAdd]
+  Metrics: [Add-to-cart]
+  Dimensions: [item_id]
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  Dimensions: Product Id; Product Name; Category; Product Finding Method
+  Metrics: Product Views (Item Views); Add to Cart (ATCs)
+  KPIs: Average Order Value (AOV); Revenue per Visit (RPV)
+
+Dashboard Usage: [Ecommerce Funnel Dashboard (view → add to cart → checkout → purchase), Product Merchandising, Product Detail Page Performance]
+
+Segment Eligibility: |
+  False
+
+Related KPIs: [add-to-cart, product-view]
+
+Data Sensitivity: Internal
+
+Contains PII: No
 
 Status: draft
 
@@ -33,5 +349,7 @@ Contributed By: swapnamagantius
 
 Created At: 2025-12-06T21:40:35.157+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2025-12-25T00:06:00.736+00:00
 
