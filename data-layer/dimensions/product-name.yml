@@ -1,0 +1,115 @@
+# Dimension: Product Name
+# Generated: 2026-03-18T05:17:29.954Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Product Name
+Formula: TRIM(product_name)
+
+Description: |
+  A name or title assigned to an individual product SKU (Stock keeping unit) or product offering. It serves as the primary qualitative label used to aggregate performance metrics (like Revenue or Add to cart) across different platforms and reporting suites.
+
+Category: Performance
+
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  item_name
+
+Adobe Event: |
+  s.products // 2nd parameter in s.products
+
+W3 Data Layer: |
+  {
+    "product": [{
+      "attributes": {
+        "productName": "Eco-Friendly Yoga Mat"
+      }
+    }]
+  }
+  
+
+GA4 Data Layer: |
+  {
+    "event": "view_item",
+    "ecommerce": {
+      "items": [{
+        "item_name": "Eco-Friendly Yoga Mat"
+      }]
+    }
+  }
+  
+
+Adobe Client Data Layer: |
+  {
+    "product": [{
+      "xdm:name": "Eco-Friendly Yoga Mat"
+    }]
+  }
+  
+
+XDM Mapping: |
+  xdm:productListItems[].name
+
+SQL Query: |
+  SELECT 
+      LOWER(TRIM(item_name)) AS product_name,
+      COUNT(DISTINCT transaction_id) AS orders,
+      SUM(item_revenue) AS total_revenue
+  FROM `your-project.analytics_12345.events_*`,
+  UNNEST(items)
+  WHERE _TABLE_SUFFIX BETWEEN '20231001' AND '20231031'
+  GROUP BY 1
+  ORDER BY 3 DESC
+  
+
+Calculation Notes: |
+  1️⃣Ensure case normalization (usually lowercase) in SQL to avoid duplication (e.g., "Yoga Mat" vs "yoga mat").
+  2️⃣If names change in the PIM, use "Product ID or SKU ID" to lookup the latest productName (Saint Classifications for Adobe and Data Import for GA4)
+
+Business Use Case: |
+  1️⃣Identify merchandising driving the highest engagement and revenue, enabling data-driven decisions on stock levels and promotional discounts.
+  
+
+Dependencies:
+  Events: [view_item, add_to_cart, purchase]
+
+Source Data: Digital Analytics, Enterprise Resource Planning (ERP), Product Information Management (PIM)
+
+Report Attributes: |
+  GA4: Item Name
+  Adobe: Product Name
+
+Dashboard Usage: [Merchandising Performance, Conversion Funnel Analysis, Top Sellers, Inventory Turnover]
+
+Segment Eligibility: |
+  True
+
+Related Dimensions: [Item Name]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-03-18T04:08:15.39+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-03-18T05:17:28.578+00:00
+
