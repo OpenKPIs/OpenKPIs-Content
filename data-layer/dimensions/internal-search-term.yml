@@ -1,0 +1,143 @@
+# Dimension: Internal Search Term
+# Generated: 2026-04-25T22:15:27.011Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Dimension Name: Internal Search Term
+Formula: Captured directly from the internal site search input field at the time a search_results_view or equivalent internal search event fires. If you want to capture from URL here is the formula LOWER(TRIM(URL_DECODE(search_query_parameter))).
+
+Description: |
+  The exact keyword or phrase a user enters into an on-site or in-app search function. This dimension categorizes search interactions by the user's expressed intent and is used to analyze content/product discoverability, navigation effectiveness, and demand signals within owned digital properties.
+
+Category: Engagement
+
+
+Industry: Retail
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event,  Session,  User,  Time based - Hourly/Daily/Monthly/Yearly
+
+GA4 Event: |
+  search_term
+
+Adobe Event: |
+  eVar12, prop12 or can be any available eVar or prop
+  
+
+W3 Data Layer: |
+  {
+    "event": "search_results_view",
+    "search": {
+      "searchTerm": "running shoes",
+      "searchType": "internal",
+      "resultsCount": 128,
+      "searchMethod": "manual"
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "view_search_results",
+    "search_term": "running shoes",
+    "search_type": "internal",
+    "results_count": 128
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "searchResultsView",
+    "search": {
+      "internalSearchTerm": "running shoes",
+      "searchType": "internal",
+      "resultsCount": 128
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "siteSearch",
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar12": "running shoes"
+          },
+          "props": {
+            "prop12": "running shoes"
+          }
+        }
+      }
+    },
+    "siteSearch": {
+      "phrase": "running shoes",
+      "isInternal": true,
+      "resultsCount": 128
+    }
+  }
+
+SQL Query: |
+  SELECT
+    event_date,
+    event_timestamp,
+    user_pseudo_id,
+    session_id,
+    (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'search_term') AS internal_search_term
+  FROM `project.dataset.events_*`
+  WHERE event_name IN ('view_search_results','search_results_view')
+    AND (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'search_term') IS NOT NULL;
+
+Calculation Notes: |
+  1) Capture when search results are rendered or when the search is submitted, depending on implementation standard, but use one method consistently. 
+  2) Prefer the submitted term over auto-suggest text unless measuring suggestion interactions separately. 
+  3) Normalise casing and whitespace for reporting consistency, but retain raw value in a separate field if possible. 
+  4) Exclude external site search engines and paid search keywords. 
+  5) If search terms are passed in the URL, ensure decoding and parameter governance across templates. 
+  6) Consider language handling, stemming, stop-word treatment, and typo correction only in downstream reporting layers, not by overwriting the raw captured term. 
+  7) Do not capture sensitive health, financial, or personal data entered into search unless approved by governance and privacy teams. Implement bot filtering and deduplicate       repeated searches caused by page reloads or SPA route changes.
+  
+
+Business Use Case: |
+  An e-commerce merchandising team filters sessions by Internal Search Term = 'running shoes' to evaluate search exit rate, product click-through, add-to-cart rate, and revenue generated from users expressing high purchase intent for that category.
+  
+
+Dependencies:
+  Events: [view_search_results, search_refinement_event]
+  Metrics: [search_results_count]
+
+Source Data: Digital Analytics, Business Intelligence
+
+Report Attributes: |
+  Dimensions: Internal Search Term, Search Results Count, Search Type, Landing Page, Device Category; 
+  Metrics: Searches, Users, Sessions, Search Exit Rate, Conversion Rate, Revenue, Add-to-Cart Rate; 
+  KPIs: Search-to-Conversion Rate, Zero-Result Search Rate
+
+Dashboard Usage: [Search Performance, Content Discovery, E-commerce Merchandising, Product Analytics, UX Optimization]
+
+Segment Eligibility: |
+  True
+
+Related Dimensions: [Search Results Count, Search Type, Search Refinement, Search Category, Landing Page, Device Category, Content Group, Product Category]
+
+Derived Dimensions: ["Search Term Group, Search Intent Category, Branded vs Non-Branded Internal Search, Zero-Result Search Flag, Search Term Length, Search Term Language, Normalised Search Term"]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2025-12-01T00:50:13.841+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-04-25T22:15:25.764+00:00
+
