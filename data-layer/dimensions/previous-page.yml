@@ -1,0 +1,174 @@
+# Dimension: Previous Page
+# Generated: 2026-04-27T00:31:42.190Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Dimension Name: Previous Page
+Formula: For each page_view event within a session ordered by event timestamp: Previous Page = LAG(current_page_identifier) OVER (PARTITION BY user/session ORDER BY event_timestamp). If the current page_view is the first page in the session, set value to '(entrance)' or null based on reporting standard.
+
+Description: |
+  The page URL, path, title, or canonical page identifier viewed immediately before the current page within the same session. This dimension categorises navigation flow by identifying the prior step in a user's on-site journey and is commonly used to analyse pathing, entry-to-content progression, internal click behaviour, and page-to-page drop-off.
+
+Category: Engagement
+
+
+Industry: Retail
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Session, User, Time based - Hourly/Daily/Monthly/Yearly
+
+GA4 Event: |
+  page_referrer
+
+Adobe Event: |
+  prop5 or any available prop
+
+W3 Data Layer: |
+  {
+    "event": "page_view",
+    "page": {
+      "pageName": "Product Detail",
+      "pageURL": "https://www.example.com/products/widget-a",
+      "previousPage": "https://www.example.com/category/widgets",
+      "previousPageName": "Category: Widgets"
+    },
+    "web": {
+      "webPageDetails": {
+        "URL": "https://www.example.com/products/widget-a",
+        "name": "Product Detail",
+        "previousPageURL": "https://www.example.com/category/widgets",
+        "previousPageName": "Category: Widgets"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_location": "https://www.example.com/products/widget-a",
+    "page_title": "Product Detail",
+    "page_referrer": "https://www.example.com/category/widgets",
+    "previous_page": "https://www.example.com/category/widgets",
+    "previous_page_name": "Category: Widgets"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "page-view",
+    "page": {
+      "pageInfo": {
+        "pageName": "Product Detail",
+        "pageURL": "https://www.example.com/products/widget-a",
+        "referrer": "https://www.example.com/category/widgets",
+        "previousPage": "https://www.example.com/category/widgets",
+        "previousPageName": "Category: Widgets"
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web": {
+      "webPageDetails": {
+        "URL": "https://www.example.com/products/widget-a",
+        "name": "Product Detail",
+        "URLReferer": "https://www.example.com/category/widgets"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "props": {
+            "prop5": "https://www.example.com/category/widgets"
+          },
+          "eVars": {
+            "eVar5": "Category: Widgets"
+          }
+        }
+      }
+    },
+    "_custom": {
+      "web": {
+        "previousPageURL": "https://www.example.com/category/widgets",
+        "previousPageName": "Category: Widgets"
+      }
+    }
+  }
+
+SQL Query: |
+  WITH pageviews AS (
+    SELECT
+      user_pseudo_id,
+      CONCAT(user_pseudo_id, '-', CAST(ga_session_id AS STRING)) AS session_id,
+      event_timestamp,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_location') AS current_page,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_title') AS current_page_title,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_referrer') AS page_referrer
+    FROM `project.dataset.events_*`
+    WHERE event_name = 'page_view'
+  )
+  SELECT
+    user_pseudo_id,
+    session_id,
+    event_timestamp,
+    current_page,
+    current_page_title,
+    COALESCE(
+      LAG(current_page) OVER (PARTITION BY session_id ORDER BY event_timestamp),
+      page_referrer,
+      '(entrance)'
+    ) AS previous_page
+  FROM pageviews;
+
+Calculation Notes: |
+  1) Prefer an internal previous page value derived from ordered page_view events rather than relying solely on browser referrer, because referrer may include external domains, be suppressed by privacy settings, or be overwritten by redirects. Standardise whether this dimension stores full URL, path only, page title, or canonical page ID. 
+  2) Exclude query strings if they create unnecessary cardinality unless campaign/content parameters are analytically required. 
+  3) For SPAs, ensure virtual page views fire on route change so previous page reflects in-app navigation. 
+  4) Define a consistent entrance value such as '(entrance)' for first pageviews in session. If using GA4 page_referrer, note it may represent browser referrer rather than strictly prior internal page.
+
+Business Use Case: |
+  A content team analyses article pages by Previous Page to identify which homepage modules, category pages, or related-article links most often drive readers into high-engagement content. A CRO team uses it to see which page users came from before reaching checkout and where abandonment is introduced.
+
+Dependencies:
+  Events: [page_view, event_timestamp]
+  Dimensions: [page_view, page_location, session_identifier, referrer]
+
+Source Data: Digital Analytics, Business Intelligence
+
+Report Attributes: |
+  Dimensions: Previous Page, Current Page, Landing Page, Page Path, Page Title, Session Source/Medium; 
+  Metrics: Page Views, Entrances, Exits, Bounce Rate/Engaged Sessions, Conversions, Revenue;
+   KPIs: Checkout Progression, Content Flow Efficiency
+  
+
+Dashboard Usage: [Traffic Analysis, Content Performance, Customer Journey, Conversion Funnel, Navigation Pathing, C-Suiteye]
+
+Segment Eligibility: |
+  True
+
+Related Dimensions: [Current Page, Landing Page, Next Page, Page Path, Page Title, Referrer, Exit Page, Page Category]
+
+Derived Dimensions: [Previous Page Group, Previous Page Type, Internal vs External Previous Page, Previous Page Depth, Previous Content Section]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-04-26T23:52:44.417+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-04-27T00:31:40.214+00:00
+
