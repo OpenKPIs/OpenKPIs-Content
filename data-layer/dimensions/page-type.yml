@@ -1,0 +1,123 @@
+# Dimension: Page Type
+# Generated: 2026-04-27T05:44:29.414Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Dimension Name: Page Type
+Formula: CASE WHEN page_template IS NOT NULL THEN page_template WHEN page_url LIKE '%/product/%' OR content_group = 'pdp' THEN 'product-detail' WHEN page_url LIKE '%/category/%' OR content_group = 'plp' THEN 'category-listing' WHEN page_url LIKE '%/search%' THEN 'search-results' WHEN page_url LIKE '%/cart%' THEN 'cart' WHEN page_url LIKE '%/checkout%' THEN 'checkout' WHEN page_url IN ('/','/home') OR page_name = 'home' THEN 'home' WHEN page_url LIKE '%/blog/%' OR content_type = 'article' THEN 'article' WHEN page_url LIKE '%/account%' THEN 'account' WHEN page_url LIKE '%/support%' OR page_url LIKE '%/help%' THEN 'support' ELSE 'other' END
+
+Description: |
+  Categorises a page or screen into a standardized content or functional type based on its purpose in the user journey, such as home, category, product detail, article, search results, cart, checkout, account, or support. This dimension enables consistent analysis of engagement, conversion, and navigation performance across templates and experiences.
+
+Category: Engagement
+
+
+Industry: Retail
+
+Priority: Medium
+
+Core Area: content taxonomy; site structure; navigation; content grouping; page classification; subsection; information architecture
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Session, User, Time based - Hourly/Daily/Monthly/Yearly
+
+GA4 Event: |
+  sub_section_1
+
+Adobe Event: |
+  eVar12 or any available eVar
+
+W3 Data Layer: |
+  {
+  "event":"content_metadata",
+  "page":
+      {
+        "section":"Resources","subSection1":"Blog","subSection2":"Analytics","pageName":"GA4 Implementation Guide","pagePath":"/resources/blog/ga4-implementation-guide"
+      }
+  }
+
+GA4 Data Layer: |
+  {
+  "event":"page_view",
+  "page_section":"Resources",
+  "sub_section_1":"Blog",
+  "sub_section_2":"Analytics",
+  "page_title":"GA4 Implementation Guide",
+  "page_location":"https://www.example.com/resources/blog/ga4-implementation-guide"
+  }
+
+Adobe Client Data Layer: |
+  {
+  "event":"contentMetadata",
+  "page":
+     {
+       "section":"Resources","subSection1":"Blog",
+       "subSection2":"Analytics",
+       "name":"GA4 Implementation Guide",
+       "path":"/resources/blog/ga4-implementation-guide"
+     }
+  }
+  
+
+XDM Mapping: |
+  {
+  "xdmPath":"_experience.analytics.customDimensions.eVars.eVar12",
+  "alternateMappings":
+  ["web.webPageDetails.siteSection","_experience.analytics.event1to100.event1"],
+  "sourceField":"page.subSection1"
+  }
+
+SQL Query: |
+  SELECT
+    event_date,
+    user_pseudo_id,
+    event_timestamp,
+    COALESCE(
+      (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'sub_section_1'),
+      REGEXP_EXTRACT((SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'page_location'), r'^https?://[^/]+/[^/]+/([^/?#]+)'),
+      '(not set)'
+    ) AS sub_section_1
+  FROM `project.dataset.events_*`
+  WHERE event_name IN ('page_view','screen_view','view_item','select_content');
+
+Calculation Notes: |
+  Populate at the time of page_view, screen_view, and any key content interaction events so the value persists across downstream analysis. Prefer CMS-driven taxonomy over URL parsing because URLs can change and may not reflect business structure. Standardise casing and naming conventions, such as title case or lowercase, to avoid duplicate values. If using SPA frameworks, ensure the dimension is refreshed on virtual page changes. For Adobe, use an eVar with visit or hit expiration depending on reporting needs; hit-level is recommended when subsection can change frequently within a session. Avoid sending free-form values from user input. Define a fallback value such as '(not set)' only when taxonomy is unavailable.
+
+Business Use Case: |
+  A content strategy team filters engagement and conversion reports by Sub Section 1 to compare how Blog, Documentation, Pricing, and Support subsections contribute to lead generation, product adoption, or revenue. An e-commerce team uses it to compare performance of Men, Women, Kids, and Sale subsections within a broader catalog section.
+
+Dependencies:
+  Dimensions: [screen_view, page_location, page_path, content_taxonomy, site_section]
+  KPIs: [page_view]
+
+Source Data: Digital Analytics; CMS; Tag Management System; Business Intelligence
+
+Report Attributes: |
+  Dimensions: Sub Section 1, Page path, Page title, Content group, Site section; Metrics: Views, Users, Sessions, Engagement rate, Conversions, Revenue; KPIs: Conversion rate, Avg engagement time, Bounce rate
+
+Dashboard Usage: [Content Performance, Navigation Analysis, Conversion Funnel, Executive Summary, SEO Landing Pages, Product Discovery]
+
+Segment Eligibility: |
+  True
+
+Related Dimensions: [Event, Session, User, Time based - Hourly/Daily/Monthly/Yearly]
+
+Derived Dimensions: [Sub Section 1 Group, Sub Section Depth, Normalized Sub Section 1, Content Hierarchy Level 2]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-04-27T00:51:46.566+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-04-27T05:44:27.586+00:00
+
