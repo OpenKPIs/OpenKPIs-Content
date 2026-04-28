@@ -1,0 +1,157 @@
+# Dimension: Retention Type
+# Generated: 2026-04-28T05:32:53.255Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Dimension Name: Retention Type
+Formula: CASE WHEN retention_logic IN ('classic','unbounded') THEN 'Classic Retention' WHEN retention_logic IN ('rolling') THEN 'Rolling Retention' WHEN retention_logic IN ('bracketed','range') THEN 'Bracketed Retention' WHEN retention_logic IN ('strict','day_n','exact_day') THEN 'Strict Day-N Retention' ELSE 'Other' END
+
+Description: |
+  Classifies the method used to measure user retention by defining the return logic applied to a cohort. It categorises retained users into standard analytical retention frameworks such as classic/unbounded retention, rolling retention, bracketed retention, and strict day-N retention so teams can compare retention results consistently across reports and tools.
+
+Category: Retention
+
+
+Industry: Retail
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User, Time based - Daily/Monthly/Yearly, Global
+
+
+
+W3 Data Layer: |
+  {
+      "event": "retention_measurement",
+      "retention": {
+          "type": "Classic Retention",
+          "logic": "user returned in exact analysis period based on cohort start date",
+          "cohort_date": "2026-04-01",
+          "return_window": "day_7"
+      }
+  }
+
+GA4 Data Layer: |
+  {
+      "event": "retention_measurement",
+      "retention_type": "Classic Retention",
+      "retention_logic": "classic",
+      "cohort_date": "2026-04-01",
+      "return_window": "day_7"
+  }
+
+Adobe Client Data Layer: |
+  {
+      "event": "retention_measurement",
+      "xdm": {
+          "_experience": {
+              "analytics": {
+                  "customDimensions": {
+                      "eVars": {
+                          "eVar42": "Classic Retention"
+                      }
+                  }
+              }
+          },
+          "retention": {
+              "type": "Classic Retention",
+              "logic": "classic",
+              "cohortDate": "2026-04-01",
+              "returnWindow": "day_7"
+          }
+      }
+  }
+
+XDM Mapping: |
+  {
+      "path": "_experience.analytics.customDimensions.eVars.eVar42",
+      "additional_mappings": {
+          "retention.type": "xdm:retention.type",
+          "retention.logic": "xdm:retention.logic",
+          "retention.cohortDate": "xdm:retention.cohortDate",
+          "retention.returnWindow": "xdm:retention.returnWindow"
+      }
+  }
+
+SQL Query: |
+  WITH user_activity AS (
+    SELECT
+      user_id,
+      DATE(MIN(event_timestamp)) AS cohort_date,
+      DATE(event_timestamp) AS activity_date
+    FROM raw_events
+    GROUP BY 1,3
+  ), retention_base AS (
+    SELECT
+      user_id,
+      cohort_date,
+      activity_date,
+      DATE_DIFF(activity_date, cohort_date, DAY) AS days_since_cohort
+    FROM user_activity
+  )
+  SELECT
+    user_id,
+    cohort_date,
+    CASE
+      WHEN days_since_cohort = 7 THEN 'Strict Day-N Retention'
+      WHEN days_since_cohort >= 7 THEN 'Rolling Retention'
+      WHEN days_since_cohort BETWEEN 7 AND 13 THEN 'Bracketed Retention'
+      ELSE 'Classic Retention'
+    END AS retention_type
+  FROM retention_base
+  WHERE days_since_cohort >= 0;
+
+Calculation Notes: |
+  1) Define and govern allowed values centrally because retention type is often a reporting configuration rather than a raw behavioral attribute.
+  2) Best practice is to populate this dimension in the semantic layer, BI model, or cohort output table rather than on every digital event unless the product explicitly emits retention methodology. 
+  3) Ensure the same cohort start rule is used across all retention types, such as first_seen_date, signup_date, first_purchase_date, or first_key_action_date. 
+  4) Strict Day-N counts return only on the exact day or period. Rolling retention counts return on or after the target day. 
+  5) Bracketed retention counts return within a defined range such as days 7-13. 
+  6) Classic retention is often used as a generic label for exact-period cohort retention in standard dashboards. 
+  7) Do not mix user-based and account-based retention definitions in the same field. 
+  8)`Capture timezone consistently when deriving cohort and return dates.
+
+Business Use Case: |
+  A growth team compares D7 retention for a mobile app using Strict Day-N Retention versus Rolling Retention to understand whether users are returning exactly on day 7 or simply returning any time after day 7. Finance and product teams then align on one retention type for board reporting to avoid conflicting KPI values.
+
+Dependencies:
+  Events: [sign_up, first_key_action]
+  Metrics: [return_date, user_id, cohort_date, active_users, retained_user]
+
+Source Data: Digital Analytics; Business Intelligence; CRM; Product Analytics; Data Warehouse
+
+Report Attributes: |
+  Dimensions: Retention type, Cohort date, Return window, User segment; 
+  Metrics: Retained users, Retention rate, Active users, Churn rate; 
+  KPIs: D1 retention, D7 retention, D30 retention, Repeat purchase rate
+
+Dashboard Usage: [C-Suite, Retention Analysis, Cohort Analysis, Product Performance, Lifecycle Reporting]
+
+Segment Eligibility: |
+  True
+  
+
+Related Dimensions: [Cohort date, Retention window, User status, Customer lifecycle stage, Acquisition channel, First purchase date]
+
+Derived Dimensions: [Retention rate band, Retention methodology group, Cohort performance tier]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-04-28T03:27:18.72+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-04-28T05:32:51.301+00:00
+
