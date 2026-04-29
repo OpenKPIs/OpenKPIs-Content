@@ -1,0 +1,166 @@
+# Metric: Add to cart
+# Generated: 2026-04-29T22:57:31.363Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Metric Name: Add to cart
+Formula: SUM(CASE WHEN event_name = 'add_to_cart' THEN COALESCE(quantity, 1) ELSE 0 END)
+
+Description: |
+  Counts the number of times a user adds one or more products to the shopping cart. This metric is a key mid-funnel conversion indicator because it reflects purchase intent, product interest, and merchandising effectiveness before checkout begins.
+
+Category: Conversion
+
+
+Industry: Retail, E-commerce
+
+Priority: High
+
+Core Area: Digital Analytics
+
+
+Measure Type: Counter
+
+Aggregation Window: Session, User, Hourly, Weekly, Yearly
+
+GA4 Event: |
+  add_to_cart
+  
+
+Adobe Event: |
+  scAdd
+  
+
+W3 Data Layer: |
+  {
+      "event": "add_to_cart",
+      "ecommerce": {
+          "currency": "USD",
+          "value": 79.98,
+          "items": [{
+              "item_id": "SKU-12345",
+              "item_name": "Classic Running Shoe",
+              "item_brand": "Acme",
+              "item_category": "Footwear",
+              "item_variant": "Blue-10",
+              "price": 39.99,
+              "quantity": 2
+          }]
+      }
+  }
+
+GA4 Data Layer: |
+  {
+      "event": "add_to_cart",
+      "ecommerce": {
+          "currency": "USD",
+          "value": 79.98,
+          "items": [{
+              "item_id": "SKU-12345",
+              "item_name": "Classic Running Shoe",
+              "item_brand": "Acme",
+              "item_category": "Footwear",
+              "item_variant": "Blue-10",
+              "price": 39.99,
+              "quantity": 2
+          }]
+      }
+  }
+
+Adobe Client Data Layer: |
+  {
+      "event": "add_to_cart",
+      "commerce": {
+          "cart": {
+              "cartID": "cart_98765",
+              "productListAdds": {
+                  "value": 1
+              }
+          }
+      },
+      "product": [{
+          "SKU": "SKU-12345",
+          "name": "Classic Running Shoe",
+          "brand": "Acme",
+          "category": "Footwear",
+          "variant": "Blue-10",
+          "priceTotal": 79.98,
+          "quantity": 2
+      }],
+      "currencyCode": "USD"
+  }
+
+XDM Mapping: |
+  {
+      "eventType": "commerce.productListAdds",
+      "commerce.productListAdds.value": "1",
+      "productListItems[].SKU": "SKU-12345",
+      "productListItems[].name": "Classic Running Shoe",
+      "productListItems[].brand": "Acme",
+      "productListItems[].category": "Footwear",
+      "productListItems[].variant": "Blue-10",
+      "productListItems[].priceTotal": "79.98",
+      "productListItems[].quantity": "2",
+      "commerce.order.currencyCode": "USD"
+  }
+
+SQL Query: |
+  "SELECT
+    DATE(event_timestamp) AS event_date,
+    COUNT(*) AS add_to_cart_events,
+    SUM(COALESCE(quantity, 1)) AS add_to_cart,
+    COUNT(DISTINCT user_id) AS users_with_add_to_cart,
+    COUNT(DISTINCT session_id) AS sessions_with_add_to_cart
+  FROM raw_digital_events
+  WHERE event_name = 'add_to_cart'
+  GROUP BY 1
+  ORDER BY 1;"
+  
+
+Calculation Notes: |
+  1) Use the add_to_cart event only. The primary metric should sum item quantity when available; 
+  2)if quantity is missing, default to 1 per event. 
+  3)Exclude duplicate events caused by page reloads, tag firing retries, or server/client double collection by deduplicating on event_id where available. 
+  4)If multiple items are sent in one event, sum all item quantities. 
+  5) For product-level reporting, attribute counts to each item in the items array. 
+  6) For session or user rollups, count distinct sessions or users with at least one add_to_cart separately from total add-to-cart quantity. 
+  7)Exclude test traffic, internal traffic, and bot traffic. 
+  8)Ensure canceled cart actions are not netted out unless a separate net cart adds metric is defined.
+
+Business Use Case: |
+  Merchandising, product, and growth teams use this metric to evaluate product detail page effectiveness, promotional impact, pricing sensitivity, and traffic quality. It helps identify high-intent products, diagnose funnel drop-off before checkout, and compare campaign landing pages by downstream shopping behavior.
+
+Dependencies:
+  Events: [add_to_cart]
+  Metrics: [item_id, quantity, session_id, user_id, event_timestamp]
+  Dimensions: [product_dimension, traffic_source_dimension]
+  KPIs: [add_to_cart]
+
+Source Data: Digital Analytics; Tag Management System; Product Catalog
+
+Report Attributes: |
+  Date, item_id, item_name, item_brand, item_category, item_variant, currency, device category, platform, page location, page type, session source, session medium, campaign, user type, country, region
+
+Dashboard Usage: [E-commerce Funnel Dashboard, Product Performance Dashboard, Merchandising Dashboard, Campaign Landing Page Dashboard]
+
+Segment Eligibility: |
+  True
+
+Related Metrics: [view item, begin checkout, purchase, remove from cart, cart abandonment rate, item view-to-cart rate]
+
+Derived KPIs: [Cart-to-detail rate, Add-to-cart rate, Checkout initiation rate, Cart abandonment rate, Revenue per add-to-cart, Product conversion rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-04-29T22:29:06.073+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-04-29T22:57:29.726+00:00
+
