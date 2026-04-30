@@ -1,0 +1,192 @@
+# Metric: Begin Checkout
+# Generated: 2026-04-30T00:55:47.429Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Metric Name: Begin Checkout
+Formula: Begin Checkout = COUNT of checkout initiation events where event_name = 'begin_checkout'
+
+Description: |
+  Counts the number of times users initiate the checkout process after adding one or more items to cart. This metric is a critical lower-funnel conversion indicator because it measures progression from shopping intent to purchase intent and helps identify friction between cart and checkout.
+
+Category: Conversion
+
+
+Industry: Retail, E-commerce
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Event, Session, User, Weekly, Yearly, Daily, Monthly
+
+GA4 Event: |
+  begin_checkout
+  
+
+Adobe Event: |
+  event25
+
+W3 Data Layer: |
+  {
+      "event": "begin_checkout",
+      "ecommerce": {
+          "currency": "USD",
+          "value": 129.97,
+          "coupon": "SPRING10",
+          "items": [{
+              "item_id": "SKU-12345",
+              "item_name": "Running Shoes",
+              "item_brand": "Acme",
+              "item_category": "Footwear",
+              "item_variant": "Black-10",
+              "price": 79.99,
+              "quantity": 1
+          }, {
+              "item_id": "SKU-67890",
+              "item_name": "Performance Socks",
+              "item_brand": "Acme",
+              "item_category": "Accessories",
+              "item_variant": "Large",
+              "price": 24.99,
+              "quantity": 2
+          }]
+      },
+      "checkout": {
+          "step": 1,
+          "step_name": "checkout_start",
+          "cart_id": "CART-98765"
+      }
+  }
+
+GA4 Data Layer: |
+  {
+      "event": "begin_checkout",
+      "ecommerce": {
+          "currency": "USD",
+          "value": 129.97,
+          "coupon": "SPRING10",
+          "items": [{
+              "item_id": "SKU-12345",
+              "item_name": "Running Shoes",
+              "item_brand": "Acme",
+              "item_category": "Footwear",
+              "item_variant": "Black-10",
+              "price": 79.99,
+              "quantity": 1
+          }, {
+              "item_id": "SKU-67890",
+              "item_name": "Performance Socks",
+              "item_brand": "Acme",
+              "item_category": "Accessories",
+              "item_variant": "Large",
+              "price": 24.99,
+              "quantity": 2
+          }]
+      },
+      "checkout_step": 1,
+      "checkout_step_name": "checkout_start",
+      "cart_id": "CART-98765"
+  }
+
+Adobe Client Data Layer: |
+  {
+      "event": "begin_checkout",
+      "commerce": {
+          "cart": {
+              "cartID": "CART-98765",
+              "priceTotal": 129.97,
+              "currencyCode": "USD"
+          },
+          "productListItems": [{
+              "SKU": "SKU-12345",
+              "name": "Running Shoes",
+              "quantity": 1,
+              "priceTotal": 79.99
+          }, {
+              "SKU": "SKU-67890",
+              "name": "Performance Socks",
+              "quantity": 2,
+              "priceTotal": 49.98
+          }],
+          "checkouts": {
+              "value": 1
+          }
+      },
+      "promotion": {
+          "couponCode": "SPRING10"
+      },
+      "checkout": {
+          "step": 1,
+          "stepName": "checkout_start"
+      }
+  }
+
+XDM Mapping: |
+  {
+      "eventType": "commerce.checkouts",
+      "commerce.checkouts.value": 1,
+      "commerce.order.priceTotal": 129.97,
+      "commerce.order.currencyCode": "USD",
+      "productListItems[].SKU": "SKU-12345",
+      "productListItems[].name": "Running Shoes",
+      "productListItems[].quantity": 1,
+      "productListItems[].priceTotal": 79.99,
+      "_experience.analytics.customDimensions.eVars.eVar10": "CART-98765",
+      "_experience.analytics.customDimensions.eVars.eVar11": "checkout_start",
+      "_experience.analytics.event1to100.event25": 1
+  }
+
+SQL Query: |
+  WITH begin_checkout_events AS 
+  ( SELECT event_date, event_timestamp, user_pseudo_id, session_id, event_name, transaction_currency AS currency, event_value_usd, ecommerce_value AS checkout_value FROM raw_digital_events WHERE event_name = 'begin_checkout' ) SELECT DATE(event_timestamp) AS metric_date, COUNT(*) AS begin_checkout FROM begin_checkout_events GROUP BY 1 ORDER BY 1;
+  
+
+Calculation Notes: |
+  1) Count each begin_checkout event occurrence. 
+  2).Do not deduplicate unless a separate deduplicated version is explicitly required. 
+  3) Exclude bot/internal traffic where applicable. 
+  4) Ensure the event fires only once per checkout initiation and not on page refresh or step reload. 
+  5) If multiple begin_checkout events occur in one session due to restart behavior, each event should count unless business rules define unique session-level starts. 
+  6) For funnel reporting, align attribution to the event date/time and preserve item-level context.
+  
+
+Business Use Case: |
+  Used by e-commerce, product, and CRO teams to monitor checkout funnel entry volume, evaluate cart-to-checkout progression, identify UX friction, measure impact of checkout experiments, and diagnose abandonment between cart and purchase.
+
+Dependencies:
+  Metrics: [currency]
+  Dimensions: [item_array, checkout_value]
+
+Source Data: Digital Analytics, Tag Management, Data Layer
+
+Report Attributes: |
+  Date, Device Category, Channel, Source/Medium, Campaign, Landing Page, Country, Region, New vs Returning, Logged-in Status, Cart Value Bucket, Item Category, Item Brand, Coupon Code, Checkout Step
+
+Dashboard Usage: [E-commerce Funnel Dashboard, Conversion Rate Dashboard, Checkout Performance Dashboard, Executive KPI Dashboard]
+
+Segment Eligibility: |
+  True
+
+Related Metrics: [Add to Cart, View Cart, Purchase, Checkout Completion Rate, Cart Abandonment Rate]
+
+Derived KPIs: [Cart-to-Checkout Rate, Checkout Abandonment Rate, Purchase Conversion Rate, Checkout Starts per User, Revenue per Checkout Start]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-04-29T23:35:40.694+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-04-30T00:55:45.544+00:00
+
