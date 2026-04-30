@@ -1,0 +1,313 @@
+# Metric: Cart Removals
+# Generated: 2026-04-30T22:44:27.079Z
+# Contributed by: swapnamagantius
+# Last modified by: devyendarm
+
+Metric Name: Cart Removals
+Formula: Cart Removals = COUNT(remove_from_cart events)
+
+Description: |
+  Counts the number of times an item is removed from the shopping cart. Each qualifying event represents a user action that decreases cart quantity or removes a line item from the cart.
+  • The metric helps quantify cart abandonment behavior at the product-interaction level.
+  • Identify friction in pricing or shipping expectations.
+  • Helps in evaluating merchandise, promotion, and checkout experience effectiveness.
+
+Category: Conversion
+
+
+Industry: Retail, E-commerce
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Event, Session, User, Daily, Weekly, Monthly, Hourly, Yearly
+
+GA4 Event: |
+  remove_from_cart
+  
+
+Adobe Event: |
+  scRemove
+
+W3 Data Layer: |
+  window.digitalData.event.push({
+    eventInfo: {
+      eventName: "remove_from_cart",
+      eventAction: "remove",
+      eventType: "cart",
+      timeStamp: new Date().toISOString()
+    },
+    category: {
+      primaryCategory: "ecommerce",
+      subCategory1: "cart",
+      subCategory2: "remove_from_cart"
+    },
+    attributes: {
+      currency: "USD",
+      value: 29.99
+    },
+    product: [
+      {
+        productInfo: {
+          productID: "SKU-12345",
+          productName: "Classic T-Shirt",
+          sku: "SKU-12345",
+          brand: "Acme"
+        },
+        category: {
+          primaryCategory: "Apparel"
+        },
+        attributes: {
+          variant: "Blue / M"
+        },
+        price: {
+          sellingPrice: 29.99,
+          currency: "USD"
+        },
+        quantity: 1
+      }
+    ]
+  });
+  
+
+GA4 Data Layer: |
+  window.dataLayer.push({
+    event: "remove_from_cart",
+    ecommerce: {
+      currency: "USD",
+      value: 29.99,
+      items: [
+        {
+          item_id: "SKU-12345",
+          item_name: "Classic T-Shirt",
+          item_brand: "Acme",
+          item_category: "Apparel",
+          item_variant: "Blue / M",
+          price: 29.99,
+          quantity: 1
+        }
+      ]
+    }
+  });
+
+Adobe Client Data Layer: |
+  window.adobeDataLayer.push({
+    event: "commerce:cartItemRemoved",
+  
+    commerce: {
+      cart: {
+        cartID: "CART-98765",
+        currencyCode: "USD",
+        priceTotal: 29.99,
+  
+        productListItems: [
+          {
+            SKU: "SKU-12345",
+            name: "Classic T-Shirt",
+            currencyCode: "USD",
+            priceTotal: 29.99,
+            quantity: 1
+          }
+        ]
+      }
+    }
+  });
+
+XDM Mapping: |
+  alloy("sendEvent", {
+    xdm: {
+      eventType: "commerce.productListRemovals",
+  
+      commerce: {
+        productListRemovals: {
+          value: 1,
+          id: "generated_or_source_event_id"
+        }
+      },
+  
+      productListItems: [
+        {
+          SKU: "SKU-12345",
+          name: "Classic T-Shirt",
+          quantity: 1,
+          priceTotal: 29.99,
+          currencyCode: "USD"
+        }
+      ]
+    }
+  });
+
+SQL Query: |
+  -- GA4 Dataset on BigQuery
+  
+  WITH base AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS metric_date,
+      e.event_timestamp,
+      e.event_name,
+      e.user_pseudo_id,
+  
+      (
+        SELECT ep.value.int_value
+        FROM UNNEST(e.event_params) AS ep
+        WHERE ep.key = 'ga_session_id'
+      ) AS ga_session_id,
+  
+      CONCAT(
+        COALESCE(e.user_pseudo_id, 'unknown'),
+        '-',
+        CAST(e.event_timestamp AS STRING),
+        '-',
+        CAST(e.event_bundle_sequence_id AS STRING),
+        '-',
+        CAST(e.batch_event_index AS STRING)
+      ) AS event_key,
+  
+      item.item_id AS item_id,
+      item.item_name AS item_name,
+      COALESCE(item.quantity, 1) AS quantity
+  
+    FROM `project.dataset.events_*` AS e
+    LEFT JOIN UNNEST(e.items) AS item
+    WHERE e.event_name = 'remove_from_cart'
+  )
+  
+  SELECT
+    metric_date,
+  
+    COUNT(DISTINCT event_key) AS remove_from_cart_events,
+  
+    COUNTIF(item_id IS NOT NULL OR item_name IS NOT NULL) AS item_rows_removed,
+  
+    SUM(
+      CASE
+        WHEN item_id IS NOT NULL OR item_name IS NOT NULL
+        THEN COALESCE(quantity, 1)
+        ELSE 0
+      END
+    ) AS units_removed,
+  
+    COUNT(DISTINCT user_pseudo_id) AS users_with_cart_removals,
+  
+    COUNT(DISTINCT CONCAT(
+      COALESCE(user_pseudo_id, 'unknown'),
+      '-',
+      CAST(ga_session_id AS STRING)
+    )) AS sessions_with_cart_removals
+  
+  FROM base
+  GROUP BY metric_date
+  ORDER BY metric_date;
+  
+  -- WebSDK Data on AEP Query Service
+  WITH event_base AS (
+    SELECT
+      id AS event_id,
+      DATE(timestamp) AS metric_date,
+      timestamp,
+      eventType,
+      identityMap['ECID'].id AS ecid,
+      commerce.productListRemovals.value AS cart_removal_value,
+      commerce.productListRemovals.id AS cart_removal_id,
+      productListItems
+    FROM your_websdk_experience_event_dataset
+    WHERE eventType = 'commerce.productListRemovals'
+  ),
+  
+  item_base AS (
+    SELECT
+      event_id,
+      productItem.SKU AS sku,
+      productItem.name AS product_name,
+      COALESCE(productItem.quantity, 1) AS quantity,
+      productItem.priceTotal AS price_total
+    FROM (
+      SELECT
+        event_id,
+        explode(productListItems) AS productItem
+      FROM event_base
+    )
+  ),
+  
+  event_agg AS (
+    SELECT
+      metric_date,
+      COUNT(DISTINCT event_id) AS remove_from_cart_events,
+      COUNT(DISTINCT ecid) AS users_with_cart_removals
+    FROM event_base
+    GROUP BY metric_date
+  ),
+  
+  item_agg AS (
+    SELECT
+      eb.metric_date,
+      COUNT(ib.sku) AS product_rows_removed,
+      SUM(COALESCE(ib.quantity, 0)) AS units_removed,
+      SUM(COALESCE(ib.price_total, 0)) AS removed_product_value
+    FROM event_base eb
+    LEFT JOIN item_base ib
+      ON eb.event_id = ib.event_id
+    GROUP BY eb.metric_date
+  )
+  
+  SELECT
+    ea.metric_date,
+    ea.remove_from_cart_events,
+    ia.product_rows_removed,
+    ia.units_removed,
+    ea.users_with_cart_removals,
+    ia.removed_product_value
+  FROM event_agg ea
+  LEFT JOIN item_agg ia
+    ON ea.metric_date = ia.metric_date
+  ORDER BY ea.metric_date;
+
+Calculation Notes: |
+  1) If one event contains multiple items, update the calculation formula and queries to avoid doing a direct COUNT(*) instead SUM(quantity) is more appropriate method to calculate.
+  2) Use event serialization with unique event_id to avoid tracking issues.
+
+Business Use Case: |
+  • Merchandising teams use this metric to identify products frequently removed after being added, signaling pricing, shipping, stock, or product-detail issues.
+  • UX and CRO teams use it to diagnose checkout friction and test cart design changes.
+  • Marketing teams compare removals by campaign or promotion to assess traffic quality.
+  • Product and analytics teams monitor the add-to-cart to remove-from-cart relationship as an early warning indicator of conversion leakage.
+
+Dependencies:
+  Events: [remove_from_cart]
+  Metrics: [quantity]
+  Dimensions: [item_name, item_id]
+  KPIs: [Cart Removal Rate]
+
+Source Data: Digital Analytics, Tag Management, E-commerce Platform
+
+Report Attributes: |
+  Product ID, Product Name, Brand, Category, Variant, Quantity Removed, Cart ID
+
+Dashboard Usage: [E-commerce Funnel Dashboard, Cart Behavior Dashboard, Product Performance Dashboard, Conversion Optimization Dashboard]
+
+Segment Eligibility: |
+  True
+
+Related Metrics: [Add to Cart, Cart Views, Checkout Starts, Purchase Conversion Rate, Cart Abandonment Rate, Units Removed from Cart]
+
+Derived KPIs: [Cart Removal Rate, Add-to-Remove Ratio, Net Cart Adds, Checkout Drop-off Rate by Product]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-04-30T20:04:46.755+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-04-30T22:44:25.919+00:00
+
