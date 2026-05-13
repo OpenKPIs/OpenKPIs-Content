@@ -1,0 +1,46 @@
+# KPI: Item View to Cart Rate
+# Generated: 2026-05-13T19:17:30.744Z
+# Contributed by: devyendar-maganti
+
+
+KPI Name: Item View to Cart Rate
+Formula: Item View to Cart Rate (%) = 100 * (COUNT(DISTINCT add_to_cart_event_id) / COUNT(DISTINCT item_view_event_id)); Example SQL: WITH item_views AS (SELECT event_id AS item_view_event_id, user_id, session_id, item_id, event_timestamp FROM analytics_events WHERE event_name = 'item_view'), add_to_carts AS (SELECT event_id AS add_to_cart_event_id, user_id, session_id, item_id, event_timestamp FROM analytics_events WHERE event_name = 'add_to_cart'), attributed_carts AS (SELECT c.add_to_cart_event_id FROM add_to_carts c INNER JOIN item_views v ON c.user_id = v.user_id AND c.session_id = v.session_id AND c.item_id = v.item_id AND c.event_timestamp >= v.event_timestamp AND c.event_timestamp <= v.event_timestamp + INTERVAL '24 hours') SELECT 100.0 * COUNT(DISTINCT add_to_cart_event_id) / NULLIF((SELECT COUNT(DISTINCT item_view_event_id) FROM item_views), 0) AS item_view_to_cart_rate FROM attributed_carts;
+
+Description: |
+  Item View to Cart Rate is an engagement KPI that measures the percentage of product detail views that result in an add-to-cart action for the same item within a defined attribution window. It is used to evaluate product page effectiveness, purchase intent, and merchandising performance by quantifying how efficiently item views convert into cart additions.
+
+Category: Engagement
+
+Tags: [cart, engagement, product]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Status: draft
+
+Contributed By: devyendar-maganti
+
+Created At: 2026-05-13T19:17:29.436+00:00
+
+
+
