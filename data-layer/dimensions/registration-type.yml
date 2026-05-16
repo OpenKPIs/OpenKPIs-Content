@@ -1,0 +1,151 @@
+# Dimension: Registration Type
+# Generated: 2026-04-28T03:21:56.633Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Dimension Name: Registration Type
+Formula: Derived from the registration submission context using a prioritised mapping of identity method and registration source. Example logic: CASE WHEN sso_provider IS NOT NULL THEN CONCAT('sso:', LOWER(sso_provider)) WHEN social_provider IS NOT NULL THEN CONCAT('social:', LOWER(social_provider)) WHEN phone_verified = TRUE THEN 'phone' WHEN guest_conversion = TRUE THEN 'guest-to-account' WHEN invite_code IS NOT NULL THEN 'invite' WHEN registration_channel = 'offline' THEN 'offline-assisted' ELSE 'email' END
+
+Description: |
+  Categorises the method, pathway, or account model used when a user completes registration or sign-up. Typical values include email, social login, SSO, phone, invite-only, guest-to-account, free trial, paid account, provider referral, or offline-assisted registration. This dimension is used to compare conversion quality, onboarding performance, and downstream retention by registration pathway.
+
+Category: Conversion
+
+
+Industry: Retail
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: Event, Session, User, Time based - Daily/Monthly/Yearly
+
+GA4 Event: |
+  registration_start
+  registration_complete
+
+Adobe Event: |
+  registration_start
+  registration_complete
+
+W3 Data Layer: |
+  {
+  "event":"user_registration",
+  "registration":
+    {
+       "type":"email",
+       "method":"email_password",
+       "provider":null,
+       "guestConversion":false,
+       "inviteCodeApplied":false
+    }
+  }
+
+GA4 Data Layer: |
+  {
+  "event":"sign_up",
+  "registration_type":"email",
+  "registration_method":"email_password",
+  "registration_provider":null,
+  "guest_conversion":false,
+  "invite_code_applied":false
+  }
+
+Adobe Client Data Layer: |
+  {
+  "event":"user_registration",
+  "xdm":
+    {
+       "eventType":"web.webinteraction.linkClicks",
+       "registration":
+        {
+          "type":"email",
+          "method":"email_password",
+          "provider":null,
+          "guestConversion":false,
+          "inviteCodeApplied":false
+        }
+  },
+  "data":{"__adobe":{"analytics":{"eVar12":"email"}}}}
+
+XDM Mapping: |
+  {
+  "event":"user_registration",
+  "xdm":
+  {
+  "eventType":"web.webinteraction.linkClicks",
+  "registration":
+  {
+  "type":"email",
+  "method":"email_password",
+  "provider":null,
+  "guestConversion":false,
+  "inviteCodeApplied":false
+  }
+  },
+  "data":{"__adobe":{"analytics":{"eVar12":"email"}}}}
+
+SQL Query: |
+  SELECT
+    user_id,
+    event_timestamp,
+    CASE
+      WHEN LOWER(COALESCE(sso_provider, '')) <> '' THEN CONCAT('sso:', LOWER(sso_provider))
+      WHEN LOWER(COALESCE(social_provider, '')) <> '' THEN CONCAT('social:', LOWER(social_provider))
+      WHEN COALESCE(phone_verified, FALSE) = TRUE THEN 'phone'
+      WHEN COALESCE(guest_conversion, FALSE) = TRUE THEN 'guest-to-account'
+      WHEN invite_code IS NOT NULL THEN 'invite'
+      WHEN LOWER(COALESCE(registration_channel, '')) = 'offline' THEN 'offline-assisted'
+      ELSE 'email'
+    END AS registration_type
+  FROM raw_events
+  WHERE event_name IN ('sign_up','complete_registration','account_created');
+
+Calculation Notes: |
+  1) Capture on the definitive registration completion event, not on form start. 
+  2)Standardise values to a controlled taxonomy and lowercase format. 
+  3) Avoid mixing provider and method unless intentionally designed, e.g. social:google vs sso:okta. 
+  4) Persist as a user-scoped property after first successful registration for longitudinal analysis, but also retain event-scoped value on the registration event for auditability. If a user retries multiple methods before success, only store the successful method on the completion event. 
+  5) Do not populate with raw email domains or identifiers. Align guest-to-account logic with commerce account merge rules.
+
+Business Use Case: |
+  Growth and product teams compare conversion rate, activation rate, and 90-day retention for users who registered via email versus social:google versus sso:okta to determine which registration pathways drive the highest quality users and where onboarding friction exists.
+
+Dependencies:
+  Events: [sign_up, complete_registration]
+  Dimensions: [guest_conversion_flag, invite_code_flag]
+
+Source Data: Digital Analytics, CRM, Identity Provider, Business Intelligence
+
+Report Attributes: |
+  Dimensions: Registration type, Registration provider, Device category, Source/Medium, Landing page; 
+  Metrics: Registrations, Registration conversion rate, Activation rate, Revenue per registered user; 
+  KPIs: Cost per registration, Retention rate
+
+Dashboard Usage: [Executive KPI, Acquisition Performance, Registration Funnel, Onboarding Analysis, Identity and Access Reporting]
+
+Segment Eligibility: |
+  True
+
+Related Dimensions: [Registration provider, Registration method, Authentication type, User type, Acquisition channel, Device category]
+
+Derived Dimensions: [Registration type group, Self-serve vs assisted registration, Federated vs native registration, Registration channel family]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-04-28T02:37:20.34+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-04-28T03:21:54.746+00:00
+
