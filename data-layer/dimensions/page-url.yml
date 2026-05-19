@@ -1,0 +1,130 @@
+# Dimension: Page URL
+# Generated: 2026-04-26T06:49:57.904Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Dimension Name: Page URL
+Formula: Observed page location captured at page_view event time. Recommended normalized form: LOWER(REGEXP_REPLACE(page_location, '#.*$', '')) with optional query-string handling based on governance rules.
+
+Description: |
+  The full canonical or observed URL of the page viewed, used to categorise content consumption, landing experiences, navigation paths, and on-site performance by exact page location. This dimension typically includes protocol, hostname, path, and may include query parameters depending on implementation rules.
+
+Category: Engagement
+
+
+Industry: Retail
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Session, User, Time based - Hourly/Daily/Monthly/Yearly
+
+GA4 Event: |
+  page_location
+
+Adobe Event: |
+  eVar3, prop3
+  Can use any eVar and prop or any other dimension
+
+W3 Data Layer: |
+  {
+    "event": "page_view",
+    "page": {
+      "url": "https://www.example.com/products/running-shoes?color=blue",
+      "path": "/products/running-shoes",
+      "title": "Running Shoes",
+      "referrer": "https://www.google.com/"
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_location": "https://www.example.com/products/running-shoes?color=blue",
+    "page_path": "/products/running-shoes",
+    "page_title": "Running Shoes",
+    "page_referrer": "https://www.google.com/"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "page-view",
+    "page": {
+      "pageInfo": {
+        "URL": "https://www.example.com/products/running-shoes?color=blue",
+        "pageName": "Running Shoes",
+        "destinationURL": "https://www.example.com/products/running-shoes?color=blue"
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "xdm.web.webPageDetails.URL": "https://www.example.com/products/running-shoes?color=blue",
+    "xdm.web.webPageDetails.name": "Running Shoes",
+    "xdm.web.webReferrer.URL": "https://www.google.com/"
+  }
+
+SQL Query: |
+  SELECT
+    event_date,
+    event_timestamp,
+    user_pseudo_id,
+    (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'page_location') AS page_url,
+    COUNT(*) AS page_views
+  FROM `project.dataset.events_*`
+  WHERE event_name = 'page_view'
+  GROUP BY 1,2,3,4;
+
+Calculation Notes: |
+  1) Capture on every page_view event after URL normalization rules are applied. 
+  2)Define whether query parameters are retained, partially retained, or stripped to avoid cardinality explosion. 
+  3)Strip URL fragments (#) because they are client-side only and often not analytically meaningful. 
+  4) Standardize lowercase hostnames and protocol handling. 
+  5) For SPAs, ensure virtual page views update the URL and fire a page_view on route change. 
+  6) Exclude internal tools, preview environments, and localhost traffic where applicable. 
+  7) Avoid collecting sensitive query parameters such as email, phone, account IDs, tokens, or health/financial identifiers. 
+  8) If canonical URL differs from browser URL, document whether this dimension stores observed URL, canonical URL, or both.
+
+Business Use Case: |
+  Marketing and product teams use Page URL to identify which exact landing pages drive the highest engagement, conversion rate, and revenue, such as comparing performance of /pricing versus /enterprise/pricing across paid and organic traffic.
+
+Dependencies:
+  Events: [page_view]
+  Dimensions: [page_title, page_path, hostname]
+
+Source Data: Digital Analytics; Business Intelligence
+
+Report Attributes: |
+  Dimensions: Page URL, Landing Page, Page Path, Hostname; 
+  Metrics: Views, Users, Sessions, Engaged Sessions, Conversions, Revenue, Bounce Rate; 
+  KPIs: Conversion Rate, Exit Rate, Revenue per Session
+
+Dashboard Usage: [Traffic Analysis, Content Performance, Landing Page Performance, Conversion Funnel, SEO Dashboard, Executive Summary]
+
+Segment Eligibility: |
+  True
+
+Related Dimensions: [Page Path, Page Title, Hostname, Landing Page, Previous Page Path, Query String, Content Group]
+
+Derived Dimensions: [Page Path Level 1, Page Path Level 2, Landing Page Group, URL Query Parameter Presence, URL Depth, Canonical Page URL]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-04-26T06:39:48.545+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-04-26T06:49:56.545+00:00
+
