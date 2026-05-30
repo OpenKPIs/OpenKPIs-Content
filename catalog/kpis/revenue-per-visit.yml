@@ -1,0 +1,179 @@
+# KPI: revenue-per-visit
+# Generated: 2026-05-30T02:49:07.818Z
+# Contributed by: swapnamagantius
+# Last modified by: devyendarm
+
+KPI Name: revenue-per-visit
+Formula: Total Revenue / Total Visits
+
+Description: |
+  Revenue per visit measures the average revenue generated each time a user visits the website. It is crucial for understanding the effectiveness of the website in converting visits into revenue.
+
+Category: Revenue
+
+
+Industry: [["Retail, SaaS, E-commerce, Media, Technology, Other"]]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Session
+
+Measure Type: Currency
+
+Aggregation Window: Session, User, Hourly, Weekly, Daily, Monthly, Yearly, Quarterly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T12345",
+      "currency": "USD",
+      "value": 149.99,
+      "items": [
+        {
+          "item_id": "SKU-001",
+          "item_name": "Running Shoes",
+          "price": 149.99,
+          "quantity": 1
+        }
+      ]
+    },
+    "web": {
+      "webPageDetails": {
+        "URL": "https://www.example.com/checkout/confirmation"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T12345",
+      "currency": "USD",
+      "value": 149.99,
+      "tax": 12.5,
+      "shipping": 0,
+      "items": [
+        {
+          "item_id": "SKU-001",
+          "item_name": "Running Shoes",
+          "price": 149.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "commerce": {
+      "order": {
+        "purchaseID": "T12345",
+        "currencyCode": "USD",
+        "priceTotal": 149.99
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-001",
+          "name": "Running Shoes",
+          "priceTotal": 149.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "order": {
+        "purchaseID": "T12345",
+        "priceTotal": 149.99,
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-001",
+        "name": "Running Shoes",
+        "priceTotal": 149.99,
+        "quantity": 1
+      }
+    ],
+    "web": {
+      "webPageDetails": {
+        "URL": "https://www.example.com/checkout/confirmation"
+      }
+    }
+  }
+
+SQL Query: |
+  WITH session_revenue AS (
+    SELECT
+      user_pseudo_id,
+      CONCAT(user_pseudo_id, '-', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_id,
+      SUM(COALESCE(ecommerce.purchase_revenue, 0)) AS revenue
+    FROM `project.dataset.events_*`
+    WHERE event_name = 'purchase'
+    GROUP BY 1,2
+  ), sessions AS (
+    SELECT DISTINCT
+      user_pseudo_id,
+      CONCAT(user_pseudo_id, '-', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_id
+    FROM `project.dataset.events_*`
+    WHERE (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') IS NOT NULL
+  )
+  SELECT
+    SAFE_DIVIDE(SUM(COALESCE(sr.revenue, 0)), COUNT(DISTINCT s.session_id)) AS revenue_per_visit
+  FROM sessions s
+  LEFT JOIN session_revenue sr
+    ON s.session_id = sr.session_id;
+
+Calculation Notes: |
+  1)Use visits as sessions, not users or pageviews. 
+  2)Include only completed revenue events such as purchase or paid conversion events, and exclude refunds, canceled orders, test transactions, internal traffic, bot traffic, and duplicate purchase events. If reporting net revenue per visit, subtract refunds from gross revenue. Ensure sessionization logic is consistent across web and app data. For cross-domain implementations, deduplicate sessions where identity stitching is available.
+
+Business Use Case: |
+  An e-commerce growth team monitors revenue per visit by channel and device. If paid social drives high traffic but low revenue per visit compared with email, the team can reduce spend on low-value campaigns, improve landing page relevance, or retarget higher-intent audiences.
+
+Dependencies:
+  Events: [purchase]
+  Metrics: [revenue, sessions/visits, currency code]
+
+Source Data: Digital Analytics, Business Intelligence, ERP
+
+Report Attributes: |
+  Dimensions: Default channel group, Source/Medium, Campaign, Device category, Landing page, Country, New vs Returning; Metrics: Revenue, Sessions, Transactions, Conversion rate, Average order value, Revenue per visit
+
+Dashboard Usage: [Executive KPI Dashboard, E-commerce Performance, Traffic Analysis, Channel Performance, Conversion Optimization]
+
+Segment Eligibility: |
+  True
+
+Related KPIs: [conversion rate, average order value, transactions, revenue, revenue per user, cart-to-purchase rate, return on ad spend]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: swapnamagantius
+
+Created At: 2026-05-23T21:37:54.57+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-05-30T02:49:07.512+00:00
+
