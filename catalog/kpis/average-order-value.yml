@@ -1,0 +1,194 @@
+# KPI: Average Order Value
+# Generated: 2026-05-30T02:50:59.551Z
+# Contributed by: swapnamagantius
+# Last modified by: devyendarm
+
+KPI Name: Average Order Value
+Formula: Total Revenue / Total Orders
+
+Description: |
+  Average Order Value measures the average revenue generated per completed order or purchase transaction. It matters because it helps teams understand monetization efficiency, evaluate merchandising and pricing strategies, and identify opportunities to increase revenue without necessarily increasing traffic.
+
+Category: Revenue
+
+
+Industry: [["Retail, E-commerce"]]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Global
+
+Measure Type: Average
+
+Aggregation Window: Event, Session, Hourly, Weekly, Quarterly, Daily, Monthly, Yearly, User
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T12345",
+      "currency": "USD",
+      "value": 149.97,
+      "items": [
+        {
+          "item_id": "SKU-001",
+          "item_name": "Running Shoes",
+          "price": 99.99,
+          "quantity": 1
+        },
+        {
+          "item_id": "SKU-002",
+          "item_name": "Socks",
+          "price": 24.99,
+          "quantity": 2
+        }
+      ]
+    },
+    "kpi": {
+      "average_order_value": 149.97
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T12345",
+      "affiliation": "Online Store",
+      "value": 149.97,
+      "tax": 12.5,
+      "shipping": 5.99,
+      "currency": "USD",
+      "coupon": "SPRING10",
+      "items": [
+        {
+          "item_id": "SKU-001",
+          "item_name": "Running Shoes",
+          "item_category": "Footwear",
+          "price": 99.99,
+          "quantity": 1
+        },
+        {
+          "item_id": "SKU-002",
+          "item_name": "Socks",
+          "item_category": "Accessories",
+          "price": 24.99,
+          "quantity": 2
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "commerce": {
+      "order": {
+        "purchaseID": "T12345",
+        "currencyCode": "USD",
+        "priceTotal": 149.97
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-001",
+          "name": "Running Shoes",
+          "priceTotal": 99.99,
+          "quantity": 1
+        },
+        {
+          "SKU": "SKU-002",
+          "name": "Socks",
+          "priceTotal": 49.98,
+          "quantity": 2
+        }
+      ]
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "average-order-value"
+          },
+          "events": {
+            "event1": 149.97
+          }
+        }
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce.order.purchaseID": "transaction_id",
+    "commerce.order.priceTotal": "ecommerce.value",
+    "commerce.order.currencyCode": "ecommerce.currency",
+    "productListItems[].SKU": "ecommerce.items[].item_id",
+    "productListItems[].name": "ecommerce.items[].item_name",
+    "productListItems[].priceTotal": "ecommerce.items[].price",
+    "productListItems[].quantity": "ecommerce.items[].quantity"
+  }
+
+SQL Query: |
+  WITH orders AS (
+    SELECT
+      event_date,
+      ecommerce.transaction_id AS transaction_id,
+      ANY_VALUE(ecommerce.purchase_revenue) AS order_revenue
+    FROM `project.dataset.events_*`
+    WHERE event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+    GROUP BY event_date, transaction_id
+  )
+  SELECT
+    SAFE_DIVIDE(SUM(order_revenue), COUNT(DISTINCT transaction_id)) AS average_order_value
+  FROM orders;
+
+Calculation Notes: |
+  1) Use only completed purchase transactions and deduplicate by unique transaction_id to avoid inflating orders from duplicate tags or retries. 
+  2) Exclude cancelled, refunded, test, fraudulent, or zero-value orders unless the business explicitly includes them. 
+  3) Define whether revenue is gross or net of discounts, tax, shipping, and refunds, and keep that definition consistent across reporting. 
+  4) For multi-currency businesses, convert all orders to a reporting currency before aggregation.
+
+Business Use Case: |
+  An e-commerce merchandising team monitors Average Order Value by device and campaign. If paid social traffic has strong conversion volume but low AOV, the team can test product bundles, cart upsells, free-shipping thresholds, or landing pages featuring higher-margin products to increase revenue per order.
+
+Dependencies:
+  Events: [purchase]
+  Metrics: [tracnsaction _id, order_value, currency]
+
+Source Data: Digital Analytics; Business Intelligence; ERP; Order Management SystemDigital Analytics; Business Intelligence; ERP; Order Management System
+
+Report Attributes: |
+  Dimensions: Date, Device Category, Channel, Source/Medium, Campaign, Product Category, Country, New vs Returning Customer;
+  Metrics: Revenue, Orders, Average Order Value, Items Purchased, Conversion Rate
+
+Dashboard Usage: [Executive Revenue Dashboard, E-commerce Performance Dashboard, Merchandising Dashboard, Channel Performance Dashboard]
+
+Segment Eligibility: |
+  True
+
+Related KPIs: [Revenue, Orders, Conversion Rate, Revenue Per User, Cart-to-Detail Rate, Refund Rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: swapnamagantius
+
+Created At: 2026-05-20T18:50:42.666+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-05-30T02:50:59.096+00:00
+
