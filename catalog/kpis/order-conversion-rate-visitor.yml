@@ -1,0 +1,199 @@
+# KPI: Order Conversion Rate (Visitor)
+# Generated: 2026-05-30T02:49:12.974Z
+# Contributed by: swapnamagantius
+# Last modified by: devyendarm
+
+KPI Name: Order Conversion Rate (Visitor)
+Formula: (Unique Visitors with >=1 Order / Unique Visitors) × 100
+
+Description: |
+  Order conversion rate (visitor) measures the percentage of unique visitors who place at least one order during the selected reporting period. It is a core e-commerce KPI for evaluating how effectively traffic is converted into purchasing customers at the visitor level rather than the session level.
+
+Category: Conversion
+
+
+Industry: [["Retail, E-commerce"]]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: User
+
+Measure Type: Percentage
+
+Aggregation Window: User, Daily, Yearly, Monthly, Quarterly, Weekly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "event": "purchase",
+    "timestamp": "2026-05-22T00:00:00Z",
+    "user": {
+      "visitorId": "visitor_12345",
+      "isLoggedIn": false
+    },
+    "page": {
+      "url": "https://www.example.com/checkout/confirmation"
+    },
+    "commerce": {
+      "order": {
+        "orderId": "ORD-100001",
+        "currency": "USD",
+        "total": 129.99
+      },
+      "conversion": {
+        "type": "order",
+        "visitorConversion": true
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "ORD-100001",
+      "currency": "USD",
+      "value": 129.99,
+      "items": [
+        {
+          "item_id": "SKU-001",
+          "item_name": "Example Product",
+          "price": 129.99,
+          "quantity": 1
+        }
+      ]
+    },
+    "user_properties": {
+      "visitor_id": "visitor_12345"
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "data": {
+      "web": {
+        "webPageDetails": {
+          "URL": "https://www.example.com/checkout/confirmation"
+        }
+      },
+      "identity": {
+        "visitorId": "visitor_12345",
+        "authenticatedState": "ambiguous"
+      },
+      "commerce": {
+        "order": {
+          "purchaseID": "ORD-100001",
+          "priceTotal": 129.99,
+          "currencyCode": "USD"
+        },
+        "kpi": {
+          "orderConversionVisitor": true
+        }
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "visitor_12345",
+          "primary": true
+        }
+      ]
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-100001",
+        "priceTotal": 129.99,
+        "currencyCode": "USD"
+      }
+    },
+    "web": {
+      "webPageDetails": {
+        "URL": "https://www.example.com/checkout/confirmation"
+      }
+    },
+    "_company": {
+      "analytics": {
+        "kpi": {
+          "orderConversionVisitor": true
+        }
+      }
+    }
+  }
+
+SQL Query: |
+  WITH visitors AS (
+    SELECT
+      user_pseudo_id AS visitor_id
+    FROM `project.dataset.events_*`
+    WHERE event_name = 'session_start'
+      AND _TABLE_SUFFIX BETWEEN '20260501' AND '20260531'
+    GROUP BY 1
+  ), purchasers AS (
+    SELECT
+      user_pseudo_id AS visitor_id
+    FROM `project.dataset.events_*`
+    WHERE event_name = 'purchase'
+      AND _TABLE_SUFFIX BETWEEN '20260501' AND '20260531'
+    GROUP BY 1
+  )
+  SELECT
+    COUNT(DISTINCT p.visitor_id) AS purchasing_visitors,
+    COUNT(DISTINCT v.visitor_id) AS total_visitors,
+    SAFE_MULTIPLY(SAFE_DIVIDE(COUNT(DISTINCT p.visitor_id), COUNT(DISTINCT v.visitor_id)), 100) AS order_conversion_rate_visitor
+  FROM visitors v
+  LEFT JOIN purchasers p
+    ON v.visitor_id = p.visitor_id;
+
+Calculation Notes: |
+  1) Use a consistent visitor identifier such as GA4 user_pseudo_id, Adobe ECID, or a first-party visitor ID. 
+  2) Count each visitor only once in the numerator even if they place multiple orders in the period. 
+  3) Exclude internal traffic, bots, QA environments, and invalid or refunded test orders where appropriate. 
+  4) Define the denominator carefully: typically all unique visitors with at least one qualifying session in the period. 
+  5) Cross-device identity stitching may materially change the result if implemented.
+
+Business Use Case: |
+  An e-commerce growth team monitors visitor-level order conversion rate by device, channel, and landing page. If mobile paid social traffic shows high visitor volume but low conversion, the team can investigate checkout friction, page speed, or audience quality and prioritize CRO tests to improve purchasing efficiency.
+
+Dependencies:
+  Events: [purchase]
+  Metrics: [unique_visitor, visitor_id, order_id]
+
+Source Data: Digital Analytics, Business Intelligence, E-commerce Platform
+
+Report Attributes: |
+  Dimensions: Date, Device Category, Default Channel Group, Source/Medium, Campaign, Landing Page, Country, New vs Returning Visitor; Metrics: Unique Visitors, Purchasing Visitors, Orders, Revenue, Order Conversion Rate (Visitor)
+
+Dashboard Usage: [Executive KPI Dashboard, E-commerce Performance Dashboard, Conversion Rate Optimization Dashboard, TurChannel Performance Dashboard]
+
+Segment Eligibility: |
+  True
+
+Related KPIs: [Session conversion rate, Checkout completion rate, Cart-to-order rate, Revenue per visitor, Average order value, New customer conversion rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: swapnamagantius
+
+Created At: 2026-05-05T19:24:33.107+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-05-30T02:49:12.66+00:00
+
