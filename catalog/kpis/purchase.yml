@@ -1,0 +1,82 @@
+# KPI: Purchase
+# Generated: 2026-05-30T04:02:50.760Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Purchase
+Formula: COUNT(DISTINCT transaction_id) for completed purchase events
+
+Description: |
+  Purchase counts completed transaction events or orders. It is a core ecommerce outcome used to measure sales volume, conversion performance, and revenue generation.
+
+Category: Conversion
+
+Tags: [purchase, order, transaction, ecommerce, conversion]
+
+Industry: [["Retail","E-commerce","SaaS","Media","Technology"]]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Measure Type: count
+
+Aggregation Window: Event, Session, User, Time based - Hourly/Daily/Monthly/Yearly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"purchase"}}],"transaction":{"transactionID":"T12345","total":{"basePrice":99.99,"currency":"USD"}}}}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"transaction_id":"T12345","currency":"USD","value":99.99,"items":[{"item_id":"SKU_123","item_name":"Example Product","price":99.99,"quantity":1}]}}
+
+Adobe Client Data Layer: |
+  {"event":"commerce.purchase","commerce":{"order":{"purchaseID":"T12345","priceTotal":99.99,"currency":"USD"}}}
+
+XDM Mapping: |
+  {"eventType":"commerce.purchases","commerce.purchases.value":"1","commerce.order.purchaseID":"transaction_id","commerce.order.priceTotal":"value","commerce.order.currencyCode":"currency"}
+
+SQL Query: |
+  SELECT COUNT(DISTINCT (SELECT value.string_value FROM UNNEST(event_params) WHERE key='transaction_id')) AS purchases FROM `project.dataset.events_*` WHERE event_name='purchase';
+
+Calculation Notes: |
+  Deduplicate by transaction_id to avoid overcounting from page reloads or duplicate tags. Exclude failed, pending, cancelled, test, and internal orders. Reconcile against backend order systems for financial reporting.
+
+Business Use Case: |
+  An ecommerce operations team monitors purchase volume by hour during a promotion to detect checkout outages or demand spikes.
+
+Dependencies: |
+  purchase event; transaction_id; order status; revenue; currency; test order flag
+
+Source Data: Digital Analytics; Ecommerce Platform; Order Management System; Payment Processor
+
+Report Attributes: |
+  Dimensions: date, channel, campaign, device, country, payment method. Metrics: purchases, revenue, average order value, conversion rate.
+
+Dashboard Usage: [Executive KPI, Ecommerce Performance, Checkout Performance, Marketing Performance]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Revenue, Average Order Value, Order Conversion Rate (Visit), Checkout completion rate]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-05-30T04:02:50.343713+00:00
+
+Last Modified By: devyendarm
+
+
