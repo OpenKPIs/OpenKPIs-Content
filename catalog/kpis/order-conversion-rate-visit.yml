@@ -1,0 +1,178 @@
+# KPI: Order Conversion Rate (Visit)
+# Generated: 2026-05-30T02:50:31.821Z
+# Contributed by: swapnamagantius
+# Last modified by: devyendarm
+
+KPI Name: Order Conversion Rate (Visit)
+Formula: (Sessions with at least one order / Total sessions) × 100
+
+Description: |
+  The percentage of visits or sessions that result in at least one completed order. This KPI measures how effectively site traffic converts into purchases and is a core indicator of ecommerce funnel performance.
+
+Category: Conversion
+
+
+Industry: [["Retail, E-commerce"]]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Session
+
+Measure Type: Percentage
+
+Aggregation Window: Session, User, Hourly, Daily, Monthly, Weekly, Quarterly, Yearly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "event": "purchase",
+    "event_name": "purchase",
+    "session_id": "1234567890",
+    "user_id": "anon_98765",
+    "timestamp": "2026-05-22T12:34:56Z",
+    "ecommerce": {
+      "transaction_id": "T12345",
+      "currency": "USD",
+      "value": 149.99,
+      "items": [
+        {
+          "item_id": "SKU-001",
+          "item_name": "Running Shoes",
+          "price": 149.99,
+          "quantity": 1
+        }
+      ]
+    },
+    "kpi_context": {
+      "name": "order_conversion_rate_visit",
+      "scope": "session",
+      "conversion": true
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T12345",
+      "currency": "USD",
+      "value": 149.99,
+      "items": [
+        {
+          "item_id": "SKU-001",
+          "item_name": "Running Shoes",
+          "price": 149.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "xdm": {
+      "eventType": "commerce.purchases",
+      "commerce": {
+        "order": {
+          "purchaseID": "T12345",
+          "priceTotal": 149.99,
+          "currencyCode": "USD",
+          "purchases": {
+            "value": 1
+          }
+        }
+      },
+      "web": {
+        "webPageDetails": {
+          "URL": "https://www.example.com/checkout/confirmation"
+        }
+      },
+      "_experience": {
+        "analytics": {
+          "customDimensions": {
+            "eVars": {
+              "eVar1": "1234567890"
+            },
+            "props": {
+              "prop1": "checkout confirmation"
+            }
+          }
+        }
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce.purchases.value": 1,
+    "commerce.order.purchaseID": "T12345",
+    "commerce.order.priceTotal": 149.99,
+    "commerce.order.currencyCode": "USD",
+    "web.webPageDetails.URL": "https://www.example.com/checkout/confirmation",
+    "_experience.analytics.customDimensions.eVars.eVar1": "session_id"
+  }
+
+SQL Query: |
+  WITH session_orders AS (
+    SELECT
+      user_pseudo_id,
+      CONCAT(user_pseudo_id, '-', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_key,
+      MAX(CASE WHEN event_name = 'purchase' THEN 1 ELSE 0 END) AS has_order
+    FROM `project.dataset.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN '20260501' AND '20260531'
+    GROUP BY 1,2
+  )
+  SELECT
+    SAFE_MULTIPLY(SAFE_DIVIDE(SUM(has_order), COUNT(session_key)), 100) AS order_conversion_rate_visit
+  FROM session_orders;
+
+Calculation Notes: |
+  1) Count each session only once in the numerator even if multiple orders occur in the same session. 
+  2) Exclude internal traffic, bots, QA environments, and invalid or duplicate purchase events. 
+  3) Use completed purchase events only, not begin_checkout or add_payment_info. 
+  4) If consent mode or ad blockers reduce session counts, document the impact. 
+  5) For Adobe, ensure the visit container is used and deduplicate by order ID where possible.
+
+Business Use Case: |
+  An ecommerce merchandising team monitors this KPI by device and landing page. If mobile visit conversion drops after a site release, the team investigates checkout UX, page speed, and payment errors, then prioritizes fixes to recover lost orders.
+
+Dependencies:
+  Events: [purchase]
+  Metrics: [transaction_id, session_id]
+  Dimensions: [Date]
+
+Source Data: Digital Analytics, Business Intelligence
+
+Report Attributes: |
+  Dimensions: Date, Device category, Source/Medium, Campaign, Landing page, Country, New vs Returning, Product category; Metrics: Sessions, Orders, Order conversion rate (visit), Revenue, Average order value
+
+Dashboard Usage: [Executive Ecommerce Overview, Conversion Funnel, Traffic Analysis, Channel Performance, Device Performance, Landing Page Performance]
+
+Segment Eligibility: |
+  True
+
+Related KPIs: [Orders, Ecommerce conversion rate, Cart-to-order rate, Checkout completion rate, Revenue per session, Average order value]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: swapnamagantius
+
+Created At: 2026-02-13T23:29:33.819+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-05-30T02:50:31.259+00:00
+
