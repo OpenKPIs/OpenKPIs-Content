@@ -1,0 +1,108 @@
+# KPI: Walmart+ Membership Trial Starts and Conversions
+# Generated: 2026-05-30T16:24:00.202Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Walmart+ Membership Trial Starts and Conversions
+Formula: Trial Starts = COUNT(sign_up events where membership_program = 'walmart_plus' and membership_action = 'trial_start'); Paid Conversions = COUNT(purchase or subscribe events where membership_program = 'walmart_plus' and membership_action = 'paid_conversion'); Trial-to-Paid Conversion Rate = (Paid Conversions from prior trial users / Trial Starts) × 100
+
+Description: |
+  Walmart+ Membership Trial Starts and Conversions measures how many users begin a Walmart+ trial and how many convert to a paid Walmart+ membership. It helps evaluate membership acquisition, onboarding quality, offer effectiveness, and the ability to turn trial intent into recurring customer value.
+
+Category: Conversion
+
+Tags: [walmart-plus, membership, subscription, trial, trial-start, paid-conversion, loyalty, retention]
+
+Industry: [["Retail","E-commerce"]]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: User
+
+Measure Type: count
+
+Aggregation Window: Event, User, Cohort, Time based - Hourly/Daily/Weekly/Monthly/Quarterly/Yearly
+
+GA4 Event: |
+  sign_up; purchase
+
+Adobe Event: |
+  membership_trial_start; membership_purchase
+
+W3 Data Layer: |
+  {"event":"membershipTrialStart","eventInfo":{"eventName":"membershipTrialStart","eventType":"membership","timestamp":"2026-05-30T12:00:00Z"},"membership":{"program":"walmart_plus","action":"trial_start","planID":"wplus_annual_trial_30d","planName":"Walmart+ Annual 30-Day Trial","billingCycle":"annual","trialLengthDays":30,"price":98,"currency":"USD","offerCode":"WPLUS30","acquisitionSurface":"checkout","eligibilityStatus":"eligible","autoRenew":true},"user":{"loginStatus":"logged_in","membershipStatus":"non_member"},"page":{"pageInfo":{"pageName":"walmart plus trial enrollment","pageType":"membership signup"}}}
+
+GA4 Data Layer: |
+  {"event":"sign_up","event_id":"wplus_trial_start_abc123","method":"walmart_plus_trial","membership_program":"walmart_plus","membership_action":"trial_start","membership_plan_id":"wplus_annual_trial_30d","membership_plan_name":"Walmart+ Annual 30-Day Trial","membership_billing_cycle":"annual","trial_length_days":30,"membership_price":98,"currency":"USD","offer_code":"WPLUS30","acquisition_surface":"checkout","eligibility_status":"eligible","auto_renew":true,"customer_type":"existing_customer","wplus_status_before":"non_member","value":0,"ecommerce":{"currency":"USD","value":0,"items":[{"item_id":"WPLUS_ANNUAL_TRIAL_30D","item_name":"Walmart+ Annual 30-Day Trial","item_category":"Membership","item_category2":"Walmart+","item_variant":"Annual Trial","price":0,"quantity":1}]},"conversion_followup_event_example":{"event":"purchase","event_id":"wplus_paid_conversion_def456","transaction_id":"WPLUS-T987654321","membership_program":"walmart_plus","membership_action":"paid_conversion","membership_plan_id":"wplus_annual","membership_plan_name":"Walmart+ Annual Membership","membership_billing_cycle":"annual","trial_length_days":30,"currency":"USD","value":98,"acquisition_surface":"post_trial_billing","wplus_status_before":"trial_member","wplus_status_after":"paid_member","ecommerce":{"transaction_id":"WPLUS-T987654321","currency":"USD","value":98,"items":[{"item_id":"WPLUS_ANNUAL","item_name":"Walmart+ Annual Membership","item_category":"Membership","item_category2":"Walmart+","item_variant":"Annual Paid","price":98,"quantity":1}]}}}
+
+Adobe Client Data Layer: |
+  {"event":"membership_trial_start","eventInfo":{"path":"membership.walmartPlus.trialStart","timestamp":"2026-05-30T12:00:00Z"},"membership":{"program":"walmart_plus","action":"trial_start","planID":"wplus_annual_trial_30d","planName":"Walmart+ Annual 30-Day Trial","billingCycle":"annual","trialLengthDays":30,"price":98,"currencyCode":"USD","offerCode":"WPLUS30","acquisitionSurface":"checkout","eligibilityStatus":"eligible","autoRenew":true,"statusBefore":"non_member","statusAfter":"trial_member"},"commerce":{"productListItems":[{"SKU":"WPLUS_ANNUAL_TRIAL_30D","name":"Walmart+ Annual 30-Day Trial","quantity":1,"priceTotal":0,"category":"Membership"}]},"web":{"webPageDetails":{"name":"walmart plus trial enrollment","siteSection":"membership"}}}
+
+XDM Mapping: |
+  {"eventType":"subscription.trialStart or commerce.purchases","_experience.analytics.customDimensions.eVars.membershipProgram":"membership_program","_experience.analytics.customDimensions.eVars.membershipAction":"membership_action","_experience.analytics.customDimensions.eVars.membershipPlanId":"membership_plan_id","_experience.analytics.customDimensions.eVars.membershipBillingCycle":"membership_billing_cycle","_experience.analytics.customDimensions.eVars.acquisitionSurface":"acquisition_surface","commerce.order.purchaseID":"transaction_id for paid_conversion","commerce.order.priceTotal":"value for paid_conversion","commerce.order.currencyCode":"currency","productListItems[].SKU":"ecommerce.items[].item_id","productListItems[].name":"ecommerce.items[].item_name","productListItems[].quantity":"ecommerce.items[].quantity","productListItems[].priceTotal":"ecommerce.items[].price * ecommerce.items[].quantity","timestamp":"event_timestamp"}
+
+SQL Query: |
+  WITH events AS (
+    SELECT
+      event_date,
+      user_pseudo_id,
+      event_name,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'membership_program') AS membership_program,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'membership_action') AS membership_action,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'membership_plan_id') AS membership_plan_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'acquisition_surface') AS acquisition_surface,
+      ecommerce.transaction_id AS transaction_id
+    FROM `project.dataset.events_*`
+    WHERE event_name IN ('sign_up','purchase','subscribe')
+  )
+  SELECT
+    event_date,
+    COUNTIF(event_name = 'sign_up' AND membership_program = 'walmart_plus' AND membership_action = 'trial_start') AS trial_starts,
+    COUNTIF(event_name IN ('purchase','subscribe') AND membership_program = 'walmart_plus' AND membership_action = 'paid_conversion') AS paid_conversions,
+    COUNT(DISTINCT CASE WHEN event_name = 'sign_up' AND membership_program = 'walmart_plus' AND membership_action = 'trial_start' THEN user_pseudo_id END) AS trial_start_users,
+    COUNT(DISTINCT CASE WHEN event_name IN ('purchase','subscribe') AND membership_program = 'walmart_plus' AND membership_action = 'paid_conversion' THEN user_pseudo_id END) AS paid_conversion_users,
+    SAFE_DIVIDE(
+      COUNT(DISTINCT CASE WHEN event_name IN ('purchase','subscribe') AND membership_program = 'walmart_plus' AND membership_action = 'paid_conversion' THEN user_pseudo_id END),
+      COUNT(DISTINCT CASE WHEN event_name = 'sign_up' AND membership_program = 'walmart_plus' AND membership_action = 'trial_start' THEN user_pseudo_id END)
+    ) * 100 AS same_day_user_trial_to_paid_conversion_rate
+  FROM events
+  WHERE membership_program = 'walmart_plus'
+  GROUP BY event_date
+  ORDER BY event_date;
+
+Calculation Notes: |
+  Use sign_up for trial start and purchase or subscribe for paid membership conversion, with membership_program = 'walmart_plus' and a specific membership_action parameter to distinguish trial_start from paid_conversion. For true trial-to-paid conversion, cohort users by their trial start date and count paid conversions within the allowed trial window, such as 30 days; the daily SQL above provides same-day counts and should be extended for cohort reporting. Deduplicate by event_id and transaction_id where applicable. Exclude renewals, plan upgrades, failed payments, cancellations before activation, employee/test accounts, and users who were already paid members before the trial event.
+
+Business Use Case: |
+  The membership growth team compares trial starts and paid conversions by acquisition surface, offer code, traffic source, device, and plan type to decide where to promote Walmart+ benefits, which trial offers to continue, and where onboarding or billing reminders need improvement.
+
+Dependencies: |
+  sign_up event; purchase or subscribe event; membership_program; membership_action; membership_plan_id; trial_length_days; user_pseudo_id or stable customer identifier; transaction_id; offer_code; acquisition_surface; membership status before/after; cancellation and payment status
+
+Source Data: GA4 BigQuery export; membership subscription platform; CRM/customer account system; billing/payment system; promotion/offer management platform
+
+Report Attributes: |
+  Dimensions: date, membership_program, membership_action, membership_plan_id, plan name, billing cycle, trial length, acquisition surface, offer code, source, medium, campaign, device category, customer type, membership status before/after. Metrics/KPIs: trial starts, trial start users, paid conversions, paid conversion users, trial-to-paid conversion rate, membership revenue, cancellation rate, renewal rate.
+
+Dashboard Usage: [Membership Growth Dashboard, Executive KPI Dashboard, Subscription Funnel Dashboard, Marketing Acquisition Dashboard, Retention and Loyalty Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Trial-to-Paid Conversion Rate, Membership Revenue, Subscription Churn Rate, Renewal Rate, Customer Lifetime Value, Online Revenue]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-05-30T16:23:59.761689+00:00
+
+Last Modified By: devyendarm
+
+
