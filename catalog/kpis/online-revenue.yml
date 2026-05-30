@@ -1,0 +1,90 @@
+# KPI: Online Revenue
+# Generated: 2026-05-30T16:24:00.135Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Online Revenue
+Formula: SUM(purchase revenue) for completed online orders; recommended GA4 calculation = SUM(ecommerce.purchase_revenue) or SUM(event parameter value) for event_name = 'purchase'
+
+Description: |
+  Online Revenue measures the total monetary value of completed eCommerce purchases through the website or app, net of discounts when available and excluding tax and shipping unless explicitly included by the business definition. It is a primary indicator of commercial performance and merchandising effectiveness.
+
+Category: Revenue
+
+Tags: [revenue, ecommerce, purchase, sales, orders, checkout, merchandising]
+
+Industry: [["Retail","E-commerce"]]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Measure Type: currency
+
+Aggregation Window: Event, Session, User, Time based - Hourly/Daily/Weekly/Monthly/Quarterly/Yearly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"event":"transactionComplete","eventInfo":{"eventName":"transactionComplete","eventType":"commerce","timestamp":"2026-05-30T12:00:00Z"},"page":{"pageInfo":{"pageName":"order confirmation","pageType":"checkout confirmation","siteSection":"checkout"}},"commerce":{"transaction":{"transactionID":"T123456789","currency":"USD","revenue":129.97,"tax":8.42,"shipping":0,"discount":15,"coupon":"SAVE15","paymentType":"credit_card","fulfillmentType":"ship_to_home"},"items":[{"productID":"SKU12345","productName":"Organic Cotton T-Shirt","quantity":2,"unitPrice":24.99,"category":"Apparel","brand":"Example Brand"},{"productID":"SKU67890","productName":"Running Shoes","quantity":1,"unitPrice":79.99,"category":"Footwear","brand":"Example Brand"}]},"user":{"loginStatus":"logged_in","loyaltyStatus":"member"}}
+
+GA4 Data Layer: |
+  {"event":"purchase","event_id":"purchase_T123456789","transaction_id":"T123456789","currency":"USD","value":129.97,"tax":8.42,"shipping":0,"coupon":"SAVE15","payment_type":"credit_card","fulfillment_type":"ship_to_home","storefront":"web","checkout_type":"standard","customer_type":"returning","ecommerce":{"transaction_id":"T123456789","affiliation":"Online Store","currency":"USD","value":129.97,"tax":8.42,"shipping":0,"coupon":"SAVE15","items":[{"item_id":"SKU12345","item_name":"Organic Cotton T-Shirt","affiliation":"Online Store","coupon":"SAVE15","discount":5,"index":1,"item_brand":"Example Brand","item_category":"Apparel","item_category2":"Tops","item_variant":"Black / M","price":24.99,"quantity":2},{"item_id":"SKU67890","item_name":"Running Shoes","affiliation":"Online Store","coupon":"SAVE15","discount":10,"index":2,"item_brand":"Example Brand","item_category":"Footwear","item_category2":"Running","item_variant":"Blue / 10","price":79.99,"quantity":1}]}}
+
+Adobe Client Data Layer: |
+  {"event":"purchase","eventInfo":{"path":"commerce.purchase","timestamp":"2026-05-30T12:00:00Z"},"commerce":{"purchase":{"transactionID":"T123456789","currencyCode":"USD","priceTotal":129.97,"taxAmount":8.42,"shippingAmount":0,"discountAmount":15,"couponCode":"SAVE15","paymentType":"credit_card","fulfillmentType":"ship_to_home"},"productListItems":[{"SKU":"SKU12345","name":"Organic Cotton T-Shirt","quantity":2,"priceTotal":49.98,"discountAmount":5,"brand":"Example Brand","category":"Apparel"},{"SKU":"SKU67890","name":"Running Shoes","quantity":1,"priceTotal":79.99,"discountAmount":10,"brand":"Example Brand","category":"Footwear"}]},"web":{"webPageDetails":{"name":"order confirmation","siteSection":"checkout"}}}
+
+XDM Mapping: |
+  {"eventType":"commerce.purchases","commerce.order.purchaseID":"transaction_id","commerce.order.currencyCode":"currency","commerce.order.priceTotal":"value","commerce.order.taxAmount":"tax","commerce.order.shippingAmount":"shipping","commerce.order.discountAmount":"discount","commerce.order.payments[0].paymentType":"payment_type","productListItems[].SKU":"ecommerce.items[].item_id","productListItems[].name":"ecommerce.items[].item_name","productListItems[].quantity":"ecommerce.items[].quantity","productListItems[].priceTotal":"ecommerce.items[].price * ecommerce.items[].quantity","productListItems[].discountAmount":"ecommerce.items[].discount","web.webPageDetails.name":"page_name","timestamp":"event_timestamp"}
+
+SQL Query: |
+  SELECT
+    event_date,
+    SUM(ecommerce.purchase_revenue) AS online_revenue,
+    COUNT(DISTINCT ecommerce.transaction_id) AS orders
+  FROM `project.dataset.events_*`
+  WHERE event_name = 'purchase'
+    AND ecommerce.transaction_id IS NOT NULL
+  GROUP BY event_date
+  ORDER BY event_date;
+
+Calculation Notes: |
+  Deduplicate purchases by transaction_id if the same order can fire multiple purchase events. Align the revenue definition with finance: GA4 purchase_revenue usually excludes tax and shipping, while the event parameter value may include or exclude them depending on implementation. Exclude canceled, test, fraud, internal QA, and fully refunded orders where downstream order-status data is available. Use consistent currency conversion when reporting across markets.
+
+Business Use Case: |
+  The eCommerce leadership team monitors Online Revenue by channel, campaign, device, category, and fulfillment type to identify revenue declines, prioritize merchandising changes, and optimize paid media spend toward higher-value traffic.
+
+Dependencies: |
+  purchase event; transaction_id; ecommerce.value or ecommerce.purchase_revenue; currency; items array; order status/refund data; campaign/source/medium; device category
+
+Source Data: GA4 BigQuery export; eCommerce transaction platform; order management system; product catalog; campaign tracking data
+
+Report Attributes: |
+  Dimensions: date, transaction_id, source, medium, campaign, default channel group, device category, platform, country, item_id, item_name, item_category, item_brand, coupon, fulfillment_type. Metrics/KPIs: total revenue, purchase revenue, transactions, items purchased, average order value, refunds, net revenue.
+
+Dashboard Usage: [Executive Revenue Dashboard, eCommerce Trading Dashboard, Merchandising Performance Dashboard, Marketing Performance Dashboard, Checkout Funnel Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Average Order Value, Orders, Purchase Conversion Rate, Revenue per Session, Refund Rate, Gross Merchandise Value]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-05-30T16:23:59.761689+00:00
+
+Last Modified By: devyendarm
+
+
