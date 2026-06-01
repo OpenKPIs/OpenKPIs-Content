@@ -1,0 +1,142 @@
+# KPI: Bounce Rate
+# Generated: 2026-06-01T04:43:25.025Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Bounce Rate
+Formula: (Single Page Sessions / Total Sessions) × 100
+
+Description: |
+  Bounce Rate measures the percentage of single-page sessions where users leave the site without interacting further. It is important for understanding user engagement and the effectiveness of landing pages.
+
+Category: Engagement
+
+Tags: [user behavior, site performance, engagement]
+
+Industry: [["Retail, E-commerce"]]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Session
+
+Measure Type: percentage
+
+Aggregation Window: Session, Time based - Hourly/Daily/Monthly/Yearly, User, Hourly, Weekly, Daily, Yearly, Quarterly
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  pageView
+
+W3 Data Layer: |
+  {
+    "event": "session_start",
+    "web": {
+      "webPageDetails": {
+        "URL": "https://www.example.com/landing-page",
+        "name": "Landing Page"
+      },
+      "webInteraction": {
+        "type": "sessionStart"
+      }
+    },
+    "analytics": {
+      "session": {
+        "sessionId": "sess_123456",
+        "isEngaged": false,
+        "engagementTimeMsec": 0,
+        "pageViews": 1,
+        "conversionCount": 0,
+        "bounce": true
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "session_start",
+    "session_id": "sess_123456",
+    "page_location": "https://www.example.com/landing-page",
+    "page_title": "Landing Page",
+    "engaged_session": 0,
+    "engagement_time_msec": 0,
+    "page_view_count": 1,
+    "conversion_count": 0,
+    "is_bounce": 1
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "session_start",
+    "session": {
+      "id": "sess_123456",
+      "engaged": false,
+      "engagementTimeMsec": 0,
+      "pageViews": 1,
+      "conversions": 0,
+      "bounce": true
+    },
+    "page": {
+      "url": "https://www.example.com/landing-page",
+      "name": "Landing Page"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "web.webPageDetails.URL": "https://www.example.com/landing-page",
+    "web.webPageDetails.name": "Landing Page",
+    "_experience.analytics.customDimensions.eVars.eVar1": "sess_123456",
+    "_experience.analytics.customDimensions.props.prop1": "non_engaged_session",
+    "_experience.analytics.event1to100.event1": 1,
+    "_experience.analytics.session.numPageViews": 1
+  }
+
+SQL Query: |
+  SELECT (COUNT(CASE WHEN page_views = 1 THEN 1 END) / COUNT(*)) * 100 AS bounce_rate FROM sessions WHERE session_date BETWEEN '2023-01-01' AND '2023-12-31';
+
+Calculation Notes: |
+  In GA4, bounce rate is the inverse of engagement rate and is defined as the percentage of sessions that were not engaged. 
+  An engaged session is typically a session lasting longer than 10 seconds, having 2 or more page or screen views, or containing at least one key event/conversion. 
+  Exclude internal traffic, bot traffic, developer traffic, and invalid sessions where session identifiers are missing. 
+  If calculating in Adobe Analytics or another platform, align the bounce definition explicitly because Adobe bounce may be based on single-hit visits unless customized.
+
+Business Use Case: |
+  A digital marketing team monitors bounce rate by landing page and campaign. If paid social traffic to a product landing page has a bounce rate of 78%, the team can review message match, page speed, mobile UX, and call-to-action clarity, then optimize the page or pause low-quality campaigns.
+
+Dependencies:
+  Events: [session_start, page_view]
+  Dimensions: [Landing page, traffic source, bot/internal traffic]
+  KPIs: [sessions]
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  Dimensions: Landing page, Page title, Page path, Source/Medium, Default channel group, Device category, Country, Campaign, Date; 
+  Metrics: Sessions, Engaged sessions, Bounce rate, Engagement rate, Conversions, Average engagement time per session
+
+Dashboard Usage: [Executive KPI Overview, Traffic Analysis, Landing Page Performance, Acquisition Performance, Content Performance, Conversion Funnel Analysis]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Exit Rate, Average Session Duration]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-05-26T01:54:57.997457+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-06-01T04:43:24.726+00:00
+
