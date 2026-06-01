@@ -1,0 +1,123 @@
+# KPI: Sign Up Rate
+# Generated: 2026-06-01T00:26:36.762Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Sign Up Rate
+Formula: (Sign Ups / Eligible Visitors or Sessions) × 100
+
+Description: |
+  Sign Up Rate measures the percentage of eligible visitors or sessions that create an account. It indicates how effectively acquisition, onboarding, and value messaging convert anonymous users into known users.
+
+Category: Conversion
+
+Tags: [sign-up, registration, account, onboarding, acquisition]
+
+Industry: [["SaaS, Retail, E-commerce"]]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: User
+
+Measure Type: percentage
+
+Aggregation Window: Session, User, Time based - Daily/Weekly/Monthly/Yearly
+
+GA4 Event: |
+  sign_up
+
+Adobe Event: |
+  sign_up
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "sign_up",
+            "method": "email"
+          }
+        }
+      ],
+      "user": [
+        {
+          "profile": [
+            {
+              "profileInfo": {
+                "profileID": "anonymous_or_customer_id"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "sign_up",
+    "method": "email"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "user.sign_up",
+    "user": {
+      "registration": {
+        "method": "email",
+        "status": "completed"
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "userAccount.signUp",
+    "_experience.analytics.customDimensions.eVars.signUpMethod": "method",
+    "identityMap.ECID": "visitor_id",
+    "identityMap.CRMID": "customer_id"
+  }
+
+SQL Query: |
+  WITH visitors AS (SELECT COUNT(DISTINCT user_pseudo_id) AS users FROM `project.dataset.events_*`), signups AS (SELECT COUNT(DISTINCT user_pseudo_id) AS signup_users FROM `project.dataset.events_*` WHERE event_name = 'sign_up') SELECT SAFE_DIVIDE(signup_users, users) * 100 AS sign_up_rate FROM visitors, signups;
+
+Calculation Notes: |
+  Count completed registrations, not form starts. Deduplicate multiple sign_up events from the same user within the reporting period. Exclude existing logged-in users if the KPI is intended for new account creation only.
+
+Business Use Case: |
+  A product team compares sign-up rate across onboarding variants to identify which messaging and form design produces the most new accounts.
+
+Dependencies:
+  Events: [sign_up]
+  Dimensions: [traffic source, eligible visitor, user identifier]
+
+Source Data: Digital Analytics; Identity Platform; CRM
+
+Report Attributes: |
+  Dimensions: method, landing page, channel, device, country, user type. 
+  Metrics: sign ups, visitors, sessions.
+
+Dashboard Usage: [Acquisition, Product Onboarding, Growth, Executive KPI]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Conversion Rate, Visitor, Customer Lifetime Value, Revenue]
+
+Data Sensitivity: confidential
+
+Contains PII: Yes
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-05-30T04:02:50.343713+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-06-01T00:26:36.522+00:00
+
