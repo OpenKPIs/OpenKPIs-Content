@@ -1,5 +1,5 @@
 # Dimension: Customer Status
-# Generated: 2026-06-11T05:09:41.588Z
+# Generated: 2026-06-14T00:32:16.010Z
 # Contributed by: swapnamagantius
 # Last modified by: devyendarm
 
@@ -19,16 +19,124 @@ Core Area: Digital Analytics
 
 Scope: User
 
+Data Type: string
+
+Aggregation Window: Event, Session, User, Daily, Weekly, Monthly, Quarterly, Yearly
+
+GA4 Event: |
+  user_property.customer_status
 
 
+W3 Data Layer: |
+  {
+    "event": "customer_status_available",
+    "customer": {
+      "id": "C123456",
+      "status": "returning_customer",
+      "firstPurchaseDate": "2024-02-15",
+      "lastPurchaseDate": "2025-06-01",
+      "purchaseCount": 7,
+      "subscriptionStatus": "inactive"
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "customer_status_available",
+    "customer_status": "returning_customer",
+    "customer_id": "C123456",
+    "first_purchase_date": "2024-02-15",
+    "last_purchase_date": "2025-06-01",
+    "purchase_count": 7,
+    "subscription_status": "inactive"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "customer_status_available",
+    "customer": {
+      "customerID": "C123456",
+      "customerStatus": "returning_customer",
+      "firstPurchaseDate": "2024-02-15",
+      "lastPurchaseDate": "2025-06-01",
+      "purchaseCount": 7,
+      "subscriptionStatus": "inactive"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "xdm:identityMap": {
+      "customerId": [
+        {
+          "id": "C123456",
+          "authenticatedState": "authenticated",
+          "primary": true
+        }
+      ]
+    },
+    "xdm:person": {
+      "customFields": {
+        "customerStatus": "returning_customer",
+        "firstPurchaseDate": "2024-02-15",
+        "lastPurchaseDate": "2025-06-01",
+        "purchaseCount": 7,
+        "subscriptionStatus": "inactive"
+      }
+    }
+  }
 
+SQL Query: |
+  WITH customer_history AS (
+    SELECT
+      customer_id,
+      MIN(order_date) AS first_purchase_date,
+      MAX(order_date) AS last_purchase_date,
+      COUNT(DISTINCT order_id) AS purchase_count
+    FROM orders
+    WHERE order_status = 'completed'
+    GROUP BY customer_id
+  ), subscription_history AS (
+    SELECT
+      customer_id,
+      MAX(subscription_status) AS subscription_status
+    FROM subscriptions
+    GROUP BY customer_id
+  )
+  SELECT
+    e.event_id,
+    e.event_timestamp,
+    e.customer_id,
+    CASE
+      WHEN e.customer_id IS NULL AND COALESCE(e.is_logged_in,false) = false THEN 'guest'
+      WHEN ch.customer_id IS NULL THEN 'prospect'
+      WHEN DATE(ch.first_purchase_date) = DATE(e.event_timestamp) THEN 'new_customer'
+      WHEN ch.purchase_count > 1
+           AND DATE_DIFF(DATE(e.event_timestamp), DATE(ch.last_purchase_date), DAY) > 365 THEN 'reactivated_customer'
+      WHEN sh.subscription_status = 'active' THEN 'active_subscriber'
+      WHEN sh.subscription_status IN ('cancelled','expired','paused') THEN 'inactive_customer'
+      WHEN ch.purchase_count >= 1 THEN 'returning_customer'
+      ELSE 'unknown'
+    END AS customer_status
+  FROM raw_events e
+  LEFT JOIN customer_history ch
+    ON e.customer_id = ch.customer_id
+  LEFT JOIN subscription_history sh
+    ON e.customer_id = sh.customer_id;
 
+Calculation Notes: |
+  1️⃣ Define statuses centrally in a business rules document and keep them mutually exclusive. 
+  2️⃣ Prefer CRM or order-management history over browser-only logic. 
+  3️⃣ Persist as a user-level attribute and stamp onto events for easier reporting. 
+  4️⃣ For anonymous users, use 'guest' or 'prospect' based on known lead state. 
+  5️⃣ For subscription businesses, decide precedence between subscriber states and purchase-history states. 
+  6️⃣ Capture after login, registration, purchase, subscription change, and CRM sync events. 
+  7️⃣ Avoid using raw GA4 new/returning user as a substitute because it is device/browser based, not customer based.
 
-
-
+Business Use Case: |
+  1️⃣Analyze how customer lifecycle stage such as new, returning, loyal or reactivated impacts conversion, order value, retention, and support usage.
+  2️⃣ Improve customer retention and revenue by tailoring onboarding, loyalty, and win-back campaigns for new, returning, and reactivated customers.
+  3️⃣ Identify which customer lifecycle segments need targeted offers, service improvements, or retention actions to increase repeat purchases and lifetime value.
 
 
 
@@ -49,5 +157,5 @@ Created At: 2026-06-09T06:36:48.135576+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-06-11T05:09:40.429+00:00
+Last Modified At: 2026-06-14T00:32:14.928+00:00
 
