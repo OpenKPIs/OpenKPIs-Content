@@ -1,0 +1,213 @@
+# KPI: Conversion Rate
+# Generated: 2026-07-08T23:40:49.310Z
+# Contributed by: dev-user
+# Last modified by: devyendarm
+
+KPI Name: Conversion Rate
+Formula: (Sessions with Conversion Event / Total eligible sessions) * 100
+
+Description: |
+  Conversion rate measures the percentage of eligible sessions or users that complete a defined conversion action, such as a purchase, lead submission, or signup. It is a core KPI for evaluating how effectively digital experiences turn traffic into business outcomes.
+
+Category: Conversion
+
+
+Industry: [["Retail, SaaS, Education, Media, Manufacturing, Other, Technology, Finance, Healthcare, E-commerce"]]
+
+Priority: High
+
+Core Area: Digital Analytics, Business Intelligence
+
+Scope: Session
+
+Measure Type: Rate
+
+Aggregation Window: User, Daily, Monthly, Yearly, Quarterly, Weekly, Hourly, Session
+
+GA4 Event: |
+  conversion_event_name // Define conversion specific event such as purchase, signup, lead, add_to_cart, etc.
+
+Adobe Event: |
+  conversion_event_name // Define conversion specific event such as purchase, signup, lead, add_to_cart, etc.
+
+W3 Data Layer: |
+  window.digitalData.event.push({
+    eventInfo: {
+      eventName: "conversion_complete",
+      eventAction: "conversion",
+      type: "conversion",
+      timeStamp: new Date().toISOString()
+    },
+    attributes: {
+      conversionGoal: "{{conversion_goal}}",   // purchase, signup, lead, add_to_cart, etc.
+      conversionId: "{{conversion_id}}",
+      conversionValue: 0,
+      currency: "USD",
+      conversionStatus: "complete",
+      entityScope: "session"                  // session, user, account, visit, lead
+    }
+  });
+
+GA4 Data Layer: |
+  dataLayer.push({
+    event: "{{conversion_event_name}}",
+    conversion: {
+      conversion_goal: "{{conversion_goal}}", // purchase, signup, lead, add_to_cart, etc.
+      conversion_id: "{{conversion_id}}",
+      conversion_value: 0,
+      currency: "USD"
+    }
+  });
+
+Adobe Client Data Layer: |
+  adobeDataLayer.push({
+    event: "conversion.complete",
+    conversion: {
+      goal: "{{conversion_goal}}", // purchase, signup, lead, add_to_cart, etc.
+      id: "{{conversion_id}}",
+      value: 0,
+      currency: "USD"
+    }
+  });
+
+XDM Mapping: |
+  xdm: {
+    eventType: "conversion.complete",
+    _tenant: {
+      conversion: {
+        goal: "{{conversion_goal}}", // purchase, signup, lead, add_to_cart, etc.
+        id: "{{conversion_id}}",
+        value: 0
+      }
+    }
+  }
+
+SQL Query: |
+  # Big Query
+  -- Generic Conversion Rate - GA4 BigQuery
+  -- Replace conversion_event_names with the configured conversion goal.
+  -- Examples:
+  -- purchase conversion: ['purchase']
+  -- signup conversion: ['sign_up']
+  -- lead conversion: ['generate_lead']
+  -- add to cart rate: ['add_to_cart']
+  
+  DECLARE conversion_event_names ARRAY<STRING> DEFAULT ['purchase'];
+  DECLARE eligibility_event_names ARRAY<STRING> DEFAULT ['session_start'];
+  
+  WITH event_rows AS (
+    SELECT
+      user_pseudo_id,
+      CAST((
+        SELECT value.int_value
+        FROM UNNEST(event_params)
+        WHERE key = 'ga_session_id'
+      ) AS STRING) AS ga_session_id,
+      event_name
+    FROM `project.dataset.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN '20260101' AND '20260131'
+  ),
+  
+  session_flags AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      MAX(CASE WHEN event_name IN UNNEST(eligibility_event_names) THEN 1 ELSE 0 END) AS is_eligible,
+      MAX(CASE WHEN event_name IN UNNEST(conversion_event_names) THEN 1 ELSE 0 END) AS is_converted
+    FROM event_rows
+    WHERE ga_session_id IS NOT NULL
+    GROUP BY user_pseudo_id, ga_session_id
+  )
+  
+  SELECT
+    SAFE_DIVIDE(
+      COUNTIF(is_eligible = 1 AND is_converted = 1),
+      COUNTIF(is_eligible = 1)
+    ) * 100 AS conversion_rate
+  FROM session_flags;
+  
+  # AEP Query Service
+  -- Generic Conversion Rate - AEP Query Service
+  -- This version uses person/entity scope.
+  -- For session-scoped reporting, use CJA Session container or a custom captured session id.
+  
+  WITH event_rows AS (
+    SELECT
+      COALESCE(
+        identityMap['ECID'][0].id,
+        identityMap['CRMID'][0].id
+      ) AS entity_id,
+      eventType,
+      _tenant.conversion.goal AS conversion_goal,
+      timestamp
+    FROM aep_experience_event_dataset
+    WHERE timestamp >= TIMESTAMP '2026-01-01 00:00:00'
+      AND timestamp <  TIMESTAMP '2026-02-01 00:00:00'
+  ),
+  
+  entity_flags AS (
+    SELECT
+      entity_id,
+  
+      MAX(CASE
+        WHEN eventType = 'web.webpagedetails.pageViews'
+        THEN 1 ELSE 0
+      END) AS is_eligible,
+  
+      MAX(CASE
+        WHEN eventType = 'commerce.purchases'
+          OR (
+            eventType = 'conversion.complete'
+            AND conversion_goal IN ('purchase', 'signup', 'lead')
+          )
+        THEN 1 ELSE 0
+      END) AS is_converted
+  
+    FROM event_rows
+    WHERE entity_id IS NOT NULL
+    GROUP BY entity_id
+  )
+  
+  SELECT
+    SUM(CASE WHEN is_eligible = 1 AND is_converted = 1 THEN 1 ELSE 0 END) * 100.0
+    / NULLIF(SUM(CASE WHEN is_eligible = 1 THEN 1 ELSE 0 END), 0) AS conversion_rate
+  FROM entity_flags;
+
+Calculation Notes: |
+  1️⃣ Parameterized KPI. Define the conversion goal, eligible population, reporting scope, and attribution window before calculation.
+  2️⃣ Use goal-specific KPI definitions for purchase, signup, lead, cart, checkout, or booking conversions.
+
+Business Use Case: |
+  1️⃣ Monitor conversion rate for key actions in a funnel flow such as Checkout, Purchase, Lead Completion etc., to identify change in conversion trend and fix issues or growth conversation rates by removing friction identified through A/B testing.
+  2️⃣ Used to monitor funnel health, campaign traffic quality, purchase experience, and revenue opportunity.
+
+Dependencies:
+  Metrics: [Conversions]
+  Dimensions: [Conversion Type]
+
+Source Data: Digital Analytics, Business Intelligence
+
+Report Attributes: |
+  Day, Page, Product
+
+Dashboard Usage: [Executive KPI Dashboard, Conversion Funnel Dashboard, Traffic Analysis, Campaign Performance, CRO Dashboard]
+
+Segment Eligibility: |
+  True
+
+Related KPIs: [Order Rate, Sign-up Rate, Lead Completion Rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: dev-user
+
+Created At: 2026-05-29T15:09:25.938048+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-07-08T23:40:48.953+00:00
+
