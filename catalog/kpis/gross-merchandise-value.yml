@@ -1,0 +1,168 @@
+# KPI: Gross Merchandise value
+# Generated: 2026-06-17T00:43:54.538Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+KPI Name: Gross Merchandise value
+Formula: GMV = SUM(item_price × quantity)
+
+Description: |
+  Gross merchandise value measures the total monetary value of merchandise sold over a given period before deducting returns, refunds, discounts funded after sale, shipping adjustments, taxes, or marketplace fees unless otherwise specified by the business definition. It is a core top-line revenue proxy used to evaluate sales volume, marketplace scale, merchandising performance, and growth trends.
+
+Category: Revenue
+
+
+Industry: [["Retail, E-commerce"]]
+
+Priority: High
+
+Core Area: Business Intelligence
+
+Scope: Global
+
+Measure Type: Currency
+
+Aggregation Window: Event, User, Weekly, Hourly, Monthly, Yearly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "currency": "USD",
+      "transaction_id": "T12345",
+      "value": 259.97,
+      "items": [
+        {
+          "item_id": "SKU-1001",
+          "item_name": "Running Shoes",
+          "price": 129.99,
+          "quantity": 2
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T12345",
+      "currency": "USD",
+      "value": 259.97,
+      "tax": 0,
+      "shipping": 0,
+      "coupon": "",
+      "items": [
+        {
+          "item_id": "SKU-1001",
+          "item_name": "Running Shoes",
+          "price": 129.99,
+          "quantity": 2
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "commerce.purchases",
+    "commerce": {
+      "order": {
+        "purchaseID": "T12345",
+        "currencyCode": "USD",
+        "priceTotal": 259.97
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1001",
+          "name": "Running Shoes",
+          "priceTotal": 259.97,
+          "quantity": 2
+        }
+      ]
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "order": {
+        "purchaseID": "commerce.order.purchaseID",
+        "priceTotal": "commerce.order.priceTotal",
+        "currencyCode": "commerce.order.currencyCode"
+      }
+    },
+    "productListItems[].SKU": "productListItems[].SKU",
+    "productListItems[].name": "productListItems[].name",
+    "productListItems[].quantity": "productListItems[].quantity",
+    "productListItems[].priceTotal": "productListItems[].priceTotal"
+  }
+
+SQL Query: |
+  WITH purchases AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS order_date,
+      ecommerce.transaction_id AS transaction_id,
+      ecommerce.purchase_revenue AS order_value,
+      items.item_id AS item_id,
+      items.price AS item_price,
+      items.quantity AS quantity
+    FROM `project.dataset.events_*`, UNNEST(items) AS items
+    WHERE event_name = 'purchase'
+  )
+  SELECT
+    order_date,
+    ROUND(SUM(COALESCE(item_price * quantity, order_value)), 2) AS gross_merchandise_value
+  FROM purchases
+  GROUP BY order_date
+  ORDER BY order_date;
+
+Calculation Notes: |
+  1) The most common commerce definition excludes tax and shipping and uses merchandise subtotal only. 
+  2) Define whether GMV includes tax, shipping, gift wrap, and discounts at the order or item level; 
+  3) Deduplicate purchase events by transaction_id to avoid double counting from page reloads or server/client dual tagging. 
+  4) Exclude canceled or fraudulent orders if the business reports net valid GMV; otherwise label the metric as booked GMV. 
+  5) For marketplaces, clarify whether third-party seller sales are included and whether currency conversion is done at transaction-time FX rates or reporting-time rates. 
+  6) Returns and refunds should not reduce GMV unless a separate net GMV definition is used.
+
+Business Use Case: |
+  An e-commerce leadership team tracks daily and monthly GMV by channel, device and product category to identify where sales volume is accelerating or declining. If paid social drives high sessions but low GMV relative to search, the team can reallocate budget, adjust promotions, or improve landing page merchandising.
+
+Dependencies:
+  Events: [purchase]
+  Metrics: [transaction_id, item_id, item_price, quantity]
+  Dimensions: [order status]
+
+Source Data: Digital Analytics; Business Intelligence; ERP; Order Management System; Finance
+
+Report Attributes: |
+  Dimensions: Date, Channel, Source/Medium, Campaign, Device Category, Country, Product Category, Brand, Seller Type, Currency; Metrics: GMV, Orders, Units, AOV, Refund Amount
+
+Dashboard Usage: [C-Suite, Executive Revenue Dashboard, E-commerce Performance, Merchandising, Channel Performance, Finance Reporting]
+
+Segment Eligibility: |
+  True
+
+Related KPIs: [Revenue, Net Merchandise Value, Average Order Value, Units Sold, Conversion Rate, Refund Rate, Gross Profit]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-06-16T23:45:57.519+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-06-17T00:43:53.536+00:00
+
