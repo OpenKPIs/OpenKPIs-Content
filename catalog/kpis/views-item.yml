@@ -1,0 +1,82 @@
+# KPI: Views Item
+# Generated: 2026-05-30T04:02:50.685Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Views Item
+Formula: COUNT(view_item events or item occurrences within view_item events)
+
+Description: |
+  Views Item counts how many times users viewed a product detail or item impression that is tracked as a product view. It indicates product interest and is the denominator for several product conversion KPIs.
+
+Category: Engagement
+
+Tags: [product, view-item, pdp, engagement, merchandising]
+
+Industry: [["Retail","E-commerce"]]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Measure Type: count
+
+Aggregation Window: Event, Item, Session, User, Time based - Hourly/Daily/Monthly/Yearly
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  prodView
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"view_item"}}],"product":[{"productInfo":{"sku":"SKU_123","productName":"Example Product","productURL":"https://www.example.com/product/sku-123"},"category":{"primaryCategory":"Category"}}]}}
+
+GA4 Data Layer: |
+  {"event":"view_item","ecommerce":{"currency":"USD","value":99.99,"items":[{"item_id":"SKU_123","item_name":"Example Product","item_category":"Category","price":99.99}]}}
+
+Adobe Client Data Layer: |
+  {"event":"commerce.productViews","commerce":{"productViews":{"value":1},"productListItems":[{"SKU":"SKU_123","name":"Example Product","priceTotal":99.99}]}}
+
+XDM Mapping: |
+  {"eventType":"commerce.productViews","commerce.productViews.value":"1","productListItems.SKU":"item_id","productListItems.name":"item_name","productListItems.category":"item_category","productListItems.priceTotal":"price"}
+
+SQL Query: |
+  SELECT item.item_id, item.item_name, COUNT(*) AS views_item FROM `project.dataset.events_*`, UNNEST(items) AS item WHERE event_name='view_item' GROUP BY item.item_id, item.item_name ORDER BY views_item DESC;
+
+Calculation Notes: |
+  For product detail pages, count one item view per item in the view_item event. Do not mix list impressions with product detail views unless explicitly defined. Filter bot traffic and duplicate page refresh inflation where needed.
+
+Business Use Case: |
+  A merchandising team identifies products with rising item views to adjust inventory, promote trending items, or optimize product detail pages.
+
+Dependencies: |
+  view_item event; item_id; item_name; product category; page URL; product catalog mapping
+
+Source Data: Digital Analytics; Product Catalog
+
+Report Attributes: |
+  Dimensions: item_id, item_name, category, brand, device, channel. Metrics: item views, add-to-carts, purchases, item revenue.
+
+Dashboard Usage: [Product Performance, Merchandising, Content Performance, Ecommerce Performance]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Item View to Cart Rate, Item purchase conversion rate, Item revenue, Pages Per Session]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-05-30T04:02:50.343713+00:00
+
+Last Modified By: devyendarm
+
+
