@@ -1,0 +1,82 @@
+# KPI: Purchase Conversion Rate
+# Generated: 2026-06-09T06:36:48.346Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+KPI Name: Purchase Conversion Rate
+Formula: (Sessions with at least one purchase / Total eligible sessions) × 100
+
+Description: |
+  The percentage of website or app sessions that result in at least one completed purchase. It measures how effectively digital experiences, merchandising, pricing, and checkout flows convert traffic into buyers.
+
+Category: Conversion
+
+Tags: [conversion, purchase, checkout, sessions, ecommerce, sporting-goods, footwear, apparel]
+
+Industry: [["Retail","E-commerce"]]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Session
+
+Measure Type: percentage
+
+Aggregation Window: Session, User, Time based - Hourly/Daily/Monthly/Yearly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"event":"purchase","session":{"id":"1700000000.12345"},"ecommerce":{"transaction_id":"T12345","currency":"USD","revenue":149.98}}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"transaction_id":"T12345","currency":"USD","value":149.98,"items":[{"item_id":"SKU123","item_name":"Trail Running Shoe","item_category":"Footwear","item_category2":"Running","price":149.98,"quantity":1}]}}
+
+Adobe Client Data Layer: |
+  {"event":"commerce.purchases","web":{"webPageDetails":{"name":"Order Confirmation"}},"commerce":{"order":{"purchaseID":"T12345","currencyCode":"USD","priceTotal":149.98}}}
+
+XDM Mapping: |
+  {"xdm.commerce.purchases.value":"1","xdm.commerce.order.purchaseID":"ecommerce.transaction_id","xdm.commerce.order.priceTotal":"ecommerce.revenue","xdm.web.webPageDetails.name":"web.webPageDetails.name","derived.sessions_with_purchase":"COUNT_DISTINCT(session_id WHERE commerce.purchases.value = 1)","derived.total_sessions":"COUNT_DISTINCT(session_id)"}
+
+SQL Query: |
+  WITH sessions AS (SELECT CONCAT(user_pseudo_id, '-', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_id, MAX(CASE WHEN event_name = 'purchase' THEN 1 ELSE 0 END) AS has_purchase FROM `project.dataset.events_*` WHERE (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') IS NOT NULL GROUP BY session_id) SELECT SAFE_DIVIDE(SUM(has_purchase), COUNT(*)) * 100 AS purchase_conversion_rate FROM sessions;
+
+Calculation Notes: |
+  Count a session once even if it contains multiple purchases. Exclude bot traffic, internal traffic, QA/test sessions, and sessions where consent prevents analytics measurement if using consented-only reporting. Define whether app and web sessions are combined, and keep the denominator consistent across channels and time periods.
+
+Business Use Case: |
+  The conversion optimization team monitors Purchase Conversion Rate after checkout, PDP, and cart changes to determine whether updates improve the percentage of traffic that buys shoes, apparel, or equipment.
+
+Dependencies: |
+  session_start or session identifier; purchase event; transaction_id; bot/internal traffic filters; consent status
+
+Source Data: Digital Analytics; Consent Management Platform; Order Management System
+
+Report Attributes: |
+  Date; Device Category; Channel Group; Landing Page; Product Category and Sport; Customer Status; Sessions; Sessions with Purchase; Purchase Conversion Rate
+
+Dashboard Usage: [Executive KPI Dashboard, Conversion Funnel Dashboard, Checkout Optimization Dashboard, Marketing Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Online Revenue, Average Order Value, Cart-to-Purchase Rate, Checkout Completion Rate, Order Conversion Rate (Visit)]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-06-09T06:36:46.980315+00:00
+
+Last Modified By: swapnamagantius
+
+
