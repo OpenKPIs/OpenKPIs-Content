@@ -1,0 +1,88 @@
+# Event: cookie_preferences_updated
+# Generated: 2026-06-08T21:26:31.869Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Event Name: cookie_preferences_updated
+Event Serialization: One event per explicit consent preference submission, serialized by consent_id and timestamp_utc. Deduplicate events with the same consent_id, consent_action, updated_consent_state, and timestamp within a 5-second window.
+
+Description: |
+  Fires when a visitor saves, updates, or confirms cookie consent preferences through the consent management platform or cookie preference center. This includes accepting all cookies, rejecting non-essential cookies, saving granular category choices, or changing a prior consent state.
+
+Category: Quality
+
+Tags: [cookie consent, privacy, consent management, cmp, compliance, measurement governance, financial services]
+
+Industry: ["Finance","Technology"]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: User
+
+Event Type: custom
+
+Aggregation Window: Event, Session, User
+
+GA4 Event: |
+  cookie_preferences_updated
+
+Adobe Event: |
+  event15
+
+W3 Data Layer: |
+  {"event":"cookie_preferences_updated","eventInfo":{"eventName":"cookie_preferences_updated","eventAction":"consent_preferences_saved","eventTimestamp":"2026-06-08T00:00:00Z"},"privacy":{"consentAction":"save_preferences","consentSource":"preference_center","consentVersion":"2026.01","consentId":"cmp-anonymous-transaction-id","previousConsentState":"analytics:false|marketing:false|personalization:false|functional:true","updatedConsentState":"analytics:true|marketing:false|personalization:false|functional:true","regulation":"GDPR","region":"EU","categories":{"essential":true,"analytics":true,"marketing":false,"personalization":false,"functional":true,"advertising":false},"cmpProvider":"OneTrust"},"page":{"pageInfo":{"pageName":"Cookie Preferences","pageURL":"https://www.example.com/privacy/cookie-preferences","language":"en-US"}},"user":{"profile":{"profileInfo":{"loggedInStatus":false}}}}
+
+GA4 Data Layer: |
+  {"event":"cookie_preferences_updated","consent_action":"save_preferences","consent_source":"preference_center","consent_version":"2026.01","consent_id":"cmp-anonymous-transaction-id","previous_consent_state":"analytics:false|marketing:false|personalization:false|functional:true","updated_consent_state":"analytics:true|marketing:false|personalization:false|functional:true","essential_cookies":true,"analytics_cookies":true,"marketing_cookies":false,"personalization_cookies":false,"functional_cookies":true,"advertising_cookies":false,"region":"EU","regulation":"GDPR","cmp_provider":"OneTrust","page_location":"https://www.example.com/privacy/cookie-preferences","language":"en-US","logged_in_status":false,"timestamp_utc":"2026-06-08T00:00:00Z"}
+
+Adobe Client Data Layer: |
+  {"event":"cookie_preferences_updated","eventInfo":{"eventName":"cookie_preferences_updated","eventAction":"consent_preferences_saved","eventTimestamp":"2026-06-08T00:00:00Z"},"consent":{"action":"save_preferences","source":"preference_center","version":"2026.01","id":"cmp-anonymous-transaction-id","previousState":"analytics:false|marketing:false|personalization:false|functional:true","updatedState":"analytics:true|marketing:false|personalization:false|functional:true","regulation":"GDPR","region":"EU","cmpProvider":"OneTrust","categories":{"essential":true,"analytics":true,"marketing":false,"personalization":false,"functional":true,"advertising":false}},"web":{"webPageDetails":{"name":"Cookie Preferences","URL":"https://www.example.com/privacy/cookie-preferences","language":"en-US"}},"user":{"loggedInStatus":false}}
+
+XDM Mapping: |
+  {"eventType":"web.consent.cookiePreferencesUpdated","timestamp":"timestamp_utc","identityMap":{},"web":{"webPageDetails":{"URL":"page_location","name":"page_name","siteSection":"privacy","language":"language"}},"consents":{"collect":{"val":"analytics_cookies ? 'y' : 'n'"},"personalize":{"content":{"val":"personalization_cookies ? 'y' : 'n'"}},"marketing":{"preferred":"marketing_cookies ? 'y' : 'n'"},"metadata":{"consentAction":"consent_action","consentSource":"consent_source","consentVersion":"consent_version","consentId":"consent_id","cmpProvider":"cmp_provider","regulation":"regulation","region":"region","previousConsentState":"previous_consent_state","updatedConsentState":"updated_consent_state"}},"_tenant":{"privacy":{"cookieCategories":{"essential":"essential_cookies","analytics":"analytics_cookies","marketing":"marketing_cookies","personalization":"personalization_cookies","functional":"functional_cookies","advertising":"advertising_cookies"}}}}
+
+Parameters: |
+  consent_action=accept_all|reject_all|save_preferences|update_preferences|dismiss; consent_source=banner|preference_center|footer_link|account_settings|cmp_api; consent_version=version of consent notice or CMP configuration; consent_id=anonymous CMP consent transaction ID; previous_consent_state=prior summarized consent state; updated_consent_state=new summarized consent state; essential_cookies=true|false; analytics_cookies=true|false; marketing_cookies=true|false; personalization_cookies=true|false; functional_cookies=true|false; advertising_cookies=true|false; region=visitor consent jurisdiction such as US, CA, EU, UK; regulation=GDPR|CCPA|CPRA|LGPD|PIPEDA|other; cmp_provider=name of consent management platform; page_location=current page URL without query-string PII; page_referrer=referring page URL without query-string PII; language=site language; logged_in_status=true|false without user identifier; timestamp_utc=ISO-8601 event timestamp
+
+Calculation Notes: |
+  Trigger only after the visitor explicitly saves or confirms a consent choice, not on every page load where consent state is read. Fire once per confirmed action and include both previous and updated state when available. Essential cookies should normally remain true and should not be interpreted as marketing consent. Respect consent mode sequencing: update the CMP or consent API first, then fire this event only if the resulting consent state permits the relevant analytics collection, or send through a consent-exempt compliance endpoint if required by legal policy. Do not include names, email addresses, account numbers, IP addresses, or raw user identifiers. Strip query strings from URLs when they may contain sensitive financial account or campaign data. Ensure this event is available for audit even when analytics cookies are rejected, using approved server-side or CMP logs if the analytics platform cannot receive the hit.
+
+Business Use Case: |
+  Used by privacy, compliance, marketing operations, and analytics teams to measure consent opt-in and opt-out behavior, diagnose drops in measurable traffic, validate CMP implementation across jurisdictions, and estimate the impact of consent choices on attribution, personalization, remarketing, and investment product journey reporting.
+
+Dependencies: |
+  Consent Management Platform configuration; Cookie category taxonomy; Privacy notice version; Jurisdiction or region detection; Tag manager consent mode rules; Page URL and page metadata; Anonymous consent transaction ID
+
+Source Data: Digital Analytics; Consent Management Platform; Tag Management System; Privacy Compliance Logs
+
+    Report Attributes: |
+  Consent Action; Consent Source; Consent Version; Previous Consent State; Updated Consent State; Analytics Cookies Allowed; Marketing Cookies Allowed; Personalization Cookies Allowed; Functional Cookies Allowed; Advertising Cookies Allowed; Region; Regulation; CMP Provider; Page Name; Page Location; Language; Logged-in Status; Device Category; Browser; Traffic Source
+
+    Dashboard Usage: [Privacy & Consent Compliance Dashboard, Digital Analytics Data Quality Dashboard, Marketing Measurement Readiness Dashboard, Tag Governance Dashboard, Executive Digital Risk Dashboard]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [Consent Action, Consent Source, Consent Version, Consent State, Cookie Category, Regulation, Region, CMP Provider, Page Location, Logged-in Status]
+
+    Derived Dimensions: [Consent Status Group, Analytics Consent Status, Marketing Consent Status, Personalization Consent Status, Consent Jurisdiction, Consent Change Type, Measurement Eligible User Flag]
+
+    Derived Metrics: [Cookie Preference Updates, Accept All Count, Reject All Count, Save Preferences Count, Analytics Consent Opt-ins, Analytics Consent Opt-outs, Marketing Consent Opt-ins, Marketing Consent Opt-outs, Consent Change Events]
+
+    Derived KPIs: [Analytics Consent Opt-in Rate, Marketing Consent Opt-in Rate, Consent Preference Completion Rate, Cookie Banner Acceptance Rate, Cookie Banner Rejection Rate, Measurable Traffic Rate, Consent Coverage Rate, Consent-Related Data Loss Estimate]
+
+    Data Sensitivity: confidential
+
+    Contains PII: No
+
+    Status: draft
+
+    Contributed By: swapnamagantius
+
+    Created At: 2026-06-08T21:26:31.556574+00:00
+
+    Last Modified By: swapnamagantius
+
+    
