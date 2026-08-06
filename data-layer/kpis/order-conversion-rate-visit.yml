@@ -1,0 +1,206 @@
+# KPI: ORDER_CONVERSION_RATE_Visit
+# Generated: 2026-02-14T00:22:40.218Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+KPI Name: ORDER_CONVERSION_RATE_Visit
+Formula: Order Conversion Rate = (Total Orders ÷ Total Sessions) × 100
+
+Description: |
+  Indicates the efficiency of your website or app in converting sessions or users into completed orders. A higher rate reflects better funnel performance and user experience.
+
+Category: Conversion
+
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Conversion Funnel Performance
+
+Scope: Session
+
+Measure Type: Ratio
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase, session_start
+  
+
+Adobe Event: |
+  purchase, OOTB Metrics
+  
+
+
+GA4 Data Layer: |
+  "{
+          transaction_id: ""T_12345_1"",
+          value: 30.03,
+          tax: 4.90,
+          shipping: 5.99,
+          currency: ""USD"",
+          coupon: ""SUMMER_SALE"",
+          items: [
+          // If someone purchases more than one item,
+          // you can add those items to the items array
+           {
+            item_id: ""SKU_12345"",
+            item_name: ""Stan and Friends Tee"",
+            affiliation: ""Google Merchandise Store"",
+            coupon: ""SUMMER_FUN"",
+            discount: 2.22,
+            index: 0,
+            item_brand: ""Google"",
+            item_category: ""Apparel"",
+            item_category2: ""Adult"",
+            item_category3: ""Shirts"",
+            item_category4: ""Crew"",
+            item_category5: ""Short sleeve"",
+            item_list_id: ""related_products"",
+            item_list_name: ""Related Products"",
+            item_variant: ""green"",
+            location_id: ""ChIJIQBpAG2ahYAR_6128GcTUEo"",
+            price: 10.01,
+            quantity: 3
+          }]
+      }"
+  
+
+Adobe Client Data Layer: |
+  "{
+          transaction_id: ""T_12345_1"",
+          value: 30.03,
+          tax: 4.90,
+          shipping: 5.99,
+          currency: ""USD"",
+          coupon: ""SUMMER_SALE"",
+          items: [
+          // If someone purchases more than one item,
+          // you can add those items to the items array
+           {
+            item_id: ""SKU_12345"",
+            item_name: ""Stan and Friends Tee"",
+            affiliation: ""Google Merchandise Store"",
+            coupon: ""SUMMER_FUN"",
+            discount: 2.22,
+            index: 0,
+            item_brand: ""Google"",
+            item_category: ""Apparel"",
+            item_category2: ""Adult"",
+            item_category3: ""Shirts"",
+            item_category4: ""Crew"",
+            item_category5: ""Short sleeve"",
+            item_list_id: ""related_products"",
+            item_list_name: ""Related Products"",
+            item_variant: ""green"",
+            location_id: ""ChIJIQBpAG2ahYAR_6128GcTUEo"",
+            price: 10.01,
+            quantity: 3
+          }]
+      }"
+  
+
+XDM Mapping: |
+  "{
+    ""eventType"": ""commerce.purchases"",
+    ""timestamp"": ""2025-10-07T19:00:00Z"",
+    ""commerce"": {
+      ""order"": {
+        ""orderType"": ""purchase"",
+        ""purchaseID"": ""ORD123456"",
+        ""currencyCode"": ""USD"",
+        ""priceSubtotal"": 330.72,
+        ""priceTax"": 10.00,
+        ""priceShipping"": 10.00,
+        ""priceDiscounts"": 0,
+        ""priceTotal"": 350.72,
+        ""payments"": [
+          {
+            ""transactionID"": ""TXN-98765"",
+            ""paymentAmount"": 350.72,
+            ""paymentType"": ""credit_card"",
+            ""currencyCode"": ""USD""
+          }
+        ]
+      },
+      ""productListItems"": [
+        {
+          ""SKU"": ""SKU-001"",
+          ""name"": ""Wireless Mouse"",
+          ""quantity"": 2,
+          ""itemPrice"": 30.00,
+          ""discountAmount"": 10.00,
+          ""priceTotal"": 50.00,
+          ""productCategories"": [{ ""categoryID"": ""Electronics"" }],
+          ""selectedOptions"": [
+            { ""attribute"": ""Color"", ""value"": ""Black"" }
+          ]
+        },
+        {
+          ""SKU"": ""SKU-002"",
+          ""name"": ""USB-C Hub"",
+          ""quantity"": 1,
+          ""itemPrice"": 100.00,
+          ""priceTotal"": 100.00,
+          ""productCategories"": [{ ""categoryID"": ""Accessories"" }],
+          ""selectedOptions"": [
+            { ""attribute"": ""Ports"", ""value"": ""6"" }
+          ]
+        }
+      ]
+    }"
+  
+
+SQL Query: |
+  sql
+  WITH base AS (
+  SELECT DATE(event_timestamp) AS event_date,
+  COUNT(DISTINCT CASE WHEN event_name = 'purchase' THEN order_id END) AS orders,
+  COUNT(DISTINCT CASE WHEN event_name = 'session_start' THEN session_id END) AS sessions
+  FROM ecommerce_events
+  GROUP BY event_date)
+  SELECT event_date,
+     (orders * 100.0 / sessions) AS order_conversion_rate
+     FROM base
+     ORDER BY event_date;
+  
+
+Calculation Notes: |
+  1) Ensure both orders and sessions are from the same date range.
+  2) Remove test traffic.
+  3) Segment by channel or device where applicable.
+  4) Keep consistency in attribution windows.
+  
+
+
+Dependencies:
+  Events: [product_view, add_to_cart implemented consistently]
+  Dimensions: [Traffic dimensions: source, medium, campaign for marketing breakdowns]
+
+
+Report Attributes: |
+  Percentage (0–100%), typically shown as % with one decimal place; breakdown by product, category, device, channel, campaign, country, etc.
+
+Dashboard Usage: [Ecommerce Funnel Dashboard (view → add to cart → checkout → purchase), Product Merchandising / PDP Performance, A/B Test Results (PDP layout, recommendations, pricing, images), Channel/Campaign Effectiveness dashboards.]
+
+Segment Eligibility: |
+  1) Sessions with product_view (base population).
+  2) High vs. low ATC-rate segments for products, categories, campaigns.
+  3) Users frequently viewing but rarely adding to cart (low-intent browsers).
+  4) Users who add to cart often but rarely purchase (friction/price-sensitive segments).
+
+
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-02-13T23:29:33.819+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-02-14T00:22:38.322+00:00
+
