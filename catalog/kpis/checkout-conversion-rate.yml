@@ -1,0 +1,93 @@
+# KPI: Checkout Conversion Rate
+# Generated: 2026-08-19T17:32:41.759Z
+# Contributed by: devyendarm
+# Last modified by: Primary Editor
+
+KPI Name: Checkout Conversion Rate
+Formula: (Completed Checkouts / Initiated Checkouts) × 100
+
+Description: |
+  Measures the percentage of initiated checkouts that result in a completed order, indicating the effectiveness of the checkout process in converting potential buyers.
+
+Category: Conversion
+
+Tags: [kpi]
+
+Industry: [E-commerce]
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: User
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  checkout_conversion_rate
+
+Adobe Event: |
+  checkout_conversion_rate
+
+W3 Data Layer: |
+  {"event":"checkout_conversion_rate","digitalData":{"event":[{"eventInfo":{"eventName":"checkout_conversion_rate","kpiName":"Checkout Conversion Rate"}}],"cart":{"price":{"currency":"USD","basePrice":99.99},"cartID":"CART-12345"},"transaction":{"transactionID":"T-12345","total":{"basePrice":99.99,"currency":"USD"},"item":[{"productInfo":{"productID":"SKU-123","productName":"Sample Product"},"quantity":1,"price":{"basePrice":99.99,"currency":"USD"}}]},"user":{"profile":[{"profileInfo":{"profileID":"USER-12345"}}]},"page":{"pageInfo":{"pageName":"checkout:confirmation"}}}}
+
+GA4 Data Layer: |
+  window.dataLayer.push({"event":"checkout_conversion_rate","ecommerce":{"transaction_id":"T-12345","currency":"USD","value":99.99,"items":[{"item_id":"SKU-123","item_name":"Sample Product","price":99.99,"quantity":1}]}});
+
+Adobe Client Data Layer: |
+  window.adobeDataLayer.push({"event":"checkout_conversion_rate","xdm":{"eventType":"commerce.purchases","commerce":{"order":{"purchaseID":"T-12345","priceTotal":99.99,"currencyCode":"USD"},"purchases":{"value":1}},"productListItems":[{"SKU":"SKU-123","name":"Sample Product","quantity":1,"priceTotal":99.99}],"web":{"webPageDetails":{"name":"checkout:confirmation"}},"identityMap":{"customerId":[{"id":"USER-12345","authenticatedState":"authenticated","primary":true}]}}});
+
+XDM Mapping: |
+  {"eventType":"commerce.purchases","commerce":{"purchases":{"value":1},"order":{"purchaseID":"T-12345","priceTotal":99.99,"currencyCode":"USD"}},"productListItems":[{"SKU":"SKU-123","name":"Sample Product","quantity":1,"priceTotal":99.99}],"web":{"webPageDetails":{"name":"checkout:confirmation"}},"identityMap":{"customerId":[{"id":"USER-12345","authenticatedState":"authenticated","primary":true}]}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL (GA4 Export)
+  -- ==========================================
+  SELECT COUNTIF(event_name = 'purchase') / COUNTIF(event_name = 'begin_checkout') AS checkout_conversion_rate
+  FROM `your-project.analytics_123456789.events_*`,
+  UNNEST(event_params) AS params
+  WHERE _TABLE_SUFFIX BETWEEN 'start_date' AND 'end_date';
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL (XDM Dataset)
+  -- ==========================================
+  SELECT SUM(CASE WHEN eventType = 'commerce.purchases' THEN 1 ELSE 0 END) / SUM(CASE WHEN eventType = 'commerce.checkout.start' THEN 1 ELSE 0 END) AS checkout_conversion_rate
+  FROM your_aep_dataset
+  WHERE timestamp BETWEEN 'start_date' AND 'end_date';
+
+Calculation Notes: |
+  Exclude retries, test, canceled, fraudulent, duplicate, and fully refunded orders. Use a consistent session key and apply a 30-minute inactivity timeout. Attribute completion to the same checkout instance or within 24 hours of initiation.
+
+Business Use Case: |
+  An e-commerce VP and analytics team monitor this KPI to identify and address issues in the checkout process, such as form friction or payment failures, to improve conversion rates.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Device","Payment Method","Market"]
+
+Dashboard Usage: [E-commerce Performance Dashboard, Conversion Analysis Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-19T14:01:43.629238+00:00
+
+Last Modified By: Primary Editor
+
+
