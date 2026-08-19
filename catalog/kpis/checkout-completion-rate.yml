@@ -1,0 +1,98 @@
+# KPI: Checkout completion rate
+# Generated: 2026-08-19T17:32:50.341Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Checkout completion rate
+Formula: (Completed Checkouts / Initiated Checkouts) × 100
+
+Description: |
+  Measures the percentage of initiated checkout sessions that result in a completed purchase. This KPI helps assess the effectiveness of the checkout process.
+
+Category: Conversion
+
+Tags: [ecommerce, checkout, purchase]
+
+Industry: [E-commerce]
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Session
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"event":"purchase","ecommerce":{"purchase":{"products":[{"id":"12345","name":"Triblend Android T-Shirt","brand":"Google","price":"15.25","coupon":"","variant":"Gray","category":"Apparel","quantity":1}],"actionField":{"id":"T12345","tax":"4.90","coupon":"SUMMER_SALE","revenue":"35.43","shipping":"5.99","affiliation":"Online Store"}}}}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"tax":4.9,"items":[{"price":15.25,"item_id":"12345","quantity":1,"item_name":"Triblend Android T-Shirt","item_brand":"Google","item_variant":"Gray","item_category":"Apparel"}],"value":35.43,"coupon":"SUMMER_SALE","currency":"USD","shipping":5.99,"affiliation":"Online Store","transaction_id":"T12345"}}
+
+Adobe Client Data Layer: |
+  {"event":"purchase","ecommerce":{"purchase":{"tax":"4.90","coupon":"SUMMER_SALE","revenue":"35.43","products":[{"brand":"Google","price":"15.25","variant":"Gray","category":"Apparel","quantity":1,"productID":"12345","productName":"Triblend Android T-Shirt"}],"shipping":"5.99","affiliation":"Online Store","transactionID":"T12345"}}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":{"purchase":{"tax":4.9,"items":[{"id":"12345","name":"Triblend Android T-Shirt","brand":"Google","price":15.25,"variant":"Gray","category":"Apparel","quantity":1}],"value":35.43,"coupon":"SUMMER_SALE","currency":"USD","shipping":5.99,"affiliation":"Online Store","transactionID":"T12345"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT COUNT(DISTINCT CASE WHEN event_name = 'purchase' THEN user_pseudo_id END) AS completed_checkouts,
+         COUNT(DISTINCT CASE WHEN event_name = 'begin_checkout' THEN user_pseudo_id END) AS initiated_checkouts,
+         SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN event_name = 'purchase' THEN user_pseudo_id END), COUNT(DISTINCT CASE WHEN event_name = 'begin_checkout' THEN user_pseudo_id END)) AS checkout_completion_rate
+  FROM `your-project.analytics_123456789.events_*`
+  WHERE _TABLE_SUFFIX BETWEEN '20230101' AND '20231231'
+    AND event_name IN ('purchase', 'begin_checkout')
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT COUNT(DISTINCT CASE WHEN event = 'purchase' THEN user_id END) AS completed_checkouts,
+         COUNT(DISTINCT CASE WHEN event = 'begin_checkout' THEN user_id END) AS initiated_checkouts,
+         SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN event = 'purchase' THEN user_id END), COUNT(DISTINCT CASE WHEN event = 'begin_checkout' THEN user_id END)) AS checkout_completion_rate
+  FROM aep_dataset.events
+  WHERE event IN ('purchase', 'begin_checkout')
+    AND event_date BETWEEN '2023-01-01' AND '2023-12-31'
+
+Calculation Notes: |
+  Exclude sessions with technical errors or timeouts exceeding 30 minutes.
+
+Business Use Case: |
+  Executives use this KPI to identify and address bottlenecks in the checkout process, aiming to improve conversion rates.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Device Type","Geography","User Type"]
+
+Dashboard Usage: [E-commerce Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-05-06T21:45:45.13+00:00
+
+Last Modified By: devyendarm
+
+
