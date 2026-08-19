@@ -1,0 +1,84 @@
+# KPI: Inventory Turnover Rate
+# Generated: 2026-08-19T17:32:56.342Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Inventory Turnover Rate
+Formula: (Cost of Goods Sold / Average Inventory)
+
+Description: |
+  Measures how often inventory is sold and replaced over a specific period, indicating the efficiency of inventory management.
+
+Category: Efficiency
+
+Tags: [kpi]
+
+Industry: [Logistics & Supply Chain]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: rate
+
+Aggregation Window: Time based - Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT product_id,
+         SUM(sales_quantity) / NULLIF(SUM(average_inventory), 0) AS inventory_turnover_rate
+  FROM `your-project.erp.warehouse_logs`
+  WHERE event_date BETWEEN '2023-01-01' AND '2023-12-31'
+  GROUP BY product_id
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT product_id,
+         SUM(sales_quantity) / NULLIF(SUM(average_inventory), 0) AS inventory_turnover_rate
+  FROM aep_backend_dataset.warehouse_logs
+  WHERE event_date BETWEEN '2023-01-01' AND '2023-12-31'
+  GROUP BY product_id
+
+Calculation Notes: |
+  Exclude obsolete or non-moving inventory items; ensure consistent valuation method for inventory.
+
+Business Use Case: |
+  Executives use this KPI to optimize inventory levels, reduce holding costs, and improve cash flow by identifying slow-moving products.
+
+
+Source Data: ERP
+
+Report Attributes: |
+  ["Product Category","Region","Time Period"]
+
+Dashboard Usage: [Executive Summary Dashboard, Operations Efficiency Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-19T14:01:50.188432+00:00
+
+Last Modified By: devyendarm
+
+
