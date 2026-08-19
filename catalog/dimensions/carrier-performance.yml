@@ -1,0 +1,117 @@
+# Dimension: Carrier Performance
+# Generated: 2026-08-19T17:33:10.666Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Carrier Performance
+
+Description: |
+  Measures the efficiency and reliability of logistics carriers in delivering shipments on time and without damage.
+
+Category: Performance
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  view_item
+
+W3 Data Layer: |
+  {"digitalData":{"event":{"category":{"primaryCategory":"Carrier Performance"},"eventInfo":{"type":"view","eventName":"Carrier Performance View"}}}}
+
+GA4 Data Layer: |
+  {"event":"view_item","ecommerce":{"items":[{"item_name":"Carrier Performance","item_category":"performance"}]}}
+
+Adobe Client Data Layer: |
+  {"event":"view_item","ecommerce":{"items":[{"item_name":"Carrier Performance","item_category":"performance"}]}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":{"name":"view_item","details":{"item_name":"Carrier Performance","item_category":"performance"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL (GA4 Export)
+  -- ==========================================
+  SELECT
+    event_date,
+    user_pseudo_id AS user_id,
+    items.item_name AS carrier_name,
+    COUNTIF(event_name = 'view_item') AS views,
+    COUNTIF(event_name = 'add_to_cart') AS adds_to_cart,
+    COUNTIF(event_name = 'purchase') AS purchases
+  FROM
+    `your-project.analytics_123456789.events_*`,
+    UNNEST(items) AS items
+  WHERE
+    items.item_category = 'carrier'
+  GROUP BY
+    event_date,
+    user_id,
+    carrier_name
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL (XDM Dataset)
+  -- ==========================================
+  SELECT
+    DATE(event.timestamp) AS event_date,
+    identityMap.ecid[0].id AS user_id,
+    e.commerce.productListItems.name AS carrier_name,
+    SUM(CASE WHEN e.eventType = 'commerce.productViews' THEN 1 ELSE 0 END) AS views,
+    SUM(CASE WHEN e.eventType = 'commerce.productListAdds' THEN 1 ELSE 0 END) AS adds_to_cart,
+    SUM(CASE WHEN e.eventType = 'commerce.purchases' THEN 1 ELSE 0 END) AS purchases
+  FROM
+    your_dataset.your_table e
+  WHERE
+    e.commerce.productListItems.category = 'carrier'
+  GROUP BY
+    event_date,
+    user_id,
+    carrier_name
+
+Calculation Notes: |
+  Excludes shipments with incomplete tracking data. Considers only completed deliveries.
+
+Business Use Case: |
+  Executives use this to negotiate better terms with carriers or switch providers based on performance metrics.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Region","Carrier Name","Time Period"]
+
+Dashboard Usage: [Logistics Performance Dashboard, Carrier Management Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-19T14:01:47.675427+00:00
+
+Last Modified By: devyendarm
+
+
