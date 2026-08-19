@@ -1,0 +1,100 @@
+# Metric: Time on Property Page
+# Generated: 2026-08-19T17:33:01.818Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Time on Property Page
+Formula: SUM(time_spent) / COUNT(visits)
+
+Description: |
+  Measures the average duration a user spends on a property listing page, indicating user interest and engagement with the property details.
+
+Category: Engagement
+
+Tags: [metric]
+
+Industry: Real Estate Tech
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Session
+
+Measure Type: average
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  time_on_property_page
+
+Adobe Event: |
+  time_on_property_page
+
+W3 Data Layer: |
+  {"digitalData":{"event":{"eventInfo":{"type":"engagement","eventName":"time_on_property_page","timeStamp":"2023-10-05T14:48:00.000Z"},"attributes":{"timeSpent":120}}}}
+
+GA4 Data Layer: |
+  {"event":"time_on_property_page","timeSpent":120}
+
+Adobe Client Data Layer: |
+  {"event":"time_on_property_page","eventData":{"timeSpent":120}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":{"name":"time_on_property_page","timeSpent":120}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL (GA4 Export)
+  -- ==========================================
+  SELECT user_pseudo_id, 
+         TIMESTAMP_DIFF(MAX(CASE WHEN event_name = 'page_view' AND param.key = 'page_location' AND param.value.string_value LIKE '%property%' THEN event_timestamp END), 
+                       MIN(CASE WHEN event_name = 'page_view' AND param.key = 'page_location' AND param.value.string_value LIKE '%property%' THEN event_timestamp END), SECOND) AS time_on_property_page
+  FROM `your-project.analytics_123456789.events_*`, 
+       UNNEST(event_params) AS param
+  WHERE _TABLE_SUFFIX BETWEEN '20230101' AND '20231231'
+  GROUP BY user_pseudo_id
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL (XDM Dataset)
+  -- ==========================================
+  SELECT identityMap.ecid AS user_id, 
+         TIMESTAMPDIFF(SECOND, MIN(CASE WHEN eventType = 'web.pageview' AND page.url LIKE '%property%' THEN timestamp END), 
+                             MAX(CASE WHEN eventType = 'web.pageview' AND page.url LIKE '%property%' THEN timestamp END)) AS time_on_property_page
+  FROM your_aep_dataset
+  WHERE timestamp BETWEEN '2023-01-01T00:00:00Z' AND '2023-12-31T23:59:59Z'
+  GROUP BY identityMap.ecid
+
+Calculation Notes: |
+  Exclude sessions with less than 5 seconds to filter out accidental clicks. Consider session timeout as 30 minutes of inactivity.
+
+Business Use Case: |
+  Executives use this metric to identify high-interest properties and optimize content or features to increase user engagement.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Property Type","Geographic Location","User Demographics"]
+
+Dashboard Usage: [User Engagement Dashboard, Property Insights Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-19T14:01:41.619118+00:00
+
+Last Modified By: devyendarm
+
+
