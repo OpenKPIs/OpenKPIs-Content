@@ -1,0 +1,107 @@
+# Metric: Average Delivery Time
+# Generated: 2026-08-19T17:33:03.558Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Average Delivery Time
+Formula: SUM(delivery_time) / COUNT(deliveries)
+
+Description: |
+  Measures the average time taken from order dispatch to delivery at the customer's location. It provides insights into the efficiency of the delivery process.
+
+Category: Efficiency
+
+Tags: [metric]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Item
+
+Measure Type: average
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"transaction":{"averageDeliveryTime":3.5}}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"average_delivery_time":3.5}}
+
+Adobe Client Data Layer: |
+  {"event":"purchase","ecommerce":{"averageDeliveryTime":3.5}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"averageDeliveryTime":3.5}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL (GA4 Export)
+  -- ==========================================
+  SELECT AVG(TIMESTAMP_DIFF(delivery_time, order_time, MINUTE)) AS average_delivery_time
+  FROM (
+    SELECT
+      TIMESTAMP_MICROS(MAX(CASE WHEN event_name = 'purchase' THEN event_timestamp END)) AS order_time,
+      TIMESTAMP_MICROS(MAX(CASE WHEN event_name = 'delivery' THEN event_timestamp END)) AS delivery_time
+    FROM `your-project.analytics_123456789.events_*`, UNNEST(event_params) AS params
+    WHERE event_name IN ('purchase', 'delivery')
+    GROUP BY user_pseudo_id
+  )
+  WHERE delivery_time IS NOT NULL AND order_time IS NOT NULL;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL (XDM Dataset)
+  -- ==========================================
+  SELECT AVG(DATEDIFF(delivery_time, order_time, 'minute')) AS average_delivery_time
+  FROM (
+    SELECT
+      MAX(CASE WHEN xdm:eventType = 'commerce.purchases' THEN xdm:timestamp END) AS order_time,
+      MAX(CASE WHEN xdm:eventType = 'commerce.deliveries' THEN xdm:timestamp END) AS delivery_time
+    FROM your_dataset.your_table
+    WHERE xdm:eventType IN ('commerce.purchases', 'commerce.deliveries')
+    GROUP BY xdm:identityMap.ecid.id
+  )
+  WHERE delivery_time IS NOT NULL AND order_time IS NOT NULL;
+
+Calculation Notes: |
+  Exclude deliveries with incomplete data or those canceled. Consider time zones and public holidays.
+
+Business Use Case: |
+  Executives use this metric to identify bottlenecks in the delivery process and implement strategies to improve delivery speed.
+
+
+Source Data: ERP
+
+Report Attributes: |
+  ["Region","Delivery Method","Product Category"]
+
+Dashboard Usage: [Logistics Performance Dashboard, Operational Efficiency Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-19T14:01:47.473138+00:00
+
+Last Modified By: devyendarm
+
+
