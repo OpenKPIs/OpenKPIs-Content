@@ -1,0 +1,107 @@
+# KPI: Time to Close
+# Generated: 2026-08-19T17:32:43.796Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Time to Close
+Formula: (Sum of Time from Inquiry to Close for All Transactions) / (Number of Closed Transactions)
+
+Description: |
+  Measures the average duration from the initiation of a property inquiry to the final closing of the sale. It reflects the efficiency of the sales process in converting inquiries into closed deals.
+
+Category: Conversion
+
+Tags: [kpi]
+
+Industry: [Real Estate Tech]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Session
+
+Measure Type: average
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  time_to_close
+
+Adobe Event: |
+  time_to_close
+
+W3 Data Layer: |
+  {"event":{"name":"Time to Close","label":"Time to Close","action":"Close","category":"User Engagement"}}
+
+GA4 Data Layer: |
+  {"event":"time_to_close","event_params":{"label":"Time to Close","action":"Close","category":"User Engagement"}}
+
+Adobe Client Data Layer: |
+  {"event":"time_to_close","eventInfo":{"label":"Time to Close","action":"Close","category":"User Engagement"}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":{"name":"Time to Close","label":"Time to Close","action":"Close","category":"User Engagement"}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL (GA4 Export)
+  -- ==========================================
+  SELECT user_id, TIMESTAMP_DIFF(CLOSE_TIMESTAMP, OPEN_TIMESTAMP, SECOND) AS time_to_close
+  FROM (
+    SELECT user_id,
+      MAX(CASE WHEN event_name = 'open_event' THEN event_timestamp END) AS OPEN_TIMESTAMP,
+      MAX(CASE WHEN event_name = 'close_event' THEN event_timestamp END) AS CLOSE_TIMESTAMP
+    FROM `your-project.analytics_123456789.events_*`,
+    UNNEST(event_params) AS params
+    WHERE event_name IN ('open_event', 'close_event')
+    GROUP BY user_id
+  )
+  WHERE OPEN_TIMESTAMP IS NOT NULL AND CLOSE_TIMESTAMP IS NOT NULL;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL (XDM Dataset)
+  -- ==========================================
+  SELECT userID, DATEDIFF(SECOND, OPEN_TIMESTAMP, CLOSE_TIMESTAMP) AS time_to_close
+  FROM (
+    SELECT userID,
+      MAX(CASE WHEN eventType = 'open_event' THEN timestamp END) AS OPEN_TIMESTAMP,
+      MAX(CASE WHEN eventType = 'close_event' THEN timestamp END) AS CLOSE_TIMESTAMP
+    FROM xdm_dataset
+    WHERE eventType IN ('open_event', 'close_event')
+    GROUP BY userID
+  )
+  WHERE OPEN_TIMESTAMP IS NOT NULL AND CLOSE_TIMESTAMP IS NOT NULL;
+
+Calculation Notes: |
+  Exclude transactions that are canceled or withdrawn. Consider timezone differences and ensure consistent date formats.
+
+Business Use Case: |
+  Executives use this KPI to identify bottlenecks in the sales process and implement strategies to reduce the time to close, thereby increasing overall sales efficiency.
+
+
+Source Data: CRM
+
+Report Attributes: |
+  ["Region","Property Type","Sales Agent"]
+
+Dashboard Usage: [Sales Performance Dashboard, Conversion Metrics Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-19T14:01:45.746593+00:00
+
+Last Modified By: devyendarm
+
+
