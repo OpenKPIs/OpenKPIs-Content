@@ -1,0 +1,107 @@
+# Dimension: User Demographics
+# Generated: 2026-08-19T17:33:12.453Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: User Demographics
+
+Description: |
+  User Demographics captures key attributes such as age, gender, and location of users interacting with the platform, enabling targeted marketing and personalized user experiences.
+
+Category: Acquisition
+
+Tags: [dimension]
+
+Industry: Real Estate Tech
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User
+
+GA4 Event: |
+  user_demographics
+
+Adobe Event: |
+  user_demographics
+
+W3 Data Layer: |
+  {"digitalData":{"user":{"demographics":{"age":"25-34","gender":"female","interests":["technology","sports"]}}}}
+
+GA4 Data Layer: |
+  {"event":"user_demographics","user_properties":{"age":"25-34","gender":"female","interests":["technology","sports"]}}
+
+Adobe Client Data Layer: |
+  {"user":{"demographics":{"age":"25-34","gender":"female","interests":["technology","sports"]}},"event":"user_demographics"}
+
+XDM Mapping: |
+  {"xdm":{"person":{"age":"25-34","gender":"female","interests":["technology","sports"]}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL (GA4 Export)
+  -- ==========================================
+  SELECT
+    user_pseudo_id AS user_id,
+    MAX(CASE WHEN ep.key = 'user_gender' THEN ep.value.string_value ELSE NULL END) AS gender,
+    MAX(CASE WHEN ep.key = 'user_age' THEN ep.value.string_value ELSE NULL END) AS age,
+    MAX(CASE WHEN ep.key = 'user_country' THEN ep.value.string_value ELSE NULL END) AS country
+  FROM
+    `your-project.analytics_123456789.events_*`,
+    UNNEST(event_params) AS ep
+  WHERE
+    _TABLE_SUFFIX BETWEEN '20230101' AND '20231231'
+  GROUP BY
+    user_pseudo_id
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL (XDM Dataset)
+  -- ==========================================
+  SELECT
+    identities.ecid AS user_id,
+    MAX(CASE WHEN demographics.gender IS NOT NULL THEN demographics.gender ELSE NULL END) AS gender,
+    MAX(CASE WHEN demographics.age IS NOT NULL THEN demographics.age ELSE NULL END) AS age,
+    MAX(CASE WHEN demographics.country IS NOT NULL THEN demographics.country ELSE NULL END) AS country
+  FROM
+    your_dataset.your_xdm_table
+  GROUP BY
+    identities.ecid
+
+Calculation Notes: |
+  Ensure data is anonymized to protect user privacy; exclude incomplete profiles.
+
+Business Use Case: |
+  Executives use demographic insights to tailor marketing strategies and improve user acquisition by targeting specific user groups.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Age Group","Gender","Location"]
+
+Dashboard Usage: [User Insights Dashboard, Marketing Strategy Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-19T14:01:45.159008+00:00
+
+Last Modified By: devyendarm
+
+
