@@ -1,0 +1,95 @@
+# KPI: Cart-to-view rate
+# Generated: 2026-08-19T17:32:53.246Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Cart-to-view rate
+Formula: (Add-to-Cart Events / Product Page Views) × 100
+
+Description: |
+  Measures the percentage of product page views that result in an add-to-cart action, indicating user interest in purchasing.
+
+Category: Conversion
+
+Tags: [ecommerce, product, cart]
+
+Industry: [E-commerce]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Session
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  add_to_cart
+
+Adobe Event: |
+  scAdd
+
+W3 Data Layer: |
+  {"event":"addToCart","ecommerce":{"add":{"products":[{"id":"12345","name":"Product Name","brand":"Brand Name","price":"29.99","variant":"Variant Name","category":"Category Name","quantity":1}]},"currencyCode":"USD"}}
+
+GA4 Data Layer: |
+  {"event":"add_to_cart","ecommerce":{"items":[{"price":29.99,"item_id":"12345","quantity":1,"item_name":"Product Name","item_brand":"Brand Name","item_variant":"Variant Name","item_category":"Category Name"}],"currency":"USD"}}
+
+Adobe Client Data Layer: |
+  {"event":"addToCart","ecommerce":{"add":{"products":[{"id":"12345","name":"Product Name","brand":"Brand Name","price":"29.99","variant":"Variant Name","category":"Category Name","quantity":1}]},"currencyCode":"USD"}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":"addToCart","commerce":{"productListAdds":{"value":1}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT COUNTIF(event_name = 'add_to_cart') / COUNTIF(event_name = 'view_item') AS cart_to_view_rate
+  FROM `your-project.analytics_123456789.events_*`
+  WHERE event_name IN ('add_to_cart', 'view_item')
+  AND _TABLE_SUFFIX BETWEEN '20230101' AND '20231231';
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT SUM(CASE WHEN event = 'scAdd' THEN 1 ELSE 0 END) / SUM(CASE WHEN event = 'prodView' THEN 1 ELSE 0 END) AS cart_to_view_rate
+  FROM aep_dataset.events
+  WHERE event IN ('scAdd', 'prodView')
+  AND timestamp BETWEEN '2023-01-01T00:00:00Z' AND '2023-12-31T23:59:59Z';
+
+Calculation Notes: |
+  Exclude sessions with no product views; consider session timeouts.
+
+Business Use Case: |
+  Executives use this KPI to assess product interest and optimize product page layouts to increase conversions.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Product Category","Device Type","Geography"]
+
+Dashboard Usage: [E-commerce Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-05-06T21:45:45.144+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-06-01T00:38:06.439+00:00
+
