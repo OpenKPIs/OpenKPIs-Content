@@ -1,0 +1,104 @@
+# Dimension: Delivery Location
+# Generated: 2026-08-19T17:33:17.739Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Delivery Location
+
+Description: |
+  The specific geographic address or coordinates where goods are delivered to the customer. It is used to track and optimize delivery routes and logistics operations.
+
+Category: Efficiency
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"digitalData":{"transaction":{"delivery":{"location":{"address":"123 Main St, Anytown, USA","coordinates":{"latitude":"37.7749","longitude":"-122.4194"}}}}}}
+
+GA4 Data Layer: |
+  {"event":"purchase","delivery_location":{"address":"123 Main St, Anytown, USA","coordinates":{"latitude":"37.7749","longitude":"-122.4194"}}}
+
+Adobe Client Data Layer: |
+  {"event":"purchase","deliveryLocation":{"address":"123 Main St, Anytown, USA","coordinates":{"latitude":"37.7749","longitude":"-122.4194"}}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"deliveryLocation":{"address":"123 Main St, Anytown, USA","coordinates":{"latitude":"37.7749","longitude":"-122.4194"}}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL (GA4 Export)
+  -- ==========================================
+  SELECT
+    event_params.value.string_value AS address,
+    event_params.value.float_value AS latitude,
+    event_params.value.float_value AS longitude
+  FROM
+    `your-project.analytics_123456789.events_*`,
+    UNNEST(event_params) AS event_params
+  WHERE
+    event_name = 'purchase'
+    AND event_params.key IN ('delivery_location.address', 'delivery_location.coordinates.latitude', 'delivery_location.coordinates.longitude')
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT
+    xdm._experience.analytics.customDimensions.deliveryLocation.address AS address,
+    xdm._experience.analytics.customDimensions.deliveryLocation.coordinates.latitude AS latitude,
+    xdm._experience.analytics.customDimensions.deliveryLocation.coordinates.longitude AS longitude
+  FROM
+    aep_backend_dataset
+  WHERE
+    xdm.eventType = 'purchase'
+
+Calculation Notes: |
+  Ensure addresses are standardized and validated to avoid duplicates and errors. Exclude locations marked as 'test' or 'invalid'.
+
+Business Use Case: |
+  Executives use delivery location data to optimize delivery routes, reduce transportation costs, and improve delivery times by analyzing geographic trends.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Region","City","Postal Code"]
+
+Dashboard Usage: [Logistics Overview, Delivery Performance]
+
+Segment Eligibility: |
+  true
+
+
+
+Data Sensitivity: internal
+
+Contains PII: Yes
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-19T14:01:49.982638+00:00
+
+Last Modified By: devyendarm
+
+
