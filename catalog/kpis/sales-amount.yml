@@ -1,0 +1,110 @@
+# KPI: Sales amount
+# Generated: 2026-08-19T17:32:47.239Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Sales amount
+Formula: SUM(order.amount)
+
+Description: |
+  The total monetary value of all completed sales transactions within a specified period. This KPI measures the revenue generated from sales activities.
+
+Category: Revenue
+
+
+Industry: [E-commerce]
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Global
+
+Measure Type: currency
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"digitalData":{"transaction":{"total":{"value":0,"currency":"USD"}}}}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"value":0,"currency":"USD","transaction_id":""}}
+
+Adobe Client Data Layer: |
+  {"event":"purchase","ecommerce":{"transaction":{"total":{"value":0,"currency":"USD"}}}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":{"value":0,"currencyCode":"USD"}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT
+    event_date,
+    SUM(ecommerce.value) AS total_sales_amount
+  FROM
+    `your-project.analytics_123456789.events_*`
+  WHERE
+    event_name = 'purchase'
+    AND ecommerce.value IS NOT NULL
+  GROUP BY
+    event_date
+  ORDER BY
+    event_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT
+    CAST(eventTimestamp AS DATE) AS event_date,
+    SUM(ecommerce.transaction.total.value) AS total_sales_amount
+  FROM
+    aep_backend_dataset
+  WHERE
+    event = 'purchase'
+    AND ecommerce.transaction.total.value IS NOT NULL
+  GROUP BY
+    CAST(eventTimestamp AS DATE)
+  ORDER BY
+    event_date;
+
+Calculation Notes: |
+  Excludes refunds and discounts. Only includes completed transactions.
+
+Business Use Case: |
+  Executives use this KPI to assess daily revenue performance and make strategic decisions on marketing and sales initiatives.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Region","Product Category"]
+
+Dashboard Usage: [Executive Summary, Sales Performance]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2025-12-28T08:18:22.634+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-06-03T21:35:37.978+00:00
+
