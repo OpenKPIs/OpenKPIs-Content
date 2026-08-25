@@ -1,0 +1,96 @@
+# KPI: Loan Application Completion Rate
+# Generated: 2026-08-25T00:14:20.031Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Loan Application Completion Rate
+Formula: (Completed Loan Applications / Initiated Loan Applications) × 100
+
+Description: |
+  Measures the percentage of loan applications that are fully completed by users out of the total applications initiated. It indicates the effectiveness of the application process in converting initiated applications to completed ones.
+
+Category: Conversion
+
+Tags: [kpi]
+
+Industry: [FinTech & Banking]
+
+Priority: High
+
+Core Area: Onboarding
+
+Scope: Session
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  submit_form
+
+Adobe Event: |
+  form_submit
+
+W3 Data Layer: |
+  {"event":"formSubmit","eventInfo":{"type":"form","formName":"loanApplication","eventName":"Loan Application Completion"},"loanApplication":{"status":"completed"}}
+
+GA4 Data Layer: |
+  {"event":"submit_form","form_name":"loanApplication","form_status":"completed"}
+
+Adobe Client Data Layer: |
+  {"form":{"name":"loanApplication","status":"completed"},"event":"formSubmit"}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":{"form":{"name":"loanApplication","status":"completed"},"name":"Loan Application Completion","type":"form"}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT COUNT(CASE WHEN event_name = 'submit_form' AND form_name = 'loanApplication' AND form_status = 'completed' THEN 1 END) AS completed_applications,
+         COUNT(CASE WHEN event_name = 'submit_form' AND form_name = 'loanApplication' THEN 1 END) AS total_applications,
+         COUNT(CASE WHEN event_name = 'submit_form' AND form_name = 'loanApplication' AND form_status = 'completed' THEN 1 END) / COUNT(CASE WHEN event_name = 'submit_form' AND form_name = 'loanApplication' THEN 1 END) AS completion_rate
+  FROM `your-project.analytics_123456789.events_*`
+  WHERE _TABLE_SUFFIX BETWEEN '20230101' AND '20231231';
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT COUNT(CASE WHEN event = 'formSubmit' AND form.name = 'loanApplication' AND form.status = 'completed' THEN 1 END) AS completed_applications,
+         COUNT(CASE WHEN event = 'formSubmit' AND form.name = 'loanApplication' THEN 1 END) AS total_applications,
+         COUNT(CASE WHEN event = 'formSubmit' AND form.name = 'loanApplication' AND form.status = 'completed' THEN 1 END) / COUNT(CASE WHEN event = 'formSubmit' AND form.name = 'loanApplication' THEN 1 END) AS completion_rate
+  FROM aep_dataset
+  WHERE event_date BETWEEN '2023-01-01' AND '2023-12-31';
+
+Calculation Notes: |
+  Exclude duplicate applications and those abandoned within 5 minutes. Consider session timeouts as abandoned applications.
+
+Business Use Case: |
+  Executives use this KPI to identify bottlenecks in the loan application process and implement improvements to increase completion rates.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Geography","Device Type","Application Type"]
+
+Dashboard Usage: [Loan Application Dashboard, Conversion Metrics Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-25T00:13:28.252+00:00
+
+Last Modified By: devyendarm
+
+
