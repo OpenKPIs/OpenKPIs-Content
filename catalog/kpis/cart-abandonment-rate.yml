@@ -1,0 +1,102 @@
+# KPI: Cart abandonment rate
+# Generated: 2026-08-25T14:04:43.239Z
+# Contributed by: swapnamagantius
+# Last modified by: devyendarm
+
+KPI Name: Cart abandonment rate
+Formula: ((Carts Created - Purchases Completed) / Carts Created) × 100
+
+Description: |
+  Measures the percentage of shopping carts initiated but not converted into purchases, indicating potential issues in the checkout process.
+
+Category: Conversion
+
+
+Industry: [E-commerce]
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Session
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  begin_checkout
+
+Adobe Event: |
+  scCheckout
+
+W3 Data Layer: |
+  {"cart":{"items":[{"price":29.99,"quantity":1,"productID":"12345","productName":"Sample Product"}],"status":"abandoned"},"event":"checkout"}
+
+GA4 Data Layer: |
+  {"event":"begin_checkout","ecommerce":{"checkout":{"products":[{"id":"12345","name":"Sample Product","price":29.99,"quantity":1}],"actionField":{"step":1,"option":"abandoned"}}}}
+
+Adobe Client Data Layer: |
+  {"event":"scCheckout","ecommerce":{"checkout":{"step":1,"option":"abandoned","products":[{"id":"12345","name":"Sample Product","price":29.99,"quantity":1}]}}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":"commerce.checkout","customDimensions":{"cartStatus":"abandoned"}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT
+    COUNTIF(event_name = 'begin_checkout') AS total_checkouts,
+    COUNTIF(event_name = 'purchase') AS total_purchases,
+    (COUNTIF(event_name = 'begin_checkout') - COUNTIF(event_name = 'purchase')) / COUNTIF(event_name = 'begin_checkout') AS cart_abandonment_rate
+  FROM
+    `your-project.analytics_123456789.events_*`
+  WHERE
+    _TABLE_SUFFIX BETWEEN '20230101' AND '20231231';
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT
+    COUNT(CASE WHEN event = 'scCheckout' THEN 1 END) AS total_checkouts,
+    COUNT(CASE WHEN event = 'purchase' THEN 1 END) AS total_purchases,
+    (COUNT(CASE WHEN event = 'scCheckout' THEN 1 END) - COUNT(CASE WHEN event = 'purchase' THEN 1 END)) / COUNT(CASE WHEN event = 'scCheckout' THEN 1 END) AS cart_abandonment_rate
+  FROM
+    your_project.adobe_analytics_dataset.events
+  WHERE
+    event IN ('scCheckout', 'purchase')
+    AND event_date BETWEEN '2023-01-01' AND '2023-12-31';
+
+Calculation Notes: |
+  Exclude carts with no items and consider session timeout rules.
+
+Business Use Case: |
+  Executives use this KPI to identify and address barriers in the checkout process to improve conversion rates.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Device Type","Geography","Traffic Source"]
+
+Dashboard Usage: [E-commerce Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: swapnamagantius
+
+Created At: 2026-06-17T01:04:26.668+00:00
+
+Last Modified By: devyendarm
+
+
