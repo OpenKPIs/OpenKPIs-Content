@@ -1,0 +1,98 @@
+# KPI: test1
+# Generated: 2026-08-25T14:04:43.729Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: test1
+Formula: (Number of Successful Conversions / Total Sessions) × 100
+
+Description: |
+  Measures the rate at which users complete a desired action during a session, indicating the effectiveness of the conversion process.
+
+Category: Conversion
+
+
+Industry: [Retail]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Session
+
+Measure Type: rate
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  conversion
+
+Adobe Event: |
+  conversion
+
+W3 Data Layer: |
+  {"event":{"category":{"primaryCategory":"engagement"},"eventInfo":{"type":"action","eventName":"conversion"}}}
+
+GA4 Data Layer: |
+  {"event":"conversion","eventParams":{"category":"engagement"}}
+
+Adobe Client Data Layer: |
+  {"event":"conversion","eventInfo":{"category":"engagement"}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":{"name":"conversion","category":"engagement"}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT COUNT(*) AS conversion_count
+  FROM `your-project.analytics_123456789.events_*`
+  WHERE event_name = 'conversion'
+  AND EXISTS (
+    SELECT 1
+    FROM UNNEST(event_params) AS params
+    WHERE params.key = 'category' AND params.value.string_value = 'engagement'
+  );
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT COUNT(*) AS conversion_count
+  FROM aep_backend_dataset
+  WHERE event = 'conversion'
+  AND eventInfo.category = 'engagement';
+
+Calculation Notes: |
+  Exclude sessions with less than 2 page views; consider session timeout of 30 minutes.
+
+Business Use Case: |
+  Executives use this KPI to assess daily conversion performance and make strategic decisions to optimize marketing efforts.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Geography","Device Type","Traffic Source"]
+
+Dashboard Usage: [Conversion Dashboard, Daily Performance Overview]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-06-19T00:32:10.934+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-06-26T16:10:29.721+00:00
+
