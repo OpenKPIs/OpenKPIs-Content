@@ -1,0 +1,92 @@
+# KPI: DEV
+# Generated: 2026-08-25T14:04:38.898Z
+# Contributed by: Pream-webapps
+# Last modified by: devyendarm
+
+KPI Name: DEV
+Formula: (Successful Conversions / Total Sessions) × 100
+
+Description: |
+  Measures the rate of successful conversions during a session, indicating the effectiveness of user engagement strategies.
+
+Category: Conversion
+
+
+Industry: [Retail]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Session
+
+Measure Type: rate
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  conversion
+
+Adobe Event: |
+  conversion
+
+W3 Data Layer: |
+  {"event":"conversion","eventInfo":{"type":"success","eventName":"conversion"},"conversion":{"rate":"calculated_rate_value","status":"successful"}}
+
+GA4 Data Layer: |
+  {"event":"conversion","conversion":{"rate":"calculated_rate_value","status":"successful"}}
+
+Adobe Client Data Layer: |
+  {"event":"conversion","conversion":{"rate":"calculated_rate_value","status":"successful"}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":{"name":"conversion","details":{"rate":"calculated_rate_value","status":"successful"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT user_pseudo_id, user_id, event_name, (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'item_name') AS item_name, (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'description') AS description
+  FROM `your-project.analytics_123456789.events_*`
+  WHERE event_name = 'conversion' AND (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'status') = 'successful'
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT identityMap.ECID[0].id AS mcid, eventType, _experience.analytics.customDimensions.eVars.eVar1 AS item_name, _experience.analytics.customDimensions.eVars.eVar2 AS description
+  FROM your_dataset.your_table
+  WHERE eventType = 'conversion' AND _experience.analytics.customDimensions.eVars.eVar1 = 'successful'
+
+Calculation Notes: |
+  Excludes sessions with less than 30 seconds duration. Filters out bot traffic.
+
+Business Use Case: |
+  Executives use this KPI to assess and optimize marketing strategies, improving conversion rates.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Geography","Device Type"]
+
+Dashboard Usage: [Executive Overview, Marketing Performance]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: Pream-webapps
+
+Created At: 2026-01-13T08:49:28.295+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-06-03T21:34:44.834+00:00
+
