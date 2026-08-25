@@ -1,0 +1,82 @@
+# KPI: Guest Satisfaction Score
+# Generated: 2026-08-25T00:14:15.248Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Guest Satisfaction Score
+Formula: (Sum of Guest Satisfaction Ratings / Total Number of Responses) × 100
+
+Description: |
+  Measures the overall satisfaction of guests based on feedback collected through surveys and reviews during their stay.
+
+Category: Satisfaction
+
+Tags: [kpi]
+
+Industry: [Travel & Hospitality]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Global
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT customer_id, AVG(satisfaction_score) AS guest_satisfaction_score
+  FROM `your-project.crm.guest_feedback`
+  WHERE feedback_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) AND CURRENT_DATE()
+  GROUP BY customer_id
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT customer_id, AVG(satisfaction_score) AS guest_satisfaction_score
+  FROM crm.guest_feedback
+  WHERE feedback_date BETWEEN DATEADD(CURRENT_DATE, -30, 'DAY') AND CURRENT_DATE
+  GROUP BY customer_id
+
+Calculation Notes: |
+  Exclude responses with incomplete data; consider only verified stays.
+
+Business Use Case: |
+  Executives use this score to identify areas for service improvement and enhance guest experience strategies.
+
+
+Source Data: CRM
+
+Report Attributes: |
+  ["Location","Stay Duration","Room Type"]
+
+Dashboard Usage: [Executive Summary Dashboard, Customer Experience Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-25T00:13:25.12+00:00
+
+Last Modified By: devyendarm
+
+
