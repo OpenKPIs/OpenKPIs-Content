@@ -1,0 +1,106 @@
+# KPI: Item View to Cart Rate
+# Generated: 2026-08-25T14:04:50.929Z
+# Contributed by: devyendar-maganti
+# Last modified by: devyendarm
+
+KPI Name: Item View to Cart Rate
+Formula: (COUNT(DISTINCT add_to_cart_event_id) / COUNT(DISTINCT item_view_event_id)) × 100
+
+Description: |
+  Measures the percentage of product detail views that result in an add-to-cart action for the same item within a 24-hour window. This KPI evaluates the effectiveness of product pages in converting interest into purchase intent.
+
+Category: Conversion
+
+Tags: [cart, engagement, product]
+
+Industry: [E-commerce]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Session
+
+Measure Type: rate
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  add_to_cart
+
+Adobe Event: |
+  scAdd
+
+W3 Data Layer: |
+  {"event":"addToCart","product":{"id":"product_id","name":"product_name","price":"product_price","category":"product_category","quantity":1}}
+
+GA4 Data Layer: |
+  {"event":"add_to_cart","ecommerce":{"items":[{"price":"product_price","item_id":"product_id","quantity":1,"item_name":"product_name","item_category":"product_category"}]}}
+
+Adobe Client Data Layer: |
+  {"event":"addToCart","ecommerce":{"products":[{"id":"product_id","name":"product_name","price":"product_price","category":"product_category","quantity":1}]}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":"addToCart","products":[{"SKU":"product_id","name":"product_name","price":"product_price","category":"product_category","quantity":1}]}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT item_id, 
+         SUM(CASE WHEN event_name = 'view_item' THEN 1 ELSE 0 END) AS item_views, 
+         SUM(CASE WHEN event_name = 'add_to_cart' THEN 1 ELSE 0 END) AS add_to_cart_events, 
+         SAFE_DIVIDE(SUM(CASE WHEN event_name = 'add_to_cart' THEN 1 ELSE 0 END), SUM(CASE WHEN event_name = 'view_item' THEN 1 ELSE 0 END)) AS view_to_cart_rate
+  FROM `your-project.analytics_123456789.events_*`, 
+       UNNEST(ecommerce.items) AS item
+  WHERE event_name IN ('view_item', 'add_to_cart')
+  GROUP BY item_id
+  HAVING item_views > 0
+  ORDER BY view_to_cart_rate DESC
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT product.id AS item_id, 
+         SUM(CASE WHEN event = 'productView' THEN 1 ELSE 0 END) AS item_views, 
+         SUM(CASE WHEN event = 'addToCart' THEN 1 ELSE 0 END) AS add_to_cart_events, 
+         SAFE_DIVIDE(SUM(CASE WHEN event = 'addToCart' THEN 1 ELSE 0 END), SUM(CASE WHEN event = 'productView' THEN 1 ELSE 0 END)) AS view_to_cart_rate
+  FROM aep_dataset.events, 
+       UNNEST(ecommerce.products) AS product
+  WHERE event IN ('productView', 'addToCart')
+  GROUP BY product.id
+  HAVING item_views > 0
+  ORDER BY view_to_cart_rate DESC
+
+Calculation Notes: |
+  Includes only add-to-cart actions within 24 hours of item view. Excludes sessions without item views.
+
+Business Use Case: |
+  Executives use this KPI to optimize product page layouts and improve merchandising strategies.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Product Category","Device Type"]
+
+Dashboard Usage: [E-commerce Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendar-maganti
+
+Created At: 2026-05-13T19:17:29.436+00:00
+
+Last Modified By: devyendarm
+
+
