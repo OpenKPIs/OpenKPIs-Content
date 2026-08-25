@@ -1,0 +1,81 @@
+# Metric: Average Loan Approval Time
+# Generated: 2026-08-25T00:04:08.478Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Average Loan Approval Time
+Formula: SUM(approval_time) / COUNT(approved_loans)
+
+Description: |
+  Measures the average duration from loan application submission to approval decision. It helps assess the efficiency of the loan processing workflow.
+
+Category: Efficiency
+
+Tags: [metric]
+
+Industry: FinTech & Banking
+
+Priority: High
+
+Core Area: Onboarding
+
+Scope: Global
+
+Measure Type: average
+
+Aggregation Window: Time based - Daily
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT AVG(TIMESTAMP_DIFF(approval_time, application_time, MINUTE)) AS average_loan_approval_time
+  FROM `your-project.crm.loan_applications`
+  WHERE approval_time IS NOT NULL AND application_time IS NOT NULL;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT AVG(DATEDIFF(approval_time, application_time) * 24 * 60 + TIMESTAMPDIFF(MINUTE, application_time, approval_time)) AS average_loan_approval_time
+  FROM crm.loan_applications
+  WHERE approval_time IS NOT NULL AND application_time IS NOT NULL;
+
+Calculation Notes: |
+  Exclude applications that are withdrawn or incomplete. Consider business hours for timing calculations.
+
+Business Use Case: |
+  Executives use this metric to identify bottlenecks in the loan approval process and implement process improvements.
+
+
+Source Data: CRM
+
+Report Attributes: |
+  ["Loan Type","Region","Approval Channel"]
+
+Dashboard Usage: [Loan Operations Dashboard, Efficiency Metrics Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-25T00:04:07.138+00:00
+
+Last Modified By: devyendarm
+
+
