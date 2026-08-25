@@ -1,0 +1,111 @@
+# KPI: Item revenue
+# Generated: 2026-08-25T14:04:45.303Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Item revenue
+Formula: Sum(Product Price × Quantity Sold)
+
+Description: |
+  The total revenue generated from the sale of individual products during a specific period. This KPI helps assess the financial contribution of each product to overall sales.
+
+Category: Revenue
+
+Tags: [ecommerce, product, revenue]
+
+Industry: [E-commerce]
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Item
+
+Measure Type: currency
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"transaction":{"itemRevenue":{"value":0,"currency":"USD"}}}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"items":[{"price":0,"item_id":"12345","quantity":1,"item_name":"Example Product"}],"currency":"USD"}}
+
+Adobe Client Data Layer: |
+  {"event":"purchase","ecommerce":{"products":[{"id":"12345","name":"Example Product","price":0,"quantity":1}],"currencyCode":"USD"}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":{"commerce":{"order":{"priceTotal":0,"currencyCode":"USD","purchasedProduct":[{"SKU":"12345","name":"Example Product","quantity":1,"priceTotal":0}]}}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT
+    event_date,
+    event_timestamp,
+    (item.price * item.quantity) AS item_revenue,
+    item.item_id,
+    item.item_name
+  FROM
+    `your-project.analytics_123456789.events_*`,
+    UNNEST(ga4_data_layer.ecommerce.items) AS item
+  WHERE
+    ga4_event = 'purchase'
+    AND event_name = 'purchase'
+    AND ga4_data_layer.ecommerce.currency = 'USD';
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT
+    eventDate AS event_date,
+    eventTimestamp AS event_timestamp,
+    (product.price * product.quantity) AS item_revenue,
+    product.id AS item_id,
+    product.name AS item_name
+  FROM
+    aep_backend_dataset,
+    UNNEST(adobe_client_data_layer.ecommerce.products) AS product
+  WHERE
+    adobe_event = 'purchase'
+    AND adobe_client_data_layer.ecommerce.currencyCode = 'USD';
+
+Calculation Notes: |
+  Excludes returns and discounts. Calculated per product SKU.
+
+Business Use Case: |
+  Executives use this KPI to identify top-performing products and adjust inventory or marketing strategies accordingly.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Product Category","Region"]
+
+Dashboard Usage: [Sales Performance Dashboard, Product Analysis Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-05-06T21:45:45.185+00:00
+
+Last Modified By: devyendarm
+
+
