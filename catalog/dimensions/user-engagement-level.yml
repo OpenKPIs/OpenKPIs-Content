@@ -1,0 +1,115 @@
+# Dimension: User Engagement Level
+# Generated: 2026-08-25T14:04:25.326Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: User Engagement Level
+
+Description: |
+  Measures the degree of interaction and participation a user has with the platform, indicating their active involvement in learning activities.
+
+Category: Engagement
+
+Tags: [dimension]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User
+
+GA4 Event: |
+  engagement
+
+Adobe Event: |
+  userEngagement
+
+W3 Data Layer: |
+  {"digitalData":{"user":{"engagementLevel":"high"}}}
+
+GA4 Data Layer: |
+  {"event":"engagement","user_engagement_level":"high"}
+
+Adobe Client Data Layer: |
+  {"user":{"engagementLevel":"high"},"event":"userEngagement"}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"userEngagementLevel":"high"}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT user_id,
+         MAX(CASE WHEN engagement_level = 'high' THEN 'High' 
+                  WHEN engagement_level = 'medium' THEN 'Medium' 
+                  ELSE 'Low' END) AS user_engagement_level
+  FROM (
+    SELECT user_pseudo_id AS user_id,
+           MAX(IF(param.key = 'user_engagement_level', param.value.string_value, NULL)) AS engagement_level
+    FROM `your-project.analytics_123456789.events_*`,
+         UNNEST(event_params) AS param
+    WHERE event_name = 'engagement'
+    GROUP BY user_id
+  )
+  GROUP BY user_id
+  ORDER BY user_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT user_id,
+         MAX(CASE WHEN engagement_level = 'high' THEN 'High' 
+                  WHEN engagement_level = 'medium' THEN 'Medium' 
+                  ELSE 'Low' END) AS user_engagement_level
+  FROM (
+    SELECT identityMap.id AS user_id,
+           MAX(CASE WHEN xdm._experience.analytics.customDimensions.userEngagementLevel = 'high' THEN 'high' 
+                    WHEN xdm._experience.analytics.customDimensions.userEngagementLevel = 'medium' THEN 'medium' 
+                    ELSE 'low' END) AS engagement_level
+    FROM aep_backend_dataset
+    WHERE xdm.eventType = 'userEngagement'
+    GROUP BY user_id
+  )
+  GROUP BY user_id
+  ORDER BY user_id;
+
+Calculation Notes: |
+  Consider variations in engagement based on content type and user demographics. Exclude inactive users beyond a 30-day period.
+
+Business Use Case: |
+  Executives use this to identify highly engaged users for targeted retention strategies and personalized learning experiences.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Age Group","Course Type"]
+
+Dashboard Usage: [User Engagement Dashboard, Learning Analytics]
+
+Segment Eligibility: |
+  true
+
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-25T14:04:23.65292+00:00
+
+Last Modified By: devyendarm
+
+
