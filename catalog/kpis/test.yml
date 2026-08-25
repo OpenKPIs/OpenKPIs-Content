@@ -1,0 +1,98 @@
+# KPI: test
+# Generated: 2026-08-25T14:04:39.519Z
+# Contributed by: swapnamagantius
+# Last modified by: devyendarm
+
+KPI Name: test
+Formula: (Number of Successful Actions / Total Actions Initiated) × 100
+
+Description: |
+  This KPI measures the rate at which users complete a specific action or series of actions during a session, indicating the effectiveness of the process.
+
+Category: Conversion
+
+
+Industry: [Retail]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Session
+
+Measure Type: rate
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  conversion
+
+Adobe Event: |
+  conversion
+
+W3 Data Layer: |
+  {"event":{"category":{"primaryCategory":"engagement"},"eventInfo":{"type":"action","eventName":"conversion"}}}
+
+GA4 Data Layer: |
+  {"event":"conversion","eventParams":{"category":"engagement"}}
+
+Adobe Client Data Layer: |
+  {"event":"conversion","eventInfo":{"category":"engagement"}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"eventType":"conversion"}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT COUNT(*) AS conversion_count
+  FROM `your-project.analytics_123456789.events_*`
+  WHERE event_name = 'conversion'
+  AND EXISTS (
+    SELECT 1
+    FROM UNNEST(event_params) AS params
+    WHERE params.key = 'category' AND params.value.string_value = 'engagement'
+  )
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT COUNT(*) AS conversion_count
+  FROM aep_backend_dataset
+  WHERE event = 'conversion'
+  AND eventInfo.category = 'engagement'
+
+Calculation Notes: |
+  Exclude sessions with less than two actions to avoid skewed data. Consider session timeout of 30 minutes.
+
+Business Use Case: |
+  Executives use this KPI to identify bottlenecks in the user journey and optimize the conversion funnel.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["User Type","Device Type","Geography"]
+
+Dashboard Usage: [Conversion Dashboard, User Behavior Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: swapnamagantius
+
+Created At: 2026-06-19T00:31:29.297+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-06-26T16:10:31.713+00:00
+
