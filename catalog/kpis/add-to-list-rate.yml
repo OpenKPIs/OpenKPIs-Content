@@ -1,0 +1,98 @@
+# KPI: Add to List Rate
+# Generated: 2026-08-25T00:18:36.761Z
+# Contributed by: devyendarm
+# Last modified by: Primary Editor
+
+KPI Name: Add to List Rate
+Formula: ((Number of sessions with at least one add-to-list event) / (Number of sessions with at least one view_item event)) × 100
+
+Description: |
+  Measures the percentage of sessions where users add at least one item to a wishlist or similar list, indicating engagement and potential purchase intent.
+
+Category: Engagement
+
+
+Industry: [E-commerce]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Session
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  add_to_wishlist
+
+Adobe Event: |
+  wishlistAdd
+
+W3 Data Layer: |
+  {"event":"wishlistAdd","digitalData":{"event":[{"eventInfo":{"eventName":"wishlistAdd","kpiName":"Add to List Rate"}}],"product":[{"productInfo":{"productID":"SKU_12345","productName":"Example Product"}}],"user":{"profile":[{"profileInfo":{"visitorID":"anon_12345"}}]}}}
+
+GA4 Data Layer: |
+  window.dataLayer.push({"event":"add_to_wishlist","ecommerce":{"items":[{"item_id":"SKU_12345","item_name":"Example Product"}]}});
+
+Adobe Client Data Layer: |
+  window.adobeDataLayer.push({"event":"wishlistAdd","xdm":{"eventType":"commerce.productListAdds","productListItems":[{"SKU":"SKU_12345","name":"Example Product"}],"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"Add to List Rate"}}}}}});
+
+XDM Mapping: |
+  {"eventType":"commerce.productListAdds","productListItems[0].SKU":"SKU_12345","productListItems[0].name":"Example Product","_experience.analytics.customDimensions.eVars.eVar1":"Add to List Rate"}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL (GA4 Export)
+  -- ==========================================
+  SELECT
+    COUNTIF(event_name = 'add_to_list') / COUNTIF(event_name = 'view_item') AS add_to_list_rate
+  FROM
+    `your-project.analytics_123456789.events_*`,
+    UNNEST(event_params) AS params
+  WHERE
+    _TABLE_SUFFIX BETWEEN '20230101' AND '20231231';
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL (XDM Dataset)
+  -- ==========================================
+  SELECT
+    SUM(CASE WHEN eventType = 'add_to_list' THEN 1 ELSE 0 END) * 1.0 / SUM(CASE WHEN eventType = 'view_item' THEN 1 ELSE 0 END) AS add_to_list_rate
+  FROM
+    your_aep_dataset
+  WHERE
+    timestamp BETWEEN '2023-01-01T00:00:00Z' AND '2023-12-31T23:59:59Z';
+
+Calculation Notes: |
+  Exclude failed API calls, duplicate clicks, bot traffic, and non-rendered components. Apply standard session timeout rules.
+
+Business Use Case: |
+  E-commerce teams use this KPI to identify areas for UX improvements and validate changes through A/B testing to increase engagement.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Device Type","Product Category"]
+
+Dashboard Usage: [E-commerce Engagement Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-06-17T01:07:12.092+00:00
+
+Last Modified By: Primary Editor
+
+
