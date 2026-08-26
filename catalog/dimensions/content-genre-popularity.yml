@@ -1,0 +1,98 @@
+# Dimension: Content Genre Popularity
+# Generated: 2026-08-26T14:03:37.910Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Content Genre Popularity
+
+Description: |
+  Measures the frequency and preference of user interactions with specific content genres within the platform. It helps identify trending genres and informs content strategy decisions.
+
+Category: Engagement
+
+Tags: [dimension]
+
+Industry: Media & Streaming
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  select_content
+
+Adobe Event: |
+  content_interaction
+
+W3 Data Layer: |
+  {"digitalData":{"event":{"category":{"subCategory":"Genre Popularity","primaryCategory":"Content Interaction"},"eventInfo":{"eventName":"Content Genre Popularity","eventAction":"select_content"}}}}
+
+GA4 Data Layer: |
+  {"event":"select_content","content_type":"genre","content_genre":"example_genre"}
+
+Adobe Client Data Layer: |
+  {"event":"content_interaction","content":{"type":"genre","genre":"example_genre"}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":{"name":"Content Genre Popularity","action":"select_content","content":{"type":"genre","genre":"example_genre"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT content_genre, COUNT(*) AS popularity
+  FROM `your-project.analytics_123456789.events_*`
+  WHERE event_name = 'select_content'
+  AND content_type = 'genre'
+  GROUP BY content_genre
+  ORDER BY popularity DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT content.genre AS content_genre, COUNT(*) AS popularity
+  FROM aep_dataset.events
+  WHERE event = 'content_interaction'
+  AND content.type = 'genre'
+  GROUP BY content.genre
+  ORDER BY popularity DESC;
+
+Calculation Notes: |
+  Exclude genres with less than 100 interactions per day to avoid skewed data. Consider session timeouts of 30 minutes.
+
+Business Use Case: |
+  Executives use this data to allocate marketing resources towards promoting popular genres and to guide content acquisition strategies.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Region","Device Type","Time of Day"]
+
+Dashboard Usage: [Content Strategy Dashboard, User Engagement Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-26T14:03:33.438409+00:00
+
+Last Modified By: devyendarm
+
+
