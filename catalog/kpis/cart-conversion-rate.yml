@@ -1,0 +1,101 @@
+# KPI: cart conversion rate
+# Generated: 2026-08-26T14:03:33.380Z
+# Contributed by: swapnamagantius
+# Last modified by: devyendarm
+
+KPI Name: cart conversion rate
+Formula: (Completed Purchases / Carts Created) × 100
+
+Description: |
+  Cart conversion rate measures the percentage of shopping sessions where a cart is created and results in a completed purchase. It helps identify checkout friction and optimize the cart-to-purchase process.
+
+Category: Conversion
+
+
+Industry: [E-commerce]
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Session
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"cart":{"items":[{"price":100,"quantity":1,"productID":"abc123","productName":"Product Name"}],"total":100,"cartID":"12345","currency":"USD"},"event":"purchase"}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"items":[{"price":100,"item_id":"abc123","quantity":1,"item_name":"Product Name"}],"value":100,"currency":"USD","transaction_id":"12345"}}
+
+Adobe Client Data Layer: |
+  {"event":"purchase","ecommerce":{"purchase":{"items":[{"price":100,"quantity":1,"productID":"abc123","productName":"Product Name"}],"total":100,"currency":"USD","transactionID":"12345"}}}
+
+XDM Mapping: |
+  {"_experience":{"commerce":{"order":{"products":[{"SKU":"abc123","name":"Product Name","quantity":1,"priceTotal":100}],"priceTotal":100,"purchaseID":"12345","currencyCode":"USD"}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT 
+    COUNTIF(event_name = 'purchase') / COUNTIF(event_name = 'add_to_cart') AS cart_conversion_rate
+  FROM 
+    `your-project.analytics_123456789.events_*`,
+    UNNEST(event_params) AS params
+  WHERE 
+    _TABLE_SUFFIX BETWEEN '20230101' AND '20231231'
+    AND (event_name = 'purchase' OR event_name = 'add_to_cart')
+    AND params.key = 'event_name';
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT 
+    SUM(CASE WHEN event = 'purchase' THEN 1 ELSE 0 END) / SUM(CASE WHEN event = 'add_to_cart' THEN 1 ELSE 0 END) AS cart_conversion_rate
+  FROM 
+    aep_backend_dataset.events
+  WHERE 
+    event IN ('purchase', 'add_to_cart')
+    AND event_timestamp BETWEEN '2023-01-01T00:00:00Z' AND '2023-12-31T23:59:59Z';
+
+Calculation Notes: |
+  Exclude sessions where carts are abandoned due to technical errors. Consider session timeout rules for accurate measurement.
+
+Business Use Case: |
+  Executives use this KPI to identify and address barriers in the checkout process, aiming to increase sales by reducing cart abandonment.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["device type","geography","traffic source"]
+
+Dashboard Usage: [E-commerce Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: swapnamagantius
+
+Created At: 2026-06-17T00:47:23.566+00:00
+
+Last Modified By: devyendarm
+
+
