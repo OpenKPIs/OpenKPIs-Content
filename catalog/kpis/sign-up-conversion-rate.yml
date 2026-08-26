@@ -1,0 +1,93 @@
+# KPI: Sign Up Conversion Rate
+# Generated: 2026-08-26T14:03:36.754Z
+# Contributed by: dev-user
+# Last modified by: devyendarm
+
+KPI Name: Sign Up Conversion Rate
+Formula: (Completed Sign Ups / Initiated Sign Ups) × 100
+
+Description: |
+  The Sign Up Conversion Rate measures the percentage of users who successfully complete the sign-up process out of the total number of users who initiated the sign-up process.
+
+Category: Conversion
+
+
+Industry: [Retail]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Session
+
+Measure Type: rate
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  sign_up
+
+Adobe Event: |
+  signUpSuccess
+
+W3 Data Layer: |
+  {"page":{"name":"sign_up","category":"conversion"},"user":{"loggedIn":true,"completedSignUp":true}}
+
+GA4 Data Layer: |
+  {"event":"sign_up_completed","event_label":"sign_up","event_category":"conversion"}
+
+Adobe Client Data Layer: |
+  {"events":[{"name":"signUpSuccess","label":"sign_up","category":"conversion"}]}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"custom1":"sign_up_conversion_rate"}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT
+    COUNTIF(event_name = 'sign_up_completed') / COUNTIF(event_name = 'sign_up') AS sign_up_conversion_rate
+  FROM `your-project.analytics_123456789.events_*`
+  WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)) AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT
+    (COUNT(CASE WHEN event_name = 'signUpSuccess' THEN 1 END) / COUNT(CASE WHEN event_name = 'sign_up' THEN 1 END)) AS sign_up_conversion_rate
+  FROM aep_backend_dataset
+  WHERE _day_ BETWEEN TO_DATE(CURRENT_DATE - 7) AND TO_DATE(CURRENT_DATE - 1)
+
+Calculation Notes: |
+  Exclude incomplete sign-up attempts and consider only successful sign-up completions within the defined time period.
+
+Business Use Case: |
+  The executive team uses the Sign Up Conversion Rate to assess the effectiveness of the sign-up process and identify areas for improvement to increase the conversion rate.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Date","Source","Device Type"]
+
+Dashboard Usage: [Conversion Rate Dashboard, User Acquisition Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: dev-user
+
+Created At: 2026-05-29T04:17:23.246936+00:00
+
+Last Modified By: devyendarm
+
+
