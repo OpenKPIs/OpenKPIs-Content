@@ -1,0 +1,92 @@
+# KPI: Supply Chain Efficiency Index
+# Generated: 2026-08-27T14:30:21.436Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Supply Chain Efficiency Index
+Formula: (Total Output Value / Total Input Cost) × 100
+
+Description: |
+  Measures the effectiveness of the supply chain in converting inputs into outputs with minimal waste and delays. It evaluates the balance between supply chain costs and service levels.
+
+Category: Efficiency
+
+Tags: [kpi]
+
+Industry: [Logistics & Supply Chain]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: index
+
+Aggregation Window: Time based - Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT 
+      warehouse_id,
+      SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) / COUNT(*) AS efficiency_index
+  FROM 
+      `your-project.erp.warehouse_logs`
+  WHERE 
+      event_date BETWEEN '2023-01-01' AND '2023-12-31'
+  GROUP BY 
+      warehouse_id
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT 
+      warehouse_id,
+      SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) / COUNT(*) AS efficiency_index
+  FROM 
+      aep_backend_dataset.warehouse_logs
+  WHERE 
+      event_date BETWEEN '2023-01-01' AND '2023-12-31'
+  GROUP BY 
+      warehouse_id
+
+Calculation Notes: |
+  Exclude returns and defective items from total output value. Consider only direct supply chain costs in total input cost.
+
+Business Use Case: |
+  Executives use this index to identify inefficiencies in the supply chain and make strategic decisions to optimize operations and reduce costs.
+
+
+Source Data: ERP
+
+Report Attributes: |
+  ["Region","Product Line","Time Period"]
+
+Dashboard Usage: [Supply Chain Performance Dashboard, Operational Efficiency Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-27T14:30:17.916631+00:00
+
+Last Modified By: devyendarm
+
+
