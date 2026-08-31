@@ -1,0 +1,84 @@
+# KPI: Lead Conversion Rate
+# Generated: 2026-08-27T16:31:22.250Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Lead Conversion Rate
+Formula: (Converted Leads / Total Leads) × 100
+
+Description: |
+  Measures the percentage of leads that convert into customers within a specified period, indicating sales process effectiveness.
+
+Category: Conversion
+
+Tags: [kpi]
+
+Industry: [Technology]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: User
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT COUNT(DISTINCT CASE WHEN event_name = 'generate_lead' THEN user_pseudo_id END) AS converted_leads,
+         COUNT(DISTINCT user_pseudo_id) AS total_users,
+         (COUNT(DISTINCT CASE WHEN event_name = 'generate_lead' THEN user_pseudo_id END) / COUNT(DISTINCT user_pseudo_id)) * 100 AS lead_conversion_rate
+  FROM `your-project.crm.lead_events`
+  WHERE event_date BETWEEN '2023-01-01' AND '2023-12-31';
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT COUNT(DISTINCT CASE WHEN events.eventType = 'generate_lead' THEN identityMap.ecid END) AS converted_leads,
+         COUNT(DISTINCT identityMap.ecid) AS total_users,
+         (COUNT(DISTINCT CASE WHEN events.eventType = 'generate_lead' THEN identityMap.ecid END) / COUNT(DISTINCT identityMap.ecid)) * 100 AS lead_conversion_rate
+  FROM aep_backend_dataset
+  WHERE events.timestamp BETWEEN '2023-01-01T00:00:00Z' AND '2023-12-31T23:59:59Z';
+
+Calculation Notes: |
+  Exclude duplicate leads and ensure consistent tracking across channels. Refresh data daily.
+
+Business Use Case: |
+  Executives assess marketing and sales strategies to allocate resources to successful channels.
+
+
+Source Data: CRM
+
+Report Attributes: |
+  ["Geography","Lead Source","Campaign"]
+
+Dashboard Usage: [Sales Performance Dashboard, Marketing Effectiveness Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-08-27T16:31:20.551339+00:00
+
+Last Modified By: devyendarm
+
+
