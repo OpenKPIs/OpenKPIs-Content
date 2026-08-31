@@ -1,0 +1,88 @@
+# Event: purchase
+# Generated: 2026-06-14T00:45:17.386Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: purchase
+Event Serialization: JSON event payload with a unique event_id, timestamp, event name, transaction object, and item array. Recommended serialization: one order-level purchase event containing all purchased items, plus optional downstream item-level exploded records in the warehouse. Deduplicate by transaction_id and event_id, and preserve original event timestamp and ingestion timestamp.
+
+Description: |
+  Represents a completed transaction or order. This event fires once after payment or order confirmation is successfully completed, typically on the order confirmation page or immediately after the backend confirms the order was accepted. It should not fire on checkout start, payment attempt, or failed payment.
+
+Category: Revenue
+
+Tags: [purchase, transaction, order, conversion, revenue, ecommerce, checkout]
+
+Industry: ["Retail","E-commerce","SaaS","Media","Technology","Other"]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Event Type: standard
+
+Aggregation Window: Event, Session, User
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"event":"purchase","event_id":"evt_123456789","timestamp":"2026-06-14T12:00:00Z","transaction":{"transaction_id":"ORD12345","affiliation":"Online Store","value":99.99,"tax":8.25,"shipping":5.99,"currency":"USD","coupon":"SUMMER10","payment_type":"credit_card"},"items":[{"item_id":"SKU123","item_name":"Example Product","item_brand":"Example Brand","item_category":"Apparel","item_variant":"Blue / M","price":49.99,"quantity":2,"coupon":"SUMMER10","discount":5}]}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"transaction_id":"ORD12345","affiliation":"Online Store","value":99.99,"tax":8.25,"shipping":5.99,"currency":"USD","coupon":"SUMMER10","items":[{"item_id":"SKU123","item_name":"Example Product","affiliation":"Online Store","coupon":"SUMMER10","discount":5,"item_brand":"Example Brand","item_category":"Apparel","item_variant":"Blue / M","price":49.99,"quantity":2}]}}
+
+Adobe Client Data Layer: |
+  {"event":"purchase","eventInfo":{"eventName":"purchase","eventId":"evt_123456789","timestamp":"2026-06-14T12:00:00Z"},"commerce":{"purchase":{"value":1},"order":{"purchaseID":"ORD12345","currencyCode":"USD","priceTotal":99.99,"taxAmount":8.25,"shippingAmount":5.99,"couponCode":"SUMMER10"}},"productListItems":[{"SKU":"SKU123","name":"Example Product","quantity":2,"priceTotal":99.98,"discountAmount":5,"productCategories":[{"categoryID":"Apparel"}],"attributes":{"brand":"Example Brand","variant":"Blue / M"}}]}
+
+XDM Mapping: |
+  {"eventType":"commerce.purchases","commerce":{"purchases":{"value":1},"order":{"purchaseID":"ORD12345","currencyCode":"USD","priceTotal":99.99,"taxAmount":8.25,"shippingAmount":5.99,"payments":[{"paymentAmount":99.99,"paymentType":"credit_card"}]}},"productListItems":[{"SKU":"SKU123","name":"Example Product","quantity":2,"priceTotal":99.98,"discountAmount":5,"currencyCode":"USD","productCategories":[{"categoryID":"Apparel"}],"_tenant":{"brand":"Example Brand","variant":"Blue / M","coupon":"SUMMER10"}}],"_id":"evt_123456789","timestamp":"2026-06-14T12:00:00Z"}
+
+Parameters: |
+  transaction_id: unique order or transaction identifier; value: monetary order value; currency: ISO 4217 currency code; tax: tax amount; shipping: shipping amount; coupon: order-level coupon code; affiliation: store, marketplace, or sales channel; payment_type: payment method category; shipping_tier: selected shipping method; items: array of purchased products; item_id: product SKU or identifier; item_name: product name; item_brand: product brand; item_category: primary product category; item_category2: secondary category; item_variant: variant such as size or color; price: unit price; quantity: units purchased; discount: item-level discount; event_id: unique event identifier for deduplication; user_id: authenticated user identifier if consented and allowed; session_id: analytics session identifier
+
+Calculation Notes: |
+  Fire exactly once per completed order using a stable transaction_id or order_id for deduplication. Prefer server-confirmed order success over client-only payment completion. Exclude failed, pending, canceled, test, fraud, and duplicate orders unless explicitly reporting gross order attempts. The value parameter should represent order revenue according to the organization’s reporting standard, commonly excluding tax and shipping for merchandise revenue or including them for gross transaction value; document the chosen convention. Currency must be populated using ISO 4217 codes. Item-level arrays should reconcile to the order-level value where possible. Use event_id and transaction_id to deduplicate across web, app, server-side, and tag manager implementations.
+
+Business Use Case: |
+  Used by marketing, ecommerce, product, finance, and executive teams to measure revenue, conversion performance, campaign return, merchandising effectiveness, checkout funnel completion, customer acquisition quality, and customer lifetime value inputs. It supports revenue attribution, ROAS analysis, A/B test evaluation, product performance reporting, retention segmentation, and forecasting.
+
+Dependencies: |
+  view_item; add_to_cart; begin_checkout; add_shipping_info; add_payment_info; transaction_id; item_id; currency; value; consent state; order confirmation source of truth
+
+Source Data: Digital Analytics; Ecommerce Platform; Order Management System; Payment Processor; CRM; Data Warehouse
+
+    Report Attributes: |
+  transaction_id, event_id, currency, value, tax, shipping, coupon, affiliation, payment_type, shipping_tier, item_id, item_name, item_brand, item_category, item_variant, price, quantity, discount, user_id or anonymous_id, session_id, page_location, traffic_source, campaign, device_category, geo_country, consent_status
+
+    Dashboard Usage: [Executive Revenue Dashboard, E-commerce Performance Dashboard, Marketing Attribution Dashboard, Checkout Funnel Dashboard, Product Merchandising Dashboard, Customer Retention Dashboard, Experimentation Dashboard]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [Transaction ID, Order ID, Currency, Coupon, Payment Type, Shipping Tier, Product ID, Product Name, Product Brand, Product Category, Product Variant, Traffic Source, Campaign, Device Category, Country, Customer Type, Consent Status]
+
+    Derived Dimensions: [Purchaser Status, First-Time Purchaser Flag, Repeat Purchaser Flag, Order Value Band, Product Category Purchased, Coupon Usage Flag, Payment Method Group, Revenue Channel, Fulfillment Type]
+
+    Derived Metrics: [Purchases, Transactions, Revenue, Gross Merchandise Value, Average Order Value, Units Sold, Items Purchased, Purchase Conversion Rate, Revenue per User, Revenue per Session, Refund-Adjusted Revenue]
+
+    Derived KPIs: [Total Revenue, E-commerce Conversion Rate, Average Order Value, Customer Lifetime Value, Return on Ad Spend, Revenue per Visitor, Checkout Completion Rate, Repeat Purchase Rate]
+
+    Data Sensitivity: confidential
+
+    Contains PII: No
+
+    Status: draft
+
+    Contributed By: devyendarm
+
+    Created At: 2026-06-14T00:45:17.095051+00:00
+
+    Last Modified By: devyendarm
+
+    
