@@ -1,0 +1,205 @@
+# Metric: Purchase
+# Generated: 2026-04-30T02:04:39.209Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Metric Name: Purchase
+Formula: Purchase = COUNT(DISTINCT transaction_id) for completed purchase events
+
+Description: |
+  Counts of completed purchase transactions captured in digital analytics. This metric measures how many orders were successfully placed and is a foundational conversion KPI for evaluating checkout effectiveness, campaign performance, merchandising impact, and revenue generation.
+
+Category: Conversion
+
+
+Industry: Retail, E-commerce, Technology, Other
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Event, Session, User, Daily, Weekly, Monthly, Yearly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+  
+
+W3 Data Layer: |
+  {
+      "event": "purchase",
+      "purchase": {
+          "transaction_id": "T12345",
+          "value": 149.99,
+          "currency": "USD",
+          "tax": 12.5,
+          "shipping": 5.99,
+          "coupon": "SPRING10",
+          "payment_type": "credit_card",
+          "items": [{
+              "item_id": "SKU-1001",
+              "item_name": "Running Shoes",
+              "price": 99.99,
+              "quantity": 1
+          }, {
+              "item_id": "SKU-2002",
+              "item_name": "Socks",
+              "price": 25,
+              "quantity": 2
+          }]
+      },
+      "page": {
+          "pageType": "confirmation"
+      },
+      "user": {
+          "authenticated": true
+      }
+  }
+
+GA4 Data Layer: |
+  {
+      "event": "purchase",
+      "ecommerce": {
+          "transaction_id": "T12345",
+          "value": 149.99,
+          "currency": "USD",
+          "tax": 12.5,
+          "shipping": 5.99,
+          "coupon": "SPRING10",
+          "items": [{
+              "item_id": "SKU-1001",
+              "item_name": "Running Shoes",
+              "price": 99.99,
+              "quantity": 1
+          }, {
+              "item_id": "SKU-2002",
+              "item_name": "Socks",
+              "price": 25,
+              "quantity": 2
+          }]
+      }
+  }
+
+Adobe Client Data Layer: |
+  {
+      "event": "purchase",
+      "commerce": {
+          "order": {
+              "purchaseID": "T12345",
+              "priceTotal": 149.99,
+              "currencyCode": "USD",
+              "taxAmount": 12.5,
+              "shippingAmount": 5.99
+          },
+          "productListItems": [{
+              "SKU": "SKU-1001",
+              "name": "Running Shoes",
+              "priceTotal": 99.99,
+              "quantity": 1
+          }, {
+              "SKU": "SKU-2002",
+              "name": "Socks",
+              "priceTotal": 50,
+              "quantity": 2
+          }]
+      },
+      "page": {
+          "pageType": "confirmation"
+      }
+  }
+
+XDM Mapping: |
+  {
+      "eventType": "commerce.purchases",
+      "commerce": {
+          "order": {
+              "purchaseID": "T12345",
+              "priceTotal": 149.99,
+              "currencyCode": "USD",
+              "payments": [{
+                  "paymentType": "credit_card"
+              }]
+          },
+          "purchases": {
+              "value": 1
+          }
+      },
+      "productListItems": [{
+          "SKU": "SKU-1001",
+          "name": "Running Shoes",
+          "priceTotal": 99.99,
+          "quantity": 1
+      }, {
+          "SKU": "SKU-2002",
+          "name": "Socks",
+          "priceTotal": 50,
+          "quantity": 2
+      }],
+      "web": {
+          "webPageDetails": {
+              "pageType": "confirmation"
+          }
+      }
+  }
+
+SQL Query: |
+  SELECT
+    DATE(event_timestamp) AS event_date,
+    COUNT(DISTINCT transaction_id) AS purchase
+  FROM raw_events
+  WHERE event_name = 'purchase'
+    AND transaction_id IS NOT NULL
+    AND COALESCE(event_status, 'completed') = 'completed'
+  GROUP BY 1
+  ORDER BY 1;
+
+Calculation Notes: |
+  1) Deduplicate by transaction_id to avoid double-counting from page reloads, duplicate tags, server/client dual collection, or retries. 
+  2) Include only completed purchase events and exclude test orders, internal traffic, canceled transactions logged as purchases, and zero-value sandbox transactions unless business rules explicitly include them. 
+  3) If transaction_id is unavailable, use a fallback deduplication key such as order_id plus user_pseudo_id plus event_date, but this is less reliable. 
+  4) Refunds should not reduce this metric; track them separately. 
+  5)For multi-currency implementations, purchase count is unaffected, but ensure transaction completion logic is consistent across regions.
+  
+
+Business Use Case: |
+  Used by e-commerce, growth, product, and executive teams to monitor sales volume, evaluate checkout funnel performance, compare channel quality, assess merchandising and pricing changes, and forecast demand. It is also a core input to conversion rate, average order value, revenue per user, and campaign ROI reporting.
+
+Dependencies:
+  Events: [purchase]
+  Metrics: [transaction_id, event_timestamp]
+  Dimensions: [traffic source dimensions, product dimensions, order completion status]
+
+Source Data: Digital Analytics; E-commerce Platform; Order Management System; CRM
+
+Report Attributes: |
+  Date, Transaction ID, User ID,Session ID, Device Category, Platform, Country, Region, City, Source, Medium, Campaign, Default Channel Group, Landing Page, Page Type, Product ID, Product Name, Product Category, Coupon, Payment Type, Currency
+
+Dashboard Usage: [Executive KPI Dashboard, E-commerce Performance Dashboard, Checkout Funnel Dashboard, Marketing Channel Dashboard, Merchandising Dashboard]
+
+Segment Eligibility: |
+  True
+
+Related Metrics: [Revenue, Transactions, Average Order Value, Checkout Starts, Add to Cart, Conversion Rate, Refunds]
+
+Derived KPIs: [Conversion Rate, Average Order Value, Revenue, Revenue Per User, Cart-to-Purchase Rate, Checkout Completion Rate, ROAS]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-04-30T01:18:16.983+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-04-30T02:04:37.309+00:00
+
