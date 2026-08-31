@@ -1,0 +1,82 @@
+# Metric: Average Order Value
+# Generated: 2026-06-09T06:36:48.390Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Metric Name: Average Order Value
+Formula: Online Revenue / Number of Completed Purchase Orders
+
+Description: |
+  Average revenue generated per completed online order. This metric helps evaluate basket size, pricing, promotion effectiveness, cross-sell performance, and merchandising strategies.
+
+Category: Revenue
+
+Tags: [aov, average-order-value, revenue, orders, basket-size, ecommerce, merchandising]
+
+Industry: ["Retail","E-commerce"]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Measure Type: average
+
+Aggregation Window: Event, Session, User, Time based - Hourly/Daily/Monthly/Yearly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"event":"purchase","ecommerce":{"transaction_id":"T12345","currency":"USD","revenue":149.98,"items":[{"product_id":"SKU123","product_name":"Trail Running Shoe","category":"Footwear","sport":"Running","price":149.98,"quantity":1}]}}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"transaction_id":"T12345","currency":"USD","value":149.98,"items":[{"item_id":"SKU123","item_name":"Trail Running Shoe","item_category":"Footwear","item_category2":"Running","price":149.98,"quantity":1}]}}
+
+Adobe Client Data Layer: |
+  {"event":"commerce.purchases","commerce":{"order":{"purchaseID":"T12345","currencyCode":"USD","priceTotal":149.98},"productListItems":[{"SKU":"SKU123","name":"Trail Running Shoe","priceTotal":149.98,"quantity":1}]}}
+
+XDM Mapping: |
+  {"xdm.commerce.purchases.value":"1","xdm.commerce.order.purchaseID":"ecommerce.transaction_id","xdm.commerce.order.priceTotal":"ecommerce.revenue","derived.average_order_value":"SUM(xdm.commerce.order.priceTotal) / COUNT_DISTINCT(xdm.commerce.order.purchaseID)"}
+
+SQL Query: |
+  WITH orders AS (SELECT ecommerce.transaction_id AS transaction_id, SUM(item.price * item.quantity) AS order_revenue FROM `project.dataset.events_*`, UNNEST(items) AS item WHERE event_name = 'purchase' AND ecommerce.transaction_id IS NOT NULL GROUP BY transaction_id) SELECT SAFE_DIVIDE(SUM(order_revenue), COUNT(DISTINCT transaction_id)) AS average_order_value FROM orders;
+
+Calculation Notes: |
+  Deduplicate transaction IDs before calculating AOV. Use the same revenue definition as Online Revenue, typically net merchandise revenue after discounts and excluding tax/shipping. Refunds may be excluded from AOV or reflected as negative revenue depending on finance reporting policy; document the selected approach consistently.
+
+Business Use Case: |
+  Merchandising teams use Average Order Value to evaluate whether bundles, free-shipping thresholds, loyalty offers, or product recommendations are increasing basket size for categories such as running shoes or training apparel.
+
+Dependencies: |
+  Online Revenue; purchase event; transaction_id; item_price; item_quantity; discounts; currency
+
+Source Data: Digital Analytics; Order Management System; ERP; Product Catalog; Promotion Platform
+
+Report Attributes: |
+  Date; Channel Group; Device Category; Product Category and Sport; Customer Status; Orders; Online Revenue; Average Order Value; Coupon Code
+
+Dashboard Usage: [Executive Revenue Dashboard, Merchandising Performance Dashboard, Promotion Performance Dashboard, Checkout Optimization Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-06-09T06:36:47.471475+00:00
+
+Last Modified By: swapnamagantius
+
+
