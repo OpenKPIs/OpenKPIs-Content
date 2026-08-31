@@ -1,0 +1,150 @@
+# Metric: Cart Removals
+# Generated: 2026-04-30T20:13:07.573Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Metric Name: Cart Removals
+Formula: Cart Removals = COUNT(remove_from_cart events) where each qualifying event represents a user action that decreases cart quantity or removes a line item from the cart.
+
+Description: |
+  Counts the number of times an item is removed from the shopping cart. This metric helps quantify cart abandonment behavior at the product-interaction level, identify friction in pricing or shipping expectations, and evaluate merchandising, promotion, and checkout experience effectiveness.
+
+Category: Conversion
+
+
+Industry: Retail, E-commerce
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Event, Session, User, Daily, Weekly, Monthly
+
+GA4 Event: |
+  remove_from_cart
+  
+
+Adobe Event: |
+  scRemove
+
+W3 Data Layer: |
+  {
+      "event": "remove_from_cart",
+      "ecommerce": {
+          "currency": "USD",
+          "value": 29.99,
+          "items": [{
+              "item_id": "SKU-12345",
+              "item_name": "Classic T-Shirt",
+              "item_brand": "Acme",
+              "item_category": "Apparel",
+              "item_variant": "Blue / M",
+              "price": 29.99,
+              "quantity": 1
+          }]
+      }
+  }
+
+GA4 Data Layer: |
+  {
+      "event": "remove_from_cart",
+      "ecommerce": {
+          "currency": "USD",
+          "value": 29.99,
+          "items": [{
+              "item_id": "SKU-12345",
+              "item_name": "Classic T-Shirt",
+              "item_brand": "Acme",
+              "item_category": "Apparel",
+              "item_variant": "Blue / M",
+              "price": 29.99,
+              "quantity": 1
+          }]
+      }
+  }
+
+Adobe Client Data Layer: |
+  {
+      "event": "cart item removed",
+      "commerce": {
+          "cart": {
+              "cartID": "CART-98765",
+              "productListItems": [{
+                  "SKU": "SKU-12345",
+                  "name": "Classic T-Shirt",
+                  "currencyCode": "USD",
+                  "priceTotal": 29.99,
+                  "quantity": 1
+              }]
+          },
+          "order": {
+              "priceTotal": 29.99,
+              "currencyCode": "USD"
+          }
+      }
+  }
+
+XDM Mapping: |
+  {
+      "eventType": "commerce.productListRemovals",
+      "commerce.productListRemovals.value": 1,
+      "commerce.productListRemovals.id": "generated_or_source_event_id",
+      "productListItems[].SKU": "ecommerce.items[].item_id",
+      "productListItems[].name": "ecommerce.items[].item_name",
+      "productListItems[].quantity": "ecommerce.items[].quantity",
+      "productListItems[].priceTotal": "ecommerce.items[].price * ecommerce.items[].quantity",
+      "commerce.order.currencyCode": "ecommerce.currency"
+  }
+
+SQL Query: |
+  WITH base AS ( SELECT event_date, event_timestamp, user_pseudo_id, session_id, event_name, COALESCE(items.item_id, item_id) AS item_id, COALESCE(items.item_name, item_name) AS item_name, COALESCE(items.quantity, quantity, 1) AS quantity FROM raw_digital_events LEFT JOIN UNNEST(items) AS items ON TRUE WHERE event_name = 'remove_from_cart' ) SELECT DATE(event_timestamp) AS metric_date, COUNT(*) AS cart_removals, SUM(COALESCE(quantity,1)) AS units_removed, COUNT(DISTINCT user_pseudo_id) AS users_with_cart_removals, COUNT(DISTINCT CONCAT(CAST(user_pseudo_id AS STRING),'-',CAST(session_id AS STRING))) AS sessions_with_cart_removals FROM base GROUP BY 1 ORDER BY 1;
+  
+
+Calculation Notes: |
+  1) Use the remove_from_cart event only; do not infer removals from cart quantity snapshots unless event tracking is unavailable. 
+  2) If one event contains multiple items, COUNT(*) returns event count while SUM(quantity) returns units removed; align reporting definition before implementation.
+  3) Exclude system-generated cart resets, expired-cart cleanups, and duplicate events caused by page reloads or retry logic. 
+  4) For server-side implementations, deduplicate using event_id where available. If quantity is reduced from 3 to 1, record quantity removed as 2 when supported; otherwise count as one removal event. Ensure bot and internal traffic filters are applied.
+  
+
+Business Use Case: |
+  Merchandising teams use this metric to identify products frequently removed after being added, signaling pricing, shipping, stock, or product-detail issues. UX and CRO teams use it to diagnose checkout friction and test cart design changes. Marketing teams compare removals by campaign or promotion to assess traffic quality. Product and analytics teams monitor the add-to-cart to remove-from-cart relationship as an early warning indicator of conversion leakage.
+  
+
+Dependencies:
+  Events: [remove_from_cart]
+  Metrics: [item_id, quantity, session_id, user_id, event_timestamp]
+  Dimensions: [item_name, traffice source dimensions, bot filtering]
+
+Source Data: Digital Analytics, Tag Management, E-commerce Platform
+
+Report Attributes: |
+  Date, Product ID, Product Name, Brand, Category, Variant, Quantity Removed, User Type, Device Category, Platform, Session Source, Session Medium, Campaign, Country, Cart ID
+
+Dashboard Usage: [E-commerce Funnel Dashboard, Cart Behavior Dashboard, Product Performance Dashboard, Conversion Optimization Dashboard]
+
+Segment Eligibility: |
+  True
+
+Related Metrics: [Add to Cart, Cart Views, Checkout Starts, Purchase Conversion Rate, Cart Abandonment Rate, Units Removed from Cart]
+
+Derived KPIs: [Cart Removal Rate, Add-to-Remove Ratio, Net Cart Adds, Checkout Drop-off Rate by Product]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-04-30T20:04:46.755+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-04-30T20:13:05.78+00:00
+
