@@ -1,0 +1,190 @@
+# Metric: Product View
+# Generated: 2026-04-30T19:58:29.107Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Metric Name: Product View
+Formula: Product View = COUNT of product detail view events where event_name = 'view_item' (or equivalent product detail view event) and product_id is present
+
+Description: |
+  Counts the number of times a product detail page or product detail view is displayed to a user. This metric is foundational for understanding product interest, merchandising effectiveness, and the top of the commerce conversion funnel. It helps teams evaluate product discovery, traffic quality, and the relationship between product exposure and downstream actions such as add-to-cart, checkout, and purchase.
+
+Category: Engagement
+
+
+Industry: Retail, E-commerce
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Event, User, Session, Daily, Monthly, Weekly, Yearly
+
+GA4 Event: |
+  view_item
+  
+
+Adobe Event: |
+  prodView
+
+W3 Data Layer: |
+  {
+      "event": "product_view",
+      "ecommerce": {
+          "currency": "USD",
+          "value": 129.99,
+          "items": [{
+              "item_id": "SKU-12345",
+              "item_name": "Classic Running Shoe",
+              "item_brand": "Acme",
+              "item_category": "Footwear",
+              "item_category2": "Running",
+              "item_variant": "Blue / 10",
+              "price": 129.99,
+              "quantity": 1
+          }]
+      },
+      "page": {
+          "pageType": "product",
+          "pageName": "Classic Running Shoe"
+      },
+      "product": {
+          "productId": "SKU-12345",
+          "productName": "Classic Running Shoe"
+      }
+  }
+
+GA4 Data Layer: |
+  {
+      "event": "view_item",
+      "ecommerce": {
+          "currency": "USD",
+          "value": 129.99,
+          "items": [{
+              "item_id": "SKU-12345",
+              "item_name": "Classic Running Shoe",
+              "item_brand": "Acme",
+              "item_category": "Footwear",
+              "item_category2": "Running",
+              "item_variant": "Blue / 10",
+              "price": 129.99,
+              "quantity": 1
+          }]
+      }
+  }
+
+Adobe Client Data Layer: |
+  {
+      "event": "product-view",
+      "product": {
+          "productInfo": {
+              "sku": "SKU-12345",
+              "name": "Classic Running Shoe",
+              "brand": "Acme",
+              "price": 129.99
+          },
+          "category": {
+              "primaryCategory": "Footwear",
+              "subCategory1": "Running"
+          },
+          "attributes": {
+              "variant": "Blue / 10"
+          }
+      },
+      "page": {
+          "pageInfo": {
+              "pageType": "product",
+              "pageName": "Classic Running Shoe"
+          }
+      }
+  }
+
+XDM Mapping: |
+  {
+      "eventType": "commerce.productViews",
+      "timestamp": "timestamp",
+      "web": {
+          "webPageDetails": {
+              "name": "page.pageName",
+              "URL": "page.url"
+          }
+      },
+      "productListItems": [{
+          "SKU": "ecommerce.items[].item_id",
+          "name": "ecommerce.items[].item_name",
+          "brand": "ecommerce.items[].item_brand",
+          "priceTotal": "ecommerce.items[].price",
+          "quantity": "ecommerce.items[].quantity",
+          "categories": [{
+              "category": "ecommerce.items[].item_category"
+          }, {
+              "category": "ecommerce.items[].item_category2"
+          }]
+      }],
+      "commerce": {
+          "productViews": {
+              "value": 1
+          }
+      }
+  }
+
+SQL Query: |
+  SELECT
+    DATE(event_timestamp) AS event_date,
+    COUNT(*) AS product_view
+  FROM raw_digital_events
+  WHERE event_name IN ('view_item', 'product_view', 'prodView')
+    AND COALESCE(product_id, JSON_VALUE(event_params, '$.ecommerce.items[0].item_id')) IS NOT NULL
+  GROUP BY 1
+  ORDER BY 1;
+  
+
+Calculation Notes: |
+  1) Count each qualifying product detail view event as one product view. 
+  2) If a single event contains multiple items, only count all items as separate product views if the implementation intentionally supports multi-item product detail impressions; otherwise for standard PDP implementations count one event per viewed product. 
+  3) Exclude non-product pages, quick-view overlays unless the business explicitly defines quick view as a product view, bot/internal traffic, QA environments, and duplicate events fired on page refresh or SPA rerenders. 
+  4) Ensure product_id is populated and stable across platforms. 
+  5)For session-level reporting, multiple views of the same product in the same session should generally be counted unless a separate unique product views metric is required.
+  
+
+Business Use Case: |
+  Merchandising teams use this metric to identify high-interest products and optimize assortment placement. UX and product teams use it to assess PDP traffic and navigation effectiveness. Marketing teams compare product views by campaign, channel, and audience to evaluate traffic quality. Analysts use it as the denominator for add-to-cart rate, product conversion rate, and purchase funnel diagnostics.
+
+Dependencies:
+  Events: [product_detail_view]
+  Metrics: [event_timestamp, session_id, user_id, product_id]
+  Dimensions: [traffic source dimensions]
+
+Source Data: Digital Analytics; Tag Management System; Product Catalog
+
+Report Attributes: |
+  date, product_id, product_name, item_brand, item_category, item_variant, page_type, device_category, platform, source, medium, campaign, channel_group, country, region, session_id, user_id
+  
+
+Dashboard Usage: [E-commerce Executive Dashboard, Product Performance Dashboard, Merchandising Dashboard, Conversion Funnel Dashboard, Campaign Landing Performance Dashboard]
+
+Segment Eligibility: |
+  True
+
+Related Metrics: [Add to Cart, Item List View, Item Click, Checkout Start, Purchase, Product Detail Conversion Rate, Revenue per Product View]
+
+Derived KPIs: [Add-to-Cart Rate, Product Detail Conversion Rate, Purchase Rate per Product View, Revenue per Product View, Product Bounce Proxy, PDP Engagement Rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-04-30T17:22:40.418+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-04-30T19:58:27.058+00:00
+
