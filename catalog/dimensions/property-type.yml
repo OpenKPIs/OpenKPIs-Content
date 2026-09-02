@@ -1,0 +1,188 @@
+# Dimension: Property Type
+# Generated: 2026-09-02T07:49:58.751Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Property Type
+
+Description: |
+  Property Type classifies the physical real estate asset associated with a property or listing into a governed category such as apartment, single-family home, office, retail, land, or mixed-use. It enables consistent analysis of inventory, discovery, engagement, conversion, pricing, and transaction performance across asset categories.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Technology
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  item_category
+
+Adobe Event: |
+  view_item
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"view_item","eventAction":"view_item"}}],"product":[{"category":{"primaryCategory":"apartment"}}]}}
+
+GA4 Data Layer: |
+  {"event":"view_item","ecommerce":{"items":[{"item_category":"apartment"}]}}
+
+Adobe Client Data Layer: |
+  {"data":{"product":[{"category":{"primaryCategory":"apartment"}}]},"event":"view_item"}
+
+XDM Mapping: |
+  {"eventType":"commerce.productViews","productListItems":[{"productCategories":[{"categoryName":"apartment"}]}]}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH raw_property_types AS (
+    SELECT
+      NULLIF(
+        REGEXP_REPLACE(
+          REGEXP_REPLACE(LOWER(TRIM(item.item_category)), r'[^a-z0-9]+', '_'),
+          r'(^_+|_+$)',
+          ''
+        ),
+        ''
+      ) AS raw_property_type
+    FROM `your-project.analytics_123456789.events_*` AS events
+    CROSS JOIN UNNEST(events.items) AS item
+    WHERE events.event_name = 'view_item'
+      AND REGEXP_CONTAINS(_TABLE_SUFFIX, r'^[0-9]{8}$')
+  ),
+  canonicalized AS (
+    SELECT
+      CASE
+        WHEN raw_property_type IS NULL THEN 'unknown'
+        WHEN raw_property_type IN ('apartment', 'apartments', 'flat', 'flats') THEN 'apartment'
+        WHEN raw_property_type IN ('condo', 'condos', 'condominium', 'condominiums') THEN 'condominium'
+        WHEN raw_property_type IN ('townhome', 'townhomes', 'townhouse', 'townhouses') THEN 'townhouse'
+        WHEN raw_property_type IN ('single_family', 'single_family_home', 'single_family_homes') THEN 'single_family_home'
+        WHEN raw_property_type IN ('multi_family', 'multi_family_home', 'multi_family_homes') THEN 'multi_family_home'
+        WHEN raw_property_type IN ('lot', 'lots', 'land') THEN 'land'
+        ELSE raw_property_type
+      END AS property_type_code
+    FROM raw_property_types
+  ),
+  dimension_values AS (
+    SELECT DISTINCT property_type_code
+    FROM canonicalized
+  
+    UNION DISTINCT
+  
+    SELECT 'unknown' AS property_type_code
+  )
+  SELECT
+    TO_HEX(MD5(property_type_code)) AS property_type_key,
+    property_type_code,
+    CASE
+      WHEN property_type_code = 'unknown' THEN 'Unknown'
+      ELSE INITCAP(REPLACE(property_type_code, '_', ' '))
+    END AS property_type_name
+  FROM dimension_values
+  ORDER BY property_type_code;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH product_items AS (
+    SELECT
+      EXPLODE(productListItems) AS product_item
+    FROM aep_analytics_dataset
+    WHERE eventType = 'commerce.productViews'
+  ),
+  product_categories AS (
+    SELECT
+      EXPLODE(product_item.productCategories) AS category_item
+    FROM product_items
+  ),
+  raw_property_types AS (
+    SELECT
+      NULLIF(
+        REGEXP_REPLACE(
+          REGEXP_REPLACE(LOWER(TRIM(category_item.categoryName)), '[^a-z0-9]+', '_'),
+          '(^_+|_+$)',
+          ''
+        ),
+        ''
+      ) AS raw_property_type
+    FROM product_categories
+  ),
+  canonicalized AS (
+    SELECT
+      CASE
+        WHEN raw_property_type IS NULL THEN 'unknown'
+        WHEN raw_property_type IN ('apartment', 'apartments', 'flat', 'flats') THEN 'apartment'
+        WHEN raw_property_type IN ('condo', 'condos', 'condominium', 'condominiums') THEN 'condominium'
+        WHEN raw_property_type IN ('townhome', 'townhomes', 'townhouse', 'townhouses') THEN 'townhouse'
+        WHEN raw_property_type IN ('single_family', 'single_family_home', 'single_family_homes') THEN 'single_family_home'
+        WHEN raw_property_type IN ('multi_family', 'multi_family_home', 'multi_family_homes') THEN 'multi_family_home'
+        WHEN raw_property_type IN ('lot', 'lots', 'land') THEN 'land'
+        ELSE raw_property_type
+      END AS property_type_code
+    FROM raw_property_types
+  ),
+  dimension_values AS (
+    SELECT DISTINCT property_type_code
+    FROM canonicalized
+  
+    UNION
+  
+    SELECT 'unknown' AS property_type_code
+  )
+  SELECT
+    MD5(property_type_code) AS property_type_key,
+    property_type_code,
+    CASE
+      WHEN property_type_code = 'unknown' THEN 'Unknown'
+      ELSE INITCAP(REPLACE(property_type_code, '_', ' '))
+    END AS property_type_name
+  FROM dimension_values
+  ORDER BY property_type_code;
+
+Calculation Notes: |
+  Assign the canonical type of the specific asset represented by the property or listing identifier, not the broader building, development, parcel, or portfolio unless that broader asset is the advertised subject. For unit listings, use the unit-level type; for whole-building or whole-site listings, use the applicable whole-asset type. Use mixed_use only when multiple material uses are formally designated or no governed primary use can be established. Exclude transaction purpose, tenure, occupancy, furnishing, architectural style, and marketing labels. Normalize source values through the versioned taxonomy crosswalk and apply precedence in this order: curated Property Master, normalized MLS or licensed registry, validated partner feed, agent or owner submission, then approved model classification. Resolve null, blank, invalid, or unmapped values to unknown; reserve other for an explicitly identified valid type outside the governed taxonomy. Historical analysis must use the value effective at the event timestamp, while current-inventory reporting must use the active value. Listing renewals, duplicate listings, sessions, and repeated events must not create new property-type records.
+
+Business Use Case: |
+  The Product and Revenue Management teams compare search demand, available inventory, listing engagement, qualified-lead conversion, and transaction outcomes by property type and market. If apartment demand is high but qualified-lead conversion is low in a target city, they can investigate apartment inventory quality, pricing, ranking, content completeness, and partner coverage before changing merchandising or supply-acquisition investment.
+
+
+Source Data: Property Master, listing management applications, MLS and licensed property registry feeds, partner listing feeds, and digital analytics events
+
+Report Attributes: |
+  ["Market","Country","Region","City","Neighborhood","Property Type Group","Property Subtype","Listing Type","Transaction Type","Listing Status","Price Band","Bedroom Count","Acquisition Channel","Device Type","Partner","Calendar Period"]
+
+Dashboard Usage: [Property Inventory and Supply, Search and Discovery Performance, Listing Engagement, Lead Conversion Funnel, Marketplace Liquidity, Property Revenue Performance, Listing Data Quality]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Property Type Group, Property Subtype, Building Type, Listing Type, Transaction Type, Tenure Type, Listing Status, Location, Price Band, Bedroom Count, Property Condition]
+
+Derived Dimensions: [Property Type Group, Residential Property Indicator, Commercial Property Indicator, Land Property Indicator, Mixed-Use Property Indicator, Property Type Reporting Label]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-02T07:49:57.361501+00:00
+
+Last Modified By: devyendarm
+
+
