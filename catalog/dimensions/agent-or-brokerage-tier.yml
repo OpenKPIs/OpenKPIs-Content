@@ -1,0 +1,642 @@
+# Dimension: Agent or Brokerage Tier
+# Generated: 2026-09-02T07:50:02.630Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Agent or Brokerage Tier
+
+Description: |
+  Classifies each qualifying event by the canonical commercial tier assigned to its accountable agent or brokerage and effective at the event timestamp. It enables consistent comparison of conversion, revenue, engagement, and service performance across Strategic, Premier, Growth, Standard, and Unclassified partner segments.
+
+Category: Performance
+
+Tags: [dimension]
+
+Industry: Technology
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  agent_or_brokerage_tier
+
+Adobe Event: |
+  conversion
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"conversion"},"attributes":{"agentOrBrokerageTier":"<Strategic|Premier|Growth|Standard|Unclassified>","accountableEntityType":"<Agent|Brokerage>"}}]}}
+
+GA4 Data Layer: |
+  {"event":"conversion","accountable_entity_type":"<Agent|Brokerage>","agent_or_brokerage_tier":"<Strategic|Premier|Growth|Standard|Unclassified>"}
+
+Adobe Client Data Layer: |
+  {"data":{"agentOrBrokerageTier":"<Strategic|Premier|Growth|Standard|Unclassified>","accountableEntityType":"<Agent|Brokerage>"},"event":"conversion"}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"<Strategic|Premier|Growth|Standard|Unclassified>"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH event_base AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      TIMESTAMP_MICROS(e.event_timestamp) AS event_timestamp,
+      TO_HEX(SHA256(CONCAT(
+        COALESCE(e.stream_id, ''), '|',
+        COALESCE(e.user_pseudo_id, ''), '|',
+        CAST(e.event_timestamp AS STRING), '|',
+        e.event_name, '|',
+        CAST(COALESCE(e.event_bundle_sequence_id, 0) AS STRING), '|',
+        CAST(COALESCE(e.batch_event_index, 0) AS STRING)
+      ))) AS event_row_key,
+      COALESCE(
+        p.event_id,
+        CONCAT(
+          COALESCE(e.user_pseudo_id, 'UNKNOWN'), '-',
+          CAST(e.event_timestamp AS STRING), '-',
+          e.event_name, '-',
+          CAST(COALESCE(e.event_bundle_sequence_id, 0) AS STRING), '-',
+          CAST(COALESCE(e.batch_event_index, 0) AS STRING)
+        )
+      ) AS event_id,
+      e.event_name,
+      e.user_pseudo_id,
+      SAFE_CAST(p.ga_session_id AS INT64) AS session_id,
+      e.stream_id,
+      e.platform,
+      p.page_location,
+      p.transaction_id,
+      NULLIF(TRIM(p.agent_id), '') AS agent_id,
+      NULLIF(TRIM(p.brokerage_id), '') AS brokerage_id,
+      CASE
+        WHEN UPPER(TRIM(p.accountable_entity_type)) IN ('AGENT', 'BROKERAGE')
+          THEN UPPER(TRIM(p.accountable_entity_type))
+        ELSE NULL
+      END AS accountable_entity_type,
+      NULLIF(TRIM(p.collected_tier), '') AS collected_tier
+    FROM `your-project.analytics_123456789.events_*` AS e
+    CROSS JOIN UNNEST([
+      STRUCT(
+        MAX(IF(ep.key = 'event_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS event_id,
+        MAX(IF(ep.key = 'ga_session_id', COALESCE(CAST(ep.value.int_value AS STRING), ep.value.string_value), NULL)) AS ga_session_id,
+        MAX(IF(ep.key = 'page_location', ep.value.string_value, NULL)) AS page_location,
+        MAX(IF(ep.key = 'transaction_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS transaction_id,
+        MAX(IF(ep.key = 'agent_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS agent_id,
+        MAX(IF(ep.key = 'brokerage_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS brokerage_id,
+        MAX(IF(ep.key = 'accountable_entity_type', ep.value.string_value, NULL)) AS accountable_entity_type,
+        MAX(IF(ep.key = 'agent_or_brokerage_tier', ep.value.string_value, NULL)) AS collected_tier
+      )
+      FROM UNNEST(e.event_params) AS ep
+    ]) AS p
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 24 MONTH))
+                            AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND e.event_name IN ('generate_lead', 'purchase', 'sign_up')
+  ),
+  authoritative_tier_raw AS (
+    SELECT
+      'PARTNER_MASTER' AS source_system,
+      CONCAT('AGENT_TIER|', CAST(agent_tier_history_id AS STRING)) AS source_record_id,
+      'AGENT' AS subject_type,
+      CAST(agent_id AS STRING) AS subject_id,
+      UPPER(REGEXP_REPLACE(TRIM(tier_code), r'[^A-Za-z0-9]+', '_')) AS tier_code,
+      TIMESTAMP(effective_from) AS effective_from,
+      TIMESTAMP(effective_to) AS effective_to,
+      TIMESTAMP(approved_at) AS approved_at,
+      TIMESTAMP(updated_at) AS record_updated_at,
+      UPPER(TRIM(approval_status)) AS approval_status
+    FROM `your-project.partner_master.agent_tier_history`
+    WHERE UPPER(TRIM(approval_status)) = 'APPROVED'
+      AND agent_id IS NOT NULL
+      AND NULLIF(TRIM(tier_code), '') IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT
+      'PARTNER_MASTER',
+      CONCAT('BROKERAGE_TIER|', CAST(brokerage_tier_history_id AS STRING)),
+      'BROKERAGE',
+      CAST(brokerage_id AS STRING),
+      UPPER(REGEXP_REPLACE(TRIM(tier_code), r'[^A-Za-z0-9]+', '_')),
+      TIMESTAMP(effective_from),
+      TIMESTAMP(effective_to),
+      TIMESTAMP(approved_at),
+      TIMESTAMP(updated_at),
+      UPPER(TRIM(approval_status))
+    FROM `your-project.partner_master.brokerage_tier_history`
+    WHERE UPPER(TRIM(approval_status)) = 'APPROVED'
+      AND brokerage_id IS NOT NULL
+      AND NULLIF(TRIM(tier_code), '') IS NOT NULL
+  ),
+  authoritative_tier AS (
+    SELECT
+      source_system,
+      source_record_id,
+      subject_type,
+      subject_id,
+      tier_code,
+      CASE tier_code
+        WHEN 'STRATEGIC' THEN 'Strategic'
+        WHEN 'PREMIER' THEN 'Premier'
+        WHEN 'GROWTH' THEN 'Growth'
+        WHEN 'STANDARD' THEN 'Standard'
+        WHEN 'UNCLASSIFIED' THEN 'Unclassified'
+      END AS tier_name,
+      CASE tier_code
+        WHEN 'STRATEGIC' THEN 1
+        WHEN 'PREMIER' THEN 2
+        WHEN 'GROWTH' THEN 3
+        WHEN 'STANDARD' THEN 4
+        WHEN 'UNCLASSIFIED' THEN NULL
+      END AS tier_rank,
+      effective_from,
+      effective_to,
+      approved_at,
+      record_updated_at,
+      approval_status
+    FROM authoritative_tier_raw
+    WHERE tier_code IN ('STRATEGIC', 'PREMIER', 'GROWTH', 'STANDARD', 'UNCLASSIFIED')
+      AND effective_from IS NOT NULL
+      AND (effective_to IS NULL OR effective_to > effective_from)
+  ),
+  eligible_subjects AS (
+    SELECT
+      e.event_row_key,
+      e.accountable_entity_type AS target_subject_type,
+      CASE e.accountable_entity_type
+        WHEN 'AGENT' THEN e.agent_id
+        WHEN 'BROKERAGE' THEN e.brokerage_id
+      END AS target_subject_id,
+      1 AS resolution_priority,
+      'DIRECT_ACCOUNTABLE_ENTITY' AS eligibility_method,
+      CAST(NULL AS STRING) AS relationship_id,
+      CAST(NULL AS STRING) AS inheritance_policy_id
+    FROM event_base AS e
+    WHERE (e.accountable_entity_type = 'AGENT' AND e.agent_id IS NOT NULL)
+       OR (e.accountable_entity_type = 'BROKERAGE' AND e.brokerage_id IS NOT NULL)
+  
+    UNION ALL
+  
+    SELECT
+      e.event_row_key,
+      'BROKERAGE',
+      CAST(r.brokerage_id AS STRING),
+      2,
+      'APPROVED_BROKERAGE_INHERITANCE',
+      CAST(r.agent_brokerage_relationship_id AS STRING),
+      CAST(ip.tier_inheritance_policy_id AS STRING)
+    FROM event_base AS e
+    JOIN `your-project.partner_master.agent_brokerage_relationship` AS r
+      ON e.accountable_entity_type = 'AGENT'
+     AND e.agent_id = CAST(r.agent_id AS STRING)
+     AND e.brokerage_id = CAST(r.brokerage_id AS STRING)
+     AND UPPER(TRIM(r.relationship_status)) = 'ACTIVE'
+     AND e.event_timestamp >= TIMESTAMP(r.effective_from)
+     AND e.event_timestamp < COALESCE(TIMESTAMP(r.effective_to), TIMESTAMP '9999-12-31 00:00:00+00')
+    JOIN `your-project.partner_master.tier_inheritance_policy` AS ip
+      ON CAST(ip.brokerage_id AS STRING) = CAST(r.brokerage_id AS STRING)
+     AND ip.allows_agent_brokerage_tier_inheritance = TRUE
+     AND UPPER(TRIM(ip.approval_status)) = 'APPROVED'
+     AND e.event_timestamp >= TIMESTAMP(ip.effective_from)
+     AND e.event_timestamp < COALESCE(TIMESTAMP(ip.effective_to), TIMESTAMP '9999-12-31 00:00:00+00')
+    WHERE e.agent_id IS NOT NULL
+      AND e.brokerage_id IS NOT NULL
+  ),
+  matched AS (
+    SELECT
+      e.*,
+      es.resolution_priority,
+      es.eligibility_method,
+      es.relationship_id,
+      es.inheritance_policy_id,
+      t.source_system,
+      t.source_record_id,
+      t.subject_type AS matched_subject_type,
+      t.subject_id AS matched_subject_id,
+      t.tier_code,
+      t.tier_name,
+      t.tier_rank,
+      t.effective_from,
+      t.effective_to,
+      t.approved_at,
+      t.record_updated_at,
+      t.approval_status,
+      COUNT(t.source_record_id) OVER (PARTITION BY e.event_row_key) AS candidate_count,
+      ROW_NUMBER() OVER (
+        PARTITION BY e.event_row_key
+        ORDER BY
+          CASE WHEN t.source_record_id IS NULL THEN 2 ELSE 1 END,
+          es.resolution_priority,
+          t.approved_at DESC,
+          t.record_updated_at DESC,
+          t.effective_from DESC,
+          t.source_record_id DESC
+      ) AS match_order
+    FROM event_base AS e
+    LEFT JOIN eligible_subjects AS es
+      ON e.event_row_key = es.event_row_key
+    LEFT JOIN authoritative_tier AS t
+      ON t.subject_type = es.target_subject_type
+     AND t.subject_id = es.target_subject_id
+     AND e.event_timestamp >= t.effective_from
+     AND e.event_timestamp < COALESCE(t.effective_to, TIMESTAMP '9999-12-31 00:00:00+00')
+  ),
+  resolved AS (
+    SELECT
+      *,
+      COALESCE(tier_code, 'UNCLASSIFIED') AS resolved_tier_code,
+      COALESCE(tier_name, 'Unclassified') AS resolved_tier_name,
+      COALESCE(matched_subject_type, accountable_entity_type, 'UNKNOWN') AS resolved_subject_type,
+      COALESCE(
+        matched_subject_id,
+        CASE accountable_entity_type WHEN 'AGENT' THEN agent_id WHEN 'BROKERAGE' THEN brokerage_id END
+      ) AS resolved_subject_id,
+      UPPER(REGEXP_REPLACE(TRIM(collected_tier), r'[^A-Za-z0-9]+', '_')) AS normalized_collected_tier
+    FROM matched
+    WHERE match_order = 1
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    event_id,
+    event_name,
+    user_pseudo_id,
+    session_id,
+    stream_id,
+    platform,
+    page_location,
+    transaction_id,
+    agent_id,
+    brokerage_id,
+    COALESCE(accountable_entity_type, 'UNKNOWN') AS preferred_subject_type,
+    CASE accountable_entity_type WHEN 'AGENT' THEN agent_id WHEN 'BROKERAGE' THEN brokerage_id END AS preferred_subject_id,
+    TO_HEX(SHA256(CONCAT('AGENT_OR_BROKERAGE_TIER|', resolved_tier_code))) AS tier_dimension_key,
+    resolved_tier_code AS tier_code,
+    resolved_tier_name AS tier_name,
+    tier_rank,
+    CASE
+      WHEN resolved_tier_code IN ('STRATEGIC', 'PREMIER') THEN 'PREMIUM'
+      WHEN resolved_tier_code IN ('GROWTH', 'STANDARD') THEN 'STANDARD'
+      ELSE 'UNRANKED'
+    END AS tier_group,
+    COALESCE(source_system, 'GOVERNED_DEFAULT') AS tier_source_system,
+    source_record_id AS tier_source_record_id,
+    resolved_subject_type AS tier_subject_type,
+    resolved_subject_id AS tier_subject_id,
+    effective_from AS tier_effective_from,
+    effective_to AS tier_effective_to,
+    approved_at AS tier_approved_at,
+    record_updated_at AS tier_record_updated_at,
+    COALESCE(approval_status, 'NOT_APPLICABLE') AS tier_approval_status,
+    collected_tier,
+    normalized_collected_tier AS collected_tier_code,
+    CASE
+      WHEN source_record_id IS NOT NULL AND resolution_priority = 1 THEN 'AUTHORITATIVE_DIRECT_MATCH'
+      WHEN source_record_id IS NOT NULL AND resolution_priority = 2 THEN 'AUTHORITATIVE_BROKERAGE_INHERITANCE'
+      ELSE 'GOVERNED_UNCLASSIFIED_DEFAULT'
+    END AS resolution_method,
+    CASE WHEN source_record_id IS NOT NULL THEN 'MATCHED' ELSE 'UNCLASSIFIED' END AS tier_match_status,
+    resolution_priority AS source_priority,
+    candidate_count,
+    source_record_id IS NOT NULL AS is_authoritative,
+    source_record_id IS NOT NULL AS is_effective_at_event,
+    collected_tier IS NOT NULL
+      AND normalized_collected_tier IN ('STRATEGIC', 'PREMIER', 'GROWTH', 'STANDARD', 'UNCLASSIFIED')
+      AND normalized_collected_tier = resolved_tier_code AS is_collected_match,
+    resolved_subject_type = 'AGENT' AS is_agent_level,
+    resolved_subject_type = 'BROKERAGE' AS is_brokerage_level,
+    resolution_priority = 2 AS is_inherited_from_brokerage,
+    relationship_id,
+    inheritance_policy_id,
+    DATE(effective_from) AS tier_validity_start_date,
+    DATE(effective_to) AS tier_validity_end_date,
+    EXTRACT(YEAR FROM event_timestamp) AS event_year,
+    EXTRACT(MONTH FROM event_timestamp) AS event_month,
+    EXTRACT(ISOWEEK FROM event_timestamp) AS event_week,
+    EXTRACT(HOUR FROM event_timestamp) AS event_hour,
+    CAST(FORMAT_DATE('%Y%m%d', event_date) AS INT64) AS event_date_key,
+    IF(
+      resolved_subject_id IS NULL,
+      NULL,
+      TO_HEX(SHA256(CONCAT(resolved_subject_type, '|', resolved_subject_id)))
+    ) AS subject_dimension_key,
+    IF(brokerage_id IS NULL, NULL, TO_HEX(SHA256(CONCAT('BROKERAGE|', brokerage_id)))) AS brokerage_dimension_key,
+    IF(agent_id IS NULL, NULL, TO_HEX(SHA256(CONCAT('AGENT|', agent_id)))) AS agent_dimension_key,
+    CURRENT_TIMESTAMP() AS load_timestamp
+  FROM resolved;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH event_base AS (
+    SELECT
+      CAST(timestamp AS DATE) AS event_date,
+      timestamp AS event_timestamp,
+      SHA2(CONCAT(
+        COALESCE(datastreamId, ''), '|',
+        COALESCE(identityMap['ECID'][0].id, ''), '|',
+        CAST(timestamp AS STRING), '|',
+        eventType, '|',
+        COALESCE(_id, '')
+      ), 256) AS event_row_key,
+      COALESCE(
+        _id,
+        CONCAT(
+          COALESCE(identityMap['ECID'][0].id, 'UNKNOWN'), '-',
+          CAST(timestamp AS STRING), '-',
+          eventType
+        )
+      ) AS event_id,
+      eventType AS event_name,
+      identityMap['ECID'][0].id AS person_id,
+      _experience.analytics.sessionID AS session_id,
+      datastreamId AS datastream_id,
+      'ADOBE_AEP' AS platform,
+      web.webPageDetails.URL AS page_location,
+      commerce.order.purchaseID AS transaction_id,
+      NULLIF(TRIM(_tenant.digital.agentId), '') AS agent_id,
+      NULLIF(TRIM(_tenant.digital.brokerageId), '') AS brokerage_id,
+      CASE
+        WHEN UPPER(TRIM(_tenant.digital.accountableEntityType)) IN ('AGENT', 'BROKERAGE')
+          THEN UPPER(TRIM(_tenant.digital.accountableEntityType))
+        ELSE NULL
+      END AS accountable_entity_type,
+      NULLIF(TRIM(_experience.analytics.customDimensions.eVars.eVar1), '') AS collected_tier
+    FROM aep_conversion_events
+    WHERE timestamp >= CURRENT_TIMESTAMP() - INTERVAL '24' MONTH
+      AND eventType IN ('commerce.purchases', 'web.formFilledOut', 'web.signUp')
+  ),
+  authoritative_tier_raw AS (
+    SELECT
+      'PARTNER_MASTER' AS source_system,
+      CONCAT('AGENT_TIER|', CAST(agent_tier_history_id AS STRING)) AS source_record_id,
+      'AGENT' AS subject_type,
+      CAST(agent_id AS STRING) AS subject_id,
+      UPPER(REGEXP_REPLACE(TRIM(tier_code), '[^A-Za-z0-9]+', '_')) AS tier_code,
+      CAST(effective_from AS TIMESTAMP) AS effective_from,
+      CAST(effective_to AS TIMESTAMP) AS effective_to,
+      CAST(approved_at AS TIMESTAMP) AS approved_at,
+      CAST(updated_at AS TIMESTAMP) AS record_updated_at,
+      UPPER(TRIM(approval_status)) AS approval_status
+    FROM partner_agent_tier_history
+    WHERE UPPER(TRIM(approval_status)) = 'APPROVED'
+      AND agent_id IS NOT NULL
+      AND NULLIF(TRIM(tier_code), '') IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT
+      'PARTNER_MASTER',
+      CONCAT('BROKERAGE_TIER|', CAST(brokerage_tier_history_id AS STRING)),
+      'BROKERAGE',
+      CAST(brokerage_id AS STRING),
+      UPPER(REGEXP_REPLACE(TRIM(tier_code), '[^A-Za-z0-9]+', '_')),
+      CAST(effective_from AS TIMESTAMP),
+      CAST(effective_to AS TIMESTAMP),
+      CAST(approved_at AS TIMESTAMP),
+      CAST(updated_at AS TIMESTAMP),
+      UPPER(TRIM(approval_status))
+    FROM partner_brokerage_tier_history
+    WHERE UPPER(TRIM(approval_status)) = 'APPROVED'
+      AND brokerage_id IS NOT NULL
+      AND NULLIF(TRIM(tier_code), '') IS NOT NULL
+  ),
+  authoritative_tier AS (
+    SELECT
+      source_system,
+      source_record_id,
+      subject_type,
+      subject_id,
+      tier_code,
+      CASE tier_code
+        WHEN 'STRATEGIC' THEN 'Strategic'
+        WHEN 'PREMIER' THEN 'Premier'
+        WHEN 'GROWTH' THEN 'Growth'
+        WHEN 'STANDARD' THEN 'Standard'
+        WHEN 'UNCLASSIFIED' THEN 'Unclassified'
+      END AS tier_name,
+      CASE tier_code
+        WHEN 'STRATEGIC' THEN 1
+        WHEN 'PREMIER' THEN 2
+        WHEN 'GROWTH' THEN 3
+        WHEN 'STANDARD' THEN 4
+        WHEN 'UNCLASSIFIED' THEN NULL
+      END AS tier_rank,
+      effective_from,
+      effective_to,
+      approved_at,
+      record_updated_at,
+      approval_status
+    FROM authoritative_tier_raw
+    WHERE tier_code IN ('STRATEGIC', 'PREMIER', 'GROWTH', 'STANDARD', 'UNCLASSIFIED')
+      AND effective_from IS NOT NULL
+      AND (effective_to IS NULL OR effective_to > effective_from)
+  ),
+  eligible_subjects AS (
+    SELECT
+      e.event_row_key,
+      e.accountable_entity_type AS target_subject_type,
+      CASE e.accountable_entity_type
+        WHEN 'AGENT' THEN e.agent_id
+        WHEN 'BROKERAGE' THEN e.brokerage_id
+      END AS target_subject_id,
+      1 AS resolution_priority,
+      'DIRECT_ACCOUNTABLE_ENTITY' AS eligibility_method,
+      CAST(NULL AS STRING) AS relationship_id,
+      CAST(NULL AS STRING) AS inheritance_policy_id
+    FROM event_base AS e
+    WHERE (e.accountable_entity_type = 'AGENT' AND e.agent_id IS NOT NULL)
+       OR (e.accountable_entity_type = 'BROKERAGE' AND e.brokerage_id IS NOT NULL)
+  
+    UNION ALL
+  
+    SELECT
+      e.event_row_key,
+      'BROKERAGE',
+      CAST(r.brokerage_id AS STRING),
+      2,
+      'APPROVED_BROKERAGE_INHERITANCE',
+      CAST(r.agent_brokerage_relationship_id AS STRING),
+      CAST(ip.tier_inheritance_policy_id AS STRING)
+    FROM event_base AS e
+    JOIN partner_agent_brokerage_relationship AS r
+      ON e.accountable_entity_type = 'AGENT'
+     AND e.agent_id = CAST(r.agent_id AS STRING)
+     AND e.brokerage_id = CAST(r.brokerage_id AS STRING)
+     AND UPPER(TRIM(r.relationship_status)) = 'ACTIVE'
+     AND e.event_timestamp >= CAST(r.effective_from AS TIMESTAMP)
+     AND e.event_timestamp < COALESCE(CAST(r.effective_to AS TIMESTAMP), CAST('9999-12-31 00:00:00' AS TIMESTAMP))
+    JOIN partner_tier_inheritance_policy AS ip
+      ON CAST(ip.brokerage_id AS STRING) = CAST(r.brokerage_id AS STRING)
+     AND ip.allows_agent_brokerage_tier_inheritance = TRUE
+     AND UPPER(TRIM(ip.approval_status)) = 'APPROVED'
+     AND e.event_timestamp >= CAST(ip.effective_from AS TIMESTAMP)
+     AND e.event_timestamp < COALESCE(CAST(ip.effective_to AS TIMESTAMP), CAST('9999-12-31 00:00:00' AS TIMESTAMP))
+    WHERE e.agent_id IS NOT NULL
+      AND e.brokerage_id IS NOT NULL
+  ),
+  matched AS (
+    SELECT
+      e.*,
+      es.resolution_priority,
+      es.eligibility_method,
+      es.relationship_id,
+      es.inheritance_policy_id,
+      t.source_system,
+      t.source_record_id,
+      t.subject_type AS matched_subject_type,
+      t.subject_id AS matched_subject_id,
+      t.tier_code,
+      t.tier_name,
+      t.tier_rank,
+      t.effective_from,
+      t.effective_to,
+      t.approved_at,
+      t.record_updated_at,
+      t.approval_status,
+      COUNT(t.source_record_id) OVER (PARTITION BY e.event_row_key) AS candidate_count,
+      ROW_NUMBER() OVER (
+        PARTITION BY e.event_row_key
+        ORDER BY
+          CASE WHEN t.source_record_id IS NULL THEN 2 ELSE 1 END,
+          es.resolution_priority,
+          t.approved_at DESC,
+          t.record_updated_at DESC,
+          t.effective_from DESC,
+          t.source_record_id DESC
+      ) AS match_order
+    FROM event_base AS e
+    LEFT JOIN eligible_subjects AS es
+      ON e.event_row_key = es.event_row_key
+    LEFT JOIN authoritative_tier AS t
+      ON t.subject_type = es.target_subject_type
+     AND t.subject_id = es.target_subject_id
+     AND e.event_timestamp >= t.effective_from
+     AND e.event_timestamp < COALESCE(t.effective_to, CAST('9999-12-31 00:00:00' AS TIMESTAMP))
+  ),
+  resolved AS (
+    SELECT
+      *,
+      COALESCE(tier_code, 'UNCLASSIFIED') AS resolved_tier_code,
+      COALESCE(tier_name, 'Unclassified') AS resolved_tier_name,
+      COALESCE(matched_subject_type, accountable_entity_type, 'UNKNOWN') AS resolved_subject_type,
+      COALESCE(
+        matched_subject_id,
+        CASE accountable_entity_type WHEN 'AGENT' THEN agent_id WHEN 'BROKERAGE' THEN brokerage_id END
+      ) AS resolved_subject_id,
+      UPPER(REGEXP_REPLACE(TRIM(collected_tier), '[^A-Za-z0-9]+', '_')) AS normalized_collected_tier
+    FROM matched
+    WHERE match_order = 1
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    event_id,
+    event_name,
+    person_id,
+    session_id,
+    datastream_id,
+    platform,
+    page_location,
+    transaction_id,
+    agent_id,
+    brokerage_id,
+    COALESCE(accountable_entity_type, 'UNKNOWN') AS preferred_subject_type,
+    CASE accountable_entity_type WHEN 'AGENT' THEN agent_id WHEN 'BROKERAGE' THEN brokerage_id END AS preferred_subject_id,
+    SHA2(CONCAT('AGENT_OR_BROKERAGE_TIER|', resolved_tier_code), 256) AS tier_dimension_key,
+    resolved_tier_code AS tier_code,
+    resolved_tier_name AS tier_name,
+    tier_rank,
+    CASE
+      WHEN resolved_tier_code IN ('STRATEGIC', 'PREMIER') THEN 'PREMIUM'
+      WHEN resolved_tier_code IN ('GROWTH', 'STANDARD') THEN 'STANDARD'
+      ELSE 'UNRANKED'
+    END AS tier_group,
+    COALESCE(source_system, 'GOVERNED_DEFAULT') AS tier_source_system,
+    source_record_id AS tier_source_record_id,
+    resolved_subject_type AS tier_subject_type,
+    resolved_subject_id AS tier_subject_id,
+    effective_from AS tier_effective_from,
+    effective_to AS tier_effective_to,
+    approved_at AS tier_approved_at,
+    record_updated_at AS tier_record_updated_at,
+    COALESCE(approval_status, 'NOT_APPLICABLE') AS tier_approval_status,
+    collected_tier,
+    normalized_collected_tier AS collected_tier_code,
+    CASE
+      WHEN source_record_id IS NOT NULL AND resolution_priority = 1 THEN 'AUTHORITATIVE_DIRECT_MATCH'
+      WHEN source_record_id IS NOT NULL AND resolution_priority = 2 THEN 'AUTHORITATIVE_BROKERAGE_INHERITANCE'
+      ELSE 'GOVERNED_UNCLASSIFIED_DEFAULT'
+    END AS resolution_method,
+    CASE WHEN source_record_id IS NOT NULL THEN 'MATCHED' ELSE 'UNCLASSIFIED' END AS tier_match_status,
+    resolution_priority AS source_priority,
+    candidate_count,
+    source_record_id IS NOT NULL AS is_authoritative,
+    source_record_id IS NOT NULL AS is_effective_at_event,
+    collected_tier IS NOT NULL
+      AND normalized_collected_tier IN ('STRATEGIC', 'PREMIER', 'GROWTH', 'STANDARD', 'UNCLASSIFIED')
+      AND normalized_collected_tier = resolved_tier_code AS is_collected_match,
+    resolved_subject_type = 'AGENT' AS is_agent_level,
+    resolved_subject_type = 'BROKERAGE' AS is_brokerage_level,
+    resolution_priority = 2 AS is_inherited_from_brokerage,
+    relationship_id,
+    inheritance_policy_id,
+    CAST(effective_from AS DATE) AS tier_validity_start_date,
+    CAST(effective_to AS DATE) AS tier_validity_end_date,
+    YEAR(event_timestamp) AS event_year,
+    MONTH(event_timestamp) AS event_month,
+    WEEKOFYEAR(event_timestamp) AS event_week,
+    HOUR(event_timestamp) AS event_hour,
+    CAST(DATE_FORMAT(event_date, 'yyyyMMdd') AS BIGINT) AS event_date_key,
+    CASE
+      WHEN resolved_subject_id IS NULL THEN NULL
+      ELSE SHA2(CONCAT(resolved_subject_type, '|', resolved_subject_id), 256)
+    END AS subject_dimension_key,
+    CASE WHEN brokerage_id IS NULL THEN NULL ELSE SHA2(CONCAT('BROKERAGE|', brokerage_id), 256) END AS brokerage_dimension_key,
+    CASE WHEN agent_id IS NULL THEN NULL ELSE SHA2(CONCAT('AGENT|', agent_id), 256) END AS agent_dimension_key,
+    CURRENT_TIMESTAMP() AS load_timestamp
+  FROM resolved;
+
+Calculation Notes: |
+  First determine whether the event's accountable entity is an Agent or Brokerage, then resolve the approved Partner Master tier assignment whose effective_from is inclusive and effective_to is exclusive at the event timestamp. For an Agent event, use an explicit active agent assignment first; inherit a brokerage assignment only when an active agent-to-brokerage relationship exists at the event timestamp and the applicable tier policy permits inheritance. For a Brokerage event, use only the active brokerage assignment. If multiple valid assignments overlap, select the record with the latest effective_from timestamp and flag the overlap as a data-quality exception. CRM labels, subscription billing tiers, and digitally collected tier values may support reconciliation but must not determine the published value. Publish only Strategic, Premier, Growth, Standard, or Unclassified; return Unclassified for missing entities, invalid or expired assignments, prohibited inheritance, conflicting records that cannot be resolved deterministically, and unmapped values. Preserve historical event-time attribution and do not replace it with the entity's current tier. Exclude test entities, demonstration accounts, synthetic traffic, deleted events, duplicate events, and entities designated as non-production.
+
+Business Use Case: |
+  The Chief Revenue Officer compares lead-to-close conversion and revenue by canonical tier and accountable entity type. If Premier brokerages in a market generate strong lead volume but weak close rates, Sales can target those brokerages for enablement or benefit review without applying the same intervention to Premier agents or higher-performing brokerages.
+
+
+Source Data: Partner Master Data, CRM, Subscription Billing, and Digital Analytics
+
+Report Attributes: |
+  ["Accountable Entity Type","Market","Region","Agent Status","Brokerage Status","Subscription Plan","Partner Program","Lead Source","Property Type","Transaction Status","Tier Assignment Method","Tier Effective Month","Tier Policy Version"]
+
+Dashboard Usage: [Executive Partner Performance, Agent Conversion Performance, Brokerage Portfolio Health, Partner Revenue and Monetization, Market Supply Performance, Sales Territory Performance, Tier Migration and Retention, Partner Service Cost]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Agent ID, Brokerage ID, Accountable Entity Type, Agent Status, Brokerage Status, Market, Region, Subscription Plan, Partner Program]
+
+Derived Dimensions: [Agent or Brokerage Tier Rank, Agent or Brokerage Tier Group, Previous Agent or Brokerage Tier, Tier Change Direction, Tier Tenure Band, Tier Eligibility Status]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-02T07:50:02.061434+00:00
+
+Last Modified By: devyendarm
+
+
