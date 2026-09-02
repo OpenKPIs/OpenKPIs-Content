@@ -1,0 +1,357 @@
+# Dimension: Listing Verification Status
+# Generated: 2026-09-02T07:50:06.282Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Listing Verification Status
+
+Description: |
+  Listing Verification Status identifies the authoritative verification state of a real-estate listing at a specified point in time. It shows whether required ownership, authorization, identity, document, and property checks have not started, are in review, passed, failed, expired, been revoked, or are not required.
+
+Category: Quality
+
+Tags: [dimension]
+
+Industry: Real Estate Tech
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event (as of the event timestamp); Time based - Daily for historical status snapshots
+
+GA4 Event: |
+  listing_verification_status
+
+Adobe Event: |
+  view_item
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"view_item","eventAction":"view","eventTimestamp":"2025-01-15T14:30:00Z"},"attributes":{"listingVerificationStatus":"in_review"}}],"product":[{"attributes":{"listingVerificationAsOf":"2025-01-15T14:30:00Z","listingVerificationStatus":"in_review"},"productInfo":{"productID":"L-12345","productName":"Real Estate Listing"}}]}}
+
+GA4 Data Layer: |
+  {"event":"view_item","ecommerce":{"items":[{"item_id":"L-12345","item_name":"Real Estate Listing","item_category":"real_estate","listing_verification_status":"in_review"}]}}
+
+Adobe Client Data Layer: |
+  {"data":{"listing":{"listingId":"L-12345","listingVerificationAsOf":"2025-01-15T14:30:00Z","listingVerificationStatus":"in_review"}},"event":"view_item"}
+
+XDM Mapping: |
+  {"commerce":{"productViews":{"value":1}},"eventType":"commerce.productViews","timestamp":"2025-01-15T14:30:00Z","_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"in_review"}}}},"productListItems":[{"SKU":"L-12345","name":"Real Estate Listing"}]}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH event_level AS (
+    SELECT
+      event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS event_timestamp,
+      event_timestamp AS event_timestamp_micros,
+      event_server_timestamp_offset,
+      event_bundle_sequence_id,
+      event_name,
+      user_pseudo_id,
+      platform,
+      stream_id,
+      device,
+      geo,
+      traffic_source,
+      items,
+      (SELECT COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING), CAST(p.value.double_value AS STRING), CAST(p.value.float_value AS STRING)) FROM UNNEST(event_params) p WHERE p.key = 'listing_verification_status' LIMIT 1) AS event_verification_status,
+      (SELECT COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING), CAST(p.value.double_value AS STRING), CAST(p.value.float_value AS STRING)) FROM UNNEST(event_params) p WHERE p.key = 'listing_verification_as_of' LIMIT 1) AS event_verification_as_of,
+      (SELECT COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING)) FROM UNNEST(event_params) p WHERE p.key = 'listing_id' LIMIT 1) AS event_listing_id,
+      (SELECT p.value.int_value FROM UNNEST(event_params) p WHERE p.key = 'ga_session_id' LIMIT 1) AS session_id,
+      (SELECT p.value.int_value FROM UNNEST(event_params) p WHERE p.key = 'ga_session_number' LIMIT 1) AS session_number,
+      (SELECT p.value.string_value FROM UNNEST(event_params) p WHERE p.key = 'page_location' LIMIT 1) AS page_location,
+      (SELECT p.value.string_value FROM UNNEST(event_params) p WHERE p.key = 'page_referrer' LIMIT 1) AS page_referrer,
+      (SELECT p.value.string_value FROM UNNEST(event_params) p WHERE p.key = 'currency' LIMIT 1) AS event_currency,
+      (SELECT COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING)) FROM UNNEST(event_params) p WHERE p.key = 'event_id' LIMIT 1) AS supplied_event_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE event_name = 'view_item'
+  ),
+  item_level AS (
+    SELECT
+      e.* EXCEPT (items),
+      COALESCE(NULLIF(i.item_id, ''), NULLIF(e.event_listing_id, '')) AS listing_id,
+      i.item_name,
+      i.item_category,
+      i.item_category2,
+      i.item_brand,
+      i.item_variant,
+      i.price,
+      i.quantity,
+      COALESCE(
+        NULLIF((SELECT COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING), CAST(p.value.double_value AS STRING), CAST(p.value.float_value AS STRING)) FROM UNNEST(i.item_params) p WHERE p.key = 'listing_verification_status' LIMIT 1), ''),
+        NULLIF(e.event_verification_status, '')
+      ) AS raw_listing_verification_status,
+      COALESCE(
+        SAFE_CAST(NULLIF((SELECT COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING)) FROM UNNEST(i.item_params) p WHERE p.key = 'listing_verification_as_of' LIMIT 1), '') AS TIMESTAMP),
+        SAFE_CAST(NULLIF(e.event_verification_as_of, '') AS TIMESTAMP),
+        e.event_timestamp
+      ) AS listing_verification_as_of
+    FROM event_level e
+    CROSS JOIN UNNEST(e.items) i
+  ),
+  normalized AS (
+    SELECT
+      *,
+      LOWER(REGEXP_REPLACE(TRIM(raw_listing_verification_status), r'[^a-zA-Z0-9]+', '_')) AS normalized_raw_status
+    FROM item_level
+    WHERE listing_id IS NOT NULL
+  ),
+  canonical AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_raw_status IN ('verified', 'approved', 'verification_approved', 'active_verified') THEN 'verified'
+        WHEN normalized_raw_status IN ('in_review', 'under_review', 'reviewing', 'manual_review') THEN 'in_review'
+        WHEN normalized_raw_status IN ('pending', 'pending_verification', 'submitted', 'awaiting_verification') THEN 'pending'
+        WHEN normalized_raw_status IN ('rejected', 'declined', 'verification_failed', 'failed') THEN 'rejected'
+        WHEN normalized_raw_status IN ('suspended', 'blocked', 'disabled') THEN 'suspended'
+        WHEN normalized_raw_status IN ('expired', 'verification_expired') THEN 'expired'
+        WHEN normalized_raw_status IN ('unverified', 'not_verified', 'new') THEN 'unverified'
+        ELSE 'unknown'
+      END AS listing_verification_status
+    FROM normalized
+  ),
+  ranked AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY listing_id
+        ORDER BY listing_verification_as_of DESC, event_timestamp DESC, event_bundle_sequence_id DESC
+      ) AS current_row_number
+    FROM canonical
+  )
+  SELECT
+    CONCAT('listing_verification_status|', listing_id) AS listing_verification_status_key,
+    listing_id,
+    listing_verification_status,
+    raw_listing_verification_status,
+    CASE
+      WHEN listing_verification_status = 'verified' THEN 'approved'
+      WHEN listing_verification_status IN ('pending', 'in_review') THEN 'workflow'
+      WHEN listing_verification_status IN ('rejected', 'suspended') THEN 'adverse'
+      WHEN listing_verification_status IN ('expired', 'unverified') THEN 'inactive'
+      ELSE 'unknown'
+    END AS listing_verification_status_group,
+    listing_verification_status = 'verified' AS is_verified,
+    listing_verification_status IN ('verified', 'rejected', 'suspended', 'expired') AS is_terminal_status,
+    CASE listing_verification_status
+      WHEN 'unverified' THEN 10
+      WHEN 'pending' THEN 20
+      WHEN 'in_review' THEN 30
+      WHEN 'verified' THEN 40
+      WHEN 'expired' THEN 50
+      WHEN 'rejected' THEN 60
+      WHEN 'suspended' THEN 70
+      ELSE 0
+    END AS listing_verification_status_rank,
+    listing_verification_as_of AS listing_verification_as_of_timestamp,
+    listing_verification_as_of AS effective_from_timestamp,
+    CAST(NULL AS TIMESTAMP) AS effective_to_timestamp,
+    TRUE AS is_current,
+    DATE(event_timestamp) AS event_date,
+    event_timestamp,
+    event_name,
+    'view' AS event_action,
+    COALESCE(supplied_event_id, CONCAT(COALESCE(user_pseudo_id, 'anonymous'), '|', CAST(event_timestamp_micros AS STRING), '|', CAST(COALESCE(event_bundle_sequence_id, 0) AS STRING))) AS event_id,
+    user_pseudo_id,
+    session_id,
+    session_number,
+    platform,
+    CAST(stream_id AS STRING) AS stream_id,
+    device.category AS device_category,
+    device.operating_system AS operating_system,
+    device.web_info.browser AS browser,
+    geo.country AS country,
+    geo.region AS region,
+    geo.city AS city,
+    device.language AS language,
+    page_location,
+    page_referrer,
+    traffic_source.source AS traffic_source,
+    traffic_source.medium AS traffic_medium,
+    traffic_source.name AS traffic_campaign,
+    item_name,
+    item_category,
+    item_category2,
+    item_brand,
+    item_variant,
+    SAFE_CAST(price AS NUMERIC) AS price,
+    event_currency AS currency,
+    COALESCE(quantity, 1) AS quantity,
+    'Google Analytics 4' AS source_system,
+    'ecommerce_item' AS source_record_type,
+    'analytics_123456789.events_*' AS source_dataset,
+    TIMESTAMP_ADD(event_timestamp, INTERVAL COALESCE(event_server_timestamp_offset, 0) MICROSECOND) AS ingestion_timestamp,
+    event_timestamp AS record_created_at,
+    CURRENT_TIMESTAMP() AS record_updated_at,
+    CASE
+      WHEN raw_listing_verification_status IS NULL THEN 'status_missing'
+      WHEN listing_verification_status = 'unknown' THEN 'status_unrecognized'
+      ELSE 'valid'
+    END AS data_quality_status
+  FROM ranked
+  WHERE current_row_number = 1;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH item_events AS (
+    SELECT
+      e._id AS source_event_id,
+      CAST(e.timestamp AS TIMESTAMP) AS event_timestamp,
+      e.eventType AS event_type,
+      e._experience.analytics.customDimensions.eVars.eVar1 AS raw_listing_verification_status,
+      EXPLODE(e.productListItems) AS product_item
+    FROM listing_experience_events e
+    WHERE e.eventType = 'commerce.productViews'
+  ),
+  normalized AS (
+    SELECT
+      source_event_id,
+      event_timestamp,
+      event_type,
+      product_item.SKU AS listing_id,
+      product_item.name AS item_name,
+      raw_listing_verification_status,
+      LOWER(REGEXP_REPLACE(TRIM(raw_listing_verification_status), '[^a-zA-Z0-9]+', '_')) AS normalized_raw_status
+    FROM item_events
+    WHERE product_item.SKU IS NOT NULL
+  ),
+  canonical AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_raw_status IN ('verified', 'approved', 'verification_approved', 'active_verified') THEN 'verified'
+        WHEN normalized_raw_status IN ('in_review', 'under_review', 'reviewing', 'manual_review') THEN 'in_review'
+        WHEN normalized_raw_status IN ('pending', 'pending_verification', 'submitted', 'awaiting_verification') THEN 'pending'
+        WHEN normalized_raw_status IN ('rejected', 'declined', 'verification_failed', 'failed') THEN 'rejected'
+        WHEN normalized_raw_status IN ('suspended', 'blocked', 'disabled') THEN 'suspended'
+        WHEN normalized_raw_status IN ('expired', 'verification_expired') THEN 'expired'
+        WHEN normalized_raw_status IN ('unverified', 'not_verified', 'new') THEN 'unverified'
+        ELSE 'unknown'
+      END AS listing_verification_status
+    FROM normalized
+  ),
+  ranked AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY listing_id
+        ORDER BY event_timestamp DESC, source_event_id DESC
+      ) AS current_row_number
+    FROM canonical
+  )
+  SELECT
+    CONCAT('listing_verification_status|', listing_id) AS listing_verification_status_key,
+    listing_id,
+    listing_verification_status,
+    raw_listing_verification_status,
+    CASE
+      WHEN listing_verification_status = 'verified' THEN 'approved'
+      WHEN listing_verification_status IN ('pending', 'in_review') THEN 'workflow'
+      WHEN listing_verification_status IN ('rejected', 'suspended') THEN 'adverse'
+      WHEN listing_verification_status IN ('expired', 'unverified') THEN 'inactive'
+      ELSE 'unknown'
+    END AS listing_verification_status_group,
+    listing_verification_status = 'verified' AS is_verified,
+    listing_verification_status IN ('verified', 'rejected', 'suspended', 'expired') AS is_terminal_status,
+    CASE listing_verification_status
+      WHEN 'unverified' THEN 10
+      WHEN 'pending' THEN 20
+      WHEN 'in_review' THEN 30
+      WHEN 'verified' THEN 40
+      WHEN 'expired' THEN 50
+      WHEN 'rejected' THEN 60
+      WHEN 'suspended' THEN 70
+      ELSE 0
+    END AS listing_verification_status_rank,
+    event_timestamp AS listing_verification_as_of_timestamp,
+    event_timestamp AS effective_from_timestamp,
+    CAST(NULL AS TIMESTAMP) AS effective_to_timestamp,
+    TRUE AS is_current,
+    CAST(event_timestamp AS DATE) AS event_date,
+    event_timestamp,
+    event_type AS event_name,
+    'view' AS event_action,
+    source_event_id AS event_id,
+    CAST(NULL AS VARCHAR) AS user_pseudo_id,
+    CAST(NULL AS BIGINT) AS session_id,
+    CAST(NULL AS BIGINT) AS session_number,
+    'WEB' AS platform,
+    CAST(NULL AS VARCHAR) AS stream_id,
+    CAST(NULL AS VARCHAR) AS device_category,
+    CAST(NULL AS VARCHAR) AS operating_system,
+    CAST(NULL AS VARCHAR) AS browser,
+    CAST(NULL AS VARCHAR) AS country,
+    CAST(NULL AS VARCHAR) AS region,
+    CAST(NULL AS VARCHAR) AS city,
+    CAST(NULL AS VARCHAR) AS language,
+    CAST(NULL AS VARCHAR) AS page_location,
+    CAST(NULL AS VARCHAR) AS page_referrer,
+    CAST(NULL AS VARCHAR) AS traffic_source,
+    CAST(NULL AS VARCHAR) AS traffic_medium,
+    CAST(NULL AS VARCHAR) AS traffic_campaign,
+    item_name,
+    CAST(NULL AS VARCHAR) AS item_category,
+    CAST(NULL AS VARCHAR) AS item_category2,
+    CAST(NULL AS VARCHAR) AS item_brand,
+    CAST(NULL AS VARCHAR) AS item_variant,
+    CAST(NULL AS DECIMAL(38,6)) AS price,
+    CAST(NULL AS VARCHAR) AS currency,
+    CAST(1 AS BIGINT) AS quantity,
+    'Adobe Experience Platform' AS source_system,
+    'productListItem' AS source_record_type,
+    'listing_experience_events' AS source_dataset,
+    event_timestamp AS ingestion_timestamp,
+    event_timestamp AS record_created_at,
+    CURRENT_TIMESTAMP AS record_updated_at,
+    CASE
+      WHEN raw_listing_verification_status IS NULL THEN 'status_missing'
+      WHEN listing_verification_status = 'unknown' THEN 'status_unrecognized'
+      ELSE 'valid'
+    END AS data_quality_status
+  FROM ranked
+  WHERE current_row_number = 1;
+
+Calculation Notes: |
+  Use the latest non-cancelled status record effective at or before the analysis timestamp, not the latest record by ingestion time. Order competing records by effective timestamp, then source update timestamp, then immutable event identifier; route unresolved ties to a data-quality exception. Map source-specific statuses to the controlled values and never convert a null or unmapped source value to UNVERIFIED. A reopened or resubmitted verification becomes PENDING when the new attempt is effective, even if an earlier attempt was REJECTED or EXPIRED. VERIFIED is valid only while all currently mandatory checks remain passed and unexpired; material changes to address, ownership, publisher, property identity, or listing terms must trigger reassessment according to policy. REVOKED applies only when an explicit revocation decision exists. Historical reporting must use the status effective at the event or snapshot time to prevent current-state leakage. Exclude synthetic, employee test, and quality-assurance listings from production reporting unless a report explicitly includes them; retain deactivated or deleted listings in historical results when they were active during the reporting period.
+
+Business Use Case: |
+  The Trust & Safety leadership team compares verified-listing coverage, rejection rates, and pending-review backlogs by market, publisher type, and property category. Markets with high listing volume but low verification coverage can receive stricter publication controls, additional review capacity, publisher outreach, or policy changes, while Product can suppress or label unverified listings in discovery experiences.
+
+
+Source Data: Listing Management Platform, Listing Verification Service, Trust and Safety Case Management, Policy Configuration Service, and Digital Analytics
+
+Report Attributes: |
+  ["Market","Country","City","Listing Type","Property Type","Listing Lifecycle Status","Publisher Type","Publisher ID","Verification Method","Verification Provider","Verification Policy","Verification Review Type","Fraud Risk Tier","Listing Created Date","Verification Effective Date"]
+
+Dashboard Usage: [Listing Trust and Safety Overview, Verification Operations Dashboard, Marketplace Listing Quality, Fraud and Policy Enforcement, Listing Supply Health, Executive Marketplace Quality Scorecard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Listing ID, Listing Lifecycle Status, Verification Method, Verification Reason, Verification Provider, Verification Review Type, Verification Policy, Listing Type, Property Type, Market, Publisher Type, Fraud Risk Tier]
+
+Derived Dimensions: [Listing Verification Group, Listing Verification Eligibility, Verification Recency Band, Verification Review Outcome, Verification Validity State, Verification Coverage Segment]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-02T07:50:05.845783+00:00
+
+Last Modified By: devyendarm
+
+
