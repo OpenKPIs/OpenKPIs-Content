@@ -1,0 +1,101 @@
+# KPI: Active Learner Retention Rate
+# Generated: 2026-09-02T06:55:37.666Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Active Learner Retention Rate
+Formula: (Number of Active Learners at End of Period / Number of Active Learners at Start of Period) × 100
+
+Description: |
+  Measures the percentage of learners who continue to engage with the platform over a specified period. It indicates the platform's ability to retain active users.
+
+Category: Retention
+
+Tags: [kpi]
+
+Industry: [EdTech & E-Learning]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Monthly
+
+GA4 Event: |
+  user_engagement
+
+Adobe Event: |
+  user_engagement
+
+W3 Data Layer: |
+  {"user":{"status":"active"},"event":"userEngagement","eventInfo":{"type":"retention","eventName":"userEngagement"}}
+
+GA4 Data Layer: |
+  {"event":"user_engagement","event_params":{"user_status":"active","engagement_type":"retention"}}
+
+Adobe Client Data Layer: |
+  {"data":{"userStatus":"active","engagementType":"retention"},"event":"userEngagement"}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"custom":{"userStatus":"active","engagementType":"retention"},"eventType":"user_engagement"}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT COUNT(DISTINCT CASE WHEN engagement_type = 'retention' AND user_status = 'active' THEN user_pseudo_id END) AS active_retained_users,
+         COUNT(DISTINCT CASE WHEN event_name = 'engagement' THEN user_pseudo_id END) AS total_active_users,
+         COUNT(DISTINCT CASE WHEN engagement_type = 'retention' AND user_status = 'active' THEN user_pseudo_id END) / COUNT(DISTINCT CASE WHEN event_name = 'engagement' THEN user_pseudo_id END) AS active_learner_retention_rate
+  FROM `your-project.analytics_123456789.events_*`,
+       UNNEST(event_params) AS params
+  WHERE event_name = 'engagement'
+  GROUP BY event_date
+  HAVING COUNT(DISTINCT CASE WHEN event_name = 'engagement' THEN user_pseudo_id END) > 0
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT COUNT(DISTINCT CASE WHEN engagement_data.engagementType = 'retention' AND engagement_data.userStatus = 'active' THEN user_id END) AS active_retained_users,
+         COUNT(DISTINCT CASE WHEN event = 'userEngagement' THEN user_id END) AS total_active_users,
+         COUNT(DISTINCT CASE WHEN engagement_data.engagementType = 'retention' AND engagement_data.userStatus = 'active' THEN user_id END) / COUNT(DISTINCT CASE WHEN event = 'userEngagement' THEN user_id END) AS active_learner_retention_rate
+  FROM aep_backend_dataset
+  WHERE event = 'userEngagement'
+  GROUP BY event_date
+  HAVING COUNT(DISTINCT CASE WHEN event = 'userEngagement' THEN user_id END) > 0
+
+Calculation Notes: |
+  Exclude users who have not logged in during the period. Consider a user active if they have completed at least one learning activity.
+
+Business Use Case: |
+  Executives use this KPI to assess the effectiveness of retention strategies and make data-driven decisions to improve learner engagement.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Geography","Course Type","User Demographics"]
+
+Dashboard Usage: [Executive Overview, Retention Analysis]
+
+Segment Eligibility: |
+  true
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-02T06:55:36.082825+00:00
+
+Last Modified By: devyendarm
+
+
