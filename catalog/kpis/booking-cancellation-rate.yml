@@ -1,0 +1,508 @@
+# KPI: Booking Cancellation Rate
+# Generated: 2026-09-03T12:30:19.132Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Booking Cancellation Rate
+Formula: (Distinct Eligible Confirmed Bookings Fully Cancelled Before First Scheduled Service Start / Distinct Eligible Confirmed Bookings in the Same Booking-Created Cohort) × 100
+
+Description: |
+  Measures the percentage of confirmed bookings that are fully cancelled before the first scheduled service start within a specific cohort period.
+
+Category: Performance
+
+Tags: [kpi]
+
+Industry: [Other]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Item
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily/Weekly/Monthly/Yearly
+
+
+
+W3 Data Layer: |
+  {}
+
+GA4 Data Layer: |
+  {}
+
+Adobe Client Data Layer: |
+  {}
+
+XDM Mapping: |
+  {}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH params AS (
+    SELECT
+      CURRENT_TIMESTAMP() AS as_of_utc,
+      CURRENT_DATE('UTC') AS current_date_utc,
+      DATE_SUB(CURRENT_DATE('UTC'), INTERVAL 365 DAY) AS cohort_start_date
+  ),
+  first_confirmation AS (
+    SELECT
+      booking_id,
+      MIN(status_effective_at) AS confirmed_at
+    FROM `your-project.reservations.booking_status_history`
+    CROSS JOIN params
+    WHERE booking_id IS NOT NULL
+      AND status_effective_at <= as_of_utc
+      AND LOWER(TRIM(COALESCE(reservation_status, ''))) IN (
+        'confirmed', 'booked', 'reserved', 'ticketed', 'guaranteed'
+      )
+    GROUP BY booking_id
+  ),
+  confirmation_snapshot_ranked AS (
+    SELECT
+      bf.*,
+      fc.confirmed_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY bf.booking_id
+        ORDER BY bf.record_updated_at DESC, bf.source_ingested_at DESC
+      ) AS row_num
+    FROM `your-project.reservations.booking_fact` AS bf
+    JOIN first_confirmation AS fc
+      ON fc.booking_id = bf.booking_id
+    CROSS JOIN params
+    WHERE bf.booking_id IS NOT NULL
+      AND bf.booking_created_at IS NOT NULL
+      AND bf.record_updated_at <= fc.confirmed_at
+      AND fc.confirmed_at <= as_of_utc
+  ),
+  eligible_bookings AS (
+    SELECT
+      cs.booking_id,
+      cs.confirmed_at,
+      cs.booking_created_at,
+      cs.check_in_date,
+      DATE(cs.booking_created_at, 'UTC') AS booking_cohort_date,
+      EXTRACT(YEAR FROM DATE(cs.booking_created_at, 'UTC')) AS booking_year,
+      EXTRACT(QUARTER FROM DATE(cs.booking_created_at, 'UTC')) AS booking_quarter,
+      DATE_TRUNC(DATE(cs.booking_created_at, 'UTC'), MONTH) AS booking_month,
+      DATE_TRUNC(DATE(cs.booking_created_at, 'UTC'), WEEK(MONDAY)) AS booking_week,
+      COALESCE(NULLIF(TRIM(CAST(cs.source_system AS STRING)), ''), 'unknown') AS source_system,
+      COALESCE(NULLIF(TRIM(CAST(cs.property_id AS STRING)), ''), 'unknown') AS property_id,
+      COALESCE(NULLIF(TRIM(CAST(cs.property_name AS STRING)), ''), 'unknown') AS property_name,
+      COALESCE(NULLIF(TRIM(CAST(cs.brand_name AS STRING)), ''), 'unknown') AS brand_name,
+      COALESCE(NULLIF(TRIM(CAST(cs.property_country AS STRING)), ''), 'unknown') AS property_country,
+      COALESCE(NULLIF(TRIM(CAST(cs.market_name AS STRING)), ''), 'unknown') AS market_name,
+      COALESCE(NULLIF(TRIM(CAST(cs.sales_channel AS STRING)), ''), 'unknown') AS sales_channel,
+      COALESCE(NULLIF(TRIM(CAST(cs.booking_channel AS STRING)), ''), 'unknown') AS booking_channel,
+      COALESCE(NULLIF(TRIM(CAST(cs.distribution_channel AS STRING)), ''), 'unknown') AS distribution_channel
+    FROM confirmation_snapshot_ranked AS cs
+    CROSS JOIN params
+    WHERE cs.row_num = 1
+      AND DATE(cs.booking_created_at, 'UTC') >= cohort_start_date
+      AND DATE(cs.booking_created_at, 'UTC') < current_date_utc
+      AND cs.confirmed_at >= cs.booking_created_at
+      AND COALESCE(cs.is_test_booking, FALSE) = FALSE
+  ),
+  current_item_snapshot_ranked AS (
+    SELECT
+      bif.booking_id,
+      bif.booking_item_id,
+      bif.service_start_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY bif.booking_id, bif.booking_item_id
+        ORDER BY bif.record_updated_at DESC, bif.source_ingested_at DESC
+      ) AS row_num
+    FROM `your-project.reservations.booking_item_fact` AS bif
+    JOIN eligible_bookings AS eb
+      ON eb.booking_id = bif.booking_id
+    CROSS JOIN params
+    WHERE bif.booking_item_id IS NOT NULL
+      AND bif.record_updated_at <= as_of_utc
+      AND COALESCE(bif.is_test_item, FALSE) = FALSE
+  ),
+  current_items AS (
+    SELECT
+      booking_id,
+      booking_item_id,
+      service_start_at
+    FROM current_item_snapshot_ranked
+    WHERE row_num = 1
+  ),
+  current_item_status_ranked AS (
+    SELECT
+      h.booking_id,
+      h.booking_item_id,
+      LOWER(TRIM(COALESCE(h.item_status, ''))) AS item_status,
+      h.status_effective_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY h.booking_id, h.booking_item_id
+        ORDER BY
+          h.status_effective_at DESC,
+          h.record_updated_at DESC,
+          h.source_ingested_at DESC
+      ) AS row_num
+    FROM `your-project.reservations.booking_item_status_history` AS h
+    JOIN current_items AS ci
+      ON ci.booking_id = h.booking_id
+     AND ci.booking_item_id = h.booking_item_id
+    CROSS JOIN params
+    WHERE h.status_effective_at <= as_of_utc
+  ),
+  current_item_status AS (
+    SELECT
+      booking_id,
+      booking_item_id,
+      item_status,
+      status_effective_at
+    FROM current_item_status_ranked
+    WHERE row_num = 1
+  ),
+  cancellation_rollup AS (
+    SELECT
+      eb.booking_id,
+      COUNT(ci.booking_item_id) AS booking_item_count,
+      COUNTIF(
+        cis.item_status IN (
+          'cancelled', 'canceled',
+          'customer-cancelled', 'customer-canceled',
+          'supplier-cancelled', 'supplier-canceled',
+          'property-cancelled', 'property-canceled',
+          'carrier-cancelled', 'carrier-canceled',
+          'operations-cancelled', 'operations-canceled'
+        )
+        AND cis.status_effective_at >= eb.confirmed_at
+      ) AS cancelled_item_count,
+      MAX(
+        IF(
+          cis.item_status IN (
+            'cancelled', 'canceled',
+            'customer-cancelled', 'customer-canceled',
+            'supplier-cancelled', 'supplier-canceled',
+            'property-cancelled', 'property-canceled',
+            'carrier-cancelled', 'carrier-canceled',
+            'operations-cancelled', 'operations-canceled'
+          )
+            AND cis.status_effective_at >= eb.confirmed_at,
+          cis.status_effective_at,
+          NULL
+        )
+      ) AS fully_cancelled_at,
+      MIN(
+        COALESCE(
+          ci.service_start_at,
+          IF(
+            eb.check_in_date IS NULL,
+            NULL,
+            TIMESTAMP(DATE(eb.check_in_date), 'UTC')
+          )
+        )
+      ) AS first_service_start_at
+    FROM eligible_bookings AS eb
+    LEFT JOIN current_items AS ci
+      ON ci.booking_id = eb.booking_id
+    LEFT JOIN current_item_status AS cis
+      ON cis.booking_id = ci.booking_id
+     AND cis.booking_item_id = ci.booking_item_id
+    GROUP BY eb.booking_id
+  ),
+  booking_outcomes AS (
+    SELECT
+      eb.*,
+      CASE
+        WHEN cr.cancelled_item_count = cr.booking_item_count
+         AND cr.fully_cancelled_at IS NOT NULL
+         AND cr.first_service_start_at IS NOT NULL
+         AND cr.fully_cancelled_at < cr.first_service_start_at
+        THEN TRUE
+        ELSE FALSE
+      END AS is_fully_cancelled
+    FROM eligible_bookings AS eb
+    JOIN cancellation_rollup AS cr
+      ON cr.booking_id = eb.booking_id
+    WHERE cr.booking_item_count > 0
+  )
+  SELECT
+    p.as_of_utc,
+    bo.booking_cohort_date,
+    bo.booking_year,
+    bo.booking_quarter,
+    bo.booking_month,
+    bo.booking_week,
+    bo.source_system,
+    bo.property_id,
+    bo.property_name,
+    bo.brand_name,
+    bo.property_country,
+    bo.market_name,
+    bo.sales_channel,
+    bo.booking_channel,
+    bo.distribution_channel,
+    COUNT(*) AS total_confirmed_bookings,
+    COUNTIF(bo.is_fully_cancelled) AS cancelled_bookings,
+    COUNTIF(NOT bo.is_fully_cancelled) AS non_cancelled_bookings,
+    SAFE_DIVIDE(COUNTIF(bo.is_fully_cancelled), COUNT(*)) AS booking_cancellation_rate,
+    ROUND(
+      100 * SAFE_DIVIDE(COUNTIF(bo.is_fully_cancelled), COUNT(*)),
+      2
+    ) AS booking_cancellation_rate_percent
+  FROM booking_outcomes AS bo
+  CROSS JOIN params AS p
+  GROUP BY
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    SELECT
+      CURRENT_TIMESTAMP AS as_of_utc,
+      CURRENT_DATE AS current_date_utc,
+      CURRENT_DATE - INTERVAL '365' DAY AS cohort_start_date
+  ),
+  first_confirmation AS (
+    SELECT
+      booking_id,
+      MIN(status_effective_at) AS confirmed_at
+    FROM booking_status_history_dataset
+    CROSS JOIN params
+    WHERE booking_id IS NOT NULL
+      AND status_effective_at <= as_of_utc
+      AND LOWER(TRIM(COALESCE(reservation_status, ''))) IN (
+        'confirmed', 'booked', 'reserved', 'ticketed', 'guaranteed'
+      )
+    GROUP BY booking_id
+  ),
+  confirmation_snapshot_ranked AS (
+    SELECT
+      bf.*,
+      fc.confirmed_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY bf.booking_id
+        ORDER BY bf.record_updated_at DESC, bf.source_ingested_at DESC
+      ) AS row_num
+    FROM booking_fact_dataset AS bf
+    JOIN first_confirmation AS fc
+      ON fc.booking_id = bf.booking_id
+    CROSS JOIN params
+    WHERE bf.booking_id IS NOT NULL
+      AND bf.booking_created_at IS NOT NULL
+      AND bf.record_updated_at <= fc.confirmed_at
+      AND fc.confirmed_at <= as_of_utc
+  ),
+  eligible_bookings AS (
+    SELECT
+      cs.booking_id,
+      cs.confirmed_at,
+      cs.booking_created_at,
+      cs.check_in_date,
+      CAST(cs.booking_created_at AS DATE) AS booking_cohort_date,
+      EXTRACT(YEAR FROM cs.booking_created_at) AS booking_year,
+      EXTRACT(QUARTER FROM cs.booking_created_at) AS booking_quarter,
+      CAST(DATE_TRUNC('month', cs.booking_created_at) AS DATE) AS booking_month,
+      CAST(DATE_TRUNC('week', cs.booking_created_at) AS DATE) AS booking_week,
+      COALESCE(NULLIF(TRIM(CAST(cs.source_system AS VARCHAR)), ''), 'unknown') AS source_system,
+      COALESCE(NULLIF(TRIM(CAST(cs.property_id AS VARCHAR)), ''), 'unknown') AS property_id,
+      COALESCE(NULLIF(TRIM(CAST(cs.property_name AS VARCHAR)), ''), 'unknown') AS property_name,
+      COALESCE(NULLIF(TRIM(CAST(cs.brand_name AS VARCHAR)), ''), 'unknown') AS brand_name,
+      COALESCE(NULLIF(TRIM(CAST(cs.property_country AS VARCHAR)), ''), 'unknown') AS property_country,
+      COALESCE(NULLIF(TRIM(CAST(cs.market_name AS VARCHAR)), ''), 'unknown') AS market_name,
+      COALESCE(NULLIF(TRIM(CAST(cs.sales_channel AS VARCHAR)), ''), 'unknown') AS sales_channel,
+      COALESCE(NULLIF(TRIM(CAST(cs.booking_channel AS VARCHAR)), ''), 'unknown') AS booking_channel,
+      COALESCE(NULLIF(TRIM(CAST(cs.distribution_channel AS VARCHAR)), ''), 'unknown') AS distribution_channel
+    FROM confirmation_snapshot_ranked AS cs
+    CROSS JOIN params
+    WHERE cs.row_num = 1
+      AND CAST(cs.booking_created_at AS DATE) >= cohort_start_date
+      AND CAST(cs.booking_created_at AS DATE) < current_date_utc
+      AND cs.confirmed_at >= cs.booking_created_at
+      AND COALESCE(cs.is_test_booking, FALSE) = FALSE
+  ),
+  current_item_snapshot_ranked AS (
+    SELECT
+      bif.booking_id,
+      bif.booking_item_id,
+      bif.service_start_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY bif.booking_id, bif.booking_item_id
+        ORDER BY bif.record_updated_at DESC, bif.source_ingested_at DESC
+      ) AS row_num
+    FROM booking_item_fact_dataset AS bif
+    JOIN eligible_bookings AS eb
+      ON eb.booking_id = bif.booking_id
+    CROSS JOIN params
+    WHERE bif.booking_item_id IS NOT NULL
+      AND bif.record_updated_at <= as_of_utc
+      AND COALESCE(bif.is_test_item, FALSE) = FALSE
+  ),
+  current_items AS (
+    SELECT
+      booking_id,
+      booking_item_id,
+      service_start_at
+    FROM current_item_snapshot_ranked
+    WHERE row_num = 1
+  ),
+  current_item_status_ranked AS (
+    SELECT
+      h.booking_id,
+      h.booking_item_id,
+      LOWER(TRIM(COALESCE(h.item_status, ''))) AS item_status,
+      h.status_effective_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY h.booking_id, h.booking_item_id
+        ORDER BY
+          h.status_effective_at DESC,
+          h.record_updated_at DESC,
+          h.source_ingested_at DESC
+      ) AS row_num
+    FROM booking_item_status_history_dataset AS h
+    JOIN current_items AS ci
+      ON ci.booking_id = h.booking_id
+     AND ci.booking_item_id = h.booking_item_id
+    CROSS JOIN params
+    WHERE h.status_effective_at <= as_of_utc
+  ),
+  current_item_status AS (
+    SELECT
+      booking_id,
+      booking_item_id,
+      item_status,
+      status_effective_at
+    FROM current_item_status_ranked
+    WHERE row_num = 1
+  ),
+  cancellation_rollup AS (
+    SELECT
+      eb.booking_id,
+      SUM(CASE WHEN ci.booking_item_id IS NOT NULL THEN 1 ELSE 0 END) AS booking_item_count,
+      SUM(
+        CASE
+          WHEN cis.item_status IN (
+            'cancelled', 'canceled',
+            'customer-cancelled', 'customer-canceled',
+            'supplier-cancelled', 'supplier-canceled',
+            'property-cancelled', 'property-canceled',
+            'carrier-cancelled', 'carrier-canceled',
+            'operations-cancelled', 'operations-canceled'
+          )
+           AND cis.status_effective_at >= eb.confirmed_at
+          THEN 1
+          ELSE 0
+        END
+      ) AS cancelled_item_count,
+      MAX(
+        CASE
+          WHEN cis.item_status IN (
+            'cancelled', 'canceled',
+            'customer-cancelled', 'customer-canceled',
+            'supplier-cancelled', 'supplier-canceled',
+            'property-cancelled', 'property-canceled',
+            'carrier-cancelled', 'carrier-canceled',
+            'operations-cancelled', 'operations-canceled'
+          )
+           AND cis.status_effective_at >= eb.confirmed_at
+          THEN cis.status_effective_at
+        END
+      ) AS fully_cancelled_at,
+      MIN(
+        COALESCE(
+          ci.service_start_at,
+          CAST(eb.check_in_date AS TIMESTAMP)
+        )
+      ) AS first_service_start_at
+    FROM eligible_bookings AS eb
+    LEFT JOIN current_items AS ci
+      ON ci.booking_id = eb.booking_id
+    LEFT JOIN current_item_status AS cis
+      ON cis.booking_id = ci.booking_id
+     AND cis.booking_item_id = ci.booking_item_id
+    GROUP BY eb.booking_id
+  ),
+  booking_outcomes AS (
+    SELECT
+      eb.*,
+      CASE
+        WHEN cr.cancelled_item_count = cr.booking_item_count
+         AND cr.fully_cancelled_at IS NOT NULL
+         AND cr.first_service_start_at IS NOT NULL
+         AND cr.fully_cancelled_at < cr.first_service_start_at
+        THEN TRUE
+        ELSE FALSE
+      END AS is_fully_cancelled
+    FROM eligible_bookings AS eb
+    JOIN cancellation_rollup AS cr
+      ON cr.booking_id = eb.booking_id
+    WHERE cr.booking_item_count > 0
+  )
+  SELECT
+    p.as_of_utc,
+    bo.booking_cohort_date,
+    bo.booking_year,
+    bo.booking_quarter,
+    bo.booking_month,
+    bo.booking_week,
+    bo.source_system,
+    bo.property_id,
+    bo.property_name,
+    bo.brand_name,
+    bo.property_country,
+    bo.market_name,
+    bo.sales_channel,
+    bo.booking_channel,
+    bo.distribution_channel,
+    COUNT(*) AS total_confirmed_bookings,
+    SUM(CASE WHEN bo.is_fully_cancelled THEN 1 ELSE 0 END) AS cancelled_bookings,
+    SUM(CASE WHEN NOT bo.is_fully_cancelled THEN 1 ELSE 0 END) AS non_cancelled_bookings,
+    CAST(
+      SUM(CASE WHEN bo.is_fully_cancelled THEN 1 ELSE 0 END) AS DECIMAL(18,6)
+    ) / NULLIF(COUNT(*), 0) AS booking_cancellation_rate,
+    ROUND(
+      CAST(
+        100.0 * SUM(CASE WHEN bo.is_fully_cancelled THEN 1 ELSE 0 END)
+        / NULLIF(COUNT(*), 0)
+        AS DECIMAL(18,6)
+      ),
+      2
+    ) AS booking_cancellation_rate_percent
+  FROM booking_outcomes AS bo
+  CROSS JOIN params AS p
+  GROUP BY
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15;
+
+Calculation Notes: |
+  Exclude test bookings, fraud voided before confirmation, and bookings with ambiguous cancellation status. Return null when the denominator is zero.
+
+Business Use Case: |
+  Revenue Management uses this rate to adjust strategies for deposit requirements, channel inventory, and overbooking assumptions to improve net performance.
+
+
+Source Data: Reservation or Order Management System, Booking Engine, Property Management System
+
+Report Attributes: |
+  ["Booking Creation Date","Confirmation Date","First Scheduled Service Start Date","Full Cancellation Date","Cohort Maturity Status","Market at Confirmation","Country at Confirmation","Region at Confirmation","Property or Supplier at Confirmation","Product Type at Confirmation","Sales Channel at Confirmation","Booking Channel at Confirmation","Device Type at Confirmation","Customer Type at Confirmation","Rate Plan at Confirmation","Cancellation Policy at Confirmation","Payment Type at Confirmation","Refundability at Confirmation","Cancellation Initiator","Cancellation Reason","Booking Lead-Time Band","Length of Stay or Service Duration","Booking Value Band","Loyalty Tier at Confirmation"]
+
+Dashboard Usage: [Executive Booking Performance Dashboard, Revenue Management Dashboard, Demand and Revenue Forecast Dashboard, Channel Performance Dashboard, Cancellation and Refund Operations Dashboard, Property or Supplier Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Confirmed Bookings, Booking Retention Rate, Booking Conversion Rate, Cancellation Lead Time, Partial Cancellation Rate, No-Show Rate, Rebooking Rate, Refund Rate, Net Booking Value, Revenue Forecast Accuracy]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-03T12:30:18.014849+00:00
+
+Last Modified By: devyendarm
+
+
