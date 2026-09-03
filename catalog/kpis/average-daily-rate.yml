@@ -1,0 +1,686 @@
+# KPI: Average Daily Rate
+# Generated: 2026-09-03T14:30:19.679Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Average Daily Rate
+Formula: (Sum(Net Room Revenue) / Sum(Paid Occupied Room Nights))
+
+Description: |
+  Average Daily Rate measures the net room revenue per paid occupied room night within a specified period, reflecting the achieved room price after adjustments and excluding taxes and ancillary revenue.
+
+Category: Revenue
+
+Tags: [kpi]
+
+Industry: [Other]
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Global
+
+Measure Type: average
+
+Aggregation Window: Time based - Daily/Monthly/Yearly
+
+
+
+W3 Data Layer: |
+  {}
+
+GA4 Data Layer: |
+  {}
+
+Adobe Client Data Layer: |
+  {}
+
+XDM Mapping: |
+  {}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH
+  room_night_base AS (
+    SELECT
+      rn.property_id,
+      rn.service_date AS kpi_date,
+      rn.room_id,
+      COALESCE(CAST(rn.reservation_id AS STRING), '~UNASSIGNED~') AS reservation_key,
+      COALESCE(rd.room_type_code, 'UNKNOWN') AS room_type_code,
+      COALESCE(rd.room_type_name, 'Unknown') AS room_type_name,
+      COALESCE(rd.room_class, 'UNKNOWN') AS room_class,
+      UPPER(COALESCE(rn.occupancy_type, 'UNKNOWN')) AS occupancy_type,
+      UPPER(COALESCE(rn.room_status, 'UNKNOWN')) AS room_status
+    FROM `your-project.hospitality_dw.pms_room_nights` rn
+    LEFT JOIN `your-project.hospitality_dw.room_dimension` rd
+      ON rd.property_id = rn.property_id
+     AND rd.room_id = rn.room_id
+     AND rn.service_date >= rd.effective_start_date
+     AND rn.service_date < COALESCE(rd.effective_end_date, DATE '9999-12-31')
+    WHERE rn.service_date < CURRENT_DATE()
+      AND COALESCE(rn.is_deleted, FALSE) = FALSE
+  ),
+  room_operations AS (
+    SELECT
+      property_id,
+      kpi_date,
+      room_type_code,
+      room_type_name,
+      room_class,
+      COUNTIF(
+        occupancy_type = 'PAID'
+        AND room_status IN ('OCCUPIED', 'STAYED', 'DEPARTED')
+      ) AS paid_occupied_room_nights,
+      COUNTIF(
+        occupancy_type = 'COMPLIMENTARY'
+        AND room_status IN ('OCCUPIED', 'STAYED', 'DEPARTED')
+      ) AS complimentary_room_nights,
+      COUNTIF(
+        occupancy_type = 'HOUSE_USE'
+        AND room_status IN ('OCCUPIED', 'STAYED', 'DEPARTED')
+      ) AS house_use_room_nights,
+      COUNTIF(room_status = 'OUT_OF_ORDER') AS out_of_order_room_nights
+    FROM room_night_base
+    GROUP BY
+      property_id,
+      kpi_date,
+      room_type_code,
+      room_type_name,
+      room_class
+  ),
+  eligible_paid_stays AS (
+    SELECT
+      property_id,
+      kpi_date,
+      room_id,
+      reservation_key,
+      room_type_code,
+      room_type_name,
+      room_class,
+      COUNT(*) AS paid_occupied_room_nights
+    FROM room_night_base
+    WHERE occupancy_type = 'PAID'
+      AND room_status IN ('OCCUPIED', 'STAYED', 'DEPARTED')
+    GROUP BY
+      property_id,
+      kpi_date,
+      room_id,
+      reservation_key,
+      room_type_code,
+      room_type_name,
+      room_class
+  ),
+  folio_room_revenue AS (
+    SELECT
+      ft.property_id,
+      ft.service_date AS kpi_date,
+      ft.room_id,
+      COALESCE(CAST(ft.reservation_id AS STRING), '~UNASSIGNED~') AS reservation_key,
+      SUM(
+        CASE
+          WHEN UPPER(ft.transaction_type) = 'ROOM_REFUND'
+            THEN -ABS(COALESCE(ft.amount_property_currency, 0))
+          ELSE COALESCE(ft.amount_property_currency, 0)
+        END
+      ) AS room_revenue_property_currency
+    FROM `your-project.hospitality_dw.pms_folio_transactions` ft
+    WHERE ft.service_date < CURRENT_DATE()
+      AND UPPER(ft.posting_status) = 'POSTED'
+      AND UPPER(ft.transaction_type) IN ('ROOM_CHARGE', 'ROOM_ADJUSTMENT', 'ROOM_REFUND')
+      AND COALESCE(ft.is_tax, FALSE) = FALSE
+      AND COALESCE(ft.is_fee, FALSE) = FALSE
+      AND COALESCE(ft.is_voided, FALSE) = FALSE
+      AND COALESCE(ft.is_deleted, FALSE) = FALSE
+    GROUP BY
+      ft.property_id,
+      ft.service_date,
+      ft.room_id,
+      reservation_key
+  ),
+  eligible_revenue_by_segment AS (
+    SELECT
+      s.property_id,
+      s.kpi_date,
+      s.room_type_code,
+      s.room_type_name,
+      s.room_class,
+      SUM(s.paid_occupied_room_nights) AS paid_occupied_room_nights,
+      SUM(COALESCE(r.room_revenue_property_currency, 0)) AS eligible_room_revenue_property_currency
+    FROM eligible_paid_stays s
+    LEFT JOIN folio_room_revenue r
+      ON r.property_id = s.property_id
+     AND r.kpi_date = s.kpi_date
+     AND r.room_id = s.room_id
+     AND r.reservation_key = s.reservation_key
+    GROUP BY
+      s.property_id,
+      s.kpi_date,
+      s.room_type_code,
+      s.room_type_name,
+      s.room_class
+  ),
+  segment_daily AS (
+    SELECT
+      o.property_id,
+      o.kpi_date,
+      'ROOM_SEGMENT' AS segment_level,
+      o.room_type_code,
+      o.room_type_name,
+      o.room_class,
+      COALESCE(r.eligible_room_revenue_property_currency, 0) AS eligible_room_revenue_property_currency,
+      o.paid_occupied_room_nights,
+      o.complimentary_room_nights,
+      o.house_use_room_nights,
+      o.out_of_order_room_nights
+    FROM room_operations o
+    LEFT JOIN eligible_revenue_by_segment r
+      ON r.property_id = o.property_id
+     AND r.kpi_date = o.kpi_date
+     AND r.room_type_code = o.room_type_code
+     AND r.room_type_name = o.room_type_name
+     AND r.room_class = o.room_class
+  ),
+  property_daily AS (
+    SELECT
+      property_id,
+      kpi_date,
+      'PROPERTY_TOTAL' AS segment_level,
+      'ALL' AS room_type_code,
+      'All Room Types' AS room_type_name,
+      'ALL' AS room_class,
+      SUM(eligible_room_revenue_property_currency) AS eligible_room_revenue_property_currency,
+      SUM(paid_occupied_room_nights) AS paid_occupied_room_nights,
+      SUM(complimentary_room_nights) AS complimentary_room_nights,
+      SUM(house_use_room_nights) AS house_use_room_nights,
+      SUM(out_of_order_room_nights) AS out_of_order_room_nights
+    FROM segment_daily
+    GROUP BY property_id, kpi_date
+  ),
+  daily_metrics AS (
+    SELECT * FROM segment_daily
+    UNION ALL
+    SELECT * FROM property_daily
+  ),
+  gl_room_revenue_by_stay_date AS (
+    SELECT
+      property_id,
+      revenue_service_date AS kpi_date,
+      SUM(
+        COALESCE(credit_amount_property_currency, 0)
+        - COALESCE(debit_amount_property_currency, 0)
+      ) AS room_revenue_gl_property_currency
+    FROM `your-project.hospitality_dw.finance_gl_entries`
+    WHERE revenue_service_date < CURRENT_DATE()
+      AND revenue_service_date IS NOT NULL
+      AND UPPER(posting_status) = 'POSTED'
+      AND UPPER(account_classification) = 'ROOM_REVENUE'
+      AND COALESCE(is_elimination_entry, FALSE) = FALSE
+    GROUP BY property_id, revenue_service_date
+  ),
+  fx_rates AS (
+    SELECT
+      rate_date,
+      source_currency_code,
+      target_currency_code,
+      conversion_rate
+    FROM `your-project.hospitality_dw.foreign_exchange_rate_master`
+    WHERE target_currency_code = 'USD'
+      AND UPPER(rate_type) = 'DAILY_CLOSE'
+      AND UPPER(rate_status) = 'ACTIVE'
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY rate_date, source_currency_code, target_currency_code
+      ORDER BY effective_timestamp DESC
+    ) = 1
+  ),
+  enriched AS (
+    SELECT
+      d.*,
+      p.property_code,
+      p.property_name,
+      p.brand,
+      p.management_company,
+      p.country_code,
+      p.region,
+      p.city,
+      p.market,
+      p.submarket,
+      p.property_type,
+      p.ownership_type,
+      p.currency_code AS property_currency_code,
+      'USD' AS reporting_currency_code,
+      CASE
+        WHEN p.currency_code = 'USD' THEN CAST(1 AS NUMERIC)
+        ELSE fx.conversion_rate
+      END AS reporting_currency_rate,
+      CASE
+        WHEN d.segment_level = 'PROPERTY_TOTAL' THEN gl.room_revenue_gl_property_currency
+      END AS room_revenue_gl_property_currency,
+      fc.fiscal_year,
+      fc.fiscal_quarter,
+      fc.fiscal_period AS fiscal_month,
+      fc.fiscal_week
+    FROM daily_metrics d
+    JOIN `your-project.hospitality_dw.property_dimension` p
+      ON p.property_id = d.property_id
+     AND d.kpi_date >= p.effective_start_date
+     AND d.kpi_date < COALESCE(p.effective_end_date, DATE '9999-12-31')
+    JOIN `your-project.hospitality_dw.fiscal_calendar_dimension` fc
+      ON fc.calendar_date = d.kpi_date
+    LEFT JOIN fx_rates fx
+      ON fx.rate_date = d.kpi_date
+     AND fx.source_currency_code = p.currency_code
+     AND fx.target_currency_code = 'USD'
+    LEFT JOIN gl_room_revenue_by_stay_date gl
+      ON gl.property_id = d.property_id
+     AND gl.kpi_date = d.kpi_date
+     AND d.segment_level = 'PROPERTY_TOTAL'
+  )
+  SELECT
+    kpi_date,
+    property_id,
+    property_code,
+    property_name,
+    brand,
+    management_company,
+    country_code,
+    region,
+    city,
+    market,
+    submarket,
+    property_type,
+    ownership_type,
+    segment_level,
+    room_type_code,
+    room_type_name,
+    room_class,
+    fiscal_year,
+    fiscal_quarter,
+    fiscal_month,
+    fiscal_week,
+    FORMAT_DATE('%A', kpi_date) AS day_of_week,
+    EXTRACT(DAYOFWEEK FROM kpi_date) IN (1, 7) AS is_weekend,
+    property_currency_code,
+    reporting_currency_code,
+    reporting_currency_rate,
+    eligible_room_revenue_property_currency,
+    CASE
+      WHEN reporting_currency_rate IS NULL THEN NULL
+      ELSE eligible_room_revenue_property_currency * reporting_currency_rate
+    END AS eligible_room_revenue_reporting_currency,
+    paid_occupied_room_nights,
+    complimentary_room_nights,
+    house_use_room_nights,
+    out_of_order_room_nights,
+    SAFE_DIVIDE(
+      eligible_room_revenue_property_currency,
+      paid_occupied_room_nights
+    ) AS average_daily_rate_property_currency,
+    SAFE_DIVIDE(
+      eligible_room_revenue_property_currency * reporting_currency_rate,
+      paid_occupied_room_nights
+    ) AS average_daily_rate_reporting_currency,
+    room_revenue_gl_property_currency,
+    CASE
+      WHEN segment_level <> 'PROPERTY_TOTAL' OR room_revenue_gl_property_currency IS NULL THEN NULL
+      ELSE room_revenue_gl_property_currency - eligible_room_revenue_property_currency
+    END AS revenue_reconciliation_variance_property_currency,
+    CASE
+      WHEN segment_level <> 'PROPERTY_TOTAL' THEN 'NOT_APPLICABLE_AT_SEGMENT'
+      WHEN room_revenue_gl_property_currency IS NULL THEN 'UNRECONCILED'
+      WHEN ABS(room_revenue_gl_property_currency - eligible_room_revenue_property_currency) <= 1.00 THEN 'MATCHED'
+      ELSE 'VARIANCE'
+    END AS revenue_reconciliation_status,
+    CASE
+      WHEN reporting_currency_rate IS NULL THEN 'MISSING_FX_RATE'
+      ELSE 'AVAILABLE'
+    END AS currency_conversion_status,
+    'PMS_ROOM_NIGHTS|PMS_FOLIO|FINANCE_GL|PROPERTY_MASTER|FISCAL_CALENDAR|FX_MASTER' AS source_systems,
+    CURRENT_TIMESTAMP() AS calculated_at
+  FROM enriched;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH
+  room_night_base AS (
+    SELECT
+      rn.property_id,
+      rn.service_date AS kpi_date,
+      rn.room_id,
+      COALESCE(CAST(rn.reservation_id AS VARCHAR), '~UNASSIGNED~') AS reservation_key,
+      COALESCE(rd.room_type_code, 'UNKNOWN') AS room_type_code,
+      COALESCE(rd.room_type_name, 'Unknown') AS room_type_name,
+      COALESCE(rd.room_class, 'UNKNOWN') AS room_class,
+      UPPER(COALESCE(rn.occupancy_type, 'UNKNOWN')) AS occupancy_type,
+      UPPER(COALESCE(rn.room_status, 'UNKNOWN')) AS room_status
+    FROM hospitality_dw_pms_room_nights rn
+    LEFT JOIN hospitality_dw_room_dimension rd
+      ON rd.property_id = rn.property_id
+     AND rd.room_id = rn.room_id
+     AND rn.service_date >= rd.effective_start_date
+     AND rn.service_date < COALESCE(rd.effective_end_date, DATE '9999-12-31')
+    WHERE rn.service_date < CURRENT_DATE
+      AND COALESCE(rn.is_deleted, FALSE) = FALSE
+  ),
+  room_operations AS (
+    SELECT
+      property_id,
+      kpi_date,
+      room_type_code,
+      room_type_name,
+      room_class,
+      SUM(CASE
+        WHEN occupancy_type = 'PAID'
+         AND room_status IN ('OCCUPIED', 'STAYED', 'DEPARTED')
+        THEN 1 ELSE 0
+      END) AS paid_occupied_room_nights,
+      SUM(CASE
+        WHEN occupancy_type = 'COMPLIMENTARY'
+         AND room_status IN ('OCCUPIED', 'STAYED', 'DEPARTED')
+        THEN 1 ELSE 0
+      END) AS complimentary_room_nights,
+      SUM(CASE
+        WHEN occupancy_type = 'HOUSE_USE'
+         AND room_status IN ('OCCUPIED', 'STAYED', 'DEPARTED')
+        THEN 1 ELSE 0
+      END) AS house_use_room_nights,
+      SUM(CASE WHEN room_status = 'OUT_OF_ORDER' THEN 1 ELSE 0 END) AS out_of_order_room_nights
+    FROM room_night_base
+    GROUP BY
+      property_id,
+      kpi_date,
+      room_type_code,
+      room_type_name,
+      room_class
+  ),
+  eligible_paid_stays AS (
+    SELECT
+      property_id,
+      kpi_date,
+      room_id,
+      reservation_key,
+      room_type_code,
+      room_type_name,
+      room_class,
+      COUNT(*) AS paid_occupied_room_nights
+    FROM room_night_base
+    WHERE occupancy_type = 'PAID'
+      AND room_status IN ('OCCUPIED', 'STAYED', 'DEPARTED')
+    GROUP BY
+      property_id,
+      kpi_date,
+      room_id,
+      reservation_key,
+      room_type_code,
+      room_type_name,
+      room_class
+  ),
+  folio_room_revenue AS (
+    SELECT
+      ft.property_id,
+      ft.service_date AS kpi_date,
+      ft.room_id,
+      COALESCE(CAST(ft.reservation_id AS VARCHAR), '~UNASSIGNED~') AS reservation_key,
+      SUM(CASE
+        WHEN UPPER(ft.transaction_type) = 'ROOM_REFUND'
+          THEN -ABS(COALESCE(ft.amount_property_currency, 0))
+        ELSE COALESCE(ft.amount_property_currency, 0)
+      END) AS room_revenue_property_currency
+    FROM hospitality_dw_pms_folio_transactions ft
+    WHERE ft.service_date < CURRENT_DATE
+      AND UPPER(ft.posting_status) = 'POSTED'
+      AND UPPER(ft.transaction_type) IN ('ROOM_CHARGE', 'ROOM_ADJUSTMENT', 'ROOM_REFUND')
+      AND COALESCE(ft.is_tax, FALSE) = FALSE
+      AND COALESCE(ft.is_fee, FALSE) = FALSE
+      AND COALESCE(ft.is_voided, FALSE) = FALSE
+      AND COALESCE(ft.is_deleted, FALSE) = FALSE
+    GROUP BY
+      ft.property_id,
+      ft.service_date,
+      ft.room_id,
+      COALESCE(CAST(ft.reservation_id AS VARCHAR), '~UNASSIGNED~')
+  ),
+  eligible_revenue_by_segment AS (
+    SELECT
+      s.property_id,
+      s.kpi_date,
+      s.room_type_code,
+      s.room_type_name,
+      s.room_class,
+      SUM(s.paid_occupied_room_nights) AS paid_occupied_room_nights,
+      SUM(COALESCE(r.room_revenue_property_currency, 0)) AS eligible_room_revenue_property_currency
+    FROM eligible_paid_stays s
+    LEFT JOIN folio_room_revenue r
+      ON r.property_id = s.property_id
+     AND r.kpi_date = s.kpi_date
+     AND r.room_id = s.room_id
+     AND r.reservation_key = s.reservation_key
+    GROUP BY
+      s.property_id,
+      s.kpi_date,
+      s.room_type_code,
+      s.room_type_name,
+      s.room_class
+  ),
+  segment_daily AS (
+    SELECT
+      o.property_id,
+      o.kpi_date,
+      'ROOM_SEGMENT' AS segment_level,
+      o.room_type_code,
+      o.room_type_name,
+      o.room_class,
+      COALESCE(r.eligible_room_revenue_property_currency, 0) AS eligible_room_revenue_property_currency,
+      o.paid_occupied_room_nights,
+      o.complimentary_room_nights,
+      o.house_use_room_nights,
+      o.out_of_order_room_nights
+    FROM room_operations o
+    LEFT JOIN eligible_revenue_by_segment r
+      ON r.property_id = o.property_id
+     AND r.kpi_date = o.kpi_date
+     AND r.room_type_code = o.room_type_code
+     AND r.room_type_name = o.room_type_name
+     AND r.room_class = o.room_class
+  ),
+  property_daily AS (
+    SELECT
+      property_id,
+      kpi_date,
+      'PROPERTY_TOTAL' AS segment_level,
+      'ALL' AS room_type_code,
+      'All Room Types' AS room_type_name,
+      'ALL' AS room_class,
+      SUM(eligible_room_revenue_property_currency) AS eligible_room_revenue_property_currency,
+      SUM(paid_occupied_room_nights) AS paid_occupied_room_nights,
+      SUM(complimentary_room_nights) AS complimentary_room_nights,
+      SUM(house_use_room_nights) AS house_use_room_nights,
+      SUM(out_of_order_room_nights) AS out_of_order_room_nights
+    FROM segment_daily
+    GROUP BY property_id, kpi_date
+  ),
+  daily_metrics AS (
+    SELECT * FROM segment_daily
+    UNION ALL
+    SELECT * FROM property_daily
+  ),
+  gl_room_revenue_by_stay_date AS (
+    SELECT
+      property_id,
+      revenue_service_date AS kpi_date,
+      SUM(
+        COALESCE(credit_amount_property_currency, 0)
+        - COALESCE(debit_amount_property_currency, 0)
+      ) AS room_revenue_gl_property_currency
+    FROM hospitality_dw_finance_gl_entries
+    WHERE revenue_service_date < CURRENT_DATE
+      AND revenue_service_date IS NOT NULL
+      AND UPPER(posting_status) = 'POSTED'
+      AND UPPER(account_classification) = 'ROOM_REVENUE'
+      AND COALESCE(is_elimination_entry, FALSE) = FALSE
+    GROUP BY property_id, revenue_service_date
+  ),
+  fx_rates AS (
+    SELECT
+      rate_date,
+      source_currency_code,
+      target_currency_code,
+      MAX(conversion_rate) AS conversion_rate
+    FROM hospitality_dw_foreign_exchange_rate_master
+    WHERE target_currency_code = 'USD'
+      AND UPPER(rate_type) = 'DAILY_CLOSE'
+      AND UPPER(rate_status) = 'ACTIVE'
+    GROUP BY rate_date, source_currency_code, target_currency_code
+  ),
+  enriched AS (
+    SELECT
+      d.property_id,
+      d.kpi_date,
+      d.segment_level,
+      d.room_type_code,
+      d.room_type_name,
+      d.room_class,
+      d.eligible_room_revenue_property_currency,
+      d.paid_occupied_room_nights,
+      d.complimentary_room_nights,
+      d.house_use_room_nights,
+      d.out_of_order_room_nights,
+      p.property_code,
+      p.property_name,
+      p.brand,
+      p.management_company,
+      p.country_code,
+      p.region,
+      p.city,
+      p.market,
+      p.submarket,
+      p.property_type,
+      p.ownership_type,
+      p.currency_code AS property_currency_code,
+      'USD' AS reporting_currency_code,
+      CASE
+        WHEN p.currency_code = 'USD' THEN CAST(1 AS DECIMAL(38,10))
+        ELSE fx.conversion_rate
+      END AS reporting_currency_rate,
+      CASE
+        WHEN d.segment_level = 'PROPERTY_TOTAL' THEN gl.room_revenue_gl_property_currency
+        ELSE NULL
+      END AS room_revenue_gl_property_currency,
+      fc.fiscal_year,
+      fc.fiscal_quarter,
+      fc.fiscal_period AS fiscal_month,
+      fc.fiscal_week
+    FROM daily_metrics d
+    JOIN hospitality_dw_property_dimension p
+      ON p.property_id = d.property_id
+     AND d.kpi_date >= p.effective_start_date
+     AND d.kpi_date < COALESCE(p.effective_end_date, DATE '9999-12-31')
+    JOIN hospitality_dw_fiscal_calendar_dimension fc
+      ON fc.calendar_date = d.kpi_date
+    LEFT JOIN fx_rates fx
+      ON fx.rate_date = d.kpi_date
+     AND fx.source_currency_code = p.currency_code
+     AND fx.target_currency_code = 'USD'
+    LEFT JOIN gl_room_revenue_by_stay_date gl
+      ON gl.property_id = d.property_id
+     AND gl.kpi_date = d.kpi_date
+     AND d.segment_level = 'PROPERTY_TOTAL'
+  )
+  SELECT
+    kpi_date,
+    property_id,
+    property_code,
+    property_name,
+    brand,
+    management_company,
+    country_code,
+    region,
+    city,
+    market,
+    submarket,
+    property_type,
+    ownership_type,
+    segment_level,
+    room_type_code,
+    room_type_name,
+    room_class,
+    fiscal_year,
+    fiscal_quarter,
+    fiscal_month,
+    fiscal_week,
+    TO_CHAR(kpi_date, 'FMDay') AS day_of_week,
+    CASE WHEN EXTRACT(DOW FROM kpi_date) IN (0, 6) THEN TRUE ELSE FALSE END AS is_weekend,
+    property_currency_code,
+    reporting_currency_code,
+    reporting_currency_rate,
+    eligible_room_revenue_property_currency,
+    CASE
+      WHEN reporting_currency_rate IS NULL THEN NULL
+      ELSE eligible_room_revenue_property_currency * reporting_currency_rate
+    END AS eligible_room_revenue_reporting_currency,
+    paid_occupied_room_nights,
+    complimentary_room_nights,
+    house_use_room_nights,
+    out_of_order_room_nights,
+    CAST(eligible_room_revenue_property_currency AS DECIMAL(38,6))
+      / NULLIF(paid_occupied_room_nights, 0) AS average_daily_rate_property_currency,
+    CAST(
+      eligible_room_revenue_property_currency * reporting_currency_rate
+      AS DECIMAL(38,6)
+    ) / NULLIF(paid_occupied_room_nights, 0) AS average_daily_rate_reporting_currency,
+    room_revenue_gl_property_currency,
+    CASE
+      WHEN segment_level <> 'PROPERTY_TOTAL' OR room_revenue_gl_property_currency IS NULL THEN NULL
+      ELSE room_revenue_gl_property_currency - eligible_room_revenue_property_currency
+    END AS revenue_reconciliation_variance_property_currency,
+    CASE
+      WHEN segment_level <> 'PROPERTY_TOTAL' THEN 'NOT_APPLICABLE_AT_SEGMENT'
+      WHEN room_revenue_gl_property_currency IS NULL THEN 'UNRECONCILED'
+      WHEN ABS(room_revenue_gl_property_currency - eligible_room_revenue_property_currency) <= 1.00 THEN 'MATCHED'
+      ELSE 'VARIANCE'
+    END AS revenue_reconciliation_status,
+    CASE
+      WHEN reporting_currency_rate IS NULL THEN 'MISSING_FX_RATE'
+      ELSE 'AVAILABLE'
+    END AS currency_conversion_status,
+    'PMS_ROOM_NIGHTS|PMS_FOLIO|FINANCE_GL|PROPERTY_MASTER|FISCAL_CALENDAR|FX_MASTER' AS source_systems,
+    CURRENT_TIMESTAMP AS calculated_at
+  FROM enriched;
+
+Calculation Notes: |
+  Exclude taxes, ancillary revenue, and complimentary stays. Use functional currency for property-level ADR and convert to reporting currency for consolidated reporting.
+
+Business Use Case: |
+  Revenue Management compares ADR by property, stay date, room type, channel, and market segment against budget and benchmarks to adjust pricing strategies.
+
+
+Source Data: Property Management System room-night and folio data, room-revenue subledger, Finance general ledger reconciliation data, property master data, fiscal calendar, and foreign-exchange rate master
+
+Report Attributes: |
+  ["Stay Date","Calendar Period","Fiscal Period","Property","Brand","Region","Country","Room Type","Rate Plan","Market Segment","Booking Channel","Source Market","Guest Type","Day of Week","Length-of-Stay Band","Lead-Time Band","Currency"]
+
+Dashboard Usage: [Hotel Executive Performance Dashboard, Revenue Management Dashboard, Daily Operations Dashboard, Property Performance Dashboard, Commercial Performance Dashboard, Budget and Forecast Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Revenue per Available Room, Occupancy Rate, Net Room Revenue, Paid Occupied Room Nights, Average Booked Rate, Total Revenue per Available Room, Average Length of Stay]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-03T14:30:17.882431+00:00
+
+Last Modified By: devyendarm
+
+
