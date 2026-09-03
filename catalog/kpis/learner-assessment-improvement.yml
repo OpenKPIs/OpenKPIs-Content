@@ -1,0 +1,591 @@
+# KPI: Learner Assessment Improvement
+# Generated: 2026-09-03T13:30:29.384Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Learner Assessment Improvement
+Formula: (1 / |L|) × Σ[l∈L] [(1 / |P_l|) × Σ[p∈P_l] 100 × (N_post,lp − N_pre,lp)], where N = (Raw Score − Minimum Possible Score) / (Maximum Possible Score − Minimum Possible Score), L is the set of eligible learners, and P_l is the set of valid matched assessment pairs for learner l
+
+Description: |
+  Measures the average percentage-point change between comparable pre-intervention and post-intervention assessment scores for learners who complete a qualifying digital learning experience. It quantifies demonstrated knowledge or skill gain during the engagement journey while giving each eligible learner equal weight.
+
+Category: Performance
+
+Tags: [kpi]
+
+Industry: [Education]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Measure Type: average
+
+Aggregation Window: Time based - Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH completed_enrollments AS (
+    SELECT
+      e.enrollment_id,
+      e.learner_id,
+      e.course_offering_id,
+      o.course_id,
+      e.enrolled_at,
+      MIN(c.completed_at) AS completed_at
+    FROM `your-project.learning_warehouse.lms_enrollments` AS e
+    INNER JOIN `your-project.learning_warehouse.lms_course_offerings` AS o
+      ON o.course_offering_id = e.course_offering_id
+    INNER JOIN `your-project.learning_warehouse.lms_course_completions` AS c
+      ON c.enrollment_id = e.enrollment_id
+     AND LOWER(TRIM(c.completion_status)) = 'completed'
+     AND c.completed_at IS NOT NULL
+     AND c.completed_at >= e.enrolled_at
+    WHERE e.enrollment_id IS NOT NULL
+      AND e.learner_id IS NOT NULL
+      AND e.course_offering_id IS NOT NULL
+      AND o.course_id IS NOT NULL
+      AND e.enrolled_at IS NOT NULL
+    GROUP BY
+      e.enrollment_id,
+      e.learner_id,
+      e.course_offering_id,
+      o.course_id,
+      e.enrolled_at
+  ),
+  objective_scores AS (
+    SELECT
+      s.attempt_id,
+      s.learning_objective_id,
+      SUM(s.points_earned) AS points_earned,
+      SUM(s.points_possible) AS points_possible
+    FROM `your-project.learning_warehouse.assessment_scores` AS s
+    WHERE s.attempt_id IS NOT NULL
+      AND s.learning_objective_id IS NOT NULL
+    GROUP BY
+      s.attempt_id,
+      s.learning_objective_id
+    HAVING COUNTIF(
+      s.points_earned IS NULL
+      OR s.points_possible IS NULL
+      OR s.points_possible <= 0
+      OR s.points_earned < 0
+      OR s.points_earned > s.points_possible
+    ) = 0
+      AND SUM(s.points_possible) > 0
+  ),
+  objective_weight_rules AS (
+    SELECT
+      course_id,
+      learning_objective_id,
+      COUNT(*) AS mapping_row_count,
+      MAX(COALESCE(objective_weight, 1.0)) AS resolved_weight,
+      CASE
+        WHEN COUNTIF(objective_weight IS NOT NULL AND objective_weight <= 0) = 0
+         AND MIN(COALESCE(objective_weight, 1.0)) = MAX(COALESCE(objective_weight, 1.0))
+        THEN 1
+        ELSE 0
+      END AS valid_weight_rule
+    FROM `your-project.learning_warehouse.course_learning_objectives`
+    WHERE course_id IS NOT NULL
+      AND learning_objective_id IS NOT NULL
+    GROUP BY
+      course_id,
+      learning_objective_id
+  ),
+  attempt_score_candidates AS (
+    SELECT
+      a.attempt_id,
+      a.enrollment_id,
+      a.assessment_id,
+      a.attempted_at,
+      COUNTIF(COALESCE(ow.valid_weight_rule, 1) = 0) AS invalid_weight_rule_count,
+      SUM(
+        SAFE_DIVIDE(os.points_earned, os.points_possible)
+        * COALESCE(ow.resolved_weight, 1.0)
+      ) AS weighted_score_sum,
+      SUM(COALESCE(ow.resolved_weight, 1.0)) AS applied_weight_sum
+    FROM `your-project.learning_warehouse.assessment_attempts` AS a
+    INNER JOIN completed_enrollments AS ce
+      ON ce.enrollment_id = a.enrollment_id
+    INNER JOIN objective_scores AS os
+      ON os.attempt_id = a.attempt_id
+    LEFT JOIN objective_weight_rules AS ow
+      ON ow.course_id = ce.course_id
+     AND ow.learning_objective_id = os.learning_objective_id
+    WHERE a.attempt_id IS NOT NULL
+      AND a.assessment_id IS NOT NULL
+      AND LOWER(TRIM(a.attempt_status)) = 'completed'
+      AND a.attempted_at IS NOT NULL
+      AND a.attempted_at >= ce.enrolled_at
+      AND a.attempted_at <= ce.completed_at
+    GROUP BY
+      a.attempt_id,
+      a.enrollment_id,
+      a.assessment_id,
+      a.attempted_at
+  ),
+  attempt_scores AS (
+    SELECT
+      attempt_id,
+      enrollment_id,
+      assessment_id,
+      attempted_at,
+      100.0 * SAFE_DIVIDE(weighted_score_sum, applied_weight_sum) AS normalized_score_pct
+    FROM attempt_score_candidates
+    WHERE invalid_weight_rule_count = 0
+      AND applied_weight_sum > 0
+      AND SAFE_DIVIDE(weighted_score_sum, applied_weight_sum) BETWEEN 0 AND 1
+  ),
+  classified_candidates AS (
+    SELECT
+      ce.enrollment_id,
+      ce.learner_id,
+      ce.course_offering_id,
+      ce.course_id,
+      ce.completed_at,
+      ats.attempt_id,
+      ats.attempted_at,
+      ats.normalized_score_pct,
+      LOWER(TRIM(eq.assessment_role)) AS assessment_role,
+      eq.equivalency_group_id,
+      ROW_NUMBER() OVER (
+        PARTITION BY ce.enrollment_id, ats.attempt_id
+        ORDER BY
+          CASE WHEN eq.effective_start_at IS NULL THEN 1 ELSE 0 END,
+          eq.effective_start_at DESC,
+          CASE WHEN eq.effective_end_at IS NULL THEN 0 ELSE 1 END,
+          eq.effective_end_at DESC,
+          eq.equivalency_group_id,
+          LOWER(TRIM(eq.assessment_role))
+      ) AS mapping_rank
+    FROM attempt_scores AS ats
+    INNER JOIN completed_enrollments AS ce
+      ON ce.enrollment_id = ats.enrollment_id
+    INNER JOIN `your-project.learning_warehouse.assessment_equivalency` AS eq
+      ON eq.assessment_id = ats.assessment_id
+     AND eq.course_id = ce.course_id
+     AND LOWER(TRIM(eq.assessment_role)) IN ('pre', 'post')
+     AND (eq.effective_start_at IS NULL OR ats.attempted_at >= eq.effective_start_at)
+     AND (eq.effective_end_at IS NULL OR ats.attempted_at < eq.effective_end_at)
+    WHERE eq.equivalency_group_id IS NOT NULL
+  ),
+  classified_attempts AS (
+    SELECT
+      enrollment_id,
+      learner_id,
+      course_offering_id,
+      course_id,
+      completed_at,
+      attempt_id,
+      attempted_at,
+      normalized_score_pct,
+      assessment_role,
+      equivalency_group_id
+    FROM classified_candidates
+    WHERE mapping_rank = 1
+  ),
+  selected_pre_assessments AS (
+    SELECT
+      enrollment_id,
+      learner_id,
+      course_offering_id,
+      course_id,
+      completed_at,
+      attempt_id,
+      attempted_at,
+      normalized_score_pct,
+      equivalency_group_id
+    FROM classified_attempts
+    WHERE assessment_role = 'pre'
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY enrollment_id, equivalency_group_id
+      ORDER BY attempted_at ASC, attempt_id ASC
+    ) = 1
+  ),
+  selected_post_assessments AS (
+    SELECT
+      enrollment_id,
+      learner_id,
+      course_offering_id,
+      course_id,
+      completed_at,
+      attempt_id,
+      attempted_at,
+      normalized_score_pct,
+      equivalency_group_id
+    FROM classified_attempts
+    WHERE assessment_role = 'post'
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY enrollment_id, equivalency_group_id
+      ORDER BY attempted_at DESC, attempt_id DESC
+    ) = 1
+  ),
+  paired_assessments AS (
+    SELECT
+      post.enrollment_id,
+      post.learner_id,
+      post.course_offering_id,
+      post.course_id,
+      post.equivalency_group_id,
+      post.completed_at,
+      pre.attempt_id AS pre_attempt_id,
+      post.attempt_id AS post_attempt_id,
+      pre.normalized_score_pct AS pre_score_pct,
+      post.normalized_score_pct AS post_score_pct,
+      post.normalized_score_pct - pre.normalized_score_pct AS improvement_percentage_points
+    FROM selected_post_assessments AS post
+    INNER JOIN selected_pre_assessments AS pre
+      ON pre.enrollment_id = post.enrollment_id
+     AND pre.equivalency_group_id = post.equivalency_group_id
+    WHERE pre.attempted_at < post.attempted_at
+      AND pre.attempt_id <> post.attempt_id
+  )
+  SELECT
+    DATE_TRUNC(DATE(completed_at), MONTH) AS completion_month,
+    course_id,
+    course_offering_id,
+    equivalency_group_id,
+    COUNT(*) AS paired_enrollments,
+    COUNT(DISTINCT learner_id) AS paired_learners,
+    ROUND(AVG(pre_score_pct), 2) AS average_pre_assessment_score_pct,
+    ROUND(AVG(post_score_pct), 2) AS average_post_assessment_score_pct,
+    ROUND(AVG(improvement_percentage_points), 2) AS learner_assessment_improvement_pp,
+    ROUND(
+      100.0 * SAFE_DIVIDE(
+        COUNTIF(improvement_percentage_points > 0),
+        COUNT(*)
+      ),
+      2
+    ) AS improved_learner_rate_pct
+  FROM paired_assessments
+  GROUP BY
+    completion_month,
+    course_id,
+    course_offering_id,
+    equivalency_group_id
+  ORDER BY
+    completion_month,
+    course_id,
+    course_offering_id,
+    equivalency_group_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH completed_enrollments AS (
+    SELECT
+      e.enrollment_id,
+      e.learner_id,
+      e.course_offering_id,
+      o.course_id,
+      e.enrolled_at,
+      MIN(c.completed_at) AS completed_at
+    FROM lms_enrollments AS e
+    INNER JOIN lms_course_offerings AS o
+      ON o.course_offering_id = e.course_offering_id
+    INNER JOIN lms_course_completions AS c
+      ON c.enrollment_id = e.enrollment_id
+     AND LOWER(TRIM(c.completion_status)) = 'completed'
+     AND c.completed_at IS NOT NULL
+     AND c.completed_at >= e.enrolled_at
+    WHERE e.enrollment_id IS NOT NULL
+      AND e.learner_id IS NOT NULL
+      AND e.course_offering_id IS NOT NULL
+      AND o.course_id IS NOT NULL
+      AND e.enrolled_at IS NOT NULL
+    GROUP BY
+      e.enrollment_id,
+      e.learner_id,
+      e.course_offering_id,
+      o.course_id,
+      e.enrolled_at
+  ),
+  objective_scores AS (
+    SELECT
+      s.attempt_id,
+      s.learning_objective_id,
+      SUM(s.points_earned) AS points_earned,
+      SUM(s.points_possible) AS points_possible
+    FROM assessment_scores AS s
+    WHERE s.attempt_id IS NOT NULL
+      AND s.learning_objective_id IS NOT NULL
+    GROUP BY
+      s.attempt_id,
+      s.learning_objective_id
+    HAVING SUM(
+      CASE
+        WHEN s.points_earned IS NULL
+          OR s.points_possible IS NULL
+          OR s.points_possible <= 0
+          OR s.points_earned < 0
+          OR s.points_earned > s.points_possible
+        THEN 1
+        ELSE 0
+      END
+    ) = 0
+      AND SUM(s.points_possible) > 0
+  ),
+  objective_weight_rules AS (
+    SELECT
+      course_id,
+      learning_objective_id,
+      COUNT(*) AS mapping_row_count,
+      MAX(COALESCE(objective_weight, 1.0)) AS resolved_weight,
+      CASE
+        WHEN SUM(
+          CASE
+            WHEN objective_weight IS NOT NULL AND objective_weight <= 0 THEN 1
+            ELSE 0
+          END
+        ) = 0
+         AND MIN(COALESCE(objective_weight, 1.0)) = MAX(COALESCE(objective_weight, 1.0))
+        THEN 1
+        ELSE 0
+      END AS valid_weight_rule
+    FROM course_learning_objectives
+    WHERE course_id IS NOT NULL
+      AND learning_objective_id IS NOT NULL
+    GROUP BY
+      course_id,
+      learning_objective_id
+  ),
+  attempt_score_candidates AS (
+    SELECT
+      a.attempt_id,
+      a.enrollment_id,
+      a.assessment_id,
+      a.attempted_at,
+      SUM(
+        CASE
+          WHEN COALESCE(ow.valid_weight_rule, 1) = 0 THEN 1
+          ELSE 0
+        END
+      ) AS invalid_weight_rule_count,
+      SUM(
+        (os.points_earned * 1.0 / NULLIF(os.points_possible, 0))
+        * COALESCE(ow.resolved_weight, 1.0)
+      ) AS weighted_score_sum,
+      SUM(COALESCE(ow.resolved_weight, 1.0)) AS applied_weight_sum
+    FROM assessment_attempts AS a
+    INNER JOIN completed_enrollments AS ce
+      ON ce.enrollment_id = a.enrollment_id
+    INNER JOIN objective_scores AS os
+      ON os.attempt_id = a.attempt_id
+    LEFT JOIN objective_weight_rules AS ow
+      ON ow.course_id = ce.course_id
+     AND ow.learning_objective_id = os.learning_objective_id
+    WHERE a.attempt_id IS NOT NULL
+      AND a.assessment_id IS NOT NULL
+      AND LOWER(TRIM(a.attempt_status)) = 'completed'
+      AND a.attempted_at IS NOT NULL
+      AND a.attempted_at >= ce.enrolled_at
+      AND a.attempted_at <= ce.completed_at
+    GROUP BY
+      a.attempt_id,
+      a.enrollment_id,
+      a.assessment_id,
+      a.attempted_at
+  ),
+  attempt_scores AS (
+    SELECT
+      attempt_id,
+      enrollment_id,
+      assessment_id,
+      attempted_at,
+      100.0 * weighted_score_sum / NULLIF(applied_weight_sum, 0) AS normalized_score_pct
+    FROM attempt_score_candidates
+    WHERE invalid_weight_rule_count = 0
+      AND applied_weight_sum > 0
+      AND weighted_score_sum / NULLIF(applied_weight_sum, 0) BETWEEN 0 AND 1
+  ),
+  classified_candidates AS (
+    SELECT
+      ce.enrollment_id,
+      ce.learner_id,
+      ce.course_offering_id,
+      ce.course_id,
+      ce.completed_at,
+      ats.attempt_id,
+      ats.attempted_at,
+      ats.normalized_score_pct,
+      LOWER(TRIM(eq.assessment_role)) AS assessment_role,
+      eq.equivalency_group_id,
+      ROW_NUMBER() OVER (
+        PARTITION BY ce.enrollment_id, ats.attempt_id
+        ORDER BY
+          CASE WHEN eq.effective_start_at IS NULL THEN 1 ELSE 0 END,
+          eq.effective_start_at DESC,
+          CASE WHEN eq.effective_end_at IS NULL THEN 0 ELSE 1 END,
+          eq.effective_end_at DESC,
+          eq.equivalency_group_id,
+          LOWER(TRIM(eq.assessment_role))
+      ) AS mapping_rank
+    FROM attempt_scores AS ats
+    INNER JOIN completed_enrollments AS ce
+      ON ce.enrollment_id = ats.enrollment_id
+    INNER JOIN assessment_equivalency AS eq
+      ON eq.assessment_id = ats.assessment_id
+     AND eq.course_id = ce.course_id
+     AND LOWER(TRIM(eq.assessment_role)) IN ('pre', 'post')
+     AND (eq.effective_start_at IS NULL OR ats.attempted_at >= eq.effective_start_at)
+     AND (eq.effective_end_at IS NULL OR ats.attempted_at < eq.effective_end_at)
+    WHERE eq.equivalency_group_id IS NOT NULL
+  ),
+  classified_attempts AS (
+    SELECT
+      enrollment_id,
+      learner_id,
+      course_offering_id,
+      course_id,
+      completed_at,
+      attempt_id,
+      attempted_at,
+      normalized_score_pct,
+      assessment_role,
+      equivalency_group_id
+    FROM classified_candidates
+    WHERE mapping_rank = 1
+  ),
+  ranked_pre_assessments AS (
+    SELECT
+      ca.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY ca.enrollment_id, ca.equivalency_group_id
+        ORDER BY ca.attempted_at ASC, ca.attempt_id ASC
+      ) AS attempt_rank
+    FROM classified_attempts AS ca
+    WHERE ca.assessment_role = 'pre'
+  ),
+  ranked_post_assessments AS (
+    SELECT
+      ca.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY ca.enrollment_id, ca.equivalency_group_id
+        ORDER BY ca.attempted_at DESC, ca.attempt_id DESC
+      ) AS attempt_rank
+    FROM classified_attempts AS ca
+    WHERE ca.assessment_role = 'post'
+  ),
+  selected_pre_assessments AS (
+    SELECT
+      enrollment_id,
+      learner_id,
+      course_offering_id,
+      course_id,
+      completed_at,
+      attempt_id,
+      attempted_at,
+      normalized_score_pct,
+      equivalency_group_id
+    FROM ranked_pre_assessments
+    WHERE attempt_rank = 1
+  ),
+  selected_post_assessments AS (
+    SELECT
+      enrollment_id,
+      learner_id,
+      course_offering_id,
+      course_id,
+      completed_at,
+      attempt_id,
+      attempted_at,
+      normalized_score_pct,
+      equivalency_group_id
+    FROM ranked_post_assessments
+    WHERE attempt_rank = 1
+  ),
+  paired_assessments AS (
+    SELECT
+      post.enrollment_id,
+      post.learner_id,
+      post.course_offering_id,
+      post.course_id,
+      post.equivalency_group_id,
+      post.completed_at,
+      pre.attempt_id AS pre_attempt_id,
+      post.attempt_id AS post_attempt_id,
+      pre.normalized_score_pct AS pre_score_pct,
+      post.normalized_score_pct AS post_score_pct,
+      post.normalized_score_pct - pre.normalized_score_pct AS improvement_percentage_points
+    FROM selected_post_assessments AS post
+    INNER JOIN selected_pre_assessments AS pre
+      ON pre.enrollment_id = post.enrollment_id
+     AND pre.equivalency_group_id = post.equivalency_group_id
+    WHERE pre.attempted_at < post.attempted_at
+      AND pre.attempt_id <> post.attempt_id
+  )
+  SELECT
+    DATE_TRUNC('month', completed_at) AS completion_month,
+    course_id,
+    course_offering_id,
+    equivalency_group_id,
+    COUNT(*) AS paired_enrollments,
+    COUNT(DISTINCT learner_id) AS paired_learners,
+    ROUND(CAST(AVG(pre_score_pct) AS DECIMAL(18, 4)), 2) AS average_pre_assessment_score_pct,
+    ROUND(CAST(AVG(post_score_pct) AS DECIMAL(18, 4)), 2) AS average_post_assessment_score_pct,
+    ROUND(CAST(AVG(improvement_percentage_points) AS DECIMAL(18, 4)), 2) AS learner_assessment_improvement_pp,
+    ROUND(
+      CAST(
+        100.0
+        * SUM(CASE WHEN improvement_percentage_points > 0 THEN 1 ELSE 0 END)
+        / NULLIF(COUNT(*), 0)
+        AS DECIMAL(18, 4)
+      ),
+      2
+    ) AS improved_learner_rate_pct
+  FROM paired_assessments
+  GROUP BY
+    DATE_TRUNC('month', completed_at),
+    course_id,
+    course_offering_id,
+    equivalency_group_id
+  ORDER BY
+    completion_month,
+    course_id,
+    course_offering_id,
+    equivalency_group_id;
+
+Calculation Notes: |
+  Include authenticated learners who completed the qualifying intervention and have at least one valid matched assessment pair. Select the first valid pre-assessment completed within 30 calendar days before the learner's first qualifying intervention exposure and the first valid post-assessment completed after intervention completion and within 30 calendar days afterward; never select attempts based on highest score. Match attempts to the same learner, intervention or course offering, assessment family, approved equivalency group, and comparable learning-objective coverage. Normalize conventional scores to a zero-to-one scale; use an approved normalized equated score for rubric, adaptive, or item-response-theory assessments. Exclude practice, formative, survey, unscored, abandoned, invalidated, duplicate, overridden, non-equivalent, or non-comparable attempts; missing or zero-width score ranges; incompatible accommodations; and test, staff, deleted, or legally suppressed accounts. Retain zero and negative gains. Average valid pair gains within each learner before averaging across learners, assign results to the month of the authoritative post-assessment completion timestamp in the configured academic timezone, and recompute affected periods after late or corrected records. Calculate valid cohorts of any size, but suppress published segment values and threshold status when fewer than 30 eligible learners are present.
+
+Business Use Case: |
+  The Chief Learning Officer reviews monthly improvement by course, program, delivery modality, assessment family, learning objective, and baseline proficiency band. When an adequately sized cohort falls below the 10-percentage-point target or shows a negative result, Learning Product validates assessment equivalency, identifies objective-level gaps, revises the learning content or assessment design, and compares subsequent cohorts to determine whether learner engagement outcomes improve.
+
+
+Source Data: Digital assessment platform attempt and score data stitched with Learning Management System enrollment, course-offering, exposure, and completion records; supplemented by LRS or xAPI activity data and governed assessment-equivalency metadata
+
+Report Attributes: |
+  ["Post-Assessment Month","Course","Course Offering","Program","Subject","Learning Objective","Assessment Family","Assessment Form","Instructor","Learner Cohort","Delivery Modality","Enrollment Type","Baseline Proficiency Band","Learner Grade Level","Organization or Institution","Geography","Accessibility Accommodation Status"]
+
+Dashboard Usage: [Executive Learning Outcomes Dashboard, Course Effectiveness Dashboard, Assessment Quality Dashboard, Curriculum Performance Dashboard, Learner Cohort Outcomes Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Assessment Completion Rate, Average Assessment Score, Course Completion Rate, Learning Objective Mastery Rate, Learner Pass Rate, Knowledge Retention Rate, Time to Competency]
+
+Data Sensitivity: restricted
+
+Contains PII: Yes
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-03T13:30:28.585349+00:00
+
+Last Modified By: devyendarm
+
+
