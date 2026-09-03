@@ -1,0 +1,368 @@
+# Dimension: Property Price Band
+# Generated: 2026-09-03T12:30:22.604Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Property Price Band
+
+Description: |
+  Property Price Band identifies the governed categorical price tier assigned to a property listing using its applicable advertised price and the configuration effective when the listing snapshot or event occurred. It supports consistent comparison of inventory, engagement, leads, and conversions across price tiers without exposing or grouping by exact prices.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Technology
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  view_item
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"view_item","eventAction":"view","eventTimestamp":"2025-03-08T14:30:00Z"},"attributes":{"listingId":"LIST-987654","propertyId":"PROP-123456","propertyPriceBand":"Premium","thresholdScheduleId":"PRICE-BANDS-US-AUS-SALE-RES-USD","propertyPriceBandCode":"500K_TO_LT_1M","propertyPriceBandOrder":4,"thresholdScheduleVersion":"2025.1"}}]}}
+
+GA4 Data Layer: |
+  {"event":"view_item","ecommerce":{"items":[{"price":750000,"item_id":"PROP-123456","quantity":1,"item_name":"LIST-987654","item_brand":"MLS","item_category":"residential","item_category2":"house","item_category3":"sale","item_category4":"Austin","item_category5":"Premium","property_price_band":"Premium","property_price_band_code":"500K_TO_LT_1M"}],"value":750000,"currency":"USD"},"property_price_band":"Premium","property_price_band_context":"{\"band_code\":\"500K_TO_LT_1M\",\"band_label\":\"Premium\",\"band_order\":4}"}
+
+Adobe Client Data Layer: |
+  {"data":{"property":{"marketId":"us-austin","listingId":"LIST-987654","priceBand":{"bandId":"US-AUS-SALE-RES-USD-500K-1M","bandCode":"500K_TO_LT_1M","bandLabel":"Premium","bandOrder":4,"bandCurrency":"USD","bandLowerBound":500000,"bandUpperBound":1000000,"lowerBoundInclusive":true,"thresholdScheduleId":"PRICE-BANDS-US-AUS-SALE-RES-USD","upperBoundInclusive":false,"classificationStatus":"classified","classificationTimestamp":"2025-03-08T14:30:00Z","thresholdScheduleVersion":"2025.1"},"propertyId":"PROP-123456","propertyType":"residential","listingSource":"MLS","transactionType":"sale"},"eventInfo":{"eventName":"view_item","eventAction":"view","eventTimestamp":"2025-03-08T14:30:00Z"}},"event":"view_item"}
+
+XDM Mapping: |
+  {"_id":"6f9624cf-6749-4a57-82b9-6a50bd3ca0e4","commerce":{"productViews":{"value":1}},"eventType":"commerce.productViews","timestamp":"2025-03-08T14:30:00Z","_propertyListing":{"propertyPriceBand":{"band_id":"US-AUS-SALE-RES-USD-500K-1M","band_code":"500K_TO_LT_1M","band_name":"Premium","market_id":"us-austin","band_label":"Premium","band_order":4,"listing_id":"LIST-987654","property_id":"PROP-123456","band_currency":"USD","property_type":"residential","listing_source":"MLS","band_lower_bound":500000,"band_upper_bound":1000000,"transaction_type":"sale","data_quality_status":"valid","classification_reason":"matched_governed_range","classification_status":"classified","lower_bound_inclusive":true,"threshold_schedule_id":"PRICE-BANDS-US-AUS-SALE-RES-USD","upper_bound_inclusive":false,"threshold_effective_to":"2025-12-31T23:59:59Z","classification_timestamp":"2025-03-08T14:30:00Z","threshold_effective_from":"2025-01-01T00:00:00Z","threshold_schedule_version":"2025.1"}},"productListItems":[{"SKU":"PROP-123456","name":"LIST-987654","quantity":1,"priceTotal":750000,"currencyCode":"USD"}]}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH source_events AS (
+    SELECT
+      e.event_timestamp AS ga4_event_timestamp,
+      i.item_id,
+      i.item_name,
+      i.item_brand,
+      i.item_category,
+      i.item_category2,
+      i.item_category3,
+      i.item_category4,
+      i.item_category5,
+      i.price AS item_price,
+      (
+        SELECT AS STRUCT
+          MAX(IF(ep.key = 'property_price_band_context', ep.value.string_value, NULL)) AS context_json_text,
+          MAX(IF(ep.key = 'property_id', ep.value.string_value, NULL)) AS property_id,
+          MAX(IF(ep.key = 'listing_id', ep.value.string_value, NULL)) AS listing_id,
+          MAX(IF(ep.key = 'listing_source', ep.value.string_value, NULL)) AS listing_source,
+          MAX(IF(ep.key = 'transaction_type', ep.value.string_value, NULL)) AS transaction_type,
+          MAX(IF(ep.key = 'market_id', ep.value.string_value, NULL)) AS market_id,
+          MAX(IF(ep.key = 'property_type', ep.value.string_value, NULL)) AS property_type,
+          MAX(IF(ep.key = 'property_price_band', ep.value.string_value, NULL)) AS band_label,
+          MAX(IF(ep.key = 'property_price_band_code', ep.value.string_value, NULL)) AS band_code,
+          MAX(
+            IF(
+              ep.key = 'property_price_band_order',
+              COALESCE(
+                ep.value.string_value,
+                CAST(ep.value.int_value AS STRING),
+                CAST(ep.value.double_value AS STRING),
+                CAST(ep.value.float_value AS STRING)
+              ),
+              NULL
+            )
+          ) AS band_order,
+          MAX(IF(ep.key = 'threshold_schedule_id', ep.value.string_value, NULL)) AS threshold_schedule_id,
+          MAX(IF(ep.key = 'threshold_schedule_version', ep.value.string_value, NULL)) AS threshold_schedule_version
+        FROM UNNEST(e.event_params) AS ep
+      ) AS event_parameters
+    FROM `your-project.analytics_123456789.events_*` AS e
+    LEFT JOIN UNNEST(e.items) AS i ON TRUE
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date)
+                            AND FORMAT_DATE('%Y%m%d', @end_date)
+      AND e.event_name = 'view_item'
+  ),
+  property_price_band AS (
+    SELECT
+      COALESCE(
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.property_id')), ''),
+        NULLIF(TRIM(event_parameters.property_id), ''),
+        NULLIF(TRIM(item_id), '')
+      ) AS property_id,
+      COALESCE(
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.listing_id')), ''),
+        NULLIF(TRIM(event_parameters.listing_id), ''),
+        NULLIF(TRIM(item_name), '')
+      ) AS listing_id,
+      COALESCE(
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.listing_source')), ''),
+        NULLIF(TRIM(event_parameters.listing_source), ''),
+        NULLIF(TRIM(item_brand), '')
+      ) AS listing_source,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.listing_status')), '') AS listing_status,
+      COALESCE(
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.transaction_type')), ''),
+        NULLIF(TRIM(event_parameters.transaction_type), ''),
+        NULLIF(TRIM(item_category3), '')
+      ) AS transaction_type,
+      COALESCE(
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.market_id')), ''),
+        NULLIF(TRIM(event_parameters.market_id), '')
+      ) AS market_id,
+      COALESCE(
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.market_name')), ''),
+        NULLIF(TRIM(item_category4), '')
+      ) AS market_name,
+      UPPER(NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.market_country_code')), '')) AS market_country_code,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.market_region_code')), '') AS market_region_code,
+      COALESCE(
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.property_type')), ''),
+        NULLIF(TRIM(event_parameters.property_type), ''),
+        NULLIF(TRIM(item_category), '')
+      ) AS property_type,
+      COALESCE(
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.property_subtype')), ''),
+        NULLIF(TRIM(item_category2), '')
+      ) AS property_subtype,
+      COALESCE(
+        SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.advertised_price') AS NUMERIC),
+        SAFE_CAST(item_price AS NUMERIC)
+      ) AS advertised_price,
+      SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.advertised_price_min') AS NUMERIC) AS advertised_price_min,
+      SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.advertised_price_max') AS NUMERIC) AS advertised_price_max,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.advertised_price_qualifier')), '') AS advertised_price_qualifier,
+      UPPER(NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.advertised_currency')), '')) AS advertised_currency,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.price_basis')), '') AS price_basis,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.billing_period')), '') AS billing_period,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.tax_inclusion')), '') AS tax_inclusion,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.fee_inclusion')), '') AS fee_inclusion,
+      SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.normalized_price') AS NUMERIC) AS normalized_price,
+      UPPER(NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.normalized_currency')), '')) AS normalized_currency,
+      SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.fx_rate') AS NUMERIC) AS fx_rate,
+      SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.fx_rate_date') AS DATE) AS fx_rate_date,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.fx_rate_source')), '') AS fx_rate_source,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.fx_rate_type')), '') AS fx_rate_type,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.band_id')), '') AS band_id,
+      COALESCE(
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.band_code')), ''),
+        NULLIF(TRIM(event_parameters.band_code), '')
+      ) AS band_code,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.band_name')), '') AS band_name,
+      COALESCE(
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.band_label')), ''),
+        NULLIF(TRIM(event_parameters.band_label), ''),
+        NULLIF(TRIM(item_category5), ''),
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.band_name')), '')
+      ) AS band_label,
+      COALESCE(
+        SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.band_order') AS INT64),
+        SAFE_CAST(event_parameters.band_order AS INT64)
+      ) AS band_order,
+      SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.band_lower_bound') AS NUMERIC) AS band_lower_bound,
+      SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.band_upper_bound') AS NUMERIC) AS band_upper_bound,
+      SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.lower_bound_inclusive') AS BOOL) AS lower_bound_inclusive,
+      SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.upper_bound_inclusive') AS BOOL) AS upper_bound_inclusive,
+      UPPER(NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.band_currency')), '')) AS band_currency,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.band_transaction_type')), '') AS band_transaction_type,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.band_market_id')), '') AS band_market_id,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.band_property_type')), '') AS band_property_type,
+      COALESCE(
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.threshold_schedule_id')), ''),
+        NULLIF(TRIM(event_parameters.threshold_schedule_id), '')
+      ) AS threshold_schedule_id,
+      COALESCE(
+        NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.threshold_schedule_version')), ''),
+        NULLIF(TRIM(event_parameters.threshold_schedule_version), '')
+      ) AS threshold_schedule_version,
+      SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.threshold_effective_from') AS TIMESTAMP) AS threshold_effective_from,
+      SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.threshold_effective_to') AS TIMESTAMP) AS threshold_effective_to,
+      COALESCE(
+        SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.classification_timestamp') AS TIMESTAMP),
+        TIMESTAMP_MICROS(ga4_event_timestamp)
+      ) AS classification_timestamp,
+      COALESCE(
+        SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.event_timestamp') AS TIMESTAMP),
+        TIMESTAMP_MICROS(ga4_event_timestamp)
+      ) AS event_timestamp,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.classification_status')), '') AS classification_status,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.classification_reason')), '') AS classification_reason,
+      SAFE_CAST(JSON_VALUE(event_parameters.context_json_text, '$.is_price_on_application') AS BOOL) AS is_price_on_application,
+      NULLIF(TRIM(JSON_VALUE(event_parameters.context_json_text, '$.data_quality_status')), '') AS data_quality_status
+    FROM source_events
+    WHERE event_parameters.context_json_text IS NOT NULL
+       OR event_parameters.band_label IS NOT NULL
+       OR event_parameters.band_code IS NOT NULL
+       OR item_category5 IS NOT NULL
+  )
+  SELECT
+    property_id,
+    listing_id,
+    listing_source,
+    listing_status,
+    transaction_type,
+    market_id,
+    market_name,
+    market_country_code,
+    market_region_code,
+    property_type,
+    property_subtype,
+    advertised_price,
+    advertised_price_min,
+    advertised_price_max,
+    advertised_price_qualifier,
+    advertised_currency,
+    price_basis,
+    billing_period,
+    tax_inclusion,
+    fee_inclusion,
+    normalized_price,
+    normalized_currency,
+    fx_rate,
+    fx_rate_date,
+    fx_rate_source,
+    fx_rate_type,
+    band_id,
+    band_code,
+    band_name,
+    band_label,
+    band_order,
+    band_lower_bound,
+    band_upper_bound,
+    lower_bound_inclusive,
+    upper_bound_inclusive,
+    band_currency,
+    band_transaction_type,
+    band_market_id,
+    band_property_type,
+    threshold_schedule_id,
+    threshold_schedule_version,
+    threshold_effective_from,
+    threshold_effective_to,
+    classification_timestamp,
+    event_timestamp,
+    classification_status,
+    classification_reason,
+    is_price_on_application,
+    data_quality_status
+  FROM property_price_band;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH source_events AS (
+    SELECT
+      e.timestamp AS xdm_event_timestamp,
+      e._propertyListing.propertyPriceBand AS price_band
+    FROM property_listing_experience_events AS e
+    WHERE e.eventType = 'commerce.productViews'
+      AND e._propertyListing.propertyPriceBand IS NOT NULL
+  )
+  SELECT
+    NULLIF(TRIM(price_band.property_id), '') AS property_id,
+    NULLIF(TRIM(price_band.listing_id), '') AS listing_id,
+    NULLIF(TRIM(price_band.listing_source), '') AS listing_source,
+    NULLIF(TRIM(price_band.listing_status), '') AS listing_status,
+    NULLIF(TRIM(price_band.transaction_type), '') AS transaction_type,
+    NULLIF(TRIM(price_band.market_id), '') AS market_id,
+    NULLIF(TRIM(price_band.market_name), '') AS market_name,
+    UPPER(NULLIF(TRIM(price_band.market_country_code), '')) AS market_country_code,
+    NULLIF(TRIM(price_band.market_region_code), '') AS market_region_code,
+    NULLIF(TRIM(price_band.property_type), '') AS property_type,
+    NULLIF(TRIM(price_band.property_subtype), '') AS property_subtype,
+    CAST(price_band.advertised_price AS DECIMAL(38, 9)) AS advertised_price,
+    CAST(price_band.advertised_price_min AS DECIMAL(38, 9)) AS advertised_price_min,
+    CAST(price_band.advertised_price_max AS DECIMAL(38, 9)) AS advertised_price_max,
+    NULLIF(TRIM(price_band.advertised_price_qualifier), '') AS advertised_price_qualifier,
+    UPPER(NULLIF(TRIM(price_band.advertised_currency), '')) AS advertised_currency,
+    NULLIF(TRIM(price_band.price_basis), '') AS price_basis,
+    NULLIF(TRIM(price_band.billing_period), '') AS billing_period,
+    NULLIF(TRIM(price_band.tax_inclusion), '') AS tax_inclusion,
+    NULLIF(TRIM(price_band.fee_inclusion), '') AS fee_inclusion,
+    CAST(price_band.normalized_price AS DECIMAL(38, 9)) AS normalized_price,
+    UPPER(NULLIF(TRIM(price_band.normalized_currency), '')) AS normalized_currency,
+    CAST(price_band.fx_rate AS DECIMAL(38, 12)) AS fx_rate,
+    CAST(price_band.fx_rate_date AS DATE) AS fx_rate_date,
+    NULLIF(TRIM(price_band.fx_rate_source), '') AS fx_rate_source,
+    NULLIF(TRIM(price_band.fx_rate_type), '') AS fx_rate_type,
+    NULLIF(TRIM(price_band.band_id), '') AS band_id,
+    NULLIF(TRIM(price_band.band_code), '') AS band_code,
+    NULLIF(TRIM(price_band.band_name), '') AS band_name,
+    COALESCE(
+      NULLIF(TRIM(price_band.band_label), ''),
+      NULLIF(TRIM(price_band.band_name), '')
+    ) AS band_label,
+    CAST(price_band.band_order AS BIGINT) AS band_order,
+    CAST(price_band.band_lower_bound AS DECIMAL(38, 9)) AS band_lower_bound,
+    CAST(price_band.band_upper_bound AS DECIMAL(38, 9)) AS band_upper_bound,
+    CAST(price_band.lower_bound_inclusive AS BOOLEAN) AS lower_bound_inclusive,
+    CAST(price_band.upper_bound_inclusive AS BOOLEAN) AS upper_bound_inclusive,
+    UPPER(NULLIF(TRIM(price_band.band_currency), '')) AS band_currency,
+    NULLIF(TRIM(price_band.band_transaction_type), '') AS band_transaction_type,
+    NULLIF(TRIM(price_band.band_market_id), '') AS band_market_id,
+    NULLIF(TRIM(price_band.band_property_type), '') AS band_property_type,
+    NULLIF(TRIM(price_band.threshold_schedule_id), '') AS threshold_schedule_id,
+    NULLIF(TRIM(price_band.threshold_schedule_version), '') AS threshold_schedule_version,
+    CAST(price_band.threshold_effective_from AS TIMESTAMP) AS threshold_effective_from,
+    CAST(price_band.threshold_effective_to AS TIMESTAMP) AS threshold_effective_to,
+    COALESCE(
+      CAST(price_band.classification_timestamp AS TIMESTAMP),
+      xdm_event_timestamp
+    ) AS classification_timestamp,
+    COALESCE(
+      CAST(price_band.event_timestamp AS TIMESTAMP),
+      xdm_event_timestamp
+    ) AS event_timestamp,
+    NULLIF(TRIM(price_band.classification_status), '') AS classification_status,
+    NULLIF(TRIM(price_band.classification_reason), '') AS classification_reason,
+    CAST(price_band.is_price_on_application AS BOOLEAN) AS is_price_on_application,
+    NULLIF(TRIM(price_band.data_quality_status), '') AS data_quality_status
+  FROM source_events
+  WHERE price_band.band_id IS NOT NULL
+     OR price_band.band_code IS NOT NULL
+     OR price_band.band_label IS NOT NULL
+     OR price_band.classification_status IS NOT NULL;
+
+Calculation Notes: |
+  Use the active total advertised asking price for sale listings and the recurring base rent normalized to the configured rental period for rental listings. Select the effective threshold schedule by market, transaction type, property type, reporting currency, and business timestamp; use the listing price effective timestamp for listing snapshots and the event timestamp for behavioral events. Convert prices to the schedule currency using the approved foreign-exchange rate effective for that timestamp. Bands include the lower threshold and exclude the upper threshold, while the highest band has no upper limit. The canonical dimension value must be one of Entry, Mainstream, Upper-Mid, Premium, Luxury, Unknown, or Not Applicable; currency-formatted ranges such as $500,000–<$1,000,000 are display labels and must not be emitted as the canonical Property Price Band value. Return Unknown when the price or any mandatory classification input is missing, invalid, nonpositive, or cannot be matched to exactly one effective band. Return Not Applicable only when a supported listing status intentionally has no monetary price. Exclude deposits, taxes, utilities, service charges, optional parking, incentives, and transaction fees unless the applicable configuration explicitly includes them. Keep sale and rental schedules separate, preserve previously emitted event-time classifications, and deduplicate repeated updates by listing version and price effective timestamp. For GA4, emit property_price_band as the canonical string value and serialize property_price_band_context as a JSON-encoded string event parameter before collection; extraction logic must not expect a native object in event_params.
+
+Business Use Case: |
+  Revenue Management compares monthly listing supply, qualified leads, and completed transactions by market and Property Price Band. When Entry inventory has high demand but low supply while Premium inventory has weak inquiry conversion, the team can redirect broker acquisition toward lower-priced listings, revise premium pricing guidance, and adjust marketplace merchandising.
+
+
+Source Data: Property Listing Management System, MLS and partner listing feeds, Pricing Configuration Service, approved Foreign Exchange Reference Service, and Digital Analytics
+
+Report Attributes: |
+  ["Property Market","Property Transaction Type","Property Type","Property Location","Listing Status","Acquisition Channel","Device Type","Customer Intent","Lead Status","Calendar Period"]
+
+Dashboard Usage: [Property Marketplace Conversion Funnel, Inventory Supply and Demand, Listing Performance by Price Tier, Lead Generation and Qualification, Market and Pricing Mix, Executive Marketplace Performance]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Property Listing Price, Property Transaction Type, Property Type, Property Market, Property Currency, Property Location, Listing Status, Listing Price per Area, Listing Age Band]
+
+Derived Dimensions: [Property Price Tier Sort Order, Affordable vs Premium Segment, Property Price Band Group, Property Price Band at Lead Creation, Property Price Band at Transaction]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-03T12:30:22.119472+00:00
+
+Last Modified By: devyendarm
+
+
