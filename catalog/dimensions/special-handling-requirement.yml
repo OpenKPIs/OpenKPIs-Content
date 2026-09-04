@@ -1,0 +1,500 @@
+# Dimension: Special Handling Requirement
+# Generated: 2026-09-04T16:30:26.825Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Special Handling Requirement
+
+Description: |
+  Identifies the standardized handling condition a customer selects or that a business rule assigns to an item during discovery, checkout, or order servicing, such as fragile, temperature-controlled, signature required, or oversized. It enables analysis of how handling needs affect conversion, charges, delivery experience, repeat purchase, and customer lifetime value across digital and assisted channels.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  add_shipping_info
+
+Adobe Event: |
+  add_shipping_info
+
+W3 Data Layer: |
+  {"cart":{"item":[{"quantity":1,"attributes":{"specialHandlingRequirement":"fragile"},"productInfo":{"productID":"SKU-12345"}}]},"event":[{"eventInfo":{"eventName":"add_shipping_info","eventAction":"add_shipping_info"},"attributes":{"specialHandlingRequirement":"fragile"}}]}
+
+GA4 Data Layer: |
+  {"event":"add_shipping_info","ecommerce":{"items":[{"price":49.99,"item_id":"SKU-12345","quantity":1,"item_name":"Example Item","special_handling_requirement":"fragile"}],"value":49.99,"currency":"USD","shipping_tier":"standard"}}
+
+Adobe Client Data Layer: |
+  {"data":{"commerce":{"items":[{"SKU":"SKU-12345","name":"Example Item","quantity":1,"priceTotal":49.99,"specialHandlingRequirement":"fragile"}],"currencyCode":"USD","shippingTier":"standard"},"eventInfo":{"eventName":"add_shipping_info"}},"event":"add_shipping_info"}
+
+XDM Mapping: |
+  {"commerce":{"checkouts":{"value":1}},"eventType":"commerce.checkouts","productListItems":[{"SKU":"SKU-12345","name":"Example Item","quantity":1,"priceTotal":49.99,"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"fragile"}}}}}]}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH extracted AS (
+    SELECT
+      e.event_name,
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      TIMESTAMP_MICROS(e.event_timestamp) AS event_timestamp,
+      e.user_pseudo_id AS user_id,
+      CAST((
+        SELECT ep.value.int_value
+        FROM UNNEST(e.event_params) AS ep
+        WHERE ep.key = 'ga_session_id'
+        LIMIT 1
+      ) AS STRING) AS session_id,
+      (
+        SELECT ARRAY_AGG(
+          COALESCE(
+            ep.value.string_value,
+            CAST(ep.value.int_value AS STRING),
+            CAST(ep.value.double_value AS STRING),
+            CAST(ep.value.float_value AS STRING)
+          ) IGNORE NULLS LIMIT 1
+        )[SAFE_OFFSET(0)]
+        FROM UNNEST(e.event_params) AS ep
+        WHERE ep.key IN ('transaction_id', 'order_id')
+      ) AS transaction_id,
+      COALESCE(
+        i.item_id,
+        (
+          SELECT ep.value.string_value
+          FROM UNNEST(e.event_params) AS ep
+          WHERE ep.key IN ('item_id', 'sku')
+          LIMIT 1
+        )
+      ) AS item_id,
+      i.item_name,
+      COALESCE(
+        i.item_params,
+        ARRAY<STRUCT<key STRING, value STRUCT<string_value STRING, int_value INT64, float_value FLOAT64, double_value FLOAT64>> >[]
+      ) AS item_params,
+      COALESCE(
+        i.currency,
+        (
+          SELECT ep.value.string_value
+          FROM UNNEST(e.event_params) AS ep
+          WHERE ep.key = 'currency'
+          LIMIT 1
+        )
+      ) AS currency,
+      (
+        SELECT ep.value.string_value
+        FROM UNNEST(e.event_params) AS ep
+        WHERE ep.key = 'shipping_tier'
+        LIMIT 1
+      ) AS shipping_tier,
+      COALESCE(i.quantity, 1) AS quantity,
+      COALESCE(i.price * COALESCE(i.quantity, 1), i.item_revenue, i.price) AS item_value,
+      COALESCE(
+        (
+          SELECT ARRAY_AGG(
+            COALESCE(
+              ip.value.string_value,
+              CAST(ip.value.int_value AS STRING),
+              CAST(ip.value.double_value AS STRING),
+              CAST(ip.value.float_value AS STRING)
+            ) IGNORE NULLS LIMIT 1
+          )[SAFE_OFFSET(0)]
+          FROM UNNEST(i.item_params) AS ip
+          WHERE ip.key IN (
+            'special_handling_requirement',
+            'specialHandlingRequirement',
+            'special_handling'
+          )
+        ),
+        (
+          SELECT ARRAY_AGG(
+            COALESCE(
+              ep.value.string_value,
+              CAST(ep.value.int_value AS STRING),
+              CAST(ep.value.double_value AS STRING),
+              CAST(ep.value.float_value AS STRING)
+            ) IGNORE NULLS LIMIT 1
+          )[SAFE_OFFSET(0)]
+          FROM UNNEST(e.event_params) AS ep
+          WHERE ep.key IN (
+            'special_handling_requirement',
+            'specialHandlingRequirement',
+            'special_handling'
+          )
+        )
+      ) AS source_value,
+      SAFE_CAST((
+        SELECT COALESCE(
+          ep.value.double_value,
+          ep.value.float_value,
+          CAST(ep.value.int_value AS FLOAT64),
+          SAFE_CAST(ep.value.string_value AS FLOAT64)
+        )
+        FROM UNNEST(e.event_params) AS ep
+        WHERE ep.key = 'special_handling_temperature_min_c'
+        LIMIT 1
+      ) AS FLOAT64) AS temperature_min_c,
+      SAFE_CAST((
+        SELECT COALESCE(
+          ep.value.double_value,
+          ep.value.float_value,
+          CAST(ep.value.int_value AS FLOAT64),
+          SAFE_CAST(ep.value.string_value AS FLOAT64)
+        )
+        FROM UNNEST(e.event_params) AS ep
+        WHERE ep.key = 'special_handling_temperature_max_c'
+        LIMIT 1
+      ) AS FLOAT64) AS temperature_max_c,
+      (
+        SELECT ep.value.string_value
+        FROM UNNEST(e.event_params) AS ep
+        WHERE ep.key IN ('special_handling_instructions', 'handling_instructions')
+        LIMIT 1
+      ) AS handling_instructions
+    FROM `your-project.analytics_123456789.events_*` AS e
+    LEFT JOIN UNNEST(e.items) AS i
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY))
+                            AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND e.event_name IN ('add_shipping_info', 'begin_checkout', 'purchase')
+  ),
+  normalized AS (
+    SELECT
+      *,
+      REGEXP_REPLACE(
+        REGEXP_REPLACE(LOWER(TRIM(source_value)), r'[^a-z0-9]+', '_'),
+        r'^_+|_+$',
+        ''
+      ) AS normalized_value
+    FROM extracted
+    WHERE NULLIF(TRIM(source_value), '') IS NOT NULL
+  ),
+  canonical AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_value IN ('fragile', 'handle_with_care', 'breakable') THEN 'fragile'
+        WHEN normalized_value IN ('hazardous', 'hazmat', 'dangerous_goods') THEN 'hazardous_material'
+        WHEN normalized_value IN ('refrigerated', 'chilled', 'keep_refrigerated') THEN 'refrigerated'
+        WHEN normalized_value IN ('frozen', 'keep_frozen') THEN 'frozen'
+        WHEN normalized_value IN ('oversized', 'over_size', 'large_item') THEN 'oversized'
+        WHEN normalized_value IN ('heavy', 'heavy_item', 'heavyweight') THEN 'heavy'
+        WHEN normalized_value IN ('signature', 'signature_required') THEN 'signature_required'
+        WHEN normalized_value IN ('adult_signature', 'adult_signature_required') THEN 'adult_signature_required'
+        WHEN normalized_value IN ('white_glove', 'white_glove_delivery') THEN 'white_glove'
+        WHEN normalized_value IN ('none', 'no_special_handling', 'not_required', 'standard') THEN 'none'
+        ELSE normalized_value
+      END AS requirement_code
+    FROM normalized
+  ),
+  classified AS (
+    SELECT
+      *,
+      REGEXP_CONTAINS(normalized_value, r'fragile|breakable|handle_with_care') AS is_fragile,
+      REGEXP_CONTAINS(normalized_value, r'hazard|hazmat|dangerous_goods') AS is_hazardous,
+      REGEXP_CONTAINS(normalized_value, r'refrigerat|chilled') AS is_refrigerated,
+      REGEXP_CONTAINS(normalized_value, r'frozen|keep_frozen') AS is_frozen,
+      REGEXP_CONTAINS(normalized_value, r'temperature|temp_control|cold_chain|refrigerat|chilled|frozen') AS is_temperature_controlled,
+      REGEXP_CONTAINS(normalized_value, r'oversized|over_size|large_item') AS is_oversized,
+      REGEXP_CONTAINS(normalized_value, r'heavy|heavyweight|two_person_lift') AS is_heavy,
+      REGEXP_CONTAINS(normalized_value, r'high_value|valuable') AS is_high_value,
+      REGEXP_CONTAINS(normalized_value, r'signature') AS is_signature_required,
+      REGEXP_CONTAINS(normalized_value, r'adult_signature') AS is_adult_signature_required,
+      REGEXP_CONTAINS(normalized_value, r'insur') AS is_insured,
+      REGEXP_CONTAINS(normalized_value, r'keep_upright|this_side_up') AS is_keep_upright,
+      REGEXP_CONTAINS(normalized_value, r'do_not_stack|non_stackable') AS is_do_not_stack,
+      REGEXP_CONTAINS(normalized_value, r'lithium|battery') AS is_lithium_battery,
+      REGEXP_CONTAINS(normalized_value, r'perishable') AS is_perishable,
+      REGEXP_CONTAINS(normalized_value, r'live_animal') AS is_live_animal,
+      REGEXP_CONTAINS(normalized_value, r'medical|pharma|clinical') AS is_medical,
+      REGEXP_CONTAINS(normalized_value, r'white_glove') AS is_white_glove,
+      REGEXP_CONTAINS(normalized_value, r'two_person|two_man') AS is_two_person_lift,
+      REGEXP_CONTAINS(normalized_value, r'limited_quantity') AS is_limited_quantity,
+      REGEXP_CONTAINS(normalized_value, r'dry_ice') AS is_dry_ice
+    FROM canonical
+  )
+  SELECT
+    TO_HEX(MD5(CONCAT('special_handling_requirement|', requirement_code))) AS special_handling_requirement_key,
+    requirement_code,
+    INITCAP(REPLACE(requirement_code, '_', ' ')) AS requirement_name,
+    CASE
+      WHEN is_hazardous OR is_lithium_battery OR is_limited_quantity OR is_dry_ice THEN 'regulated_material'
+      WHEN is_temperature_controlled OR is_perishable THEN 'temperature_and_perishability'
+      WHEN is_fragile OR is_keep_upright OR is_do_not_stack THEN 'handling_care'
+      WHEN is_oversized OR is_heavy OR is_two_person_lift THEN 'size_and_weight'
+      WHEN is_signature_required OR is_high_value OR is_insured THEN 'security_and_verification'
+      WHEN is_white_glove THEN 'delivery_service'
+      WHEN requirement_code = 'none' THEN 'none'
+      ELSE 'other'
+    END AS requirement_category,
+    CONCAT('Special handling requirement: ', INITCAP(REPLACE(requirement_code, '_', ' '))) AS requirement_description,
+    source_value,
+    normalized_value,
+    requirement_code != 'none' AS is_special_handling_required,
+    is_fragile,
+    is_hazardous,
+    is_refrigerated,
+    is_frozen,
+    is_temperature_controlled,
+    is_oversized,
+    is_heavy,
+    is_high_value,
+    is_signature_required,
+    is_adult_signature_required,
+    is_insured,
+    is_keep_upright,
+    is_do_not_stack,
+    is_lithium_battery,
+    is_perishable,
+    is_live_animal,
+    is_medical,
+    is_white_glove,
+    is_two_person_lift,
+    is_limited_quantity,
+    is_dry_ice,
+    NOT (
+      is_fragile OR is_hazardous OR is_refrigerated OR is_frozen OR
+      is_temperature_controlled OR is_oversized OR is_heavy OR is_high_value OR
+      is_signature_required OR is_insured OR is_keep_upright OR is_do_not_stack OR
+      is_lithium_battery OR is_perishable OR is_live_animal OR is_medical OR
+      is_white_glove OR is_two_person_lift OR is_limited_quantity OR is_dry_ice OR
+      requirement_code = 'none'
+    ) AS is_other,
+    CASE
+      WHEN is_hazardous OR is_live_animal OR is_medical OR is_lithium_battery THEN 'critical'
+      WHEN is_temperature_controlled OR is_fragile OR is_high_value THEN 'high'
+      WHEN is_oversized OR is_heavy OR is_signature_required OR is_white_glove THEN 'medium'
+      WHEN requirement_code = 'none' THEN 'none'
+      ELSE 'standard'
+    END AS handling_priority,
+    temperature_min_c,
+    temperature_max_c,
+    handling_instructions,
+    item_id,
+    item_name,
+    currency,
+    shipping_tier,
+    quantity,
+    item_value,
+    event_name,
+    event_date,
+    event_timestamp,
+    user_id,
+    session_id,
+    transaction_id,
+    'GA4' AS source_system,
+    event_timestamp AS effective_from_timestamp,
+    CURRENT_TIMESTAMP() AS record_created_timestamp
+  FROM classified;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH exploded_events AS (
+    SELECT
+      eventType AS event_type,
+      timestamp AS event_timestamp,
+      _id AS experience_event_id,
+      commerce.order.currencyCode AS currency,
+      commerce.order.purchaseID AS transaction_id,
+      EXPLODE(productListItems) AS item
+    FROM your_aep_database.your_xdm_experience_event_dataset
+    WHERE eventType IN ('commerce.checkouts', 'commerce.purchases')
+      AND timestamp >= CURRENT_TIMESTAMP - INTERVAL '90' DAY
+  ),
+  extracted AS (
+    SELECT
+      event_type,
+      CAST(event_timestamp AS DATE) AS event_date,
+      event_timestamp,
+      CAST(NULL AS VARCHAR) AS user_id,
+      CAST(NULL AS VARCHAR) AS session_id,
+      transaction_id,
+      item.SKU AS item_id,
+      item.name AS item_name,
+      currency,
+      CAST(NULL AS VARCHAR) AS shipping_tier,
+      COALESCE(item.quantity, 1) AS quantity,
+      item.priceTotal AS item_value,
+      item._experience.analytics.customDimensions.eVars.eVar1 AS source_value,
+      CAST(NULL AS DECIMAL(10,2)) AS temperature_min_c,
+      CAST(NULL AS DECIMAL(10,2)) AS temperature_max_c,
+      CAST(NULL AS VARCHAR) AS handling_instructions
+    FROM exploded_events
+  ),
+  normalized AS (
+    SELECT
+      *,
+      REGEXP_REPLACE(
+        REGEXP_REPLACE(LOWER(TRIM(source_value)), '[^a-z0-9]+', '_'),
+        '^_+|_+$',
+        ''
+      ) AS normalized_value
+    FROM extracted
+    WHERE source_value IS NOT NULL
+      AND TRIM(source_value) <> ''
+  ),
+  canonical AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_value IN ('fragile', 'handle_with_care', 'breakable') THEN 'fragile'
+        WHEN normalized_value IN ('hazardous', 'hazmat', 'dangerous_goods') THEN 'hazardous_material'
+        WHEN normalized_value IN ('refrigerated', 'chilled', 'keep_refrigerated') THEN 'refrigerated'
+        WHEN normalized_value IN ('frozen', 'keep_frozen') THEN 'frozen'
+        WHEN normalized_value IN ('oversized', 'over_size', 'large_item') THEN 'oversized'
+        WHEN normalized_value IN ('heavy', 'heavy_item', 'heavyweight') THEN 'heavy'
+        WHEN normalized_value IN ('signature', 'signature_required') THEN 'signature_required'
+        WHEN normalized_value IN ('adult_signature', 'adult_signature_required') THEN 'adult_signature_required'
+        WHEN normalized_value IN ('white_glove', 'white_glove_delivery') THEN 'white_glove'
+        WHEN normalized_value IN ('none', 'no_special_handling', 'not_required', 'standard') THEN 'none'
+        ELSE normalized_value
+      END AS requirement_code
+    FROM normalized
+  ),
+  classified AS (
+    SELECT
+      *,
+      REGEXP_LIKE(normalized_value, 'fragile|breakable|handle_with_care') AS is_fragile,
+      REGEXP_LIKE(normalized_value, 'hazard|hazmat|dangerous_goods') AS is_hazardous,
+      REGEXP_LIKE(normalized_value, 'refrigerat|chilled') AS is_refrigerated,
+      REGEXP_LIKE(normalized_value, 'frozen|keep_frozen') AS is_frozen,
+      REGEXP_LIKE(normalized_value, 'temperature|temp_control|cold_chain|refrigerat|chilled|frozen') AS is_temperature_controlled,
+      REGEXP_LIKE(normalized_value, 'oversized|over_size|large_item') AS is_oversized,
+      REGEXP_LIKE(normalized_value, 'heavy|heavyweight|two_person_lift') AS is_heavy,
+      REGEXP_LIKE(normalized_value, 'high_value|valuable') AS is_high_value,
+      REGEXP_LIKE(normalized_value, 'signature') AS is_signature_required,
+      REGEXP_LIKE(normalized_value, 'adult_signature') AS is_adult_signature_required,
+      REGEXP_LIKE(normalized_value, 'insur') AS is_insured,
+      REGEXP_LIKE(normalized_value, 'keep_upright|this_side_up') AS is_keep_upright,
+      REGEXP_LIKE(normalized_value, 'do_not_stack|non_stackable') AS is_do_not_stack,
+      REGEXP_LIKE(normalized_value, 'lithium|battery') AS is_lithium_battery,
+      REGEXP_LIKE(normalized_value, 'perishable') AS is_perishable,
+      REGEXP_LIKE(normalized_value, 'live_animal') AS is_live_animal,
+      REGEXP_LIKE(normalized_value, 'medical|pharma|clinical') AS is_medical,
+      REGEXP_LIKE(normalized_value, 'white_glove') AS is_white_glove,
+      REGEXP_LIKE(normalized_value, 'two_person|two_man') AS is_two_person_lift,
+      REGEXP_LIKE(normalized_value, 'limited_quantity') AS is_limited_quantity,
+      REGEXP_LIKE(normalized_value, 'dry_ice') AS is_dry_ice
+    FROM canonical
+  )
+  SELECT
+    MD5(CONCAT('special_handling_requirement|', requirement_code)) AS special_handling_requirement_key,
+    requirement_code,
+    INITCAP(REPLACE(requirement_code, '_', ' ')) AS requirement_name,
+    CASE
+      WHEN is_hazardous OR is_lithium_battery OR is_limited_quantity OR is_dry_ice THEN 'regulated_material'
+      WHEN is_temperature_controlled OR is_perishable THEN 'temperature_and_perishability'
+      WHEN is_fragile OR is_keep_upright OR is_do_not_stack THEN 'handling_care'
+      WHEN is_oversized OR is_heavy OR is_two_person_lift THEN 'size_and_weight'
+      WHEN is_signature_required OR is_high_value OR is_insured THEN 'security_and_verification'
+      WHEN is_white_glove THEN 'delivery_service'
+      WHEN requirement_code = 'none' THEN 'none'
+      ELSE 'other'
+    END AS requirement_category,
+    CONCAT('Special handling requirement: ', INITCAP(REPLACE(requirement_code, '_', ' '))) AS requirement_description,
+    source_value,
+    normalized_value,
+    CASE WHEN requirement_code <> 'none' THEN TRUE ELSE FALSE END AS is_special_handling_required,
+    is_fragile,
+    is_hazardous,
+    is_refrigerated,
+    is_frozen,
+    is_temperature_controlled,
+    is_oversized,
+    is_heavy,
+    is_high_value,
+    is_signature_required,
+    is_adult_signature_required,
+    is_insured,
+    is_keep_upright,
+    is_do_not_stack,
+    is_lithium_battery,
+    is_perishable,
+    is_live_animal,
+    is_medical,
+    is_white_glove,
+    is_two_person_lift,
+    is_limited_quantity,
+    is_dry_ice,
+    NOT (
+      is_fragile OR is_hazardous OR is_refrigerated OR is_frozen OR
+      is_temperature_controlled OR is_oversized OR is_heavy OR is_high_value OR
+      is_signature_required OR is_insured OR is_keep_upright OR is_do_not_stack OR
+      is_lithium_battery OR is_perishable OR is_live_animal OR is_medical OR
+      is_white_glove OR is_two_person_lift OR is_limited_quantity OR is_dry_ice OR
+      requirement_code = 'none'
+    ) AS is_other,
+    CASE
+      WHEN is_hazardous OR is_live_animal OR is_medical OR is_lithium_battery THEN 'critical'
+      WHEN is_temperature_controlled OR is_fragile OR is_high_value THEN 'high'
+      WHEN is_oversized OR is_heavy OR is_signature_required OR is_white_glove THEN 'medium'
+      WHEN requirement_code = 'none' THEN 'none'
+      ELSE 'standard'
+    END AS handling_priority,
+    temperature_min_c,
+    temperature_max_c,
+    handling_instructions,
+    item_id,
+    item_name,
+    currency,
+    shipping_tier,
+    quantity,
+    item_value,
+    event_type AS event_name,
+    event_date,
+    event_timestamp,
+    user_id,
+    session_id,
+    transaction_id,
+    'ADOBE_AEP' AS source_system,
+    event_timestamp AS effective_from_timestamp,
+    CURRENT_TIMESTAMP AS record_created_timestamp
+  FROM classified;
+
+Calculation Notes: |
+  Use a governed canonical value set and map channel-specific labels to values such as none, fragile, temperature_controlled, signature_required, age_verification, hazardous_restricted, oversized, high_value_secure, keep_upright, or other. Record one value per item-requirement combination when multiple requirements apply; deduplicate repeated selections for the same item, order, and requirement. Preserve the value effective when checkout is submitted and separately capture later additions or removals as service events rather than overwriting history. Use none only when the source explicitly confirms that no special handling is required; use unknown when the attribute was not collected, unavailable, or could not be mapped. Exclude free-text delivery instructions, customer names, addresses, access codes, and courier operational notes. For abandoned journeys, retain selections made before the session ends using the digital analytics session definition, normally 30 minutes of inactivity, and do not infer a requirement solely from product category unless an approved business rule assigned it.
+
+Business Use Case: |
+  The Product and Customer Experience teams compare checkout completion, handling-charge acceptance, delivery exceptions, support contacts, returns, repeat purchase, and lifetime value by requirement. If temperature-controlled orders show elevated checkout abandonment after fees are displayed, the team can test earlier fee disclosure, clearer eligibility messaging, or alternative fulfillment options and monitor the affected customer segment after release.
+
+
+Source Data: Digital Analytics (GA4 or Adobe Analytics) stitched with e-commerce checkout, order management, CRM-assisted order, customer service, billing, and carrier status data
+
+Report Attributes: |
+  ["Customer Channel","Journey Stage","Checkout Step","Product Category","Delivery Method","Fulfillment Option","Special Handling Requirement Group","Special Handling Complexity Tier","Handling Charge Status","Customer Segment","New or Returning Customer","Order Status","Delivery Status","Return Reason","Geographic Market","Device Type","Acquisition Source"]
+
+Dashboard Usage: [Omnichannel Checkout Conversion, Special Handling Customer Journey, Delivery Experience and Retention, Handling Fee Acceptance, Order Exception and Customer Contact, Product Eligibility and Fulfillment, Customer Lifetime Value by Service Need]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Product, Product Category, Order, Shipment, Delivery Method, Fulfillment Option, Customer Channel, Checkout Step, Customer Segment, Delivery Status, Return Reason, Service Level]
+
+Derived Dimensions: [Special Handling Requirement Group, Special Handling Complexity Tier, Special Handling Charge Applicability, Temperature Control Indicator, Signature Requirement Indicator, Fragile Item Indicator, Handling Requirement Count Band]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-04T16:30:26.402468+00:00
+
+Last Modified By: devyendarm
+
+
