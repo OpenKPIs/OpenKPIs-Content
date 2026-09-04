@@ -1,0 +1,773 @@
+# Metric: Listing Inquiry Response Time
+# Generated: 2026-09-04T12:30:19.011Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Listing Inquiry Response Time
+Formula: SUM(TIMESTAMP_DIFF(first_qualifying_human_response_at, inquiry_created_at, SECOND)) / (60.0 * COUNT(DISTINCT inquiry_id)) WHERE inquiry_eligibility_flag = TRUE AND first_qualifying_human_response_at IS NOT NULL AND first_qualifying_human_response_at >= inquiry_created_at
+
+Description: |
+  Measures the average calendar minutes between platform acceptance of an eligible property-listing inquiry and the first qualifying human response from a representative authorized for that listing. Only inquiries receiving a qualifying response are included in the average; unanswered inquiries remain in response-rate and SLA monitoring.
+
+Category: Performance
+
+Tags: [metric]
+
+Industry: Technology
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Measure Type: average
+
+Aggregation Window: Time based - Daily
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH params AS (
+    SELECT
+      CURRENT_TIMESTAMP() AS as_of_ts,
+      DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY) AS cutoff_date
+  ),
+  ranked_inquiries AS (
+    SELECT
+      q.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY q.inquiry_id
+        ORDER BY q.ingestion_timestamp DESC
+      ) AS record_rank
+    FROM `your-project.crm_marketplace.inquiries` q
+    CROSS JOIN params p
+    WHERE q.inquiry_id IS NOT NULL
+      AND q.created_at IS NOT NULL
+      AND DATE(q.created_at) >= p.cutoff_date
+      AND q.created_at <= p.as_of_ts
+  ),
+  deduplicated_inquiries AS (
+    SELECT
+      inquiry_id,
+      lead_id,
+      external_inquiry_id,
+      created_at AS inquiry_created_at,
+      source_system,
+      marketplace_id,
+      inquiry_channel,
+      inquiry_type,
+      subject AS inquiry_subject,
+      priority AS inquiry_priority,
+      locale,
+      device_category,
+      campaign_id,
+      marketing_source,
+      marketing_medium,
+      marketing_campaign,
+      customer_id,
+      customer_email_hash,
+      customer_phone_hash,
+      consent_status,
+      listing_id,
+      assigned_agent_id,
+      submitted_during_business_hours,
+      response_sla_seconds,
+      closed_at AS inquiry_closed_at,
+      ingestion_timestamp
+    FROM ranked_inquiries
+    WHERE record_rank = 1
+      AND COALESCE(is_test, FALSE) = FALSE
+      AND LOWER(COALESCE(record_classification, 'valid')) NOT IN ('spam', 'duplicate', 'invalid')
+  ),
+  inquiries AS (
+    SELECT
+      d.*,
+      CASE
+        WHEN d.lead_id IS NULL THEN NULL
+        ELSE LEAD(d.inquiry_created_at) OVER (
+          PARTITION BY d.lead_id
+          ORDER BY d.inquiry_created_at, d.inquiry_id
+        )
+      END AS next_inquiry_at,
+      CASE
+        WHEN d.response_sla_seconds IS NULL OR d.response_sla_seconds <= 0 THEN 86400
+        ELSE d.response_sla_seconds
+      END AS effective_response_sla_seconds
+    FROM deduplicated_inquiries d
+  ),
+  ranked_assignments AS (
+    SELECT
+      i.inquiry_id,
+      r.agent_id,
+      r.assigned_at,
+      r.queue_id,
+      r.routing_rule_id,
+      r.routing_method,
+      ROW_NUMBER() OVER (
+        PARTITION BY i.inquiry_id
+        ORDER BY r.assigned_at, r.routing_event_id
+      ) AS assignment_rank
+    FROM inquiries i
+    JOIN `your-project.lead_routing.routing_events` r
+      ON r.inquiry_id = i.inquiry_id
+      OR (
+        r.inquiry_id IS NULL
+        AND i.lead_id IS NOT NULL
+        AND r.lead_id = i.lead_id
+      )
+    CROSS JOIN params p
+    WHERE LOWER(r.routing_action) IN ('assigned', 'reassigned', 'accepted')
+      AND r.assigned_at IS NOT NULL
+      AND r.assigned_at >= i.inquiry_created_at
+      AND r.assigned_at <= p.as_of_ts
+      AND r.assigned_at < LEAST(
+        COALESCE(i.next_inquiry_at, TIMESTAMP_ADD(i.inquiry_created_at, INTERVAL 30 DAY)),
+        TIMESTAMP_ADD(i.inquiry_created_at, INTERVAL 30 DAY)
+      )
+      AND (i.inquiry_closed_at IS NULL OR r.assigned_at <= i.inquiry_closed_at)
+  ),
+  first_assignment AS (
+    SELECT
+      inquiry_id,
+      agent_id,
+      assigned_at,
+      queue_id,
+      routing_rule_id,
+      routing_method
+    FROM ranked_assignments
+    WHERE assignment_rank = 1
+  ),
+  response_candidates AS (
+    SELECT DISTINCT
+      CAST(m.message_id AS STRING) AS response_event_id,
+      m.inquiry_id,
+      m.lead_id,
+      m.sent_at AS response_at,
+      'messaging' AS response_channel,
+      CAST(m.sender_id AS STRING) AS response_actor_id
+    FROM `your-project.messaging.message_events` m
+    CROSS JOIN params p
+    WHERE LOWER(m.direction) = 'outbound'
+      AND LOWER(m.sender_role) IN ('agent', 'broker', 'advertiser', 'property_manager')
+      AND LOWER(m.delivery_status) IN ('sent', 'delivered', 'read')
+      AND COALESCE(m.is_automated, FALSE) = FALSE
+      AND COALESCE(m.is_internal, FALSE) = FALSE
+      AND m.sent_at IS NOT NULL
+      AND DATE(m.sent_at) >= p.cutoff_date
+      AND m.sent_at <= p.as_of_ts
+  
+    UNION ALL
+  
+    SELECT DISTINCT
+      CAST(c.call_id AS STRING) AS response_event_id,
+      c.inquiry_id,
+      c.lead_id,
+      c.started_at AS response_at,
+      'phone' AS response_channel,
+      CAST(c.agent_id AS STRING) AS response_actor_id
+    FROM `your-project.telephony.call_events` c
+    CROSS JOIN params p
+    WHERE LOWER(c.direction) = 'outbound'
+      AND LOWER(c.call_status) IN ('initiated', 'ringing', 'connected', 'completed', 'no_answer', 'voicemail')
+      AND COALESCE(c.is_test, FALSE) = FALSE
+      AND COALESCE(c.is_internal, FALSE) = FALSE
+      AND c.started_at IS NOT NULL
+      AND DATE(c.started_at) >= p.cutoff_date
+      AND c.started_at <= p.as_of_ts
+  ),
+  ranked_responses AS (
+    SELECT
+      i.inquiry_id,
+      c.response_event_id,
+      c.response_at,
+      c.response_channel,
+      c.response_actor_id,
+      ROW_NUMBER() OVER (
+        PARTITION BY i.inquiry_id
+        ORDER BY
+          c.response_at,
+          c.response_channel,
+          c.response_event_id,
+          c.response_actor_id
+      ) AS response_rank
+    FROM inquiries i
+    JOIN response_candidates c
+      ON c.inquiry_id = i.inquiry_id
+      OR (
+        c.inquiry_id IS NULL
+        AND i.lead_id IS NOT NULL
+        AND c.lead_id = i.lead_id
+      )
+    WHERE c.response_at >= i.inquiry_created_at
+      AND c.response_at < LEAST(
+        COALESCE(i.next_inquiry_at, TIMESTAMP_ADD(i.inquiry_created_at, INTERVAL 30 DAY)),
+        TIMESTAMP_ADD(i.inquiry_created_at, INTERVAL 30 DAY)
+      )
+      AND (i.inquiry_closed_at IS NULL OR c.response_at <= i.inquiry_closed_at)
+  ),
+  first_response AS (
+    SELECT
+      inquiry_id,
+      response_event_id,
+      response_at,
+      response_channel,
+      response_actor_id
+    FROM ranked_responses
+    WHERE response_rank = 1
+  ),
+  listing_dimension AS (
+    SELECT
+      listing_id,
+      external_listing_id,
+      listing_type,
+      listing_status,
+      property_type,
+      market_id,
+      city,
+      region,
+      country,
+      postal_code,
+      time_zone,
+      brokerage_id,
+      advertiser_account_id
+    FROM `your-project.listing_management.listings`
+    WHERE listing_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY listing_id
+      ORDER BY updated_at DESC
+    ) = 1
+  ),
+  metric_base AS (
+    SELECT
+      i.*,
+      l.external_listing_id,
+      l.listing_type,
+      l.listing_status,
+      l.property_type,
+      l.market_id,
+      l.city AS listing_city,
+      l.region AS listing_region,
+      l.country AS listing_country,
+      l.postal_code AS listing_postal_code,
+      COALESCE(l.time_zone, 'UTC') AS listing_time_zone,
+      l.brokerage_id,
+      l.advertiser_account_id,
+      l.listing_id AS matched_listing_id,
+      COALESCE(a.agent_id, i.assigned_agent_id) AS effective_assigned_agent_id,
+      a.assigned_at AS assignment_at,
+      a.queue_id AS routing_queue_id,
+      a.routing_rule_id,
+      a.routing_method,
+      r.response_at AS first_response_at,
+      r.response_event_id,
+      r.response_channel,
+      r.response_actor_id,
+      IF(
+        r.response_at IS NULL,
+        NULL,
+        TIMESTAMP_DIFF(r.response_at, i.inquiry_created_at, SECOND)
+      ) AS response_time_seconds,
+      IF(
+        a.assigned_at IS NULL OR r.response_at IS NULL,
+        NULL,
+        TIMESTAMP_DIFF(r.response_at, a.assigned_at, SECOND)
+      ) AS assignment_to_response_seconds,
+      p.as_of_ts
+    FROM inquiries i
+    LEFT JOIN first_assignment a
+      ON a.inquiry_id = i.inquiry_id
+    LEFT JOIN first_response r
+      ON r.inquiry_id = i.inquiry_id
+    LEFT JOIN listing_dimension l
+      ON l.listing_id = i.listing_id
+    CROSS JOIN params p
+  )
+  SELECT
+    'listing_inquiry_response_time' AS metric_name,
+    'seconds' AS metric_unit,
+    inquiry_id,
+    lead_id,
+    external_inquiry_id,
+    inquiry_created_at,
+    DATE(inquiry_created_at) AS inquiry_date,
+    DATE_TRUNC(DATE(inquiry_created_at), WEEK(MONDAY)) AS inquiry_week,
+    DATE_TRUNC(DATE(inquiry_created_at), MONTH) AS inquiry_month,
+    source_system,
+    marketplace_id,
+    inquiry_channel,
+    inquiry_type,
+    inquiry_subject,
+    inquiry_priority,
+    locale,
+    device_category,
+    campaign_id,
+    marketing_source,
+    marketing_medium,
+    marketing_campaign,
+    customer_id,
+    customer_email_hash,
+    customer_phone_hash,
+    consent_status,
+    listing_id,
+    external_listing_id,
+    listing_type,
+    listing_status,
+    property_type,
+    market_id,
+    listing_city,
+    listing_region,
+    listing_country,
+    listing_postal_code,
+    listing_time_zone,
+    brokerage_id,
+    advertiser_account_id,
+    effective_assigned_agent_id AS assigned_agent_id,
+    assignment_at,
+    routing_queue_id,
+    routing_rule_id,
+    routing_method,
+    first_response_at,
+    DATE(first_response_at) AS first_response_date,
+    response_event_id,
+    response_channel,
+    response_actor_id,
+    response_time_seconds,
+    IF(response_time_seconds IS NULL, NULL, ROUND(response_time_seconds / 60.0, 2)) AS response_time_minutes,
+    IF(response_time_seconds IS NULL, NULL, ROUND(response_time_seconds / 3600.0, 2)) AS response_time_hours,
+    assignment_to_response_seconds,
+    first_response_at IS NOT NULL AS is_responded,
+    CASE
+      WHEN first_response_at IS NOT NULL THEN 'responded'
+      WHEN inquiry_closed_at IS NOT NULL AND inquiry_closed_at <= as_of_ts THEN 'closed_unresponded'
+      WHEN TIMESTAMP_DIFF(as_of_ts, inquiry_created_at, SECOND) > effective_response_sla_seconds THEN 'overdue'
+      ELSE 'pending'
+    END AS response_status,
+    effective_response_sla_seconds AS response_sla_target_seconds,
+    CASE
+      WHEN first_response_at IS NOT NULL THEN response_time_seconds <= effective_response_sla_seconds
+      WHEN inquiry_closed_at IS NOT NULL AND inquiry_closed_at <= as_of_ts THEN FALSE
+      WHEN TIMESTAMP_DIFF(as_of_ts, inquiry_created_at, SECOND) > effective_response_sla_seconds THEN FALSE
+      ELSE NULL
+    END AS response_sla_met_flag,
+    submitted_during_business_hours AS inquiry_business_hours_flag,
+    TIMESTAMP_DIFF(as_of_ts, inquiry_created_at, SECOND) AS inquiry_age_seconds,
+    inquiry_closed_at,
+    CASE
+      WHEN inquiry_closed_at IS NOT NULL AND inquiry_closed_at < inquiry_created_at THEN 'invalid_close_before_inquiry'
+      WHEN first_response_at IS NOT NULL AND response_time_seconds < 0 THEN 'invalid_negative_duration'
+      WHEN assignment_to_response_seconds IS NOT NULL AND assignment_to_response_seconds < 0 THEN 'response_before_assignment'
+      WHEN response_sla_seconds IS NOT NULL AND response_sla_seconds <= 0 THEN 'invalid_sla_target'
+      WHEN listing_id IS NULL THEN 'missing_listing_id'
+      WHEN matched_listing_id IS NULL THEN 'listing_not_found'
+      WHEN effective_assigned_agent_id IS NULL THEN 'missing_assignment'
+      ELSE 'valid'
+    END AS data_quality_status,
+    as_of_ts AS extracted_at
+  FROM metric_base;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    SELECT
+      CURRENT_TIMESTAMP AS as_of_ts,
+      CURRENT_DATE - INTERVAL '90' DAY AS cutoff_date
+  ),
+  ranked_inquiries AS (
+    SELECT
+      q.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY q.inquiry_id
+        ORDER BY q.ingestion_timestamp DESC
+      ) AS record_rank
+    FROM crm_marketplace_inquiries q
+    CROSS JOIN params p
+    WHERE q.inquiry_id IS NOT NULL
+      AND q.created_at IS NOT NULL
+      AND CAST(q.created_at AS DATE) >= p.cutoff_date
+      AND q.created_at <= p.as_of_ts
+  ),
+  deduplicated_inquiries AS (
+    SELECT
+      inquiry_id,
+      lead_id,
+      external_inquiry_id,
+      created_at AS inquiry_created_at,
+      source_system,
+      marketplace_id,
+      inquiry_channel,
+      inquiry_type,
+      subject AS inquiry_subject,
+      priority AS inquiry_priority,
+      locale,
+      device_category,
+      campaign_id,
+      marketing_source,
+      marketing_medium,
+      marketing_campaign,
+      customer_id,
+      customer_email_hash,
+      customer_phone_hash,
+      consent_status,
+      listing_id,
+      assigned_agent_id,
+      submitted_during_business_hours,
+      response_sla_seconds,
+      closed_at AS inquiry_closed_at,
+      ingestion_timestamp
+    FROM ranked_inquiries
+    WHERE record_rank = 1
+      AND COALESCE(is_test, FALSE) = FALSE
+      AND LOWER(COALESCE(record_classification, 'valid')) NOT IN ('spam', 'duplicate', 'invalid')
+  ),
+  inquiries AS (
+    SELECT
+      d.*,
+      CASE
+        WHEN d.lead_id IS NULL THEN NULL
+        ELSE LEAD(d.inquiry_created_at) OVER (
+          PARTITION BY d.lead_id
+          ORDER BY d.inquiry_created_at, d.inquiry_id
+        )
+      END AS next_inquiry_at,
+      CASE
+        WHEN d.response_sla_seconds IS NULL OR d.response_sla_seconds <= 0 THEN 86400
+        ELSE d.response_sla_seconds
+      END AS effective_response_sla_seconds
+    FROM deduplicated_inquiries d
+  ),
+  ranked_assignments AS (
+    SELECT
+      i.inquiry_id,
+      r.agent_id,
+      r.assigned_at,
+      r.queue_id,
+      r.routing_rule_id,
+      r.routing_method,
+      ROW_NUMBER() OVER (
+        PARTITION BY i.inquiry_id
+        ORDER BY r.assigned_at, r.routing_event_id
+      ) AS assignment_rank
+    FROM inquiries i
+    JOIN lead_routing_events r
+      ON r.inquiry_id = i.inquiry_id
+      OR (
+        r.inquiry_id IS NULL
+        AND i.lead_id IS NOT NULL
+        AND r.lead_id = i.lead_id
+      )
+    CROSS JOIN params p
+    WHERE LOWER(r.routing_action) IN ('assigned', 'reassigned', 'accepted')
+      AND r.assigned_at IS NOT NULL
+      AND r.assigned_at >= i.inquiry_created_at
+      AND r.assigned_at <= p.as_of_ts
+      AND r.assigned_at < LEAST(
+        COALESCE(i.next_inquiry_at, i.inquiry_created_at + INTERVAL '30' DAY),
+        i.inquiry_created_at + INTERVAL '30' DAY
+      )
+      AND (i.inquiry_closed_at IS NULL OR r.assigned_at <= i.inquiry_closed_at)
+  ),
+  first_assignment AS (
+    SELECT
+      inquiry_id,
+      agent_id,
+      assigned_at,
+      queue_id,
+      routing_rule_id,
+      routing_method
+    FROM ranked_assignments
+    WHERE assignment_rank = 1
+  ),
+  response_candidates AS (
+    SELECT DISTINCT
+      CAST(m.message_id AS VARCHAR) AS response_event_id,
+      m.inquiry_id,
+      m.lead_id,
+      m.sent_at AS response_at,
+      'messaging' AS response_channel,
+      CAST(m.sender_id AS VARCHAR) AS response_actor_id
+    FROM messaging_platform_events m
+    CROSS JOIN params p
+    WHERE LOWER(m.direction) = 'outbound'
+      AND LOWER(m.sender_role) IN ('agent', 'broker', 'advertiser', 'property_manager')
+      AND LOWER(m.delivery_status) IN ('sent', 'delivered', 'read')
+      AND COALESCE(m.is_automated, FALSE) = FALSE
+      AND COALESCE(m.is_internal, FALSE) = FALSE
+      AND m.sent_at IS NOT NULL
+      AND CAST(m.sent_at AS DATE) >= p.cutoff_date
+      AND m.sent_at <= p.as_of_ts
+  
+    UNION ALL
+  
+    SELECT DISTINCT
+      CAST(c.call_id AS VARCHAR) AS response_event_id,
+      c.inquiry_id,
+      c.lead_id,
+      c.started_at AS response_at,
+      'phone' AS response_channel,
+      CAST(c.agent_id AS VARCHAR) AS response_actor_id
+    FROM telephony_call_events c
+    CROSS JOIN params p
+    WHERE LOWER(c.direction) = 'outbound'
+      AND LOWER(c.call_status) IN ('initiated', 'ringing', 'connected', 'completed', 'no_answer', 'voicemail')
+      AND COALESCE(c.is_test, FALSE) = FALSE
+      AND COALESCE(c.is_internal, FALSE) = FALSE
+      AND c.started_at IS NOT NULL
+      AND CAST(c.started_at AS DATE) >= p.cutoff_date
+      AND c.started_at <= p.as_of_ts
+  ),
+  ranked_responses AS (
+    SELECT
+      i.inquiry_id,
+      c.response_event_id,
+      c.response_at,
+      c.response_channel,
+      c.response_actor_id,
+      ROW_NUMBER() OVER (
+        PARTITION BY i.inquiry_id
+        ORDER BY
+          c.response_at,
+          c.response_channel,
+          c.response_event_id,
+          c.response_actor_id
+      ) AS response_rank
+    FROM inquiries i
+    JOIN response_candidates c
+      ON c.inquiry_id = i.inquiry_id
+      OR (
+        c.inquiry_id IS NULL
+        AND i.lead_id IS NOT NULL
+        AND c.lead_id = i.lead_id
+      )
+    WHERE c.response_at >= i.inquiry_created_at
+      AND c.response_at < LEAST(
+        COALESCE(i.next_inquiry_at, i.inquiry_created_at + INTERVAL '30' DAY),
+        i.inquiry_created_at + INTERVAL '30' DAY
+      )
+      AND (i.inquiry_closed_at IS NULL OR c.response_at <= i.inquiry_closed_at)
+  ),
+  first_response AS (
+    SELECT
+      inquiry_id,
+      response_event_id,
+      response_at,
+      response_channel,
+      response_actor_id
+    FROM ranked_responses
+    WHERE response_rank = 1
+  ),
+  ranked_listings AS (
+    SELECT
+      listing_id,
+      external_listing_id,
+      listing_type,
+      listing_status,
+      property_type,
+      market_id,
+      city,
+      region,
+      country,
+      postal_code,
+      time_zone,
+      brokerage_id,
+      advertiser_account_id,
+      ROW_NUMBER() OVER (
+        PARTITION BY listing_id
+        ORDER BY updated_at DESC
+      ) AS listing_rank
+    FROM listing_management_listings
+    WHERE listing_id IS NOT NULL
+  ),
+  listing_dimension AS (
+    SELECT
+      listing_id,
+      external_listing_id,
+      listing_type,
+      listing_status,
+      property_type,
+      market_id,
+      city,
+      region,
+      country,
+      postal_code,
+      time_zone,
+      brokerage_id,
+      advertiser_account_id
+    FROM ranked_listings
+    WHERE listing_rank = 1
+  ),
+  metric_base AS (
+    SELECT
+      i.*,
+      l.external_listing_id,
+      l.listing_type,
+      l.listing_status,
+      l.property_type,
+      l.market_id,
+      l.city AS listing_city,
+      l.region AS listing_region,
+      l.country AS listing_country,
+      l.postal_code AS listing_postal_code,
+      COALESCE(l.time_zone, 'UTC') AS listing_time_zone,
+      l.brokerage_id,
+      l.advertiser_account_id,
+      l.listing_id AS matched_listing_id,
+      COALESCE(a.agent_id, i.assigned_agent_id) AS effective_assigned_agent_id,
+      a.assigned_at AS assignment_at,
+      a.queue_id AS routing_queue_id,
+      a.routing_rule_id,
+      a.routing_method,
+      r.response_at AS first_response_at,
+      r.response_event_id,
+      r.response_channel,
+      r.response_actor_id,
+      CASE
+        WHEN r.response_at IS NULL THEN NULL
+        ELSE CAST(EXTRACT(EPOCH FROM (r.response_at - i.inquiry_created_at)) AS BIGINT)
+      END AS response_time_seconds,
+      CASE
+        WHEN a.assigned_at IS NULL OR r.response_at IS NULL THEN NULL
+        ELSE CAST(EXTRACT(EPOCH FROM (r.response_at - a.assigned_at)) AS BIGINT)
+      END AS assignment_to_response_seconds,
+      p.as_of_ts
+    FROM inquiries i
+    LEFT JOIN first_assignment a
+      ON a.inquiry_id = i.inquiry_id
+    LEFT JOIN first_response r
+      ON r.inquiry_id = i.inquiry_id
+    LEFT JOIN listing_dimension l
+      ON l.listing_id = i.listing_id
+    CROSS JOIN params p
+  )
+  SELECT
+    'listing_inquiry_response_time' AS metric_name,
+    'seconds' AS metric_unit,
+    inquiry_id,
+    lead_id,
+    external_inquiry_id,
+    inquiry_created_at,
+    CAST(inquiry_created_at AS DATE) AS inquiry_date,
+    CAST(DATE_TRUNC('week', inquiry_created_at) AS DATE) AS inquiry_week,
+    CAST(DATE_TRUNC('month', inquiry_created_at) AS DATE) AS inquiry_month,
+    source_system,
+    marketplace_id,
+    inquiry_channel,
+    inquiry_type,
+    inquiry_subject,
+    inquiry_priority,
+    locale,
+    device_category,
+    campaign_id,
+    marketing_source,
+    marketing_medium,
+    marketing_campaign,
+    customer_id,
+    customer_email_hash,
+    customer_phone_hash,
+    consent_status,
+    listing_id,
+    external_listing_id,
+    listing_type,
+    listing_status,
+    property_type,
+    market_id,
+    listing_city,
+    listing_region,
+    listing_country,
+    listing_postal_code,
+    listing_time_zone,
+    brokerage_id,
+    advertiser_account_id,
+    effective_assigned_agent_id AS assigned_agent_id,
+    assignment_at,
+    routing_queue_id,
+    routing_rule_id,
+    routing_method,
+    first_response_at,
+    CAST(first_response_at AS DATE) AS first_response_date,
+    response_event_id,
+    response_channel,
+    response_actor_id,
+    response_time_seconds,
+    CASE
+      WHEN response_time_seconds IS NULL THEN NULL
+      ELSE ROUND(CAST(response_time_seconds AS DOUBLE) / 60.0, 2)
+    END AS response_time_minutes,
+    CASE
+      WHEN response_time_seconds IS NULL THEN NULL
+      ELSE ROUND(CAST(response_time_seconds AS DOUBLE) / 3600.0, 2)
+    END AS response_time_hours,
+    assignment_to_response_seconds,
+    CASE WHEN first_response_at IS NOT NULL THEN TRUE ELSE FALSE END AS is_responded,
+    CASE
+      WHEN first_response_at IS NOT NULL THEN 'responded'
+      WHEN inquiry_closed_at IS NOT NULL AND inquiry_closed_at <= as_of_ts THEN 'closed_unresponded'
+      WHEN EXTRACT(EPOCH FROM (as_of_ts - inquiry_created_at)) > effective_response_sla_seconds THEN 'overdue'
+      ELSE 'pending'
+    END AS response_status,
+    effective_response_sla_seconds AS response_sla_target_seconds,
+    CASE
+      WHEN first_response_at IS NOT NULL THEN response_time_seconds <= effective_response_sla_seconds
+      WHEN inquiry_closed_at IS NOT NULL AND inquiry_closed_at <= as_of_ts THEN FALSE
+      WHEN EXTRACT(EPOCH FROM (as_of_ts - inquiry_created_at)) > effective_response_sla_seconds THEN FALSE
+      ELSE NULL
+    END AS response_sla_met_flag,
+    submitted_during_business_hours AS inquiry_business_hours_flag,
+    CAST(EXTRACT(EPOCH FROM (as_of_ts - inquiry_created_at)) AS BIGINT) AS inquiry_age_seconds,
+    inquiry_closed_at,
+    CASE
+      WHEN inquiry_closed_at IS NOT NULL AND inquiry_closed_at < inquiry_created_at THEN 'invalid_close_before_inquiry'
+      WHEN first_response_at IS NOT NULL AND response_time_seconds < 0 THEN 'invalid_negative_duration'
+      WHEN assignment_to_response_seconds IS NOT NULL AND assignment_to_response_seconds < 0 THEN 'response_before_assignment'
+      WHEN response_sla_seconds IS NOT NULL AND response_sla_seconds <= 0 THEN 'invalid_sla_target'
+      WHEN listing_id IS NULL THEN 'missing_listing_id'
+      WHEN matched_listing_id IS NULL THEN 'listing_not_found'
+      WHEN effective_assigned_agent_id IS NULL THEN 'missing_assignment'
+      ELSE 'valid'
+    END AS data_quality_status,
+    as_of_ts AS extracted_at
+  FROM metric_base;
+
+Calculation Notes: |
+  Start the timer at the server-side timestamp when the platform accepts and persists the inquiry. Stop it at the earliest successfully sent or delivered human-authored email, SMS, chat, or in-app message; connected outbound call; or confirmed human voicemail from a representative authorized for the listing at that time. Exclude automated acknowledgements, chatbots, autoresponders, internal notes, delivery receipts, failed messages, unanswered or merely initiated calls, platform tests, spam, fraud, owner- or representative-generated inquiries, blocked submissions, malformed records, and duplicates. Deduplicate first by source_system and stable source inquiry ID; when unavailable, retain the earliest inquiry for the same normalized contact, listing, channel, and materially identical message within 10 minutes. Attribute responses using inquiry_id whenever available; lead-level fallback is permitted only before the lead's next inquiry and within 30 days. Calculate continuous calendar elapsed time in UTC across nights, weekends, and holidays, then assign the result to the inquiry-created date in the listing market's configured timezone. Exclude unanswered inquiries from the average without treating them as zero, do not impute timestamps, reject negative durations, and do not cap or winsorize valid durations. Flag durations above 30 days for validation and exclude them only when confirmed as attribution, integration, or backfill errors. Reopened conversations, transfers, later replies, and reassignment do not restart the timer. Business-hours response time is a separate metric.
+
+Business Use Case: |
+  Marketplace Operations compares daily response time and response-rate trends by brokerage, agent, market, listing tier, and inquiry channel. If a brokerage exceeds 120 minutes or deteriorates materially week over week, leadership can change routing rules, activate backup responders, coach agents, escalate account outreach, or reduce lead allocation, then measure the effect on viewing and transaction conversion.
+
+
+Source Data: Marketplace inquiry and CRM records stitched with email, SMS, chat, in-app messaging, telephony, lead-routing, representative-authorization, and listing-management data
+
+Report Attributes: |
+  ["Inquiry Created Date","Inquiry Created Hour","Listing Market","Listing City","Listing Type","Property Type","Transaction Type","Listing Status","Listing Price Band","Listing Age Band","Inquiry Channel","Response Channel","Device Type","Agent","Brokerage","Property Manager","Lead Routing Method","New versus Returning Prospect","Business Hours versus After Hours"]
+
+Dashboard Usage: [Marketplace Responsiveness Dashboard, Listing Operations Executive Dashboard, Agent and Brokerage Performance Dashboard, Lead Funnel Conversion Dashboard, Inquiry SLA Monitoring Dashboard, Listing Quality Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Listing Inquiry Response Rate, Median Listing Inquiry Response Time, P90 Listing Inquiry Response Time, Listing Inquiry SLA Compliance Rate, Unanswered Listing Inquiry Rate, Listing Inquiry to Viewing Conversion Rate, Listing Inquiry to Lead Conversion Rate, Agent Response Rate, Business-Hours Listing Inquiry Response Time]
+
+Derived KPIs: [Percent of Listing Inquiries Responded to Within 15 Minutes, Percent of Listing Inquiries Responded to Within 1 Hour, Percent of Listing Inquiries Responded to Within 24 Hours, Average Response Time by Agent, Average Response Time by Brokerage, Listings Meeting Response SLA, Response-Time-Adjusted Inquiry Conversion Rate]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-04T12:30:18.028647+00:00
+
+Last Modified By: devyendarm
+
+
