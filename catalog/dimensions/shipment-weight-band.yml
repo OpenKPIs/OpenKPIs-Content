@@ -1,0 +1,379 @@
+# Dimension: Shipment Weight Band
+# Generated: 2026-09-04T17:30:30.417Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Shipment Weight Band
+
+Description: |
+  Classifies a customer-visible shipment into a governed weight range using the weight applied when shipping options, delivery promises, or charges are presented. It enables comparison of checkout conversion, shipping-fee acceptance, delivery experience, billing outcomes, repeat purchase, and customer lifetime value across shipment sizes.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  add_shipping_info
+
+Adobe Event: |
+  add_shipping_info
+
+W3 Data Layer: |
+  {"digitalData":{"cart":{"attributes":{"shipmentWeightBand":"{{shipment_weight_band}}"}},"event":[{"eventInfo":{"eventName":"add_shipping_info","eventAction":"add_shipping_info"},"attributes":{"shipmentWeightBand":"{{shipment_weight_band}}"}}]}}
+
+GA4 Data Layer: |
+  {"event":"add_shipping_info","shipment_weight_band":"{{shipment_weight_band}}"}
+
+Adobe Client Data Layer: |
+  {"data":{"shipment":{"weightBand":"{{shipment_weight_band}}"}},"event":"add_shipping_info"}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"{{shipment_weight_band}}"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH source_events AS (
+    SELECT
+      event_date,
+      event_timestamp,
+      user_pseudo_id,
+      NULLIF(TRIM((
+        SELECT ARRAY_AGG(
+          COALESCE(
+            ep.value.string_value,
+            CAST(ep.value.int_value AS STRING),
+            CAST(ep.value.float_value AS STRING),
+            CAST(ep.value.double_value AS STRING)
+          ) IGNORE NULLS
+          LIMIT 1
+        )[SAFE_OFFSET(0)]
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key = 'shipment_weight_band'
+      )), '') AS explicit_weight_band,
+      NULLIF(TRIM((
+        SELECT ARRAY_AGG(
+          COALESCE(
+            ep.value.string_value,
+            CAST(ep.value.int_value AS STRING),
+            CAST(ep.value.float_value AS STRING),
+            CAST(ep.value.double_value AS STRING)
+          ) IGNORE NULLS
+          ORDER BY CASE ep.key
+            WHEN 'shipment_weight' THEN 1
+            WHEN 'shipping_weight' THEN 2
+            WHEN 'cart_weight' THEN 3
+            ELSE 4
+          END
+          LIMIT 1
+        )[SAFE_OFFSET(0)]
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key IN ('shipment_weight', 'shipping_weight', 'cart_weight')
+      )), '') AS raw_weight,
+      NULLIF(LOWER(TRIM((
+        SELECT ARRAY_AGG(ep.value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)]
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key IN ('shipment_weight_unit', 'shipping_weight_unit', 'weight_unit')
+      ))), '') AS explicit_weight_unit
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE event_name = 'add_shipping_info'
+  ),
+  parsed AS (
+    SELECT
+      *,
+      NULLIF(
+        REGEXP_REPLACE(
+          LOWER(REPLACE(REPLACE(TRIM(explicit_weight_band), '–', '-'), '—', '-')),
+          r'\s+',
+          ' '
+        ),
+        ''
+      ) AS normalized_explicit_band,
+      SAFE_CAST(
+        REGEXP_EXTRACT(REPLACE(raw_weight, ',', '.'), r'-?\d+(?:\.\d+)?')
+        AS FLOAT64
+      ) AS parsed_weight_value,
+      COALESCE(
+        explicit_weight_unit,
+        CASE
+          WHEN REGEXP_CONTAINS(LOWER(raw_weight), r'(^|\s)(lb|lbs|pound|pounds)\s*$') THEN 'lb'
+          WHEN REGEXP_CONTAINS(LOWER(raw_weight), r'(^|\s)(oz|ounce|ounces)\s*$') THEN 'oz'
+          WHEN REGEXP_CONTAINS(LOWER(raw_weight), r'(^|\s)(g|gram|grams)\s*$') THEN 'g'
+          WHEN REGEXP_CONTAINS(LOWER(raw_weight), r'(^|\s)(kg|kgs|kilogram|kilograms)\s*$') THEN 'kg'
+          ELSE 'kg'
+        END
+      ) AS parsed_weight_unit
+    FROM source_events
+  ),
+  weighted AS (
+    SELECT
+      *,
+      CASE
+        WHEN parsed_weight_value IS NULL OR parsed_weight_value < 0 THEN NULL
+        WHEN parsed_weight_unit IN ('lb', 'lbs', 'pound', 'pounds') THEN parsed_weight_value * 0.45359237
+        WHEN parsed_weight_unit IN ('oz', 'ounce', 'ounces') THEN parsed_weight_value * 0.028349523125
+        WHEN parsed_weight_unit IN ('g', 'gram', 'grams') THEN parsed_weight_value / 1000.0
+        ELSE parsed_weight_value
+      END AS shipment_weight_kg
+    FROM parsed
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_explicit_band IS NOT NULL THEN normalized_explicit_band
+        WHEN shipment_weight_kg IS NULL THEN 'unknown'
+        WHEN shipment_weight_kg <= 1 THEN '0-1 kg'
+        WHEN shipment_weight_kg <= 5 THEN '1-5 kg'
+        WHEN shipment_weight_kg <= 10 THEN '5-10 kg'
+        WHEN shipment_weight_kg <= 20 THEN '10-20 kg'
+        WHEN shipment_weight_kg <= 50 THEN '20-50 kg'
+        ELSE 'over 50 kg'
+      END AS shipment_weight_band_name,
+      CASE
+        WHEN normalized_explicit_band IS NOT NULL THEN 'explicit'
+        WHEN shipment_weight_kg IS NOT NULL THEN 'derived_from_weight'
+        ELSE 'default_unknown'
+      END AS derivation_method
+    FROM weighted
+  ),
+  aggregated AS (
+    SELECT
+      shipment_weight_band_name,
+      MIN(PARSE_DATE('%Y%m%d', event_date)) AS first_seen_date,
+      MAX(PARSE_DATE('%Y%m%d', event_date)) AS last_seen_date,
+      MIN(TIMESTAMP_MICROS(event_timestamp)) AS first_seen_timestamp,
+      MAX(TIMESTAMP_MICROS(event_timestamp)) AS last_seen_timestamp,
+      COUNT(*) AS source_event_count,
+      COUNT(DISTINCT user_pseudo_id) AS source_user_count,
+      COUNTIF(derivation_method = 'explicit') AS explicit_event_count,
+      COUNTIF(derivation_method = 'derived_from_weight') AS derived_event_count,
+      COUNTIF(derivation_method = 'default_unknown') AS unknown_event_count,
+      MIN(shipment_weight_kg) AS observed_min_weight_kg,
+      MAX(shipment_weight_kg) AS observed_max_weight_kg
+    FROM classified
+    GROUP BY shipment_weight_band_name
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT('shipment_weight_band|', shipment_weight_band_name))) AS shipment_weight_band_key,
+    REGEXP_REPLACE(TRIM(shipment_weight_band_name), r'[^a-z0-9]+', '_') AS shipment_weight_band_code,
+    shipment_weight_band_name,
+    CASE shipment_weight_band_name
+      WHEN '0-1 kg' THEN 0.0
+      WHEN '1-5 kg' THEN 1.0
+      WHEN '5-10 kg' THEN 5.0
+      WHEN '10-20 kg' THEN 10.0
+      WHEN '20-50 kg' THEN 20.0
+      WHEN 'over 50 kg' THEN 50.0
+      ELSE NULL
+    END AS lower_bound_kg,
+    CASE shipment_weight_band_name
+      WHEN '0-1 kg' THEN 1.0
+      WHEN '1-5 kg' THEN 5.0
+      WHEN '5-10 kg' THEN 10.0
+      WHEN '10-20 kg' THEN 20.0
+      WHEN '20-50 kg' THEN 50.0
+      ELSE NULL
+    END AS upper_bound_kg,
+    shipment_weight_band_name = '0-1 kg' AS is_lower_bound_inclusive,
+    shipment_weight_band_name IN ('0-1 kg', '1-5 kg', '5-10 kg', '10-20 kg', '20-50 kg') AS is_upper_bound_inclusive,
+    'kg' AS standard_weight_unit,
+    CASE shipment_weight_band_name
+      WHEN '0-1 kg' THEN 10
+      WHEN '1-5 kg' THEN 20
+      WHEN '5-10 kg' THEN 30
+      WHEN '10-20 kg' THEN 40
+      WHEN '20-50 kg' THEN 50
+      WHEN 'over 50 kg' THEN 60
+      WHEN 'unknown' THEN 999
+      ELSE 500
+    END AS sort_order,
+    shipment_weight_band_name = 'unknown' AS is_unknown,
+    shipment_weight_band_name NOT IN (
+      '0-1 kg', '1-5 kg', '5-10 kg', '10-20 kg', '20-50 kg', 'over 50 kg', 'unknown'
+    ) AS is_custom_band,
+    CASE
+      WHEN explicit_event_count > 0 AND derived_event_count > 0 THEN 'mixed'
+      WHEN explicit_event_count > 0 THEN 'explicit'
+      WHEN derived_event_count > 0 THEN 'derived_from_weight'
+      ELSE 'default_unknown'
+    END AS derivation_method,
+    first_seen_date,
+    last_seen_date,
+    first_seen_timestamp,
+    last_seen_timestamp,
+    source_event_count,
+    source_user_count,
+    explicit_event_count,
+    derived_event_count,
+    unknown_event_count,
+    observed_min_weight_kg,
+    observed_max_weight_kg,
+    'GA4' AS source_platform,
+    'add_shipping_info' AS source_event_name,
+    CURRENT_TIMESTAMP() AS dimension_loaded_at
+  FROM aggregated;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH source_events AS (
+    SELECT
+      CAST(timestamp AS TIMESTAMP) AS event_timestamp,
+      NULLIF(
+        TRIM(CAST(_experience.analytics.customDimensions.eVars.eVar1 AS STRING)),
+        ''
+      ) AS explicit_weight_band
+    FROM aep_analytics_event_dataset
+    WHERE eventType = 'add_shipping_info'
+  ),
+  normalized AS (
+    SELECT
+      event_timestamp,
+      NULLIF(
+        REGEXP_REPLACE(
+          LOWER(
+            REPLACE(
+              REPLACE(TRIM(explicit_weight_band), '–', '-'),
+              '—',
+              '-'
+            )
+          ),
+          '[[:space:]]+',
+          ' '
+        ),
+        ''
+      ) AS normalized_explicit_band
+    FROM source_events
+  ),
+  classified AS (
+    SELECT
+      event_timestamp,
+      COALESCE(normalized_explicit_band, 'unknown') AS shipment_weight_band_name,
+      CASE
+        WHEN normalized_explicit_band IS NOT NULL THEN 'explicit'
+        ELSE 'default_unknown'
+      END AS derivation_method
+    FROM normalized
+  ),
+  aggregated AS (
+    SELECT
+      shipment_weight_band_name,
+      MIN(CAST(event_timestamp AS DATE)) AS first_seen_date,
+      MAX(CAST(event_timestamp AS DATE)) AS last_seen_date,
+      MIN(event_timestamp) AS first_seen_timestamp,
+      MAX(event_timestamp) AS last_seen_timestamp,
+      COUNT(*) AS source_event_count,
+      SUM(CASE WHEN derivation_method = 'explicit' THEN 1 ELSE 0 END) AS explicit_event_count,
+      SUM(CASE WHEN derivation_method = 'default_unknown' THEN 1 ELSE 0 END) AS unknown_event_count
+    FROM classified
+    GROUP BY shipment_weight_band_name
+  )
+  SELECT
+    MD5(CONCAT('shipment_weight_band|', shipment_weight_band_name)) AS shipment_weight_band_key,
+    REGEXP_REPLACE(TRIM(shipment_weight_band_name), '[^a-z0-9]+', '_') AS shipment_weight_band_code,
+    shipment_weight_band_name,
+    CASE shipment_weight_band_name
+      WHEN '0-1 kg' THEN 0.0
+      WHEN '1-5 kg' THEN 1.0
+      WHEN '5-10 kg' THEN 5.0
+      WHEN '10-20 kg' THEN 10.0
+      WHEN '20-50 kg' THEN 20.0
+      WHEN 'over 50 kg' THEN 50.0
+      ELSE NULL
+    END AS lower_bound_kg,
+    CASE shipment_weight_band_name
+      WHEN '0-1 kg' THEN 1.0
+      WHEN '1-5 kg' THEN 5.0
+      WHEN '5-10 kg' THEN 10.0
+      WHEN '10-20 kg' THEN 20.0
+      WHEN '20-50 kg' THEN 50.0
+      ELSE NULL
+    END AS upper_bound_kg,
+    CASE WHEN shipment_weight_band_name = '0-1 kg' THEN TRUE ELSE FALSE END AS is_lower_bound_inclusive,
+    CASE
+      WHEN shipment_weight_band_name IN ('0-1 kg', '1-5 kg', '5-10 kg', '10-20 kg', '20-50 kg') THEN TRUE
+      ELSE FALSE
+    END AS is_upper_bound_inclusive,
+    'kg' AS standard_weight_unit,
+    CASE shipment_weight_band_name
+      WHEN '0-1 kg' THEN 10
+      WHEN '1-5 kg' THEN 20
+      WHEN '5-10 kg' THEN 30
+      WHEN '10-20 kg' THEN 40
+      WHEN '20-50 kg' THEN 50
+      WHEN 'over 50 kg' THEN 60
+      WHEN 'unknown' THEN 999
+      ELSE 500
+    END AS sort_order,
+    CASE WHEN shipment_weight_band_name = 'unknown' THEN TRUE ELSE FALSE END AS is_unknown,
+    CASE
+      WHEN shipment_weight_band_name NOT IN (
+        '0-1 kg', '1-5 kg', '5-10 kg', '10-20 kg', '20-50 kg', 'over 50 kg', 'unknown'
+      ) THEN TRUE
+      ELSE FALSE
+    END AS is_custom_band,
+    CASE
+      WHEN explicit_event_count > 0 THEN 'explicit'
+      ELSE 'default_unknown'
+    END AS derivation_method,
+    first_seen_date,
+    last_seen_date,
+    first_seen_timestamp,
+    last_seen_timestamp,
+    source_event_count,
+    explicit_event_count,
+    unknown_event_count,
+    'ADOBE_AEP' AS source_platform,
+    'add_shipping_info' AS source_event_name,
+    CURRENT_TIMESTAMP AS dimension_loaded_at
+  FROM aggregated;
+
+Calculation Notes: |
+  Assign the band from the governed weight-band reference table after normalizing the source weight to the enterprise standard unit. Use the estimated rating weight captured when shipping options are displayed for acquisition and checkout events, the accepted rating weight for order-placement events, and the final carrier-rated weight for post-purchase billing or delivery events; retain each event-time value without retroactive restatement. For multi-package shipments, use the shipment-level weight used to produce the customer-facing shipping quote rather than independently banding each package. Band boundaries must be lower-bound inclusive and upper-bound exclusive, except for the highest open-ended band. Map missing, nonnumeric, negative, unsupported-unit, or unresolved weights to "Unknown"; map a valid zero only to a separately governed "Zero Weight" band when digital goods, free samples, or data defects can be distinguished. Exclude canceled quotes that were never shown to the customer, internal test orders, employee test traffic, duplicate events, and shipment records lacking a valid customer journey or order event. If the weight changes between quote, checkout, fulfillment, and billing, preserve the band on each applicable event and derive Shipment Weight Band Change for variance analysis. Apply the band configuration version effective at event time so historical reports remain reproducible.
+
+Business Use Case: |
+  The commerce executive team can compare shipping-option views, checkout completion, shipping-fee disputes, delivery satisfaction, repeat purchase, and lifetime value by weight band and acquisition channel. If heavier bands show strong product engagement but elevated checkout abandonment, the Product and Revenue Management teams can test threshold-based shipping offers, clearer fee messaging, alternative service levels, or bundled-cart incentives for the affected customer segments.
+
+
+Source Data: Digital Analytics (GA4 or Adobe Analytics) stitched with e-commerce checkout, customer order events, carrier rating APIs, CRM, and billing or payment platforms
+
+Report Attributes: |
+  ["Customer Lifecycle Stage","Acquisition Channel","Order Channel","Shipping Method","Shipping Service Level","Shipping Fee Band","Delivery Promise Band","Fulfillment Channel","Product Category","Package Count Band","Checkout Outcome","Delivery Outcome","Billing Adjustment Reason","Customer Region","New Versus Returning Customer"]
+
+Dashboard Usage: [Omnichannel Checkout Conversion Dashboard, Shipping Offer and Fee Performance Dashboard, Customer Delivery Experience Dashboard, Acquisition-to-Order Journey Dashboard, Shipping Billing and Adjustment Dashboard, Retention and Repeat Purchase Dashboard, Customer Lifetime Value by Fulfillment Experience]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Shipment Weight, Shipment Weight Unit, Shipping Method, Shipping Service Level, Shipping Fee Band, Delivery Promise Band, Fulfillment Channel, Order Channel, Package Count Band, Product Category, Customer Lifecycle Stage, Customer Acquisition Channel, Delivery Outcome, Billing Adjustment Reason]
+
+Derived Dimensions: [Shipment Weight Category, Heavy Shipment Indicator, Shipping Surcharge Eligibility Band, Weight-Based Shipping Offer Eligibility, Shipment Weight Band Change]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-04T17:30:27.768449+00:00
+
+Last Modified By: devyendarm
+
+
