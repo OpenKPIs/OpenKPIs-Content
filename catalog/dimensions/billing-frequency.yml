@@ -1,0 +1,359 @@
+# Dimension: Billing Frequency
+# Generated: 2026-09-04T16:30:23.339Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Billing Frequency
+
+Description: |
+  Billing Frequency identifies how often a customer is scheduled to be charged for an order, subscription, installment plan, or recurring service agreement. It distinguishes one-time and recurring billing cadences so teams can analyze checkout conversion, revenue timing, renewal behavior, retention, and customer lifetime value.
+
+Category: Revenue
+
+Tags: [dimension]
+
+Industry: E-commerce & SaaS
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"event":[{"eventInfo":{"eventName":"purchase"},"attributes":{"billingFrequency":"monthly"}}],"transaction":{"attributes":{"billingFrequency":"monthly"}}}
+
+GA4 Data Layer: |
+  {"event":"purchase","billing_frequency":"monthly"}
+
+Adobe Client Data Layer: |
+  {"data":{"transaction":{"attributes":{"billingFrequency":"monthly"}}},"event":"purchase"}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"monthly"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH billing_frequency_keys AS (
+    SELECT billing_key, priority
+    FROM UNNEST([
+      'billing_frequency', 'billingFrequency', 'billingfrequency',
+      'billing_freq', 'billingFreq', 'billing_cycle', 'billingCycle',
+      'billing_period', 'billingPeriod', 'payment_frequency',
+      'paymentFrequency', 'payment_schedule', 'paymentSchedule',
+      'charge_frequency', 'chargeFrequency', 'charge_interval',
+      'chargeInterval', 'subscription_frequency', 'subscriptionFrequency',
+      'subscription_interval', 'subscriptionInterval',
+      'subscription_period', 'subscriptionPeriod', 'recurring_frequency',
+      'recurringFrequency', 'recurring_interval', 'recurringInterval',
+      'recurrence_frequency', 'recurrenceFrequency', 'renewal_frequency',
+      'renewalFrequency', 'renewal_interval', 'renewalInterval',
+      'plan_frequency', 'planFrequency', 'plan_interval', 'planInterval',
+      'price_frequency', 'priceFrequency', 'price_interval', 'priceInterval',
+      'invoice_frequency', 'invoiceFrequency', 'invoice_interval',
+      'invoiceInterval', 'product_billing_frequency',
+      'productBillingFrequency', 'checkout_billing_frequency',
+      'checkoutBillingFrequency'
+    ]) AS billing_key WITH OFFSET AS priority
+  ),
+  purchase_parameters AS (
+    SELECT
+      e.event_date,
+      e.event_timestamp,
+      e.event_bundle_sequence_id,
+      e.event_server_timestamp_offset,
+      e.user_pseudo_id,
+      e.stream_id,
+      e.platform,
+      ep.key AS parameter_key,
+      COALESCE(
+        ep.value.string_value,
+        CAST(ep.value.int_value AS STRING),
+        CAST(ep.value.double_value AS STRING),
+        CAST(ep.value.float_value AS STRING)
+      ) AS parameter_value
+    FROM `your-project.analytics_123456789.events_*` AS e
+    LEFT JOIN UNNEST(e.event_params) AS ep
+    WHERE e.event_name = 'purchase'
+  ),
+  purchase_events AS (
+    SELECT
+      p.event_date,
+      p.event_timestamp,
+      p.event_bundle_sequence_id,
+      p.event_server_timestamp_offset,
+      p.user_pseudo_id,
+      p.stream_id,
+      p.platform,
+      MAX(IF(p.parameter_key = 'transaction_id', p.parameter_value, NULL)) AS transaction_id,
+      MAX(IF(
+        p.parameter_key IN (
+          'billing_interval_count', 'billingIntervalCount',
+          'interval_count', 'intervalCount',
+          'recurring_interval_count', 'subscription_interval_count'
+        ),
+        p.parameter_value,
+        NULL
+      )) AS billing_interval_count,
+      MAX(IF(
+        p.parameter_key IN (
+          'billing_interval_unit', 'billingIntervalUnit',
+          'interval_unit', 'intervalUnit',
+          'recurring_interval_unit', 'subscription_interval_unit'
+        ),
+        p.parameter_value,
+        NULL
+      )) AS billing_interval_unit,
+      MAX(IF(p.parameter_key = 'transaction', p.parameter_value, NULL)) AS transaction_json,
+      MAX(IF(p.parameter_key = 'w3_data_layer', p.parameter_value, NULL)) AS w3_data_layer_json,
+      MAX(IF(p.parameter_key = 'adobe_client_data_layer', p.parameter_value, NULL)) AS adobe_data_layer_json,
+      ARRAY_AGG(
+        IF(
+          k.billing_key IS NOT NULL
+          AND NULLIF(TRIM(p.parameter_value), '') IS NOT NULL,
+          STRUCT(
+            k.priority AS priority,
+            p.parameter_key AS source_attribute,
+            p.parameter_value AS billing_frequency
+          ),
+          NULL
+        )
+        IGNORE NULLS
+        ORDER BY k.priority
+        LIMIT 1
+      )[SAFE_OFFSET(0)] AS matched_frequency
+    FROM purchase_parameters AS p
+    LEFT JOIN billing_frequency_keys AS k
+      ON p.parameter_key = k.billing_key
+    GROUP BY
+      p.event_date,
+      p.event_timestamp,
+      p.event_bundle_sequence_id,
+      p.event_server_timestamp_offset,
+      p.user_pseudo_id,
+      p.stream_id,
+      p.platform
+  ),
+  resolved_frequency AS (
+    SELECT
+      *,
+      COALESCE(
+        matched_frequency.billing_frequency,
+        JSON_VALUE(transaction_json, '$.attributes.billingFrequency'),
+        JSON_VALUE(transaction_json, '$.attributes.billing_frequency'),
+        JSON_VALUE(w3_data_layer_json, '$.transaction.attributes.billingFrequency'),
+        JSON_VALUE(w3_data_layer_json, '$.transaction.attributes.billing_frequency'),
+        JSON_VALUE(adobe_data_layer_json, '$.data.transaction.attributes.billingFrequency'),
+        JSON_VALUE(adobe_data_layer_json, '$.data.transaction.attributes.billing_frequency'),
+        CASE
+          WHEN SAFE_CAST(billing_interval_count AS INT64) IS NOT NULL
+               AND NULLIF(TRIM(billing_interval_unit), '') IS NOT NULL
+            THEN CONCAT(
+              TRIM(billing_interval_count),
+              ' ',
+              LOWER(TRIM(billing_interval_unit))
+            )
+        END
+      ) AS billing_frequency_raw,
+      LOWER(REGEXP_REPLACE(TRIM(COALESCE(
+        matched_frequency.billing_frequency,
+        JSON_VALUE(transaction_json, '$.attributes.billingFrequency'),
+        JSON_VALUE(transaction_json, '$.attributes.billing_frequency'),
+        JSON_VALUE(w3_data_layer_json, '$.transaction.attributes.billingFrequency'),
+        JSON_VALUE(w3_data_layer_json, '$.transaction.attributes.billing_frequency'),
+        JSON_VALUE(adobe_data_layer_json, '$.data.transaction.attributes.billingFrequency'),
+        JSON_VALUE(adobe_data_layer_json, '$.data.transaction.attributes.billing_frequency'),
+        CASE
+          WHEN SAFE_CAST(billing_interval_count AS INT64) IS NOT NULL
+               AND NULLIF(TRIM(billing_interval_unit), '') IS NOT NULL
+            THEN CONCAT(TRIM(billing_interval_count), ' ', LOWER(TRIM(billing_interval_unit)))
+        END,
+        ''
+      )), r'[^a-z0-9]+', '')) AS normalized_frequency_value
+    FROM purchase_events
+  )
+  SELECT
+    PARSE_DATE('%Y%m%d', event_date) AS event_date,
+    TIMESTAMP_MICROS(event_timestamp) AS event_timestamp,
+    user_pseudo_id,
+    stream_id,
+    platform,
+    transaction_id,
+    billing_frequency_raw,
+    CASE
+      WHEN normalized_frequency_value IN ('daily', 'day', 'everyday', '1day', 'p1d')
+        THEN 'daily'
+      WHEN normalized_frequency_value IN ('weekly', 'week', 'everyweek', '1week', '7days', 'p1w')
+        THEN 'weekly'
+      WHEN normalized_frequency_value IN ('biweekly', 'fortnightly', 'every2weeks', '2weeks', '14days', 'p2w')
+        THEN 'biweekly'
+      WHEN normalized_frequency_value IN ('semimonthly', 'twicemonthly', 'twiceamonth')
+        THEN 'semimonthly'
+      WHEN normalized_frequency_value IN ('monthly', 'month', 'everymonth', '1month', 'p1m')
+        THEN 'monthly'
+      WHEN normalized_frequency_value IN ('bimonthly', 'every2months', '2months', 'p2m')
+        THEN 'bimonthly'
+      WHEN normalized_frequency_value IN ('quarterly', 'quarter', 'every3months', '3months', 'p3m')
+        THEN 'quarterly'
+      WHEN normalized_frequency_value IN ('semiannual', 'semiannually', 'halfyearly', 'every6months', '6months', 'p6m')
+        THEN 'semiannual'
+      WHEN normalized_frequency_value IN ('annual', 'annually', 'yearly', 'year', 'everyyear', '12months', '1year', 'p1y')
+        THEN 'annual'
+      WHEN normalized_frequency_value IN ('biennial', 'biennially', 'every2years', '2years', '24months', 'p2y')
+        THEN 'biennial'
+      WHEN normalized_frequency_value IN ('triennial', 'triennially', 'every3years', '3years', '36months', 'p3y')
+        THEN 'triennial'
+      WHEN normalized_frequency_value IN (
+        'onetime', 'oneoff', 'single', 'nonrecurring', 'nonrenewing',
+        'payasyougo', 'prepaid', 'lifetime'
+      ) THEN 'one_time'
+      WHEN normalized_frequency_value IN ('custom', 'variable', 'usagebased', 'metered', 'irregular')
+        THEN 'custom'
+      WHEN normalized_frequency_value = '' THEN 'unknown'
+      ELSE 'other'
+    END AS billing_frequency,
+    COALESCE(
+      matched_frequency.source_attribute,
+      CASE
+        WHEN JSON_VALUE(transaction_json, '$.attributes.billingFrequency') IS NOT NULL
+          THEN 'transaction.attributes.billingFrequency'
+        WHEN JSON_VALUE(transaction_json, '$.attributes.billing_frequency') IS NOT NULL
+          THEN 'transaction.attributes.billing_frequency'
+        WHEN JSON_VALUE(w3_data_layer_json, '$.transaction.attributes.billingFrequency') IS NOT NULL
+          THEN 'w3_data_layer.transaction.attributes.billingFrequency'
+        WHEN JSON_VALUE(w3_data_layer_json, '$.transaction.attributes.billing_frequency') IS NOT NULL
+          THEN 'w3_data_layer.transaction.attributes.billing_frequency'
+        WHEN JSON_VALUE(adobe_data_layer_json, '$.data.transaction.attributes.billingFrequency') IS NOT NULL
+          THEN 'adobe_client_data_layer.data.transaction.attributes.billingFrequency'
+        WHEN JSON_VALUE(adobe_data_layer_json, '$.data.transaction.attributes.billing_frequency') IS NOT NULL
+          THEN 'adobe_client_data_layer.data.transaction.attributes.billing_frequency'
+        WHEN billing_interval_count IS NOT NULL AND billing_interval_unit IS NOT NULL
+          THEN 'billing_interval_count+billing_interval_unit'
+        ELSE 'not_populated'
+      END
+    ) AS billing_frequency_source_attribute
+  FROM resolved_frequency;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH purchase_events AS (
+    SELECT
+      timestamp AS event_timestamp,
+      CAST(timestamp AS DATE) AS event_date,
+      _id AS experience_event_id,
+      eventType AS event_type,
+      commerce.order.purchaseID AS transaction_id,
+      NULLIF(
+        TRIM(_experience.analytics.customDimensions.eVars.eVar1),
+        ''
+      ) AS billing_frequency_raw
+    FROM your_aep_purchase_dataset
+    WHERE eventType = 'commerce.purchases'
+       OR commerce.purchases.value > 0
+  ),
+  normalized_frequency AS (
+    SELECT
+      *,
+      LOWER(
+        REGEXP_REPLACE(
+          COALESCE(billing_frequency_raw, ''),
+          '[^a-zA-Z0-9]+',
+          ''
+        )
+      ) AS normalized_frequency_value
+    FROM purchase_events
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    experience_event_id,
+    event_type,
+    transaction_id,
+    billing_frequency_raw,
+    CASE
+      WHEN normalized_frequency_value IN ('daily', 'day', 'everyday', '1day', 'p1d')
+        THEN 'daily'
+      WHEN normalized_frequency_value IN ('weekly', 'week', 'everyweek', '1week', '7days', 'p1w')
+        THEN 'weekly'
+      WHEN normalized_frequency_value IN ('biweekly', 'fortnightly', 'every2weeks', '2weeks', '14days', 'p2w')
+        THEN 'biweekly'
+      WHEN normalized_frequency_value IN ('semimonthly', 'twicemonthly', 'twiceamonth')
+        THEN 'semimonthly'
+      WHEN normalized_frequency_value IN ('monthly', 'month', 'everymonth', '1month', 'p1m')
+        THEN 'monthly'
+      WHEN normalized_frequency_value IN ('bimonthly', 'every2months', '2months', 'p2m')
+        THEN 'bimonthly'
+      WHEN normalized_frequency_value IN ('quarterly', 'quarter', 'every3months', '3months', 'p3m')
+        THEN 'quarterly'
+      WHEN normalized_frequency_value IN ('semiannual', 'semiannually', 'halfyearly', 'every6months', '6months', 'p6m')
+        THEN 'semiannual'
+      WHEN normalized_frequency_value IN ('annual', 'annually', 'yearly', 'year', 'everyyear', '12months', '1year', 'p1y')
+        THEN 'annual'
+      WHEN normalized_frequency_value IN ('biennial', 'biennially', 'every2years', '2years', '24months', 'p2y')
+        THEN 'biennial'
+      WHEN normalized_frequency_value IN ('triennial', 'triennially', 'every3years', '3years', '36months', 'p3y')
+        THEN 'triennial'
+      WHEN normalized_frequency_value IN (
+        'onetime', 'oneoff', 'single', 'nonrecurring', 'nonrenewing',
+        'payasyougo', 'prepaid', 'lifetime'
+      ) THEN 'one_time'
+      WHEN normalized_frequency_value IN ('custom', 'variable', 'usagebased', 'metered', 'irregular')
+        THEN 'custom'
+      WHEN normalized_frequency_value = '' THEN 'unknown'
+      ELSE 'other'
+    END AS billing_frequency,
+    CASE
+      WHEN billing_frequency_raw IS NOT NULL
+        THEN '_experience.analytics.customDimensions.eVars.eVar1'
+      ELSE 'not_populated'
+    END AS billing_frequency_source_attribute
+  FROM normalized_frequency;
+
+Calculation Notes: |
+  Classify the scheduled customer charge cadence, not the contract term, service-delivery period, or revenue-recognition period. An annual contract invoiced monthly is monthly, while an annual prepaid agreement charged once per year is annual; usage-based pricing is classified by its actual invoice schedule, installment purchases use the installment charge cadence, prorations and retry charges inherit the underlying schedule, free trials use the first committed paid schedule when available, and ad hoc credits, refunds, taxes, and off-cycle adjustments do not create a new billing frequency. Evaluate frequency as of each journey event, retain changes between monthly and annual plans, exclude test accounts and sandbox transactions from production reporting, and do not infer cadence from irregular failed-payment dates.
+
+Business Use Case: |
+  A Chief Revenue Officer compares monthly and annual cohorts by acquisition channel, checkout conversion, first-payment success, renewal rate, churn, and LTV. If annual billing improves retention but converts poorly on mobile checkout, Product can test clearer savings messaging or a monthly default, Marketing can target annual-plan propensity segments, and Revenue Management can monitor whether cadence migrations improve durable revenue without increasing payment failures or early refunds.
+
+
+Source Data: Billing platforms such as Stripe, Chargebee, Recurly, or Zuora stitched with e-commerce checkout, subscription management, CRM, and digital analytics events.
+
+Report Attributes: |
+  ["Customer Type","Subscription Plan","Pricing Model","Acquisition Channel","Sales Channel","Device Category","Geography","Currency","Payment Method","Customer Lifecycle Stage","Auto-Renewal Status","Cohort Month"]
+
+Dashboard Usage: [Executive Revenue and LTV Dashboard, Subscription Conversion Dashboard, Checkout Funnel Dashboard, Billing and Collections Health Dashboard, Renewal and Retention Dashboard, Plan Migration Dashboard, Acquisition Cohort Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Subscription Plan, Pricing Model, Contract Term, Auto-Renewal Status, Payment Method, Currency, Sales Channel, Acquisition Channel, Customer Lifecycle Stage, Invoice Status]
+
+Derived Dimensions: [Billing Frequency Family, Recurring Billing Indicator, Billing Cadence Granularity, Billing Frequency Sort Order]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-04T16:30:22.389613+00:00
+
+Last Modified By: devyendarm
+
+
