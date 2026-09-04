@@ -1,0 +1,352 @@
+# Dimension: Transit Distance Band
+# Generated: 2026-09-04T17:30:22.938Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Transit Distance Band
+
+Description: |
+  Transit Distance Band classifies the distance between the committed fulfillment origin and the customer's delivery destination into standardized ranges for each eligible customer journey event. It enables analysis of how delivery distance affects shipping choices, checkout conversion, delivery engagement, billing outcomes, retention, and customer lifetime value without exposing an exact address or distance.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"event":[{"eventInfo":{"eventName":"purchase"},"attributes":{"transitDistanceBand":"50_99_km"}}]}
+
+GA4 Data Layer: |
+  {"event":"purchase","transit_distance_band":"50_99_km"}
+
+Adobe Client Data Layer: |
+  {"event":"purchase","eventInfo":{"transitDistanceBand":"50_99_km"}}
+
+XDM Mapping: |
+  {"eventType":"commerce.purchases","_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"50_99_km"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH purchase_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS purchase_event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS purchase_timestamp,
+      event_name,
+      user_pseudo_id,
+      stream_id,
+      platform,
+      device.category AS device_category,
+      device.operating_system,
+      device.web_info.browser AS browser,
+      device.language,
+      ecommerce.transaction_id AS ecommerce_transaction_id,
+      ecommerce.purchase_revenue,
+      ecommerce.shipping_value,
+      ecommerce.tax_value,
+      ecommerce.currency,
+      (SELECT SUM(COALESCE(i.quantity, 1)) FROM UNNEST(items) AS i) AS item_quantity,
+      ARRAY_LENGTH(items) AS distinct_item_count,
+      MAX(IF(ep.key = 'transit_distance_band', ep.value.string_value, NULL)) AS collected_distance_band,
+      MAX(IF(ep.key IN ('transit_distance_km', 'shipping_distance_km', 'route_distance_km'),
+        COALESCE(ep.value.double_value, ep.value.float_value, CAST(ep.value.int_value AS FLOAT64), SAFE_CAST(ep.value.string_value AS FLOAT64)), NULL)) AS supplied_distance_km,
+      MAX(IF(ep.key IN ('transit_distance_miles', 'shipping_distance_miles'),
+        COALESCE(ep.value.double_value, ep.value.float_value, CAST(ep.value.int_value AS FLOAT64), SAFE_CAST(ep.value.string_value AS FLOAT64)), NULL)) AS supplied_distance_miles,
+      MAX(IF(ep.key IN ('origin_latitude', 'ship_from_latitude', 'fulfillment_origin_latitude'),
+        COALESCE(ep.value.double_value, ep.value.float_value, CAST(ep.value.int_value AS FLOAT64), SAFE_CAST(ep.value.string_value AS FLOAT64)), NULL)) AS origin_latitude,
+      MAX(IF(ep.key IN ('origin_longitude', 'ship_from_longitude', 'fulfillment_origin_longitude'),
+        COALESCE(ep.value.double_value, ep.value.float_value, CAST(ep.value.int_value AS FLOAT64), SAFE_CAST(ep.value.string_value AS FLOAT64)), NULL)) AS origin_longitude,
+      MAX(IF(ep.key IN ('destination_latitude', 'ship_to_latitude', 'delivery_latitude'),
+        COALESCE(ep.value.double_value, ep.value.float_value, CAST(ep.value.int_value AS FLOAT64), SAFE_CAST(ep.value.string_value AS FLOAT64)), NULL)) AS destination_latitude,
+      MAX(IF(ep.key IN ('destination_longitude', 'ship_to_longitude', 'delivery_longitude'),
+        COALESCE(ep.value.double_value, ep.value.float_value, CAST(ep.value.int_value AS FLOAT64), SAFE_CAST(ep.value.string_value AS FLOAT64)), NULL)) AS destination_longitude,
+      MAX(IF(ep.key IN ('transaction_id', 'order_id', 'purchase_id'), ep.value.string_value, NULL)) AS parameter_order_id,
+      MAX(IF(ep.key IN ('customer_id', 'crm_customer_id'), ep.value.string_value, NULL)) AS customer_id,
+      MAX(IF(ep.key = 'ga_session_id', CAST(ep.value.int_value AS STRING), NULL)) AS session_id,
+      MAX(IF(ep.key = 'origin_country', UPPER(ep.value.string_value), NULL)) AS origin_country,
+      MAX(IF(ep.key IN ('destination_country', 'shipping_country'), UPPER(ep.value.string_value), NULL)) AS destination_country,
+      MAX(IF(ep.key = 'origin_region', ep.value.string_value, NULL)) AS origin_region,
+      MAX(IF(ep.key IN ('destination_region', 'shipping_region'), ep.value.string_value, NULL)) AS destination_region,
+      MAX(IF(ep.key = 'origin_postal_code', ep.value.string_value, NULL)) AS origin_postal_code,
+      MAX(IF(ep.key IN ('destination_postal_code', 'shipping_postal_code'), ep.value.string_value, NULL)) AS destination_postal_code,
+      MAX(IF(ep.key = 'shipping_service_level', ep.value.string_value, NULL)) AS shipping_service_level,
+      MAX(IF(ep.key IN ('carrier_name', 'shipping_carrier'), ep.value.string_value, NULL)) AS carrier_name,
+      MAX(IF(ep.key = 'fulfillment_type', ep.value.string_value, NULL)) AS fulfillment_type,
+      MAX(IF(ep.key = 'promised_delivery_date', SAFE_CAST(ep.value.string_value AS DATE), NULL)) AS promised_delivery_date,
+      MAX(IF(ep.key = 'actual_delivery_date', SAFE_CAST(ep.value.string_value AS DATE), NULL)) AS actual_delivery_date
+    FROM `your-project.analytics_123456789.events_*`
+    LEFT JOIN UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date) AND FORMAT_DATE('%Y%m%d', @end_date)
+      AND event_name = 'purchase'
+    GROUP BY
+      event_date, event_timestamp, event_name, user_pseudo_id, stream_id, platform,
+      device.category, device.operating_system, device.web_info.browser, device.language,
+      ecommerce.transaction_id, ecommerce.purchase_revenue, ecommerce.shipping_value,
+      ecommerce.tax_value, ecommerce.currency, items
+  ),
+  normalized AS (
+    SELECT
+      *,
+      TRIM(REGEXP_REPLACE(LOWER(TRIM(collected_distance_band)), r'[^a-z0-9]+', '_'), '_') AS normalized_collected_band,
+      CASE
+        WHEN supplied_distance_km >= 0 THEN supplied_distance_km
+        WHEN supplied_distance_miles >= 0 THEN supplied_distance_miles * 1.609344
+        WHEN origin_latitude BETWEEN -90 AND 90
+          AND destination_latitude BETWEEN -90 AND 90
+          AND origin_longitude BETWEEN -180 AND 180
+          AND destination_longitude BETWEEN -180 AND 180
+        THEN 2 * 6371.0088 * ASIN(SQRT(LEAST(1.0,
+          POW(SIN(RADIANS(destination_latitude - origin_latitude) / 2), 2)
+          + COS(RADIANS(origin_latitude)) * COS(RADIANS(destination_latitude))
+          * POW(SIN(RADIANS(destination_longitude - origin_longitude) / 2), 2))))
+        ELSE NULL
+      END AS transit_distance_km
+    FROM purchase_events
+  ),
+  banded AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_collected_band IN ('0_9', '0_9_km') THEN '0_9_km'
+        WHEN normalized_collected_band IN ('10_24', '10_24_km') THEN '10_24_km'
+        WHEN normalized_collected_band IN ('25_49', '25_49_km') THEN '25_49_km'
+        WHEN normalized_collected_band IN ('50_99', '50_99_km') THEN '50_99_km'
+        WHEN normalized_collected_band IN ('100_249', '100_249_km') THEN '100_249_km'
+        WHEN normalized_collected_band IN ('250_499', '250_499_km') THEN '250_499_km'
+        WHEN normalized_collected_band IN ('500_999', '500_999_km') THEN '500_999_km'
+        WHEN normalized_collected_band IN ('1000_plus', '1000_plus_km', '1000_km_plus') THEN '1000_plus_km'
+        WHEN transit_distance_km < 10 THEN '0_9_km'
+        WHEN transit_distance_km < 25 THEN '10_24_km'
+        WHEN transit_distance_km < 50 THEN '25_49_km'
+        WHEN transit_distance_km < 100 THEN '50_99_km'
+        WHEN transit_distance_km < 250 THEN '100_249_km'
+        WHEN transit_distance_km < 500 THEN '250_499_km'
+        WHEN transit_distance_km < 1000 THEN '500_999_km'
+        WHEN transit_distance_km >= 1000 THEN '1000_plus_km'
+        ELSE 'unknown'
+      END AS transit_distance_band
+    FROM normalized
+  )
+  SELECT
+    transit_distance_band,
+    CASE transit_distance_band
+      WHEN '0_9_km' THEN '0–9 km'
+      WHEN '10_24_km' THEN '10–24 km'
+      WHEN '25_49_km' THEN '25–49 km'
+      WHEN '50_99_km' THEN '50–99 km'
+      WHEN '100_249_km' THEN '100–249 km'
+      WHEN '250_499_km' THEN '250–499 km'
+      WHEN '500_999_km' THEN '500–999 km'
+      WHEN '1000_plus_km' THEN '1,000+ km'
+      ELSE 'Unknown'
+    END AS transit_distance_band_label,
+    CASE transit_distance_band WHEN '0_9_km' THEN 1 WHEN '10_24_km' THEN 2 WHEN '25_49_km' THEN 3 WHEN '50_99_km' THEN 4 WHEN '100_249_km' THEN 5 WHEN '250_499_km' THEN 6 WHEN '500_999_km' THEN 7 WHEN '1000_plus_km' THEN 8 ELSE 99 END AS band_sort_order,
+    CASE transit_distance_band WHEN '0_9_km' THEN 0 WHEN '10_24_km' THEN 10 WHEN '25_49_km' THEN 25 WHEN '50_99_km' THEN 50 WHEN '100_249_km' THEN 100 WHEN '250_499_km' THEN 250 WHEN '500_999_km' THEN 500 WHEN '1000_plus_km' THEN 1000 END AS band_lower_bound_km,
+    CASE transit_distance_band WHEN '0_9_km' THEN 10 WHEN '10_24_km' THEN 25 WHEN '25_49_km' THEN 50 WHEN '50_99_km' THEN 100 WHEN '100_249_km' THEN 250 WHEN '250_499_km' THEN 500 WHEN '500_999_km' THEN 1000 END AS band_upper_bound_km_exclusive,
+    ROUND(transit_distance_km, 3) AS transit_distance_km,
+    CASE WHEN normalized_collected_band IS NOT NULL THEN 'collected_band' WHEN supplied_distance_km IS NOT NULL THEN 'shipping_distance_km' WHEN supplied_distance_miles IS NOT NULL THEN 'shipping_distance_miles' WHEN transit_distance_km IS NOT NULL THEN 'origin_destination_coordinates' ELSE 'unavailable' END AS distance_source,
+    CASE WHEN normalized_collected_band IS NOT NULL THEN 'upstream_classification' WHEN supplied_distance_km IS NOT NULL THEN 'supplied_kilometres' WHEN supplied_distance_miles IS NOT NULL THEN 'miles_to_kilometres' WHEN transit_distance_km IS NOT NULL THEN 'haversine_great_circle' ELSE 'not_calculated' END AS distance_calculation_method,
+    CASE WHEN transit_distance_km IS NOT NULL THEN 'distance_available' WHEN normalized_collected_band IS NOT NULL THEN 'band_only' ELSE 'missing' END AS distance_quality_status,
+    (transit_distance_km IS NOT NULL AND supplied_distance_km IS NULL AND supplied_distance_miles IS NULL) OR (transit_distance_km IS NULL AND normalized_collected_band IS NOT NULL) AS is_distance_estimated,
+    CASE WHEN origin_country IS NULL OR destination_country IS NULL THEN NULL ELSE origin_country <> destination_country END AS is_cross_border,
+    origin_country,
+    destination_country,
+    origin_region,
+    destination_region,
+    origin_postal_code,
+    destination_postal_code,
+    origin_latitude,
+    origin_longitude,
+    destination_latitude,
+    destination_longitude,
+    COALESCE(parameter_order_id, ecommerce_transaction_id) AS order_id,
+    COALESCE(ecommerce_transaction_id, parameter_order_id) AS transaction_id,
+    purchase_event_date,
+    purchase_timestamp,
+    user_pseudo_id,
+    customer_id,
+    session_id,
+    platform,
+    CAST(stream_id AS STRING) AS stream_id,
+    device_category,
+    operating_system,
+    browser,
+    device_language AS language,
+    ecommerce_currency AS currency,
+    purchase_revenue AS order_value,
+    shipping_value,
+    tax_value,
+    item_quantity,
+    distinct_item_count,
+    shipping_service_level,
+    carrier_name,
+    fulfillment_type,
+    promised_delivery_date,
+    actual_delivery_date,
+    DATE_DIFF(actual_delivery_date, purchase_event_date, DAY) AS transit_days,
+    event_name AS source_event_name,
+    'ga4' AS record_source,
+    'transit_distance_band_v1' AS dimension_version
+  FROM banded;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH purchase_events AS (
+    SELECT
+      timestamp AS purchase_timestamp,
+      CAST(timestamp AS DATE) AS purchase_event_date,
+      eventType,
+      _experience.analytics.customDimensions.eVars.eVar1 AS collected_distance_band,
+      commerce.order.purchaseID AS order_id,
+      commerce.order.purchaseID AS transaction_id,
+      identityMap['ECID'][0].id AS ecid,
+      identityMap['CRMID'][0].id AS customer_id,
+      commerce.order.currencyCode AS currency,
+      COALESCE(commerce.order.priceTotal, commerce.purchases.value) AS order_value,
+      CARDINALITY(productListItems) AS distinct_item_count,
+      device.type AS device_category,
+      environment.operatingSystem AS operating_system,
+      environment.browserDetails.name AS browser,
+      environment.browserDetails.acceptLanguage AS language
+    FROM aep_commerce_event_dataset
+    WHERE timestamp >= CURRENT_TIMESTAMP - INTERVAL '90' DAY
+      AND eventType = 'commerce.purchases'
+  ),
+  normalized AS (
+    SELECT
+      *,
+      TRIM(BOTH '_' FROM REGEXP_REPLACE(LOWER(TRIM(collected_distance_band)), '[^a-z0-9]+', '_')) AS normalized_collected_band
+    FROM purchase_events
+  ),
+  banded AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_collected_band IN ('0_9', '0_9_km') THEN '0_9_km'
+        WHEN normalized_collected_band IN ('10_24', '10_24_km') THEN '10_24_km'
+        WHEN normalized_collected_band IN ('25_49', '25_49_km') THEN '25_49_km'
+        WHEN normalized_collected_band IN ('50_99', '50_99_km') THEN '50_99_km'
+        WHEN normalized_collected_band IN ('100_249', '100_249_km') THEN '100_249_km'
+        WHEN normalized_collected_band IN ('250_499', '250_499_km') THEN '250_499_km'
+        WHEN normalized_collected_band IN ('500_999', '500_999_km') THEN '500_999_km'
+        WHEN normalized_collected_band IN ('1000_plus', '1000_plus_km', '1000_km_plus') THEN '1000_plus_km'
+        ELSE 'unknown'
+      END AS transit_distance_band
+    FROM normalized
+  )
+  SELECT
+    transit_distance_band,
+    CASE transit_distance_band
+      WHEN '0_9_km' THEN '0–9 km'
+      WHEN '10_24_km' THEN '10–24 km'
+      WHEN '25_49_km' THEN '25–49 km'
+      WHEN '50_99_km' THEN '50–99 km'
+      WHEN '100_249_km' THEN '100–249 km'
+      WHEN '250_499_km' THEN '250–499 km'
+      WHEN '500_999_km' THEN '500–999 km'
+      WHEN '1000_plus_km' THEN '1,000+ km'
+      ELSE 'Unknown'
+    END AS transit_distance_band_label,
+    CASE transit_distance_band WHEN '0_9_km' THEN 1 WHEN '10_24_km' THEN 2 WHEN '25_49_km' THEN 3 WHEN '50_99_km' THEN 4 WHEN '100_249_km' THEN 5 WHEN '250_499_km' THEN 6 WHEN '500_999_km' THEN 7 WHEN '1000_plus_km' THEN 8 ELSE 99 END AS band_sort_order,
+    CASE transit_distance_band WHEN '0_9_km' THEN 0 WHEN '10_24_km' THEN 10 WHEN '25_49_km' THEN 25 WHEN '50_99_km' THEN 50 WHEN '100_249_km' THEN 100 WHEN '250_499_km' THEN 250 WHEN '500_999_km' THEN 500 WHEN '1000_plus_km' THEN 1000 END AS band_lower_bound_km,
+    CASE transit_distance_band WHEN '0_9_km' THEN 10 WHEN '10_24_km' THEN 25 WHEN '25_49_km' THEN 50 WHEN '50_99_km' THEN 100 WHEN '100_249_km' THEN 250 WHEN '250_499_km' THEN 500 WHEN '500_999_km' THEN 1000 END AS band_upper_bound_km_exclusive,
+    CAST(NULL AS DECIMAL(18,3)) AS transit_distance_km,
+    CASE WHEN transit_distance_band <> 'unknown' THEN 'xdm_evar1' ELSE 'unavailable' END AS distance_source,
+    CASE WHEN transit_distance_band <> 'unknown' THEN 'upstream_classification' ELSE 'not_calculated' END AS distance_calculation_method,
+    CASE WHEN transit_distance_band <> 'unknown' THEN 'band_only' ELSE 'missing' END AS distance_quality_status,
+    CASE WHEN transit_distance_band <> 'unknown' THEN TRUE ELSE FALSE END AS is_distance_estimated,
+    CAST(NULL AS BOOLEAN) AS is_cross_border,
+    CAST(NULL AS VARCHAR) AS origin_country,
+    CAST(NULL AS VARCHAR) AS destination_country,
+    CAST(NULL AS VARCHAR) AS origin_region,
+    CAST(NULL AS VARCHAR) AS destination_region,
+    CAST(NULL AS VARCHAR) AS origin_postal_code,
+    CAST(NULL AS VARCHAR) AS destination_postal_code,
+    CAST(NULL AS DECIMAL(10,7)) AS origin_latitude,
+    CAST(NULL AS DECIMAL(10,7)) AS origin_longitude,
+    CAST(NULL AS DECIMAL(10,7)) AS destination_latitude,
+    CAST(NULL AS DECIMAL(10,7)) AS destination_longitude,
+    order_id,
+    transaction_id,
+    purchase_event_date,
+    purchase_timestamp,
+    ecid AS user_pseudo_id,
+    customer_id,
+    CAST(NULL AS VARCHAR) AS session_id,
+    'WEB' AS platform,
+    CAST(NULL AS VARCHAR) AS stream_id,
+    device_category,
+    operating_system,
+    browser,
+    language,
+    currency,
+    order_value,
+    CAST(NULL AS DECIMAL(18,2)) AS shipping_value,
+    CAST(NULL AS DECIMAL(18,2)) AS tax_value,
+    CAST(NULL AS BIGINT) AS item_quantity,
+    distinct_item_count,
+    CAST(NULL AS VARCHAR) AS shipping_service_level,
+    CAST(NULL AS VARCHAR) AS carrier_name,
+    CAST(NULL AS VARCHAR) AS fulfillment_type,
+    CAST(NULL AS DATE) AS promised_delivery_date,
+    CAST(NULL AS DATE) AS actual_delivery_date,
+    CAST(NULL AS INTEGER) AS transit_days,
+    eventType AS source_event_name,
+    'adobe_aep' AS record_source,
+    'transit_distance_band_v1' AS dimension_version
+  FROM banded;
+
+Calculation Notes: |
+  Classify the canonical transit distance in kilometers using the band boundaries defined above. For checkout and shipping-option events, use the fulfillment origin assigned by the quoting service at event time; for purchase and post-purchase events, use the committed origin associated with the fulfillment group. Recalculate the event-level value when an order is rerouted, split, or refulfilled, but do not overwrite historical event values. Assign each split fulfillment group independently and avoid assigning a single order-level band when items depart from different origins. Exclude store pickup, curbside pickup, digital delivery, canceled fulfillment groups that were never tendered, and return legs unless the event explicitly represents a customer-facing return journey. Do not infer cross-border status from distance, do not use customer IP location as a delivery destination, and do not substitute billing address for delivery address. Negative, nonnumeric, or unresolved distance results must be recorded as Unknown. This dimension is event based and does not depend on session timeout or session stitching rules.
+
+Business Use Case: |
+  The Chief Customer Officer and checkout analytics team compare conversion, shipping-option selection, delivery complaints, repeat purchase, refunds, and LTV across distance bands. If long-distance customers show high checkout abandonment or low repeat purchase after seeing delivery fees or promises, Product and Revenue Management can adjust fulfillment-origin selection, free-shipping thresholds, delivery messaging, and retention offers for that segment.
+
+
+Source Data: Digital checkout and order events stitched with the commerce order platform, shipping-rate APIs, delivery-promise services, CRM customer identifiers, billing records, and customer-facing carrier tracking events
+
+Report Attributes: |
+  ["Customer Lifecycle Stage","Acquisition Channel","Order Channel","Fulfillment Channel","Shipping Method","Delivery Speed","Delivery Promise Band","Shipping Fee Band","Destination Region","Cross-Border Indicator","Customer Tenure Band","Loyalty Tier","Device Category","Product Category"]
+
+Dashboard Usage: [Checkout Conversion and Shipping Experience, Omnichannel Delivery Journey, Delivery Promise and Customer Satisfaction, Shipping Revenue and Billing, Post-Purchase Engagement and Retention, Customer Lifetime Value by Fulfillment Experience]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Delivery Destination Region, Fulfillment Origin Region, Shipping Method, Delivery Speed, Delivery Promise Band, Shipping Fee Band, Fulfillment Channel, Order Channel, Customer Lifecycle Stage, Customer Tenure Band, Cross-Border Indicator]
+
+Derived Dimensions: [Long-Haul Transit Flag, Transit Distance Tier Group, Distance-Based Delivery Promise Class, Distance-Based Shipping Cost Exposure]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-03T18:30:16.19403+00:00
+
+Last Modified By: devyendarm
+
+
