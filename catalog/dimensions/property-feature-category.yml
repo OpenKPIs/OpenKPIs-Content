@@ -1,0 +1,392 @@
+# Dimension: Property Feature Category
+# Generated: 2026-09-04T15:30:21.478Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Property Feature Category
+
+Description: |
+  Classifies each canonical property feature assigned to a listing into one governed functional category, such as Parking, Accessibility, Utilities, or Safety and Security. It supports consistent analysis of property inventory, feature demand, search behavior, and listing engagement by feature category.
+
+Category: Engagement
+
+Tags: [dimension]
+
+Industry: Technology
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH ranked_categories AS (
+    SELECT
+      c.category_id,
+      c.category_version_id,
+      c.category_name,
+      c.effective_from,
+      c.effective_to,
+      c.updated_at,
+      c.ingestion_timestamp,
+      ROW_NUMBER() OVER (
+        PARTITION BY c.category_id, c.category_version_id
+        ORDER BY c.updated_at DESC, c.ingestion_timestamp DESC
+      ) AS row_number
+    FROM `your-project.property_feature_taxonomy.feature_categories` AS c
+    WHERE c.category_id IS NOT NULL
+      AND c.category_version_id IS NOT NULL
+      AND c.category_name IS NOT NULL
+      AND c.effective_from IS NOT NULL
+  ),
+  categories AS (
+    SELECT * EXCEPT (row_number)
+    FROM ranked_categories
+    WHERE row_number = 1
+  ),
+  ranked_features AS (
+    SELECT
+      f.feature_id,
+      f.feature_version_id,
+      f.feature_name,
+      f.category_id,
+      f.effective_from,
+      f.effective_to,
+      f.updated_at,
+      f.ingestion_timestamp,
+      ROW_NUMBER() OVER (
+        PARTITION BY f.feature_id, f.feature_version_id
+        ORDER BY f.updated_at DESC, f.ingestion_timestamp DESC
+      ) AS row_number
+    FROM `your-project.property_feature_taxonomy.property_features` AS f
+    WHERE f.feature_id IS NOT NULL
+      AND f.feature_version_id IS NOT NULL
+      AND f.category_id IS NOT NULL
+      AND f.feature_name IS NOT NULL
+      AND f.effective_from IS NOT NULL
+  ),
+  features AS (
+    SELECT * EXCEPT (row_number)
+    FROM ranked_features
+    WHERE row_number = 1
+  ),
+  ranked_assignments AS (
+    SELECT
+      a.property_id,
+      a.feature_id,
+      a.is_enabled,
+      a.effective_from,
+      a.effective_to,
+      a.updated_at,
+      a.ingestion_timestamp,
+      ROW_NUMBER() OVER (
+        PARTITION BY a.property_id, a.feature_id, a.effective_from
+        ORDER BY a.updated_at DESC, a.ingestion_timestamp DESC
+      ) AS row_number
+    FROM `your-project.property_listing_management.property_feature_assignments` AS a
+    WHERE a.property_id IS NOT NULL
+      AND a.feature_id IS NOT NULL
+      AND a.effective_from IS NOT NULL
+  ),
+  assignments AS (
+    SELECT * EXCEPT (row_number)
+    FROM ranked_assignments
+    WHERE row_number = 1
+      AND COALESCE(is_enabled, FALSE) = TRUE
+  ),
+  temporal_intersections AS (
+    SELECT
+      a.property_id,
+      f.feature_id,
+      f.feature_version_id,
+      f.feature_name,
+      c.category_id,
+      c.category_version_id,
+      c.category_name,
+      GREATEST(
+        a.effective_from,
+        f.effective_from,
+        c.effective_from
+      ) AS valid_from,
+      LEAST(
+        COALESCE(a.effective_to, TIMESTAMP '9999-12-31 23:59:59+00'),
+        COALESCE(f.effective_to, TIMESTAMP '9999-12-31 23:59:59+00'),
+        COALESCE(c.effective_to, TIMESTAMP '9999-12-31 23:59:59+00')
+      ) AS valid_to_raw,
+      GREATEST(
+        COALESCE(a.updated_at, TIMESTAMP '1970-01-01 00:00:00+00'),
+        COALESCE(f.updated_at, TIMESTAMP '1970-01-01 00:00:00+00'),
+        COALESCE(c.updated_at, TIMESTAMP '1970-01-01 00:00:00+00')
+      ) AS source_updated_at
+    FROM assignments AS a
+    INNER JOIN features AS f
+      ON a.feature_id = f.feature_id
+     AND a.effective_from < COALESCE(f.effective_to, TIMESTAMP '9999-12-31 23:59:59+00')
+     AND f.effective_from < COALESCE(a.effective_to, TIMESTAMP '9999-12-31 23:59:59+00')
+    INNER JOIN categories AS c
+      ON f.category_id = c.category_id
+     AND a.effective_from < COALESCE(c.effective_to, TIMESTAMP '9999-12-31 23:59:59+00')
+     AND f.effective_from < COALESCE(c.effective_to, TIMESTAMP '9999-12-31 23:59:59+00')
+     AND c.effective_from < COALESCE(a.effective_to, TIMESTAMP '9999-12-31 23:59:59+00')
+     AND c.effective_from < COALESCE(f.effective_to, TIMESTAMP '9999-12-31 23:59:59+00')
+  ),
+  resolved_history AS (
+    SELECT *
+    FROM temporal_intersections
+    WHERE valid_from < valid_to_raw
+  )
+  SELECT
+    TO_HEX(MD5(CONCAT(
+      LOWER(TRIM(CAST(category_id AS STRING))),
+      '|',
+      LOWER(TRIM(CAST(category_version_id AS STRING)))
+    ))) AS property_feature_category_key,
+    TO_HEX(MD5(CONCAT(
+      LOWER(TRIM(CAST(feature_id AS STRING))),
+      '|',
+      LOWER(TRIM(CAST(feature_version_id AS STRING)))
+    ))) AS property_feature_key,
+    property_id,
+    category_id AS property_feature_category_id,
+    category_name AS property_feature_category,
+    feature_id AS property_feature_id,
+    feature_name AS property_feature_name,
+    valid_from,
+    IF(
+      valid_to_raw = TIMESTAMP '9999-12-31 23:59:59+00',
+      NULL,
+      valid_to_raw
+    ) AS valid_to,
+    source_updated_at,
+    CURRENT_TIMESTAMP() AS dimension_loaded_at,
+    valid_to_raw = TIMESTAMP '9999-12-31 23:59:59+00' AS is_current
+  FROM resolved_history;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH ranked_categories AS (
+    SELECT
+      c.category_id,
+      c.category_version_id,
+      c.category_name,
+      c.effective_from,
+      c.effective_to,
+      c.updated_at,
+      c.ingestion_timestamp,
+      ROW_NUMBER() OVER (
+        PARTITION BY c.category_id, c.category_version_id
+        ORDER BY c.updated_at DESC, c.ingestion_timestamp DESC
+      ) AS row_number
+    FROM property_feature_taxonomy_categories_dataset AS c
+    WHERE c.category_id IS NOT NULL
+      AND c.category_version_id IS NOT NULL
+      AND c.category_name IS NOT NULL
+      AND c.effective_from IS NOT NULL
+  ),
+  categories AS (
+    SELECT
+      category_id,
+      category_version_id,
+      category_name,
+      effective_from,
+      effective_to,
+      updated_at,
+      ingestion_timestamp
+    FROM ranked_categories
+    WHERE row_number = 1
+  ),
+  ranked_features AS (
+    SELECT
+      f.feature_id,
+      f.feature_version_id,
+      f.feature_name,
+      f.category_id,
+      f.effective_from,
+      f.effective_to,
+      f.updated_at,
+      f.ingestion_timestamp,
+      ROW_NUMBER() OVER (
+        PARTITION BY f.feature_id, f.feature_version_id
+        ORDER BY f.updated_at DESC, f.ingestion_timestamp DESC
+      ) AS row_number
+    FROM property_feature_taxonomy_features_dataset AS f
+    WHERE f.feature_id IS NOT NULL
+      AND f.feature_version_id IS NOT NULL
+      AND f.category_id IS NOT NULL
+      AND f.feature_name IS NOT NULL
+      AND f.effective_from IS NOT NULL
+  ),
+  features AS (
+    SELECT
+      feature_id,
+      feature_version_id,
+      feature_name,
+      category_id,
+      effective_from,
+      effective_to,
+      updated_at,
+      ingestion_timestamp
+    FROM ranked_features
+    WHERE row_number = 1
+  ),
+  ranked_assignments AS (
+    SELECT
+      a.property_id,
+      a.feature_id,
+      a.is_enabled,
+      a.effective_from,
+      a.effective_to,
+      a.updated_at,
+      a.ingestion_timestamp,
+      ROW_NUMBER() OVER (
+        PARTITION BY a.property_id, a.feature_id, a.effective_from
+        ORDER BY a.updated_at DESC, a.ingestion_timestamp DESC
+      ) AS row_number
+    FROM property_listing_feature_assignments_dataset AS a
+    WHERE a.property_id IS NOT NULL
+      AND a.feature_id IS NOT NULL
+      AND a.effective_from IS NOT NULL
+  ),
+  assignments AS (
+    SELECT
+      property_id,
+      feature_id,
+      is_enabled,
+      effective_from,
+      effective_to,
+      updated_at,
+      ingestion_timestamp
+    FROM ranked_assignments
+    WHERE row_number = 1
+      AND COALESCE(is_enabled, FALSE) = TRUE
+  ),
+  temporal_intersections AS (
+    SELECT
+      a.property_id,
+      f.feature_id,
+      f.feature_version_id,
+      f.feature_name,
+      c.category_id,
+      c.category_version_id,
+      c.category_name,
+      GREATEST(
+        a.effective_from,
+        f.effective_from,
+        c.effective_from
+      ) AS valid_from,
+      LEAST(
+        COALESCE(a.effective_to, TIMESTAMP '9999-12-31 23:59:59'),
+        COALESCE(f.effective_to, TIMESTAMP '9999-12-31 23:59:59'),
+        COALESCE(c.effective_to, TIMESTAMP '9999-12-31 23:59:59')
+      ) AS valid_to_raw,
+      GREATEST(
+        COALESCE(a.updated_at, TIMESTAMP '1970-01-01 00:00:00'),
+        COALESCE(f.updated_at, TIMESTAMP '1970-01-01 00:00:00'),
+        COALESCE(c.updated_at, TIMESTAMP '1970-01-01 00:00:00')
+      ) AS source_updated_at
+    FROM assignments AS a
+    INNER JOIN features AS f
+      ON a.feature_id = f.feature_id
+     AND a.effective_from < COALESCE(f.effective_to, TIMESTAMP '9999-12-31 23:59:59')
+     AND f.effective_from < COALESCE(a.effective_to, TIMESTAMP '9999-12-31 23:59:59')
+    INNER JOIN categories AS c
+      ON f.category_id = c.category_id
+     AND a.effective_from < COALESCE(c.effective_to, TIMESTAMP '9999-12-31 23:59:59')
+     AND f.effective_from < COALESCE(c.effective_to, TIMESTAMP '9999-12-31 23:59:59')
+     AND c.effective_from < COALESCE(a.effective_to, TIMESTAMP '9999-12-31 23:59:59')
+     AND c.effective_from < COALESCE(f.effective_to, TIMESTAMP '9999-12-31 23:59:59')
+  ),
+  resolved_history AS (
+    SELECT
+      property_id,
+      feature_id,
+      feature_version_id,
+      feature_name,
+      category_id,
+      category_version_id,
+      category_name,
+      valid_from,
+      valid_to_raw,
+      source_updated_at
+    FROM temporal_intersections
+    WHERE valid_from < valid_to_raw
+  )
+  SELECT
+    MD5(CONCAT(
+      LOWER(TRIM(CAST(category_id AS STRING))),
+      '|',
+      LOWER(TRIM(CAST(category_version_id AS STRING)))
+    )) AS property_feature_category_key,
+    MD5(CONCAT(
+      LOWER(TRIM(CAST(feature_id AS STRING))),
+      '|',
+      LOWER(TRIM(CAST(feature_version_id AS STRING)))
+    )) AS property_feature_key,
+    property_id,
+    category_id AS property_feature_category_id,
+    category_name AS property_feature_category,
+    feature_id AS property_feature_id,
+    feature_name AS property_feature_name,
+    valid_from,
+    CASE
+      WHEN valid_to_raw = TIMESTAMP '9999-12-31 23:59:59' THEN NULL
+      ELSE valid_to_raw
+    END AS valid_to,
+    source_updated_at,
+    CURRENT_TIMESTAMP() AS dimension_loaded_at,
+    CASE
+      WHEN valid_to_raw = TIMESTAMP '9999-12-31 23:59:59' THEN TRUE
+      ELSE FALSE
+    END AS is_current
+  FROM resolved_history;
+
+Calculation Notes: |
+  Resolve the category by joining each valid listing-feature assignment to its canonical property feature code and then to the governed, effective-dated property feature taxonomy. For event analysis, select the category whose effective period contains the event timestamp; for inventory snapshots, use the category and listing-feature assignment valid at the snapshot timestamp. Treat effective-from timestamps as inclusive and effective-to timestamps as exclusive, and prohibit overlapping active category mappings for the same canonical feature code. Assign 'Unknown' only when a valid canonical feature assignment has no applicable category mapping; do not create a category record when no feature assignment exists. Deduplicate the same canonical feature within a listing and effective period for listing counts while retaining records that differ by source lineage, verification status, or effective period. Preserve Type 2 history and do not restate historical categories after taxonomy changes unless an approved historical restatement is performed. Category values must come from the governed taxonomy and must not be derived from hardcoded property boolean columns, raw feature labels, free text, or embedded category labels.
+
+Business Use Case: |
+  The Product analytics team compares search-filter engagement with available listing inventory by property feature category and identifies strong demand but low coverage for Parking and Accessibility in selected markets. Product leadership then prioritizes structured feature collection for those categories, and partner teams ask brokers and property managers to enrich affected listings.
+
+
+Source Data: Property Listing Management System and Property Feature Taxonomy Service
+
+Report Attributes: |
+  ["Property Feature","Property Type","Property Subtype","Listing Status","Market","City","Neighborhood","Price Band","Bedroom Count","Bathroom Count","Feature Verification Status","Feature Source","Listing Channel","Listing Created Date"]
+
+Dashboard Usage: [Property Inventory Quality Dashboard, Search and Filter Engagement Dashboard, Listing Content Completeness Dashboard, Feature Demand and Supply Dashboard, Property Discovery Conversion Dashboard, Market Inventory Composition Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Property Feature, Listing, Property, Property Type, Property Subtype, Listing Status, Feature Verification Status, Feature Source, Market, Location]
+
+Derived Dimensions: [Property Feature Category Group, Property Feature Search Facet, Premium Feature Indicator, Accessibility Feature Indicator, Sustainability Feature Indicator, Outdoor Feature Indicator]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-04T15:30:18.956425+00:00
+
+Last Modified By: devyendarm
+
+
