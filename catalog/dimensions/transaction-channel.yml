@@ -1,0 +1,111 @@
+# Dimension: Transaction Channel
+# Generated: 2026-09-05T17:30:26.153Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Transaction Channel
+
+Description: |
+  Identifies the medium through which a financial transaction is conducted, such as online banking, mobile app, or in-person branch visit.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: FinTech & Banking
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  transaction
+
+W3 Data Layer: |
+  {"transaction":{"channel":"online banking"}}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"transaction_channel":"online banking"}}
+
+Adobe Client Data Layer: |
+  {"event":"transaction","transaction":{"channel":"online banking"}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":{"transactionChannel":"online banking"}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT
+    event_date,
+    user_pseudo_id,
+    MAX(IF(param.key = 'transaction_channel', param.value.string_value, NULL)) AS transaction_channel
+  FROM
+    `your-project.analytics_123456789.events_*`,
+    UNNEST(event_params) AS param
+  WHERE
+    event_name = 'purchase'
+  GROUP BY
+    event_date,
+    user_pseudo_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT
+    eventDate AS event_date,
+    identityMap AS user_id,
+    MAX(CASE WHEN eventType = 'transaction' THEN transaction.channel ELSE NULL END) AS transaction_channel
+  FROM
+    aep_backend_dataset
+  WHERE
+    eventType = 'transaction'
+  GROUP BY
+    eventDate,
+    identityMap;
+
+Calculation Notes: |
+  Ensure accurate mapping of transaction channels; exclude test transactions and apply session timeout rules of 30 minutes.
+
+Business Use Case: |
+  Executives can analyze which channels drive the most conversions and allocate resources to optimize underperforming channels.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Region","Time of Day"]
+
+Dashboard Usage: [Conversion Analysis Dashboard, Channel Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Transaction Type, Customer Segment]
+
+Derived Dimensions: [Channel Performance]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-05T17:30:25.799499+00:00
+
+Last Modified By: devyendarm
+
+
