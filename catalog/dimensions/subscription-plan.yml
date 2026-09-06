@@ -1,0 +1,636 @@
+# Dimension: Subscription Plan
+# Generated: 2026-09-06T12:30:18.462Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Subscription Plan
+
+Description: |
+  Subscription Plan identifies the effective-dated commercial package governing a learner or organization subscription, including its tier, billing cadence, entitlement level, market, and catalog version. It enables revenue, conversion, retention, and engagement analysis by the exact plan terms applicable when a subscription event occurred.
+
+Category: Revenue
+
+Tags: [dimension]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH billing_plans AS (
+    SELECT * EXCEPT (row_num)
+    FROM (
+      SELECT
+        CAST(plan_id AS STRING) AS plan_id,
+        plan_code,
+        plan_name,
+        plan_description,
+        plan_status,
+        plan_type,
+        CAST(product_id AS STRING) AS product_id,
+        billing_provider,
+        external_plan_id,
+        billing_frequency,
+        billing_interval_count,
+        billing_period_days,
+        trial_available_flag,
+        trial_period_days,
+        grace_period_days,
+        currency_code,
+        list_price,
+        setup_fee,
+        discount_eligible_flag,
+        tax_inclusive_flag,
+        auto_renew_flag,
+        seat_model,
+        min_seats,
+        max_seats,
+        sales_channel,
+        effective_start_at,
+        effective_end_at,
+        created_at,
+        updated_at,
+        ROW_NUMBER() OVER (
+          PARTITION BY CAST(plan_id AS STRING)
+          ORDER BY updated_at DESC, created_at DESC
+        ) AS row_num
+      FROM `your-project.subscription_billing.subscription_plans`
+      WHERE COALESCE(is_deleted, FALSE) = FALSE
+    )
+    WHERE row_num = 1
+  ),
+  catalog_plans AS (
+    SELECT * EXCEPT (row_num)
+    FROM (
+      SELECT
+        CAST(plan_id AS STRING) AS plan_id,
+        plan_code,
+        plan_name,
+        plan_description,
+        catalog_status,
+        plan_type,
+        CAST(product_id AS STRING) AS product_id,
+        product_code,
+        product_name,
+        product_family,
+        product_category,
+        platform,
+        region_code,
+        country_code,
+        language_code,
+        effective_start_at,
+        effective_end_at,
+        created_at,
+        updated_at,
+        ROW_NUMBER() OVER (
+          PARTITION BY CAST(plan_id AS STRING)
+          ORDER BY updated_at DESC, created_at DESC
+        ) AS row_num
+      FROM `your-project.subscription_catalog.subscription_products`
+      WHERE COALESCE(is_deleted, FALSE) = FALSE
+    )
+    WHERE row_num = 1
+  ),
+  crm_products AS (
+    SELECT * EXCEPT (row_num)
+    FROM (
+      SELECT
+        CAST(subscription_plan_id AS STRING) AS plan_id,
+        CAST(crm_product_id AS STRING) AS crm_product_id,
+        product_code,
+        product_name,
+        product_family,
+        product_category,
+        market_segment,
+        customer_type,
+        sales_channel,
+        region_code,
+        country_code,
+        effective_start_at,
+        effective_end_at,
+        created_at,
+        updated_at,
+        ROW_NUMBER() OVER (
+          PARTITION BY CAST(subscription_plan_id AS STRING)
+          ORDER BY updated_at DESC, created_at DESC
+        ) AS row_num
+      FROM `your-project.crm.product_catalog`
+      WHERE COALESCE(is_deleted, FALSE) = FALSE
+        AND subscription_plan_id IS NOT NULL
+    )
+    WHERE row_num = 1
+  ),
+  app_store_products AS (
+    SELECT * EXCEPT (row_num)
+    FROM (
+      SELECT
+        CAST(subscription_plan_id AS STRING) AS plan_id,
+        app_store_product_id,
+        store_name AS billing_provider,
+        platform,
+        billing_frequency,
+        billing_interval_count,
+        currency_code,
+        list_price,
+        country_code,
+        effective_start_at,
+        effective_end_at,
+        ingested_at AS updated_at,
+        ROW_NUMBER() OVER (
+          PARTITION BY CAST(subscription_plan_id AS STRING)
+          ORDER BY ingested_at DESC
+        ) AS row_num
+      FROM `your-project.app_store.subscription_product_feed`
+      WHERE COALESCE(is_deleted, FALSE) = FALSE
+        AND subscription_plan_id IS NOT NULL
+    )
+    WHERE row_num = 1
+  ),
+  entitlements AS (
+    SELECT
+      CAST(subscription_plan_id AS STRING) AS plan_id,
+      MAX(CAST(entitlement_package_id AS STRING)) AS entitlement_package_id,
+      STRING_AGG(DISTINCT entitlement_code, '|' ORDER BY entitlement_code) AS entitlement_codes,
+      MAX(learner_limit) AS learner_limit,
+      MAX(storage_limit_gb) AS storage_limit_gb,
+      MAX(access_level) AS access_level,
+      MAX(content_tier) AS content_tier,
+      MAX(support_tier) AS support_tier,
+      MIN(effective_start_at) AS effective_start_at,
+      MAX(effective_end_at) AS effective_end_at,
+      MAX(updated_at) AS updated_at
+    FROM `your-project.learning_entitlements.plan_entitlements`
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+      AND subscription_plan_id IS NOT NULL
+    GROUP BY CAST(subscription_plan_id AS STRING)
+  ),
+  plan_ids AS (
+    SELECT plan_id FROM billing_plans
+    UNION DISTINCT
+    SELECT plan_id FROM catalog_plans
+    UNION DISTINCT
+    SELECT plan_id FROM crm_products
+    UNION DISTINCT
+    SELECT plan_id FROM app_store_products
+    UNION DISTINCT
+    SELECT plan_id FROM entitlements
+  ),
+  resolved AS (
+    SELECT
+      p.plan_id,
+      b,
+      c,
+      r,
+      a,
+      e
+    FROM plan_ids p
+    LEFT JOIN billing_plans b USING (plan_id)
+    LEFT JOIN catalog_plans c USING (plan_id)
+    LEFT JOIN crm_products r USING (plan_id)
+    LEFT JOIN app_store_products a USING (plan_id)
+    LEFT JOIN entitlements e USING (plan_id)
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT('SUBSCRIPTION_PLAN|', plan_id))) AS subscription_plan_key,
+    plan_id,
+    COALESCE(b.plan_code, c.plan_code, r.product_code, CONCAT('PLAN-', plan_id)) AS plan_code,
+    COALESCE(b.plan_name, c.plan_name, r.product_name, 'Unknown Subscription Plan') AS plan_name,
+    COALESCE(b.plan_description, c.plan_description) AS plan_description,
+    UPPER(COALESCE(b.plan_status, c.catalog_status, 'UNKNOWN')) AS plan_status,
+    UPPER(COALESCE(b.plan_type, c.plan_type, 'UNKNOWN')) AS plan_type,
+    COALESCE(b.product_id, c.product_id) AS product_id,
+    COALESCE(c.product_code, r.product_code) AS product_code,
+    COALESCE(c.product_name, r.product_name, b.plan_name) AS product_name,
+    COALESCE(c.product_family, r.product_family) AS product_family,
+    COALESCE(c.product_category, r.product_category) AS product_category,
+    COALESCE(b.billing_provider, a.billing_provider, 'UNKNOWN') AS billing_provider,
+    b.external_plan_id AS external_plan_id,
+    a.app_store_product_id AS app_store_product_id,
+    e.entitlement_package_id AS entitlement_package_id,
+    UPPER(COALESCE(b.billing_frequency, a.billing_frequency, 'UNKNOWN')) AS billing_frequency,
+    COALESCE(b.billing_interval_count, a.billing_interval_count, 1) AS billing_interval_count,
+    b.billing_period_days AS billing_period_days,
+    COALESCE(b.trial_available_flag, FALSE) AS trial_available_flag,
+    COALESCE(b.trial_period_days, 0) AS trial_period_days,
+    COALESCE(b.grace_period_days, 0) AS grace_period_days,
+    UPPER(COALESCE(b.currency_code, a.currency_code, 'UNKNOWN')) AS currency_code,
+    COALESCE(b.list_price, a.list_price) AS list_price,
+    COALESCE(b.setup_fee, 0) AS setup_fee,
+    COALESCE(b.discount_eligible_flag, FALSE) AS discount_eligible_flag,
+    COALESCE(b.tax_inclusive_flag, FALSE) AS tax_inclusive_flag,
+    COALESCE(b.auto_renew_flag, FALSE) AS auto_renew_flag,
+    UPPER(COALESCE(b.seat_model, 'INDIVIDUAL')) AS seat_model,
+    b.min_seats AS min_seats,
+    b.max_seats AS max_seats,
+    e.learner_limit AS learner_limit,
+    e.storage_limit_gb AS storage_limit_gb,
+    UPPER(COALESCE(e.access_level, 'UNKNOWN')) AS access_level,
+    UPPER(COALESCE(e.content_tier, 'UNKNOWN')) AS content_tier,
+    UPPER(COALESCE(e.support_tier, 'UNKNOWN')) AS support_tier,
+    e.entitlement_codes AS entitlement_codes,
+    UPPER(COALESCE(b.sales_channel, r.sales_channel, 'UNKNOWN')) AS sales_channel,
+    UPPER(COALESCE(r.market_segment, 'UNKNOWN')) AS market_segment,
+    UPPER(COALESCE(r.customer_type, 'UNKNOWN')) AS customer_type,
+    UPPER(COALESCE(c.region_code, r.region_code, 'GLOBAL')) AS region_code,
+    UPPER(COALESCE(c.country_code, r.country_code, a.country_code, 'GLOBAL')) AS country_code,
+    LOWER(COALESCE(c.language_code, 'und')) AS language_code,
+    UPPER(COALESCE(c.platform, a.platform, 'UNKNOWN')) AS platform,
+    r.crm_product_id AS crm_product_id,
+    COALESCE(b.effective_start_at, c.effective_start_at, r.effective_start_at, a.effective_start_at, e.effective_start_at, b.created_at, c.created_at, r.created_at) AS effective_start_at,
+    COALESCE(b.effective_end_at, c.effective_end_at, r.effective_end_at, a.effective_end_at, e.effective_end_at, TIMESTAMP '9999-12-31 23:59:59+00') AS effective_end_at,
+    CASE
+      WHEN UPPER(COALESCE(b.plan_status, c.catalog_status, 'ACTIVE')) IN ('ACTIVE', 'AVAILABLE', 'PUBLISHED')
+       AND COALESCE(b.effective_end_at, c.effective_end_at, r.effective_end_at, a.effective_end_at, e.effective_end_at, TIMESTAMP '9999-12-31 23:59:59+00') > CURRENT_TIMESTAMP()
+      THEN TRUE ELSE FALSE
+    END AS is_current,
+    GREATEST(
+      COALESCE(b.updated_at, TIMESTAMP '1970-01-01 00:00:00+00'),
+      COALESCE(c.updated_at, TIMESTAMP '1970-01-01 00:00:00+00'),
+      COALESCE(r.updated_at, TIMESTAMP '1970-01-01 00:00:00+00'),
+      COALESCE(a.updated_at, TIMESTAMP '1970-01-01 00:00:00+00'),
+      COALESCE(e.updated_at, TIMESTAMP '1970-01-01 00:00:00+00')
+    ) AS source_updated_at,
+    ARRAY_TO_STRING(
+      ARRAY(
+        SELECT source_name
+        FROM UNNEST([
+          IF(b.plan_id IS NOT NULL, 'SUBSCRIPTION_BILLING', NULL),
+          IF(c.plan_id IS NOT NULL, 'PRODUCT_CATALOG', NULL),
+          IF(r.plan_id IS NOT NULL, 'CRM', NULL),
+          IF(a.plan_id IS NOT NULL, 'APP_STORE', NULL),
+          IF(e.plan_id IS NOT NULL, 'ENTITLEMENT_SERVICE', NULL)
+        ]) AS source_name
+        WHERE source_name IS NOT NULL
+      ),
+      '|'
+    ) AS source_system
+  FROM resolved;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH billing_ranked AS (
+    SELECT
+      CAST(plan_id AS VARCHAR) AS plan_id,
+      plan_code,
+      plan_name,
+      plan_description,
+      plan_status,
+      plan_type,
+      CAST(product_id AS VARCHAR) AS product_id,
+      billing_provider,
+      external_plan_id,
+      billing_frequency,
+      billing_interval_count,
+      billing_period_days,
+      trial_available_flag,
+      trial_period_days,
+      grace_period_days,
+      currency_code,
+      list_price,
+      setup_fee,
+      discount_eligible_flag,
+      tax_inclusive_flag,
+      auto_renew_flag,
+      seat_model,
+      min_seats,
+      max_seats,
+      sales_channel,
+      effective_start_at,
+      effective_end_at,
+      created_at,
+      updated_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(plan_id AS VARCHAR)
+        ORDER BY updated_at DESC, created_at DESC
+      ) AS row_num
+    FROM subscription_billing_platform_subscription_plans
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+  ),
+  billing_plans AS (
+    SELECT * FROM billing_ranked WHERE row_num = 1
+  ),
+  catalog_ranked AS (
+    SELECT
+      CAST(plan_id AS VARCHAR) AS plan_id,
+      plan_code,
+      plan_name,
+      plan_description,
+      catalog_status,
+      plan_type,
+      CAST(product_id AS VARCHAR) AS product_id,
+      product_code,
+      product_name,
+      product_family,
+      product_category,
+      platform,
+      region_code,
+      country_code,
+      language_code,
+      effective_start_at,
+      effective_end_at,
+      created_at,
+      updated_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(plan_id AS VARCHAR)
+        ORDER BY updated_at DESC, created_at DESC
+      ) AS row_num
+    FROM subscription_product_catalog
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+  ),
+  catalog_plans AS (
+    SELECT * FROM catalog_ranked WHERE row_num = 1
+  ),
+  crm_ranked AS (
+    SELECT
+      CAST(subscription_plan_id AS VARCHAR) AS plan_id,
+      CAST(crm_product_id AS VARCHAR) AS crm_product_id,
+      product_code,
+      product_name,
+      product_family,
+      product_category,
+      market_segment,
+      customer_type,
+      sales_channel,
+      region_code,
+      country_code,
+      effective_start_at,
+      effective_end_at,
+      created_at,
+      updated_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(subscription_plan_id AS VARCHAR)
+        ORDER BY updated_at DESC, created_at DESC
+      ) AS row_num
+    FROM crm_product_catalog
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+      AND subscription_plan_id IS NOT NULL
+  ),
+  crm_products AS (
+    SELECT * FROM crm_ranked WHERE row_num = 1
+  ),
+  app_store_ranked AS (
+    SELECT
+      CAST(subscription_plan_id AS VARCHAR) AS plan_id,
+      app_store_product_id,
+      store_name AS billing_provider,
+      platform,
+      billing_frequency,
+      billing_interval_count,
+      currency_code,
+      list_price,
+      country_code,
+      effective_start_at,
+      effective_end_at,
+      ingested_at AS updated_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(subscription_plan_id AS VARCHAR)
+        ORDER BY ingested_at DESC
+      ) AS row_num
+    FROM app_store_subscription_product_feed
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+      AND subscription_plan_id IS NOT NULL
+  ),
+  app_store_products AS (
+    SELECT * FROM app_store_ranked WHERE row_num = 1
+  ),
+  entitlements AS (
+    SELECT
+      CAST(subscription_plan_id AS VARCHAR) AS plan_id,
+      MAX(CAST(entitlement_package_id AS VARCHAR)) AS entitlement_package_id,
+      STRING_AGG(DISTINCT entitlement_code, '|' ORDER BY entitlement_code) AS entitlement_codes,
+      MAX(learner_limit) AS learner_limit,
+      MAX(storage_limit_gb) AS storage_limit_gb,
+      MAX(access_level) AS access_level,
+      MAX(content_tier) AS content_tier,
+      MAX(support_tier) AS support_tier,
+      MIN(effective_start_at) AS effective_start_at,
+      MAX(effective_end_at) AS effective_end_at,
+      MAX(updated_at) AS updated_at
+    FROM learning_platform_plan_entitlements
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+      AND subscription_plan_id IS NOT NULL
+    GROUP BY CAST(subscription_plan_id AS VARCHAR)
+  ),
+  plan_ids AS (
+    SELECT plan_id FROM billing_plans
+    UNION
+    SELECT plan_id FROM catalog_plans
+    UNION
+    SELECT plan_id FROM crm_products
+    UNION
+    SELECT plan_id FROM app_store_products
+    UNION
+    SELECT plan_id FROM entitlements
+  ),
+  resolved AS (
+    SELECT
+      p.plan_id,
+      b.plan_code AS billing_plan_code,
+      b.plan_name AS billing_plan_name,
+      b.plan_description AS billing_plan_description,
+      b.plan_status,
+      b.plan_type AS billing_plan_type,
+      b.product_id AS billing_product_id,
+      b.billing_provider,
+      b.external_plan_id,
+      b.billing_frequency AS billing_billing_frequency,
+      b.billing_interval_count AS billing_interval_count,
+      b.billing_period_days,
+      b.trial_available_flag,
+      b.trial_period_days,
+      b.grace_period_days,
+      b.currency_code AS billing_currency_code,
+      b.list_price AS billing_list_price,
+      b.setup_fee,
+      b.discount_eligible_flag,
+      b.tax_inclusive_flag,
+      b.auto_renew_flag,
+      b.seat_model,
+      b.min_seats,
+      b.max_seats,
+      b.sales_channel AS billing_sales_channel,
+      b.effective_start_at AS billing_effective_start_at,
+      b.effective_end_at AS billing_effective_end_at,
+      b.created_at AS billing_created_at,
+      b.updated_at AS billing_updated_at,
+      c.plan_code AS catalog_plan_code,
+      c.plan_name AS catalog_plan_name,
+      c.plan_description AS catalog_plan_description,
+      c.catalog_status,
+      c.plan_type AS catalog_plan_type,
+      c.product_id AS catalog_product_id,
+      c.product_code AS catalog_product_code,
+      c.product_name AS catalog_product_name,
+      c.product_family AS catalog_product_family,
+      c.product_category AS catalog_product_category,
+      c.platform AS catalog_platform,
+      c.region_code AS catalog_region_code,
+      c.country_code AS catalog_country_code,
+      c.language_code,
+      c.effective_start_at AS catalog_effective_start_at,
+      c.effective_end_at AS catalog_effective_end_at,
+      c.created_at AS catalog_created_at,
+      c.updated_at AS catalog_updated_at,
+      r.crm_product_id,
+      r.product_code AS crm_product_code,
+      r.product_name AS crm_product_name,
+      r.product_family AS crm_product_family,
+      r.product_category AS crm_product_category,
+      r.market_segment,
+      r.customer_type,
+      r.sales_channel AS crm_sales_channel,
+      r.region_code AS crm_region_code,
+      r.country_code AS crm_country_code,
+      r.effective_start_at AS crm_effective_start_at,
+      r.effective_end_at AS crm_effective_end_at,
+      r.created_at AS crm_created_at,
+      r.updated_at AS crm_updated_at,
+      a.app_store_product_id,
+      a.billing_provider AS app_billing_provider,
+      a.platform AS app_platform,
+      a.billing_frequency AS app_billing_frequency,
+      a.billing_interval_count AS app_billing_interval_count,
+      a.currency_code AS app_currency_code,
+      a.list_price AS app_list_price,
+      a.country_code AS app_country_code,
+      a.effective_start_at AS app_effective_start_at,
+      a.effective_end_at AS app_effective_end_at,
+      a.updated_at AS app_updated_at,
+      e.entitlement_package_id,
+      e.entitlement_codes,
+      e.learner_limit,
+      e.storage_limit_gb,
+      e.access_level,
+      e.content_tier,
+      e.support_tier,
+      e.effective_start_at AS entitlement_effective_start_at,
+      e.effective_end_at AS entitlement_effective_end_at,
+      e.updated_at AS entitlement_updated_at,
+      CASE WHEN b.plan_id IS NOT NULL THEN 'SUBSCRIPTION_BILLING' END AS billing_source,
+      CASE WHEN c.plan_id IS NOT NULL THEN 'PRODUCT_CATALOG' END AS catalog_source,
+      CASE WHEN r.plan_id IS NOT NULL THEN 'CRM' END AS crm_source,
+      CASE WHEN a.plan_id IS NOT NULL THEN 'APP_STORE' END AS app_source,
+      CASE WHEN e.plan_id IS NOT NULL THEN 'ENTITLEMENT_SERVICE' END AS entitlement_source
+    FROM plan_ids p
+    LEFT JOIN billing_plans b ON p.plan_id = b.plan_id
+    LEFT JOIN catalog_plans c ON p.plan_id = c.plan_id
+    LEFT JOIN crm_products r ON p.plan_id = r.plan_id
+    LEFT JOIN app_store_products a ON p.plan_id = a.plan_id
+    LEFT JOIN entitlements e ON p.plan_id = e.plan_id
+  )
+  SELECT
+    MD5(CONCAT('SUBSCRIPTION_PLAN|', plan_id)) AS subscription_plan_key,
+    plan_id,
+    COALESCE(billing_plan_code, catalog_plan_code, crm_product_code, CONCAT('PLAN-', plan_id)) AS plan_code,
+    COALESCE(billing_plan_name, catalog_plan_name, crm_product_name, 'Unknown Subscription Plan') AS plan_name,
+    COALESCE(billing_plan_description, catalog_plan_description) AS plan_description,
+    UPPER(COALESCE(plan_status, catalog_status, 'UNKNOWN')) AS plan_status,
+    UPPER(COALESCE(billing_plan_type, catalog_plan_type, 'UNKNOWN')) AS plan_type,
+    COALESCE(billing_product_id, catalog_product_id) AS product_id,
+    COALESCE(catalog_product_code, crm_product_code) AS product_code,
+    COALESCE(catalog_product_name, crm_product_name, billing_plan_name) AS product_name,
+    COALESCE(catalog_product_family, crm_product_family) AS product_family,
+    COALESCE(catalog_product_category, crm_product_category) AS product_category,
+    COALESCE(billing_provider, app_billing_provider, 'UNKNOWN') AS billing_provider,
+    external_plan_id,
+    app_store_product_id,
+    entitlement_package_id,
+    UPPER(COALESCE(billing_billing_frequency, app_billing_frequency, 'UNKNOWN')) AS billing_frequency,
+    COALESCE(billing_interval_count, app_billing_interval_count, 1) AS billing_interval_count,
+    billing_period_days,
+    COALESCE(trial_available_flag, FALSE) AS trial_available_flag,
+    COALESCE(trial_period_days, 0) AS trial_period_days,
+    COALESCE(grace_period_days, 0) AS grace_period_days,
+    UPPER(COALESCE(billing_currency_code, app_currency_code, 'UNKNOWN')) AS currency_code,
+    COALESCE(billing_list_price, app_list_price) AS list_price,
+    COALESCE(setup_fee, 0) AS setup_fee,
+    COALESCE(discount_eligible_flag, FALSE) AS discount_eligible_flag,
+    COALESCE(tax_inclusive_flag, FALSE) AS tax_inclusive_flag,
+    COALESCE(auto_renew_flag, FALSE) AS auto_renew_flag,
+    UPPER(COALESCE(seat_model, 'INDIVIDUAL')) AS seat_model,
+    min_seats,
+    max_seats,
+    learner_limit,
+    storage_limit_gb,
+    UPPER(COALESCE(access_level, 'UNKNOWN')) AS access_level,
+    UPPER(COALESCE(content_tier, 'UNKNOWN')) AS content_tier,
+    UPPER(COALESCE(support_tier, 'UNKNOWN')) AS support_tier,
+    entitlement_codes,
+    UPPER(COALESCE(billing_sales_channel, crm_sales_channel, 'UNKNOWN')) AS sales_channel,
+    UPPER(COALESCE(market_segment, 'UNKNOWN')) AS market_segment,
+    UPPER(COALESCE(customer_type, 'UNKNOWN')) AS customer_type,
+    UPPER(COALESCE(catalog_region_code, crm_region_code, 'GLOBAL')) AS region_code,
+    UPPER(COALESCE(catalog_country_code, crm_country_code, app_country_code, 'GLOBAL')) AS country_code,
+    LOWER(COALESCE(language_code, 'und')) AS language_code,
+    UPPER(COALESCE(catalog_platform, app_platform, 'UNKNOWN')) AS platform,
+    crm_product_id,
+    COALESCE(billing_effective_start_at, catalog_effective_start_at, crm_effective_start_at, app_effective_start_at, entitlement_effective_start_at, billing_created_at, catalog_created_at, crm_created_at) AS effective_start_at,
+    COALESCE(billing_effective_end_at, catalog_effective_end_at, crm_effective_end_at, app_effective_end_at, entitlement_effective_end_at, TIMESTAMP '9999-12-31 23:59:59') AS effective_end_at,
+    CASE
+      WHEN UPPER(COALESCE(plan_status, catalog_status, 'ACTIVE')) IN ('ACTIVE', 'AVAILABLE', 'PUBLISHED')
+       AND COALESCE(billing_effective_end_at, catalog_effective_end_at, crm_effective_end_at, app_effective_end_at, entitlement_effective_end_at, TIMESTAMP '9999-12-31 23:59:59') > CURRENT_TIMESTAMP
+      THEN TRUE ELSE FALSE
+    END AS is_current,
+    GREATEST(
+      COALESCE(billing_updated_at, TIMESTAMP '1970-01-01 00:00:00'),
+      COALESCE(catalog_updated_at, TIMESTAMP '1970-01-01 00:00:00'),
+      COALESCE(crm_updated_at, TIMESTAMP '1970-01-01 00:00:00'),
+      COALESCE(app_updated_at, TIMESTAMP '1970-01-01 00:00:00'),
+      COALESCE(entitlement_updated_at, TIMESTAMP '1970-01-01 00:00:00')
+    ) AS source_updated_at,
+    CONCAT_WS('|', billing_source, catalog_source, crm_source, app_source, entitlement_source) AS source_system
+  FROM resolved;
+
+Calculation Notes: |
+  Resolve the plan using the subscription event timestamp against the plan version's valid-from and valid-to timestamps; do not overwrite historical events with the current catalog definition. A renewal retains the existing plan unless a plan-change transaction occurred, while upgrades, downgrades, migrations, and reactivations use the newly effective plan from their contractual effective timestamp. Coupons, scholarships, credits, negotiated discounts, taxes, refunds, and payment failures do not change the plan classification unless they reference a distinct catalog plan identifier. Classify a trial under its destination paid plan when the trial is an introductory state of that plan; retain a separate plan only when the trial has its own catalog identifier and entitlements. Grandfathered, regional, institutional, app-store, and legacy variants must remain distinct when pricing, entitlements, currency, billing cadence, or contractual terms differ. Resolve timestamps in UTC, preserve the original plan on cancellation and refund events, and map missing or retired identifiers to UNKNOWN_PLAN until late-arriving catalog data is backfilled.
+
+Business Use Case: |
+  Revenue Management compares trial conversion, renewal rate, learner engagement, and recurring revenue across plan tiers and billing cadences. If an annual premium plan produces stronger retention but weak initial conversion, the team can test onboarding changes or targeted introductory offers without changing the plan's historical classification.
+
+
+Source Data: Subscription Billing Platform, Subscription Product Catalog, CRM, App-Store Subscription Feeds, and Learning Platform Entitlement Service
+
+Report Attributes: |
+  ["Subscription Plan Family","Plan Tier","Billing Cadence","Subscription Status","Trial Status","Customer Type","Learner Country","Organization","Market","Currency","Acquisition Channel","Promotion","Course Category","Device Platform"]
+
+Dashboard Usage: [Subscription Revenue Executive Dashboard, Plan Conversion and Funnel Dashboard, Subscription Retention and Churn Dashboard, Plan Upgrade and Downgrade Dashboard, Trial-to-Paid Conversion Dashboard, Learner Engagement by Plan Dashboard, Institutional Subscription Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Subscription, Plan Tier, Billing Cadence, Subscription Status, Customer Type, Learner, Organization, Product, Course Access Level, Currency, Market, Promotion, Acquisition Channel]
+
+Derived Dimensions: [Subscription Plan Family, Subscription Plan Tier, Subscription Billing Cadence, Subscription Access Level, Subscription Plan Price Band, Subscription Plan Market, Subscription Plan Lifecycle Status]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-06T12:30:17.619237+00:00
+
+Last Modified By: devyendarm
+
+
