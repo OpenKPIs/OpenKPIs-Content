@@ -1,0 +1,378 @@
+# Dimension: Academic Subject
+# Generated: 2026-09-06T13:30:19.024Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Academic Subject
+
+Description: |
+  Academic Subject records the governed area of study assigned to a course, lesson, assessment, learning resource, or related interaction. It enables enrollment, engagement, completion, and learning outcomes to be analyzed consistently by subject.
+
+Category: Engagement
+
+Tags: [dimension]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH latest_subjects AS (
+    SELECT * EXCEPT (record_rank)
+    FROM (
+      SELECT
+        s.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY s.subject_id
+          ORDER BY s.updated_at DESC, s.ingested_at DESC
+        ) AS record_rank
+      FROM `your-project.academic_taxonomy_master.subjects` AS s
+    )
+    WHERE record_rank = 1
+  ),
+  latest_taxonomies AS (
+    SELECT * EXCEPT (record_rank)
+    FROM (
+      SELECT
+        t.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY t.taxonomy_id
+          ORDER BY t.updated_at DESC, t.ingested_at DESC
+        ) AS record_rank
+      FROM `your-project.academic_taxonomy_master.taxonomies` AS t
+    )
+    WHERE record_rank = 1
+  ),
+  latest_hierarchy AS (
+    SELECT * EXCEPT (record_rank)
+    FROM (
+      SELECT
+        h.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY h.subject_id
+          ORDER BY h.updated_at DESC, h.ingested_at DESC
+        ) AS record_rank
+      FROM `your-project.academic_taxonomy_master.subject_hierarchy` AS h
+    )
+    WHERE record_rank = 1
+  ),
+  source_subject_references AS (
+    SELECT canonical_subject_id AS subject_id, 'Learning Content Management System' AS source_system, updated_at
+    FROM `your-project.lcms.learning_content_subjects`
+    WHERE canonical_subject_id IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT canonical_subject_id AS subject_id, 'Learning Management System' AS source_system, updated_at
+    FROM `your-project.lms.course_subjects`
+    WHERE canonical_subject_id IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT canonical_subject_id AS subject_id, 'Course Catalog' AS source_system, updated_at
+    FROM `your-project.course_catalog.course_subjects`
+    WHERE canonical_subject_id IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT canonical_subject_id AS subject_id, 'Assessment Platform' AS source_system, updated_at
+    FROM `your-project.assessment_platform.assessment_subjects`
+    WHERE canonical_subject_id IS NOT NULL
+  ),
+  source_coverage AS (
+    SELECT
+      subject_id,
+      STRING_AGG(DISTINCT source_system, ', ' ORDER BY source_system) AS source_systems,
+      MAX(updated_at) AS source_updated_at
+    FROM source_subject_references
+    GROUP BY subject_id
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT('ACADEMIC_SUBJECT|', CAST(s.subject_id AS STRING)))) AS academic_subject_key,
+    CAST(s.subject_id AS STRING) AS academic_subject_id,
+    s.subject_code AS academic_subject_code,
+    s.subject_name AS academic_subject_name,
+    s.short_name AS academic_subject_short_name,
+    s.description AS academic_subject_description,
+    s.status AS academic_subject_status,
+    s.subject_type AS academic_subject_type,
+    s.subject_level AS academic_subject_level,
+    CAST(s.taxonomy_id AS STRING) AS taxonomy_id,
+    t.taxonomy_name,
+    t.taxonomy_version,
+    CAST(s.parent_subject_id AS STRING) AS parent_subject_id,
+    p.subject_code AS parent_subject_code,
+    p.subject_name AS parent_subject_name,
+    CAST(COALESCE(h.root_subject_id, s.subject_id) AS STRING) AS root_subject_id,
+    COALESCE(r.subject_code, s.subject_code) AS root_subject_code,
+    COALESCE(r.subject_name, s.subject_name) AS root_subject_name,
+    COALESCE(h.hierarchy_level, 0) AS hierarchy_level,
+    COALESCE(h.hierarchy_path_ids, CAST(s.subject_id AS STRING)) AS hierarchy_path_ids,
+    COALESCE(h.hierarchy_path_codes, s.subject_code) AS hierarchy_path_codes,
+    COALESCE(h.hierarchy_path_names, s.subject_name) AS hierarchy_path_names,
+    s.display_order,
+    CAST(s.academic_domain_id AS STRING) AS academic_domain_id,
+    d.domain_code AS academic_domain_code,
+    d.domain_name AS academic_domain_name,
+    CAST(s.discipline_id AS STRING) AS discipline_id,
+    di.discipline_code,
+    di.discipline_name,
+    CAST(s.department_id AS STRING) AS department_id,
+    dep.department_code,
+    dep.department_name,
+    CAST(s.school_id AS STRING) AS school_id,
+    sch.school_code,
+    sch.school_name,
+    s.education_level,
+    s.grade_band,
+    s.program_level,
+    s.credit_category,
+    s.delivery_scope,
+    s.language_code,
+    s.country_code,
+    CAST(s.effective_start_date AS DATE) AS effective_start_date,
+    CAST(s.effective_end_date AS DATE) AS effective_end_date,
+    CURRENT_DATE() >= CAST(s.effective_start_date AS DATE)
+      AND (s.effective_end_date IS NULL OR CURRENT_DATE() <= CAST(s.effective_end_date AS DATE)) AS is_current,
+    UPPER(s.status) IN ('ACTIVE', 'PUBLISHED')
+      AND CURRENT_DATE() >= CAST(s.effective_start_date AS DATE)
+      AND (s.effective_end_date IS NULL OR CURRENT_DATE() <= CAST(s.effective_end_date AS DATE)) AS is_active,
+    CONCAT(
+      'Academic Taxonomy Master',
+      IF(sc.source_systems IS NULL, '', CONCAT(', ', sc.source_systems))
+    ) AS source_system,
+    GREATEST(s.updated_at, COALESCE(sc.source_updated_at, s.updated_at)) AS source_last_updated_at,
+    CURRENT_TIMESTAMP() AS dw_loaded_at
+  FROM latest_subjects AS s
+  LEFT JOIN latest_taxonomies AS t
+    ON s.taxonomy_id = t.taxonomy_id
+  LEFT JOIN latest_hierarchy AS h
+    ON s.subject_id = h.subject_id
+  LEFT JOIN latest_subjects AS p
+    ON s.parent_subject_id = p.subject_id
+  LEFT JOIN latest_subjects AS r
+    ON COALESCE(h.root_subject_id, s.subject_id) = r.subject_id
+  LEFT JOIN `your-project.academic_taxonomy_master.academic_domains` AS d
+    ON s.academic_domain_id = d.academic_domain_id
+  LEFT JOIN `your-project.academic_taxonomy_master.disciplines` AS di
+    ON s.discipline_id = di.discipline_id
+  LEFT JOIN `your-project.academic_taxonomy_master.departments` AS dep
+    ON s.department_id = dep.department_id
+  LEFT JOIN `your-project.academic_taxonomy_master.schools` AS sch
+    ON s.school_id = sch.school_id
+  LEFT JOIN source_coverage AS sc
+    ON s.subject_id = sc.subject_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH ranked_subjects AS (
+    SELECT
+      s.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY s.subject_id
+        ORDER BY s.updated_at DESC, s.ingested_at DESC
+      ) AS record_rank
+    FROM academic_taxonomy_subjects AS s
+  ),
+  latest_subjects AS (
+    SELECT *
+    FROM ranked_subjects
+    WHERE record_rank = 1
+  ),
+  ranked_taxonomies AS (
+    SELECT
+      t.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY t.taxonomy_id
+        ORDER BY t.updated_at DESC, t.ingested_at DESC
+      ) AS record_rank
+    FROM academic_taxonomy_taxonomies AS t
+  ),
+  latest_taxonomies AS (
+    SELECT *
+    FROM ranked_taxonomies
+    WHERE record_rank = 1
+  ),
+  ranked_hierarchy AS (
+    SELECT
+      h.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY h.subject_id
+        ORDER BY h.updated_at DESC, h.ingested_at DESC
+      ) AS record_rank
+    FROM academic_taxonomy_subject_hierarchy AS h
+  ),
+  latest_hierarchy AS (
+    SELECT *
+    FROM ranked_hierarchy
+    WHERE record_rank = 1
+  ),
+  source_subject_references AS (
+    SELECT canonical_subject_id AS subject_id, 'Learning Content Management System' AS source_system, updated_at
+    FROM lcms_learning_content_subjects
+    WHERE canonical_subject_id IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT canonical_subject_id AS subject_id, 'Learning Management System' AS source_system, updated_at
+    FROM lms_course_subjects
+    WHERE canonical_subject_id IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT canonical_subject_id AS subject_id, 'Course Catalog' AS source_system, updated_at
+    FROM course_catalog_course_subjects
+    WHERE canonical_subject_id IS NOT NULL
+  
+    UNION ALL
+  
+    SELECT canonical_subject_id AS subject_id, 'Assessment Platform' AS source_system, updated_at
+    FROM assessment_platform_assessment_subjects
+    WHERE canonical_subject_id IS NOT NULL
+  ),
+  source_coverage AS (
+    SELECT
+      subject_id,
+      CONCAT_WS(', ', SORT_ARRAY(COLLECT_SET(source_system))) AS source_systems,
+      MAX(updated_at) AS source_updated_at
+    FROM source_subject_references
+    GROUP BY subject_id
+  )
+  SELECT
+    SHA2(CONCAT('ACADEMIC_SUBJECT|', CAST(s.subject_id AS STRING)), 256) AS academic_subject_key,
+    CAST(s.subject_id AS STRING) AS academic_subject_id,
+    s.subject_code AS academic_subject_code,
+    s.subject_name AS academic_subject_name,
+    s.short_name AS academic_subject_short_name,
+    s.description AS academic_subject_description,
+    s.status AS academic_subject_status,
+    s.subject_type AS academic_subject_type,
+    s.subject_level AS academic_subject_level,
+    CAST(s.taxonomy_id AS STRING) AS taxonomy_id,
+    t.taxonomy_name,
+    t.taxonomy_version,
+    CAST(s.parent_subject_id AS STRING) AS parent_subject_id,
+    p.subject_code AS parent_subject_code,
+    p.subject_name AS parent_subject_name,
+    CAST(COALESCE(h.root_subject_id, s.subject_id) AS STRING) AS root_subject_id,
+    COALESCE(r.subject_code, s.subject_code) AS root_subject_code,
+    COALESCE(r.subject_name, s.subject_name) AS root_subject_name,
+    COALESCE(h.hierarchy_level, 0) AS hierarchy_level,
+    COALESCE(h.hierarchy_path_ids, CAST(s.subject_id AS STRING)) AS hierarchy_path_ids,
+    COALESCE(h.hierarchy_path_codes, s.subject_code) AS hierarchy_path_codes,
+    COALESCE(h.hierarchy_path_names, s.subject_name) AS hierarchy_path_names,
+    s.display_order,
+    CAST(s.academic_domain_id AS STRING) AS academic_domain_id,
+    d.domain_code AS academic_domain_code,
+    d.domain_name AS academic_domain_name,
+    CAST(s.discipline_id AS STRING) AS discipline_id,
+    di.discipline_code,
+    di.discipline_name,
+    CAST(s.department_id AS STRING) AS department_id,
+    dep.department_code,
+    dep.department_name,
+    CAST(s.school_id AS STRING) AS school_id,
+    sch.school_code,
+    sch.school_name,
+    s.education_level,
+    s.grade_band,
+    s.program_level,
+    s.credit_category,
+    s.delivery_scope,
+    s.language_code,
+    s.country_code,
+    CAST(s.effective_start_date AS DATE) AS effective_start_date,
+    CAST(s.effective_end_date AS DATE) AS effective_end_date,
+    CASE
+      WHEN CURRENT_DATE() >= CAST(s.effective_start_date AS DATE)
+        AND (s.effective_end_date IS NULL OR CURRENT_DATE() <= CAST(s.effective_end_date AS DATE))
+      THEN TRUE ELSE FALSE
+    END AS is_current,
+    CASE
+      WHEN UPPER(s.status) IN ('ACTIVE', 'PUBLISHED')
+        AND CURRENT_DATE() >= CAST(s.effective_start_date AS DATE)
+        AND (s.effective_end_date IS NULL OR CURRENT_DATE() <= CAST(s.effective_end_date AS DATE))
+      THEN TRUE ELSE FALSE
+    END AS is_active,
+    CONCAT(
+      'Academic Taxonomy Master',
+      CASE WHEN sc.source_systems IS NULL THEN '' ELSE CONCAT(', ', sc.source_systems) END
+    ) AS source_system,
+    CASE
+      WHEN sc.source_updated_at IS NULL OR s.updated_at >= sc.source_updated_at THEN s.updated_at
+      ELSE sc.source_updated_at
+    END AS source_last_updated_at,
+    CURRENT_TIMESTAMP() AS dw_loaded_at
+  FROM latest_subjects AS s
+  LEFT JOIN latest_taxonomies AS t
+    ON s.taxonomy_id = t.taxonomy_id
+  LEFT JOIN latest_hierarchy AS h
+    ON s.subject_id = h.subject_id
+  LEFT JOIN latest_subjects AS p
+    ON s.parent_subject_id = p.subject_id
+  LEFT JOIN latest_subjects AS r
+    ON COALESCE(h.root_subject_id, s.subject_id) = r.subject_id
+  LEFT JOIN academic_taxonomy_academic_domains AS d
+    ON s.academic_domain_id = d.academic_domain_id
+  LEFT JOIN academic_taxonomy_disciplines AS di
+    ON s.discipline_id = di.discipline_id
+  LEFT JOIN academic_taxonomy_departments AS dep
+    ON s.department_id = dep.department_id
+  LEFT JOIN academic_taxonomy_schools AS sch
+    ON s.school_id = sch.school_id
+  LEFT JOIN source_coverage AS sc
+    ON s.subject_id = sc.subject_id;
+
+Calculation Notes: |
+  Resolve the subject from the governed content-to-subject assignment effective at the event timestamp. Use the primary subject when an item has multiple subject assignments; expose secondary assignments through a content-subject bridge and never concatenate multiple labels into this field. Preserve the historical subject for completed events when taxonomy labels or assignments change, using effective-dated taxonomy records. Map unmapped, missing, deleted, or invalid source values to "Unknown" while retaining the original source value in a quality-audit field. Do not infer a subject from search text, course title, instructor entry, or learner behavior unless an approved taxonomy-mapping process has created a governed assignment. Test and administrative content may retain a subject for operational analysis but must be excluded through content-purpose filters where reports require learner-facing academic activity only. Session timeout rules do not alter the subject because it is resolved independently for each event or item snapshot.
+
+Business Use Case: |
+  The Chief Academic Officer reviews engagement, completion, assessment performance, and content coverage by Academic Subject to identify subjects with high enrollment but low completion or insufficient content depth. The curriculum organization can then prioritize new content investment, instructional redesign, assessment review, or instructor support for the affected subjects.
+
+
+Source Data: Learning Content Management System, Learning Management System, Course Catalog, Assessment Platform, and Academic Taxonomy Master
+
+Report Attributes: |
+  ["Academic Discipline","Subject Topic","Course","Content Type","Grade Level","Education Level","Curriculum Standard","Difficulty Level","Delivery Mode","Language","Institution","Instructor","Learner Segment","Geography"]
+
+Dashboard Usage: [Academic Portfolio Performance, Subject Engagement and Completion, Curriculum Coverage, Learning Outcome Performance, Content Supply and Demand, Course Discovery and Enrollment, Assessment Performance by Subject, Subject Taxonomy Data Quality]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Course, Learning Content Item, Academic Discipline, Subject Taxonomy, Grade Level, Education Level, Curriculum Standard, Content Type, Assessment, Instructor, Delivery Mode, Language]
+
+Derived Dimensions: [Academic Subject Group, Academic Subject Hierarchy Level, Academic Discipline, STEM Classification, Subject Portfolio Segment]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-06T13:30:17.780081+00:00
+
+Last Modified By: devyendarm
+
+
