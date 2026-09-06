@@ -1,0 +1,368 @@
+# Dimension: Lead Urgency
+# Generated: 2026-09-06T16:30:26.838Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Lead Urgency
+
+Description: |
+  Lead Urgency classifies how quickly a real estate prospect is expected to take the next meaningful transaction step, such as scheduling a tour, applying, listing a property, or completing a purchase. It enables consistent lead prioritization using declared timing, verified intent signals, agent assessment, and approved scoring rules.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Real Estate Tech
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  generate_lead
+
+Adobe Event: |
+  generate_lead
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"generate_lead"},"attributes":{"leadUrgency":"high"}}]}}
+
+GA4 Data Layer: |
+  {"event":"generate_lead","lead_urgency":"high"}
+
+Adobe Client Data Layer: |
+  {"event":"generate_lead","eventInfo":{"lead":{"urgency":"high"}}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"high"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH lead_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS event_timestamp,
+      event_name,
+      user_pseudo_id,
+      user_id,
+      stream_id,
+      platform,
+      geo.city AS geo_city,
+      geo.region AS geo_region,
+      geo.country AS geo_country,
+      geo.metro AS geo_metro,
+      device.category AS device_category,
+      device.operating_system AS device_operating_system,
+      device.web_info.browser AS browser,
+      device.language AS device_language,
+      event_bundle_sequence_id,
+      event_server_timestamp_offset,
+      _TABLE_SUFFIX AS source_table_suffix,
+      MAX(IF(ep.key = 'event_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS supplied_event_id,
+      MAX(IF(ep.key IN ('lead_urgency', 'leadUrgency', 'urgency'), COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING), CAST(ep.value.float_value AS STRING)), NULL)) AS lead_urgency_raw,
+      MAX(IF(ep.key = 'lead_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS lead_id,
+      MAX(IF(ep.key = 'form_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS form_id,
+      MAX(IF(ep.key = 'inquiry_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS inquiry_id,
+      MAX(IF(ep.key IN ('property_id', 'item_id'), COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS property_id,
+      MAX(IF(ep.key = 'listing_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS listing_id,
+      MAX(IF(ep.key = 'tour_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS tour_id,
+      MAX(IF(ep.key = 'contact_method', ep.value.string_value, NULL)) AS contact_method,
+      MAX(IF(ep.key = 'lead_source', ep.value.string_value, NULL)) AS lead_source,
+      MAX(IF(ep.key = 'lead_type', ep.value.string_value, NULL)) AS lead_type,
+      MAX(IF(ep.key = 'lead_status', ep.value.string_value, NULL)) AS lead_status,
+      MAX(IF(ep.key = 'agent_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS agent_id,
+      MAX(IF(ep.key = 'market', ep.value.string_value, NULL)) AS market,
+      MAX(IF(ep.key = 'city', ep.value.string_value, NULL)) AS event_city,
+      MAX(IF(ep.key = 'region', ep.value.string_value, NULL)) AS event_region,
+      MAX(IF(ep.key = 'country', ep.value.string_value, NULL)) AS event_country,
+      MAX(IF(ep.key = 'page_location', ep.value.string_value, NULL)) AS page_location,
+      MAX(IF(ep.key = 'page_referrer', ep.value.string_value, NULL)) AS page_referrer,
+      MAX(IF(ep.key = 'page_title', ep.value.string_value, NULL)) AS page_title,
+      MAX(IF(ep.key IN ('campaign', 'campaign_name', 'utm_campaign'), ep.value.string_value, NULL)) AS campaign,
+      MAX(IF(ep.key IN ('source', 'utm_source'), ep.value.string_value, NULL)) AS source,
+      MAX(IF(ep.key IN ('medium', 'utm_medium'), ep.value.string_value, NULL)) AS medium,
+      MAX(IF(ep.key IN ('term', 'utm_term'), ep.value.string_value, NULL)) AS term,
+      MAX(IF(ep.key IN ('content', 'utm_content'), ep.value.string_value, NULL)) AS content,
+      MAX(IF(ep.key = 'gclid', ep.value.string_value, NULL)) AS gclid,
+      MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS session_id,
+      MAX(IF(ep.key = 'ga_session_number', ep.value.int_value, NULL)) AS session_number,
+      MAX(IF(ep.key = 'language', ep.value.string_value, NULL)) AS event_language,
+      MAX(IF(ep.key = 'hostname', ep.value.string_value, NULL)) AS supplied_hostname
+    FROM `your-project.analytics_123456789.events_*`
+    LEFT JOIN UNNEST(event_params) AS ep
+    WHERE event_name = 'generate_lead'
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+    GROUP BY
+      event_date,
+      event_timestamp,
+      event_name,
+      user_pseudo_id,
+      user_id,
+      stream_id,
+      platform,
+      geo_city,
+      geo_region,
+      geo_country,
+      geo_metro,
+      device_category,
+      device_operating_system,
+      browser,
+      device_language,
+      event_bundle_sequence_id,
+      event_server_timestamp_offset,
+      source_table_suffix
+  ),
+  standardized AS (
+    SELECT
+      *,
+      NULLIF(LOWER(TRIM(lead_urgency_raw)), '') AS urgency_clean
+    FROM lead_events
+  ),
+  normalized AS (
+    SELECT
+      *,
+      CASE
+        WHEN urgency_clean IS NULL THEN 'unknown'
+        WHEN urgency_clean IN ('critical', 'urgent', 'immediate', 'asap', 'very high', 'very_high', 'highest', 'hot') THEN 'critical'
+        WHEN urgency_clean IN ('high', 'high priority', 'high_priority') THEN 'high'
+        WHEN urgency_clean IN ('medium', 'moderate', 'normal', 'standard', 'warm') THEN 'medium'
+        WHEN urgency_clean IN ('low', 'low priority', 'low_priority', 'cold') THEN 'low'
+        WHEN urgency_clean IN ('none', 'not urgent', 'not_urgent', 'no urgency', 'no_urgency') THEN 'none'
+        ELSE urgency_clean
+      END AS lead_urgency
+    FROM standardized
+  )
+  SELECT
+    TO_HEX(MD5(lead_urgency)) AS lead_urgency_key,
+    lead_urgency,
+    lead_urgency_raw,
+    CASE lead_urgency
+      WHEN 'critical' THEN 1
+      WHEN 'high' THEN 2
+      WHEN 'medium' THEN 3
+      WHEN 'low' THEN 4
+      WHEN 'none' THEN 5
+      ELSE 99
+    END AS urgency_rank,
+    CASE
+      WHEN lead_urgency IN ('critical', 'high') THEN 'hot'
+      WHEN lead_urgency = 'medium' THEN 'warm'
+      WHEN lead_urgency IN ('low', 'none') THEN 'cold'
+      WHEN lead_urgency = 'unknown' THEN 'unknown'
+      ELSE 'custom'
+    END AS urgency_group,
+    lead_urgency IN ('critical', 'high', 'medium', 'low', 'none') AS urgency_is_known,
+    event_date,
+    event_timestamp,
+    event_name,
+    COALESCE(
+      supplied_event_id,
+      TO_HEX(SHA256(CONCAT(COALESCE(user_pseudo_id, user_id, 'anonymous'), '|', CAST(event_timestamp AS STRING), '|', event_name, '|', COALESCE(lead_id, ''))))
+    ) AS event_id,
+    user_pseudo_id,
+    user_id,
+    session_id,
+    session_number,
+    CAST(stream_id AS STRING) AS stream_id,
+    platform,
+    lead_id,
+    form_id,
+    inquiry_id,
+    property_id,
+    listing_id,
+    tour_id,
+    contact_method,
+    lead_source,
+    lead_type,
+    lead_status,
+    agent_id,
+    market,
+    COALESCE(event_city, geo_city) AS city,
+    COALESCE(event_region, geo_region) AS region,
+    COALESCE(event_country, geo_country) AS country,
+    page_location,
+    page_referrer,
+    page_title,
+    campaign,
+    source,
+    medium,
+    term,
+    content,
+    gclid,
+    device_category,
+    device_operating_system,
+    browser,
+    COALESCE(event_language, device_language) AS language,
+    COALESCE(supplied_hostname, REGEXP_EXTRACT(page_location, r'^https?://([^/]+)')) AS hostname,
+    geo_metro,
+    event_bundle_sequence_id,
+    event_server_timestamp_offset,
+    source_table_suffix
+  FROM normalized;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH lead_events AS (
+    SELECT
+      CAST(timestamp AS DATE) AS event_date,
+      CAST(timestamp AS TIMESTAMP) AS event_timestamp,
+      eventType AS event_name,
+      `_id` AS event_id,
+      element_at(identityMap, 'ECID')[0].id AS user_pseudo_id,
+      COALESCE(
+        element_at(identityMap, 'CRMID')[0].id,
+        element_at(identityMap, 'customerId')[0].id
+      ) AS user_id,
+      CAST(channel.`_id` AS STRING) AS stream_id,
+      CAST(environment.type AS STRING) AS platform,
+      NULLIF(TRIM(CAST(`_experience`.analytics.customDimensions.eVars.eVar1 AS STRING)), '') AS lead_urgency_raw,
+      CAST(web.webPageDetails.URL AS STRING) AS page_location,
+      CAST(web.webReferrer.URL AS STRING) AS page_referrer,
+      CAST(web.webPageDetails.name AS STRING) AS page_title,
+      CAST(marketing.trackingCode AS STRING) AS campaign,
+      CAST(channel.type AS STRING) AS lead_source,
+      CAST(device.type AS STRING) AS device_category,
+      CAST(environment.operatingSystem AS STRING) AS device_operating_system,
+      CAST(environment.browserDetails.userAgent AS STRING) AS browser,
+      CAST(environment.language AS STRING) AS language,
+      CAST(placeContext.geo.city AS STRING) AS city,
+      CAST(placeContext.geo.stateProvince AS STRING) AS region,
+      CAST(placeContext.geo.countryCode AS STRING) AS country,
+      CAST(placeContext.geo.dmaID AS STRING) AS geo_metro
+    FROM aep_event_dataset
+    WHERE eventType = 'generate_lead'
+      AND timestamp >= current_timestamp() - INTERVAL 30 DAYS
+  ),
+  standardized AS (
+    SELECT
+      *,
+      NULLIF(LOWER(TRIM(lead_urgency_raw)), '') AS urgency_clean
+    FROM lead_events
+  ),
+  normalized AS (
+    SELECT
+      *,
+      CASE
+        WHEN urgency_clean IS NULL THEN 'unknown'
+        WHEN urgency_clean IN ('critical', 'urgent', 'immediate', 'asap', 'very high', 'very_high', 'highest', 'hot') THEN 'critical'
+        WHEN urgency_clean IN ('high', 'high priority', 'high_priority') THEN 'high'
+        WHEN urgency_clean IN ('medium', 'moderate', 'normal', 'standard', 'warm') THEN 'medium'
+        WHEN urgency_clean IN ('low', 'low priority', 'low_priority', 'cold') THEN 'low'
+        WHEN urgency_clean IN ('none', 'not urgent', 'not_urgent', 'no urgency', 'no_urgency') THEN 'none'
+        ELSE urgency_clean
+      END AS lead_urgency
+    FROM standardized
+  )
+  SELECT
+    sha2(lead_urgency, 256) AS lead_urgency_key,
+    lead_urgency,
+    lead_urgency_raw,
+    CASE lead_urgency
+      WHEN 'critical' THEN 1
+      WHEN 'high' THEN 2
+      WHEN 'medium' THEN 3
+      WHEN 'low' THEN 4
+      WHEN 'none' THEN 5
+      ELSE 99
+    END AS urgency_rank,
+    CASE
+      WHEN lead_urgency IN ('critical', 'high') THEN 'hot'
+      WHEN lead_urgency = 'medium' THEN 'warm'
+      WHEN lead_urgency IN ('low', 'none') THEN 'cold'
+      WHEN lead_urgency = 'unknown' THEN 'unknown'
+      ELSE 'custom'
+    END AS urgency_group,
+    CASE WHEN lead_urgency IN ('critical', 'high', 'medium', 'low', 'none') THEN TRUE ELSE FALSE END AS urgency_is_known,
+    event_date,
+    event_timestamp,
+    event_name,
+    COALESCE(
+      event_id,
+      sha2(concat_ws('|', COALESCE(user_pseudo_id, user_id, 'anonymous'), CAST(event_timestamp AS STRING), event_name), 256)
+    ) AS event_id,
+    user_pseudo_id,
+    user_id,
+    CAST(NULL AS BIGINT) AS session_id,
+    CAST(NULL AS BIGINT) AS session_number,
+    stream_id,
+    platform,
+    CAST(NULL AS STRING) AS lead_id,
+    CAST(NULL AS STRING) AS form_id,
+    CAST(NULL AS STRING) AS inquiry_id,
+    CAST(NULL AS STRING) AS property_id,
+    CAST(NULL AS STRING) AS listing_id,
+    CAST(NULL AS STRING) AS tour_id,
+    CAST(NULL AS STRING) AS contact_method,
+    lead_source,
+    CAST(NULL AS STRING) AS lead_type,
+    CAST(NULL AS STRING) AS lead_status,
+    CAST(NULL AS STRING) AS agent_id,
+    CAST(NULL AS STRING) AS market,
+    city,
+    region,
+    country,
+    page_location,
+    page_referrer,
+    page_title,
+    campaign,
+    CAST(NULL AS STRING) AS source,
+    CAST(NULL AS STRING) AS medium,
+    CAST(NULL AS STRING) AS term,
+    CAST(NULL AS STRING) AS content,
+    CAST(NULL AS STRING) AS gclid,
+    device_category,
+    device_operating_system,
+    browser,
+    language,
+    parse_url(page_location, 'HOST') AS hostname,
+    geo_metro,
+    CAST(NULL AS BIGINT) AS event_bundle_sequence_id,
+    CAST(NULL AS BIGINT) AS event_server_timestamp_offset,
+    'aep_event_dataset' AS source_table_suffix
+  FROM normalized;
+
+Calculation Notes: |
+  Assign the value recorded or resolved at each lead creation, qualification, reassessment, or routing event. Use the most recent valid agent override first, followed by an explicit customer timeline, qualifying high-intent activity, and the approved lead-scoring classification; do not infer urgency from page views alone. Expired target dates must trigger reassessment rather than remain Immediate or High indefinitely. Duplicate events must be resolved using the event identifier and latest source-system update timestamp. Deleted test leads, employee leads, spam, bots, and invalid contact submissions are excluded. Missing evidence is classified as Unspecified and must not be defaulted to Low. The dimension is not sessionized, so session timeout rules do not change its value; all effective timestamps are standardized to UTC while local market dates are retained for audit.
+
+Business Use Case: |
+  Sales leadership uses Lead Urgency with market, lead source, and assigned agent to identify Immediate and High leads that have not received a timely response, rebalance agent queues, and enforce service-level targets. Marketing compares conversion by urgency and acquisition source to reduce spend on channels producing low-intent leads and increase investment in sources producing transaction-ready prospects.
+
+
+Source Data: CRM, lead intake forms, agent workflow systems, property inquiry services, tour scheduling platforms, and digital analytics
+
+Report Attributes: |
+  ["Lead Source","Lead Stage","Lead Status","Transaction Type","Property Type","Market","Assigned Agent","Lead Score Band","Acquisition Campaign","Urgency Assignment Source"]
+
+Dashboard Usage: [Lead Conversion Executive Dashboard, Sales Pipeline and Routing Dashboard, Lead Response SLA Dashboard, Agent Performance Dashboard, Marketing Lead Quality Dashboard, Market Demand Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Lead Status, Lead Stage, Lead Source, Lead Intent, Property Type, Transaction Type, Target Move Date, Lead Score Band, Market, Assigned Agent]
+
+Derived Dimensions: [Urgency Group, Urgency Change Direction, Urgency Age Band, Urgency Assignment Source, High-Urgency Lead Flag]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-06T16:30:26.422847+00:00
+
+Last Modified By: devyendarm
+
+
