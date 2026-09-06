@@ -1,0 +1,326 @@
+# Dimension: Distribution Center
+# Generated: 2026-09-06T15:30:26.310Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Distribution Center
+
+Description: |
+  Identifies the normalized fulfillment location assigned to a customer order, shipment, pickup, delivery, or return event across digital and assisted channels. It enables analysis of how the assigned location influences product availability, checkout conversion, delivery experience, repeat purchase, refunds, and customer lifetime value.
+
+Category: Performance
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"event":[{"eventInfo":{"eventName":"purchase"},"attributes":{"distributionCenter":"DC-001"}}],"transaction":{"attributes":{"distributionCenter":"DC-001"},"transactionID":"ORDER-12345"}}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"transaction_id":"ORDER-12345"},"distribution_center":"DC-001"}
+
+Adobe Client Data Layer: |
+  {"data":{"commerce":{"order":{"purchaseID":"ORDER-12345"},"fulfillment":{"distributionCenter":"DC-001"}}},"event":"purchase","eventInfo":{"distributionCenter":"DC-001"}}
+
+XDM Mapping: |
+  {"commerce":{"order":{"purchaseID":"ORDER-12345"}},"eventType":"commerce.purchases","_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"DC-001"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH purchase_events AS (
+    SELECT
+      TIMESTAMP_MICROS(e.event_timestamp) AS event_ts,
+      NULLIF(TRIM(e.ecommerce.transaction_id), '') AS order_id,
+      MAX(IF(p.key IN ('distribution_center', 'distributionCenter'), COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING), CAST(p.value.double_value AS STRING)), NULL)) AS distribution_center_code,
+      MAX(IF(p.key = 'distribution_center_name', p.value.string_value, NULL)) AS distribution_center_name,
+      MAX(IF(p.key = 'distribution_center_type', p.value.string_value, NULL)) AS distribution_center_type,
+      MAX(IF(p.key = 'distribution_center_status', p.value.string_value, NULL)) AS distribution_center_status,
+      MAX(IF(p.key = 'facility_number', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING)), NULL)) AS facility_number,
+      MAX(IF(p.key = 'warehouse_management_system', p.value.string_value, NULL)) AS warehouse_management_system,
+      MAX(IF(p.key = 'fulfillment_network', p.value.string_value, NULL)) AS fulfillment_network,
+      MAX(IF(p.key = 'operating_company', p.value.string_value, NULL)) AS operating_company,
+      MAX(IF(p.key = 'business_unit', p.value.string_value, NULL)) AS business_unit,
+      MAX(IF(p.key = 'distribution_center_region', p.value.string_value, NULL)) AS region,
+      MAX(IF(p.key = 'distribution_center_country_code', p.value.string_value, NULL)) AS country_code,
+      MAX(IF(p.key = 'distribution_center_state_province', p.value.string_value, NULL)) AS state_province,
+      MAX(IF(p.key = 'distribution_center_city', p.value.string_value, NULL)) AS city,
+      MAX(IF(p.key = 'distribution_center_postal_code', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING)), NULL)) AS postal_code,
+      MAX(IF(p.key = 'distribution_center_timezone', p.value.string_value, NULL)) AS timezone,
+      MAX(IF(p.key = 'distribution_center_latitude', COALESCE(p.value.string_value, CAST(p.value.double_value AS STRING), CAST(p.value.int_value AS STRING)), NULL)) AS latitude,
+      MAX(IF(p.key = 'distribution_center_longitude', COALESCE(p.value.string_value, CAST(p.value.double_value AS STRING), CAST(p.value.int_value AS STRING)), NULL)) AS longitude,
+      MAX(IF(p.key = 'distribution_center_address_line_1', p.value.string_value, NULL)) AS address_line_1,
+      MAX(IF(p.key = 'distribution_center_address_line_2', p.value.string_value, NULL)) AS address_line_2,
+      MAX(IF(p.key = 'distribution_center_phone', p.value.string_value, NULL)) AS phone,
+      MAX(IF(p.key = 'distribution_center_email', p.value.string_value, NULL)) AS email,
+      MAX(IF(p.key = 'distribution_center_manager_name', p.value.string_value, NULL)) AS manager_name,
+      MAX(IF(p.key = 'distribution_center_service_area', p.value.string_value, NULL)) AS service_area,
+      MAX(IF(p.key = 'distribution_center_shipping_zones', p.value.string_value, NULL)) AS shipping_zones,
+      MAX(IF(p.key = 'distribution_center_supported_channels', p.value.string_value, NULL)) AS supported_channels,
+      MAX(IF(p.key = 'distribution_center_carrier_codes', p.value.string_value, NULL)) AS carrier_codes,
+      MAX(IF(p.key = 'distribution_center_fulfillment_methods', p.value.string_value, NULL)) AS fulfillment_methods,
+      MAX(IF(p.key = 'distribution_center_temperature_controlled', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING)), NULL)) AS temperature_controlled,
+      MAX(IF(p.key = 'distribution_center_hazmat_enabled', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING)), NULL)) AS hazmat_enabled,
+      MAX(IF(p.key = 'distribution_center_bonded_facility', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING)), NULL)) AS bonded_facility,
+      MAX(IF(p.key = 'distribution_center_automation_level', p.value.string_value, NULL)) AS automation_level,
+      MAX(IF(p.key = 'distribution_center_total_capacity_units', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING), CAST(p.value.double_value AS STRING)), NULL)) AS total_capacity_units,
+      MAX(IF(p.key = 'distribution_center_available_capacity_units', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING), CAST(p.value.double_value AS STRING)), NULL)) AS available_capacity_units,
+      MAX(IF(p.key = 'distribution_center_daily_order_capacity', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING), CAST(p.value.double_value AS STRING)), NULL)) AS daily_order_capacity,
+      MAX(IF(p.key = 'distribution_center_cutoff_time_local', p.value.string_value, NULL)) AS cutoff_time_local,
+      MAX(IF(p.key = 'distribution_center_opening_date', p.value.string_value, NULL)) AS opening_date,
+      MAX(IF(p.key = 'distribution_center_closing_date', p.value.string_value, NULL)) AS closing_date,
+      MAX(IF(p.key = 'distribution_center_operating_hours', p.value.string_value, NULL)) AS operating_hours,
+      MAX(IF(p.key = 'distribution_center_sla_days', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING), CAST(p.value.double_value AS STRING)), NULL)) AS sla_days,
+      MAX(IF(p.key = 'distribution_center_priority_rank', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING)), NULL)) AS priority_rank,
+      MAX(IF(p.key = 'distribution_center_is_active', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING)), NULL)) AS is_active
+    FROM `your-project.analytics_123456789.events_*` AS e
+    LEFT JOIN UNNEST(e.event_params) AS p
+    WHERE e.event_name = 'purchase'
+      AND REGEXP_CONTAINS(_TABLE_SUFFIX, r'^\d{8}$')
+    GROUP BY e.event_timestamp, e.ecommerce.transaction_id
+  ),
+  normalized AS (
+    SELECT
+      event_ts,
+      order_id,
+      UPPER(NULLIF(TRIM(distribution_center_code), '')) AS distribution_center_code,
+      NULLIF(TRIM(distribution_center_name), '') AS distribution_center_name,
+      NULLIF(TRIM(distribution_center_type), '') AS distribution_center_type,
+      NULLIF(TRIM(distribution_center_status), '') AS distribution_center_status,
+      NULLIF(TRIM(facility_number), '') AS facility_number,
+      NULLIF(TRIM(warehouse_management_system), '') AS warehouse_management_system,
+      NULLIF(TRIM(fulfillment_network), '') AS fulfillment_network,
+      NULLIF(TRIM(operating_company), '') AS operating_company,
+      NULLIF(TRIM(business_unit), '') AS business_unit,
+      NULLIF(TRIM(region), '') AS region,
+      UPPER(NULLIF(TRIM(country_code), '')) AS country_code,
+      NULLIF(TRIM(state_province), '') AS state_province,
+      NULLIF(TRIM(city), '') AS city,
+      NULLIF(TRIM(postal_code), '') AS postal_code,
+      NULLIF(TRIM(timezone), '') AS timezone,
+      SAFE_CAST(latitude AS NUMERIC) AS latitude,
+      SAFE_CAST(longitude AS NUMERIC) AS longitude,
+      NULLIF(TRIM(address_line_1), '') AS address_line_1,
+      NULLIF(TRIM(address_line_2), '') AS address_line_2,
+      NULLIF(TRIM(phone), '') AS phone,
+      LOWER(NULLIF(TRIM(email), '')) AS email,
+      NULLIF(TRIM(manager_name), '') AS manager_name,
+      NULLIF(TRIM(service_area), '') AS service_area,
+      NULLIF(TRIM(shipping_zones), '') AS shipping_zones,
+      NULLIF(TRIM(supported_channels), '') AS supported_channels,
+      NULLIF(TRIM(carrier_codes), '') AS carrier_codes,
+      NULLIF(TRIM(fulfillment_methods), '') AS fulfillment_methods,
+      CASE WHEN LOWER(temperature_controlled) IN ('true', '1', 'yes', 'y') THEN TRUE WHEN LOWER(temperature_controlled) IN ('false', '0', 'no', 'n') THEN FALSE END AS temperature_controlled,
+      CASE WHEN LOWER(hazmat_enabled) IN ('true', '1', 'yes', 'y') THEN TRUE WHEN LOWER(hazmat_enabled) IN ('false', '0', 'no', 'n') THEN FALSE END AS hazmat_enabled,
+      CASE WHEN LOWER(bonded_facility) IN ('true', '1', 'yes', 'y') THEN TRUE WHEN LOWER(bonded_facility) IN ('false', '0', 'no', 'n') THEN FALSE END AS bonded_facility,
+      NULLIF(TRIM(automation_level), '') AS automation_level,
+      SAFE_CAST(total_capacity_units AS NUMERIC) AS total_capacity_units,
+      SAFE_CAST(available_capacity_units AS NUMERIC) AS available_capacity_units,
+      SAFE_CAST(daily_order_capacity AS NUMERIC) AS daily_order_capacity,
+      NULLIF(TRIM(cutoff_time_local), '') AS cutoff_time_local,
+      SAFE_CAST(opening_date AS DATE) AS opening_date,
+      SAFE_CAST(closing_date AS DATE) AS closing_date,
+      NULLIF(TRIM(operating_hours), '') AS operating_hours,
+      SAFE_CAST(sla_days AS NUMERIC) AS sla_days,
+      SAFE_CAST(priority_rank AS INT64) AS priority_rank,
+      CASE WHEN LOWER(is_active) IN ('true', '1', 'yes', 'y') THEN TRUE WHEN LOWER(is_active) IN ('false', '0', 'no', 'n') THEN FALSE END AS is_active
+    FROM purchase_events
+    WHERE NULLIF(TRIM(distribution_center_code), '') IS NOT NULL
+  ),
+  ranked AS (
+    SELECT
+      n.*,
+      ROW_NUMBER() OVER (PARTITION BY distribution_center_code ORDER BY event_ts DESC, order_id DESC) AS recency_rank
+    FROM normalized AS n
+  ),
+  activity AS (
+    SELECT
+      distribution_center_code,
+      MIN(event_ts) AS first_seen_timestamp,
+      MAX(event_ts) AS last_seen_timestamp,
+      COUNT(*) AS purchase_event_count,
+      COUNT(DISTINCT order_id) AS distinct_order_count
+    FROM normalized
+    GROUP BY distribution_center_code
+  )
+  SELECT
+    TO_HEX(SHA256(r.distribution_center_code)) AS distribution_center_key,
+    r.distribution_center_code,
+    r.distribution_center_name,
+    r.distribution_center_type,
+    r.distribution_center_status,
+    r.facility_number,
+    r.warehouse_management_system,
+    r.fulfillment_network,
+    r.operating_company,
+    r.business_unit,
+    r.region,
+    r.country_code,
+    r.state_province,
+    r.city,
+    r.postal_code,
+    r.timezone,
+    r.latitude,
+    r.longitude,
+    r.address_line_1,
+    r.address_line_2,
+    r.phone,
+    r.email,
+    r.manager_name,
+    r.service_area,
+    r.shipping_zones,
+    r.supported_channels,
+    r.carrier_codes,
+    r.fulfillment_methods,
+    r.temperature_controlled,
+    r.hazmat_enabled,
+    r.bonded_facility,
+    r.automation_level,
+    r.total_capacity_units,
+    r.available_capacity_units,
+    r.daily_order_capacity,
+    r.cutoff_time_local,
+    r.opening_date,
+    r.closing_date,
+    r.operating_hours,
+    r.sla_days,
+    r.priority_rank,
+    r.is_active,
+    a.first_seen_timestamp,
+    a.last_seen_timestamp,
+    DATE(a.first_seen_timestamp) AS first_seen_date,
+    DATE(a.last_seen_timestamp) AS last_seen_date,
+    a.purchase_event_count,
+    a.distinct_order_count,
+    'GA4_PURCHASE_EVENTS' AS record_source
+  FROM ranked AS r
+  JOIN activity AS a USING (distribution_center_code)
+  WHERE r.recency_rank = 1;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH purchase_events AS (
+    SELECT
+      timestamp AS event_ts,
+      NULLIF(TRIM(commerce.order.purchaseID), '') AS order_id,
+      UPPER(NULLIF(TRIM(_experience.analytics.customDimensions.eVars.eVar1), '')) AS distribution_center_code
+    FROM aep_purchase_event_dataset
+    WHERE eventType = 'commerce.purchases'
+      AND NULLIF(TRIM(_experience.analytics.customDimensions.eVars.eVar1), '') IS NOT NULL
+  ),
+  activity AS (
+    SELECT
+      distribution_center_code,
+      MIN(event_ts) AS first_seen_timestamp,
+      MAX(event_ts) AS last_seen_timestamp,
+      COUNT(*) AS purchase_event_count,
+      COUNT(DISTINCT order_id) AS distinct_order_count
+    FROM purchase_events
+    GROUP BY distribution_center_code
+  )
+  SELECT
+    SHA2(distribution_center_code, 256) AS distribution_center_key,
+    distribution_center_code,
+    CAST(NULL AS VARCHAR) AS distribution_center_name,
+    CAST(NULL AS VARCHAR) AS distribution_center_type,
+    CAST(NULL AS VARCHAR) AS distribution_center_status,
+    CAST(NULL AS VARCHAR) AS facility_number,
+    CAST(NULL AS VARCHAR) AS warehouse_management_system,
+    CAST(NULL AS VARCHAR) AS fulfillment_network,
+    CAST(NULL AS VARCHAR) AS operating_company,
+    CAST(NULL AS VARCHAR) AS business_unit,
+    CAST(NULL AS VARCHAR) AS region,
+    CAST(NULL AS VARCHAR) AS country_code,
+    CAST(NULL AS VARCHAR) AS state_province,
+    CAST(NULL AS VARCHAR) AS city,
+    CAST(NULL AS VARCHAR) AS postal_code,
+    CAST(NULL AS VARCHAR) AS timezone,
+    CAST(NULL AS DECIMAL(10,7)) AS latitude,
+    CAST(NULL AS DECIMAL(10,7)) AS longitude,
+    CAST(NULL AS VARCHAR) AS address_line_1,
+    CAST(NULL AS VARCHAR) AS address_line_2,
+    CAST(NULL AS VARCHAR) AS phone,
+    CAST(NULL AS VARCHAR) AS email,
+    CAST(NULL AS VARCHAR) AS manager_name,
+    CAST(NULL AS VARCHAR) AS service_area,
+    CAST(NULL AS VARCHAR) AS shipping_zones,
+    CAST(NULL AS VARCHAR) AS supported_channels,
+    CAST(NULL AS VARCHAR) AS carrier_codes,
+    CAST(NULL AS VARCHAR) AS fulfillment_methods,
+    CAST(NULL AS BOOLEAN) AS temperature_controlled,
+    CAST(NULL AS BOOLEAN) AS hazmat_enabled,
+    CAST(NULL AS BOOLEAN) AS bonded_facility,
+    CAST(NULL AS VARCHAR) AS automation_level,
+    CAST(NULL AS DECIMAL(18,2)) AS total_capacity_units,
+    CAST(NULL AS DECIMAL(18,2)) AS available_capacity_units,
+    CAST(NULL AS DECIMAL(18,2)) AS daily_order_capacity,
+    CAST(NULL AS VARCHAR) AS cutoff_time_local,
+    CAST(NULL AS DATE) AS opening_date,
+    CAST(NULL AS DATE) AS closing_date,
+    CAST(NULL AS VARCHAR) AS operating_hours,
+    CAST(NULL AS DECIMAL(10,2)) AS sla_days,
+    CAST(NULL AS BIGINT) AS priority_rank,
+    CAST(NULL AS BOOLEAN) AS is_active,
+    first_seen_timestamp,
+    last_seen_timestamp,
+    CAST(first_seen_timestamp AS DATE) AS first_seen_date,
+    CAST(last_seen_timestamp AS DATE) AS last_seen_date,
+    purchase_event_count,
+    distinct_order_count,
+    'ADOBE_AEP_PURCHASE_EVENTS' AS record_source
+  FROM activity;
+
+Calculation Notes: |
+  Use the governed distribution center identifier and display name valid at the time of the event. For split orders, attribute each shipment, item, delivery, cancellation, or return event to its assigned center rather than applying the first center to the entire order; order-level reporting may use a dedicated "Multiple Distribution Centers" value when more than one center participates. Preserve the original assignment for historical journey analysis and record rerouting or reassignment as a new event-level value instead of overwriting prior events. Map stores, drop-ship partners, dark stores, and virtual nodes to their governed fulfillment node categories and use "Not Applicable" when no physical fulfillment assignment is expected. Use "Unknown" only when an assignment should exist but is missing or cannot be resolved. Exclude test orders, synthetic monitoring traffic, employee test transactions, and invalidated shipments according to enterprise traffic rules. Session timeout rules do not change attribution because the value is event-scoped; cross-session analysis must join through the authenticated customer, order, shipment, or return identifier.
+
+Business Use Case: |
+  The omnichannel commerce team compares checkout conversion, delivery-promise attainment, cancellation behavior, return experience, repeat purchase, and lifetime value by distribution center and customer market. Leadership can then adjust digital availability rules, order-routing policies, delivery promises, pickup options, and customer communications for centers associated with avoidable abandonment or poor post-purchase experiences.
+
+
+Source Data: Order Management and Fulfillment APIs stitched with Digital Analytics (GA4 or Adobe Analytics), E-commerce Platform, CRM, Customer Data Platform, Customer Service Platform, and Billing or Payment data
+
+Report Attributes: |
+  ["Distribution Center Region","Distribution Center Type","Fulfillment Channel","Customer Journey Stage","Sales Channel","Customer Market","Delivery Method","Shipping Service Level","Product Category","Order Type","New versus Returning Customer","Acquisition Channel","Device Category","Loyalty Tier","Return Reason","Calendar Period"]
+
+Dashboard Usage: [Omnichannel Customer Journey Performance, Checkout and Fulfillment Conversion, Post-Purchase Customer Experience, Delivery Promise and Retention, Returns and Refund Experience, Customer Lifetime Value by Fulfillment Network, Digital Availability and Order Routing, Executive Omnichannel Performance]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Fulfillment Channel, Fulfillment Location, Distribution Center Region, Distribution Center Type, Customer Journey Stage, Order, Shipment, Return Location, Delivery Method, Shipping Service Level, Sales Channel, Product, Customer, Geographic Market]
+
+Derived Dimensions: [Distribution Center Region, Distribution Center Market, Distribution Center Type, Distribution Center Time Zone, Distribution Center Service Area, Distribution Center Country, Fulfillment Node Category, Origin-to-Customer Distance Band]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-06T15:30:25.888191+00:00
+
+Last Modified By: devyendarm
+
+
