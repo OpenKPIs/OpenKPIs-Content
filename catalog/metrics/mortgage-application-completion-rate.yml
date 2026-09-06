@@ -1,0 +1,600 @@
+# Metric: Mortgage Application Completion Rate
+# Generated: 2026-09-06T14:30:22.209Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Mortgage Application Completion Rate
+Formula: 100 * COUNT(DISTINCT CASE WHEN completion_timestamp >= qualified_start_timestamp AND completion_timestamp < qualified_start_timestamp + INTERVAL '30 days' THEN canonical_application_id END) / NULLIF(COUNT(DISTINCT canonical_application_id), 0)
+
+Description: |
+  Measures the percentage of unique full mortgage applications that are completed and successfully submitted within 30 calendar days of a qualified application start across digital and advisor-assisted channels. It quantifies conversion from application initiation to lender-ready submission, excluding prequalification, duplicate, test, withdrawn-before-submission, and ineligible applications.
+
+Category: Conversion
+
+Tags: [metric]
+
+Industry: Real Estate Tech
+
+Priority: High
+
+Core Area: Onboarding
+
+Scope: Item
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily/Weekly/Monthly
+
+GA4 Event: |
+  generate_lead
+
+Adobe Event: |
+  generate_lead
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"generate_lead","timestamp":"{{event_timestamp_iso8601}}","eventAction":"submit"},"mortgageApplication":{"region":"{{region_code}}","channel":"{{digital_or_advisor_assisted}}","country":"{{iso_3166_1_alpha_2_country_code}}","currency":"{{iso_4217_currency_code}}","event_id":"{{globally_unique_event_id}}","language":"{{bcp_47_language_tag}}","branch_id":"{{branch_id_or_not_applicable}}","journey_id":"{{mortgage_journey_id}}","product_id":"{{mortgage_product_id}}","session_id":"{{analytics_session_id}}","lender_ready":true,"product_name":"{{mortgage_product_name}}","user_id_hash":"{{user_id_sha256}}","property_type":"{{property_type}}","source_system":"{{originating_source_system}}","application_id":"{{canonical_mortgage_application_id}}","consent_status":"granted","assistance_type":"{{self_service_or_advisor_assisted}}","event_timestamp":"{{event_timestamp_iso8601}}","qualified_start":true,"advisor_assisted":true,"application_type":"full_mortgage_application","customer_id_hash":"{{customer_id_sha256}}","full_application":true,"prequalification":false,"test_application":false,"consent_timestamp":"{{consent_timestamp_iso8601}}","submission_status":"successfully_submitted","application_status":"completed","completion_channel":"{{application_completion_channel}}","days_to_completion":18,"documents_complete":true,"property_occupancy":"{{property_occupancy_type}}","application_id_type":"canonical_mortgage_application_id","application_purpose":"{{purchase_or_refinance}}","crm_contact_id_hash":"{{crm_contact_id_sha256}}","esignature_complete":true,"originating_channel":"{{application_start_channel}}","eligible_application":true,"duplicate_application":false,"advisor_interaction_id":"{{pseudonymous_advisor_interaction_id}}","completion_window_days":30,"within_completion_window":true,"call_center_interaction_id":"{{pseudonymous_call_center_interaction_id_or_not_applicable}}","requested_loan_amount_band":"{{requested_loan_amount_band}}","application_start_timestamp":"{{application_start_timestamp_iso8601}}","withdrawn_before_submission":false,"application_completion_timestamp":"{{application_completion_timestamp_iso8601}}","loan_origination_application_id_hash":"{{loan_origination_application_id_sha256}}"}}]}}
+
+GA4 Data Layer: |
+  {"event":"generate_lead","region":"{{region_code}}","channel":"{{digital_or_advisor_assisted}}","country":"{{iso_3166_1_alpha_2_country_code}}","currency":"{{iso_4217_currency_code}}","event_id":"{{globally_unique_event_id}}","language":"{{bcp_47_language_tag}}","branch_id":"{{branch_id_or_not_applicable}}","journey_id":"{{mortgage_journey_id}}","product_id":"{{mortgage_product_id}}","session_id":"{{analytics_session_id}}","lender_ready":true,"product_name":"{{mortgage_product_name}}","user_id_hash":"{{user_id_sha256}}","property_type":"{{property_type}}","source_system":"{{originating_source_system}}","application_id":"{{canonical_mortgage_application_id}}","consent_status":"granted","assistance_type":"{{self_service_or_advisor_assisted}}","event_timestamp":"{{event_timestamp_iso8601}}","qualified_start":true,"advisor_assisted":true,"application_type":"full_mortgage_application","customer_id_hash":"{{customer_id_sha256}}","full_application":true,"prequalification":false,"test_application":false,"consent_timestamp":"{{consent_timestamp_iso8601}}","submission_status":"successfully_submitted","application_status":"completed","completion_channel":"{{application_completion_channel}}","days_to_completion":18,"documents_complete":true,"property_occupancy":"{{property_occupancy_type}}","application_id_type":"canonical_mortgage_application_id","application_purpose":"{{purchase_or_refinance}}","crm_contact_id_hash":"{{crm_contact_id_sha256}}","esignature_complete":true,"originating_channel":"{{application_start_channel}}","eligible_application":true,"duplicate_application":false,"advisor_interaction_id":"{{pseudonymous_advisor_interaction_id}}","completion_window_days":30,"within_completion_window":true,"call_center_interaction_id":"{{pseudonymous_call_center_interaction_id_or_not_applicable}}","requested_loan_amount_band":"{{requested_loan_amount_band}}","application_start_timestamp":"{{application_start_timestamp_iso8601}}","withdrawn_before_submission":false,"application_completion_timestamp":"{{application_completion_timestamp_iso8601}}","loan_origination_application_id_hash":"{{loan_origination_application_id_sha256}}"}
+
+Adobe Client Data Layer: |
+  {"data":{"mortgageApplication":{"region":"{{region_code}}","channel":"{{digital_or_advisor_assisted}}","country":"{{iso_3166_1_alpha_2_country_code}}","currency":"{{iso_4217_currency_code}}","event_id":"{{globally_unique_event_id}}","language":"{{bcp_47_language_tag}}","branch_id":"{{branch_id_or_not_applicable}}","journey_id":"{{mortgage_journey_id}}","product_id":"{{mortgage_product_id}}","session_id":"{{analytics_session_id}}","lender_ready":true,"product_name":"{{mortgage_product_name}}","user_id_hash":"{{user_id_sha256}}","property_type":"{{property_type}}","source_system":"{{originating_source_system}}","application_id":"{{canonical_mortgage_application_id}}","consent_status":"granted","assistance_type":"{{self_service_or_advisor_assisted}}","event_timestamp":"{{event_timestamp_iso8601}}","qualified_start":true,"advisor_assisted":true,"application_type":"full_mortgage_application","customer_id_hash":"{{customer_id_sha256}}","full_application":true,"prequalification":false,"test_application":false,"consent_timestamp":"{{consent_timestamp_iso8601}}","submission_status":"successfully_submitted","application_status":"completed","completion_channel":"{{application_completion_channel}}","days_to_completion":18,"documents_complete":true,"property_occupancy":"{{property_occupancy_type}}","application_id_type":"canonical_mortgage_application_id","application_purpose":"{{purchase_or_refinance}}","crm_contact_id_hash":"{{crm_contact_id_sha256}}","esignature_complete":true,"originating_channel":"{{application_start_channel}}","eligible_application":true,"duplicate_application":false,"advisor_interaction_id":"{{pseudonymous_advisor_interaction_id}}","completion_window_days":30,"within_completion_window":true,"call_center_interaction_id":"{{pseudonymous_call_center_interaction_id_or_not_applicable}}","requested_loan_amount_band":"{{requested_loan_amount_band}}","application_start_timestamp":"{{application_start_timestamp_iso8601}}","withdrawn_before_submission":false,"application_completion_timestamp":"{{application_completion_timestamp_iso8601}}","loan_origination_application_id_hash":"{{loan_origination_application_id_sha256}}"}},"event":"generate_lead"}
+
+XDM Mapping: |
+  {"_id":"{{globally_unique_event_id}}","web":{"webInteraction":{"name":"generate_lead","type":"other","linkClicks":{"value":1}}},"_mortgage":{"application":{"region":"{{region_code}}","channel":"{{digital_or_advisor_assisted}}","country":"{{iso_3166_1_alpha_2_country_code}}","currency":"{{iso_4217_currency_code}}","event_id":"{{globally_unique_event_id}}","language":"{{bcp_47_language_tag}}","branch_id":"{{branch_id_or_not_applicable}}","journey_id":"{{mortgage_journey_id}}","product_id":"{{mortgage_product_id}}","session_id":"{{analytics_session_id}}","lender_ready":true,"product_name":"{{mortgage_product_name}}","user_id_hash":"{{user_id_sha256}}","property_type":"{{property_type}}","source_system":"{{originating_source_system}}","application_id":"{{canonical_mortgage_application_id}}","consent_status":"granted","assistance_type":"{{self_service_or_advisor_assisted}}","event_timestamp":"{{event_timestamp_iso8601}}","qualified_start":true,"advisor_assisted":true,"application_type":"full_mortgage_application","customer_id_hash":"{{customer_id_sha256}}","full_application":true,"prequalification":false,"test_application":false,"consent_timestamp":"{{consent_timestamp_iso8601}}","submission_status":"successfully_submitted","application_status":"completed","completion_channel":"{{application_completion_channel}}","days_to_completion":18,"documents_complete":true,"property_occupancy":"{{property_occupancy_type}}","application_id_type":"canonical_mortgage_application_id","application_purpose":"{{purchase_or_refinance}}","crm_contact_id_hash":"{{crm_contact_id_sha256}}","esignature_complete":true,"originating_channel":"{{application_start_channel}}","eligible_application":true,"duplicate_application":false,"advisor_interaction_id":"{{pseudonymous_advisor_interaction_id}}","completion_window_days":30,"within_completion_window":true,"call_center_interaction_id":"{{pseudonymous_call_center_interaction_id_or_not_applicable}}","requested_loan_amount_band":"{{requested_loan_amount_band}}","application_start_timestamp":"{{application_start_timestamp_iso8601}}","withdrawn_before_submission":false,"application_completion_timestamp":"{{application_completion_timestamp_iso8601}}","loan_origination_application_id_hash":"{{loan_origination_application_id_sha256}}"}},"eventType":"generate_lead","timestamp":"{{event_timestamp_iso8601}}","identityMap":{"customerIdHash":[{"id":"{{customer_id_sha256}}","primary":false,"authenticatedState":"{{authenticated_state}}"}],"mortgageApplicationId":[{"id":"{{canonical_mortgage_application_id}}","primary":true,"authenticatedState":"ambiguous"}]}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH event_parameter_pivot AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS collected_event_timestamp,
+      event_name,
+      MAX(IF(ep.key = 'application_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS application_id,
+      MAX(IF(ep.key = 'application_id_type', ep.value.string_value, NULL)) AS application_id_type,
+      MAX(IF(ep.key = 'application_type', ep.value.string_value, NULL)) AS application_type,
+      MAX(IF(ep.key = 'application_purpose', ep.value.string_value, NULL)) AS application_purpose,
+      MAX(IF(ep.key = 'application_status', ep.value.string_value, NULL)) AS application_status,
+      MAX(IF(ep.key = 'submission_status', ep.value.string_value, NULL)) AS submission_status,
+      MAX(IF(ep.key = 'application_start_timestamp', ep.value.string_value, NULL)) AS application_start_timestamp_raw,
+      MAX(IF(ep.key = 'application_completion_timestamp', ep.value.string_value, NULL)) AS application_completion_timestamp_raw,
+      MAX(IF(ep.key = 'days_to_completion', COALESCE(CAST(ep.value.int_value AS STRING), ep.value.string_value), NULL)) AS days_to_completion_raw,
+      MAX(IF(ep.key = 'completion_window_days', COALESCE(CAST(ep.value.int_value AS STRING), ep.value.string_value), NULL)) AS completion_window_days_raw,
+      MAX(IF(ep.key = 'within_completion_window', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS within_completion_window_raw,
+      MAX(IF(ep.key = 'qualified_start', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS qualified_start_raw,
+      MAX(IF(ep.key = 'full_application', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS full_application_raw,
+      MAX(IF(ep.key = 'prequalification', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS prequalification_raw,
+      MAX(IF(ep.key = 'duplicate_application', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS duplicate_application_raw,
+      MAX(IF(ep.key = 'test_application', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS test_application_raw,
+      MAX(IF(ep.key = 'withdrawn_before_submission', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS withdrawn_before_submission_raw,
+      MAX(IF(ep.key = 'eligible_application', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS eligible_application_raw,
+      MAX(IF(ep.key = 'lender_ready', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS lender_ready_raw,
+      MAX(IF(ep.key = 'documents_complete', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS documents_complete_raw,
+      MAX(IF(ep.key = 'esignature_complete', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS esignature_complete_raw,
+      MAX(IF(ep.key = 'consent_status', ep.value.string_value, NULL)) AS consent_status,
+      MAX(IF(ep.key = 'consent_timestamp', ep.value.string_value, NULL)) AS consent_timestamp_raw,
+      MAX(IF(ep.key = 'channel', ep.value.string_value, NULL)) AS channel,
+      MAX(IF(ep.key = 'originating_channel', ep.value.string_value, NULL)) AS originating_channel,
+      MAX(IF(ep.key = 'completion_channel', ep.value.string_value, NULL)) AS completion_channel,
+      MAX(IF(ep.key = 'assistance_type', ep.value.string_value, NULL)) AS assistance_type,
+      MAX(IF(ep.key = 'advisor_assisted', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS advisor_assisted_raw,
+      MAX(IF(ep.key = 'advisor_interaction_id', ep.value.string_value, NULL)) AS advisor_interaction_id,
+      MAX(IF(ep.key = 'branch_id', ep.value.string_value, NULL)) AS branch_id,
+      MAX(IF(ep.key = 'call_center_interaction_id', ep.value.string_value, NULL)) AS call_center_interaction_id,
+      MAX(IF(ep.key = 'customer_id_hash', ep.value.string_value, NULL)) AS customer_id_hash,
+      MAX(IF(ep.key = 'user_id_hash', ep.value.string_value, NULL)) AS user_id_hash,
+      MAX(IF(ep.key = 'session_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS session_id,
+      MAX(IF(ep.key = 'journey_id', ep.value.string_value, NULL)) AS journey_id,
+      MAX(IF(ep.key = 'crm_contact_id_hash', ep.value.string_value, NULL)) AS crm_contact_id_hash,
+      MAX(IF(ep.key = 'loan_origination_application_id_hash', ep.value.string_value, NULL)) AS loan_origination_application_id_hash,
+      MAX(IF(ep.key = 'product_id', ep.value.string_value, NULL)) AS product_id,
+      MAX(IF(ep.key = 'product_name', ep.value.string_value, NULL)) AS product_name,
+      MAX(IF(ep.key = 'currency', ep.value.string_value, NULL)) AS currency,
+      MAX(IF(ep.key = 'requested_loan_amount_band', ep.value.string_value, NULL)) AS requested_loan_amount_band,
+      MAX(IF(ep.key = 'property_type', ep.value.string_value, NULL)) AS property_type,
+      MAX(IF(ep.key = 'property_occupancy', ep.value.string_value, NULL)) AS property_occupancy,
+      MAX(IF(ep.key = 'country', ep.value.string_value, NULL)) AS country,
+      MAX(IF(ep.key = 'region', ep.value.string_value, NULL)) AS region,
+      MAX(IF(ep.key = 'language', ep.value.string_value, NULL)) AS language,
+      MAX(IF(ep.key = 'event_timestamp', ep.value.string_value, NULL)) AS event_timestamp_raw,
+      MAX(IF(ep.key = 'source_system', ep.value.string_value, NULL)) AS source_system,
+      MAX(IF(ep.key = 'event_id', ep.value.string_value, NULL)) AS event_id
+    FROM `your-project.analytics_123456789.events_*`
+    LEFT JOIN UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @cohort_start_date)
+                            AND FORMAT_DATE('%Y%m%d', @as_of_date)
+      AND event_name IN ('begin_checkout', 'generate_lead')
+    GROUP BY event_date, collected_event_timestamp, event_name
+  ),
+  normalized_events AS (
+    SELECT
+      event_date,
+      collected_event_timestamp,
+      event_name,
+      application_id,
+      application_id_type,
+      application_type,
+      application_purpose,
+      application_status,
+      submission_status,
+      COALESCE(SAFE_CAST(application_start_timestamp_raw AS TIMESTAMP), IF(event_name = 'begin_checkout', collected_event_timestamp, NULL)) AS application_start_timestamp,
+      COALESCE(SAFE_CAST(application_completion_timestamp_raw AS TIMESTAMP), IF(event_name = 'generate_lead', collected_event_timestamp, NULL)) AS application_completion_timestamp,
+      SAFE_CAST(days_to_completion_raw AS INT64) AS days_to_completion,
+      COALESCE(SAFE_CAST(completion_window_days_raw AS INT64), 30) AS completion_window_days,
+      LOWER(within_completion_window_raw) IN ('true', '1') AS within_completion_window,
+      LOWER(qualified_start_raw) IN ('true', '1') AS qualified_start,
+      LOWER(full_application_raw) IN ('true', '1') AS full_application,
+      LOWER(prequalification_raw) IN ('true', '1') AS prequalification,
+      LOWER(duplicate_application_raw) IN ('true', '1') AS duplicate_application,
+      LOWER(test_application_raw) IN ('true', '1') AS test_application,
+      LOWER(withdrawn_before_submission_raw) IN ('true', '1') AS withdrawn_before_submission,
+      LOWER(eligible_application_raw) IN ('true', '1') AS eligible_application,
+      LOWER(lender_ready_raw) IN ('true', '1') AS lender_ready,
+      LOWER(documents_complete_raw) IN ('true', '1') AS documents_complete,
+      LOWER(esignature_complete_raw) IN ('true', '1') AS esignature_complete,
+      consent_status,
+      SAFE_CAST(consent_timestamp_raw AS TIMESTAMP) AS consent_timestamp,
+      channel,
+      originating_channel,
+      completion_channel,
+      assistance_type,
+      LOWER(advisor_assisted_raw) IN ('true', '1') AS advisor_assisted,
+      advisor_interaction_id,
+      branch_id,
+      call_center_interaction_id,
+      customer_id_hash,
+      user_id_hash,
+      session_id,
+      journey_id,
+      crm_contact_id_hash,
+      loan_origination_application_id_hash,
+      product_id,
+      product_name,
+      currency,
+      requested_loan_amount_band,
+      property_type,
+      property_occupancy,
+      country,
+      region,
+      language,
+      COALESCE(SAFE_CAST(event_timestamp_raw AS TIMESTAMP), collected_event_timestamp) AS event_timestamp,
+      source_system,
+      event_id
+    FROM event_parameter_pivot
+    WHERE application_id IS NOT NULL
+  ),
+  latest_application_record AS (
+    SELECT *
+    FROM normalized_events
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY application_id
+      ORDER BY event_timestamp DESC, collected_event_timestamp DESC, event_id DESC
+    ) = 1
+  ),
+  application_lifecycle AS (
+    SELECT
+      application_id,
+      MIN(COALESCE(application_start_timestamp, IF(event_name = 'begin_checkout', collected_event_timestamp, NULL))) AS first_application_start_timestamp,
+      MIN(IF(event_name = 'generate_lead' AND LOWER(application_status) = 'completed' AND LOWER(submission_status) = 'successfully_submitted', COALESCE(application_completion_timestamp, collected_event_timestamp), NULL)) AS first_valid_completion_timestamp,
+      LOGICAL_OR(event_name = 'begin_checkout' OR qualified_start IS TRUE) AS has_start_evidence,
+      LOGICAL_OR(event_name = 'generate_lead' AND LOWER(application_status) = 'completed' AND LOWER(submission_status) = 'successfully_submitted') AS has_completion_evidence
+    FROM normalized_events
+    GROUP BY application_id
+  ),
+  application_facts AS (
+    SELECT
+      l.* REPLACE (
+        COALESCE(x.first_application_start_timestamp, l.application_start_timestamp) AS application_start_timestamp,
+        COALESCE(x.first_valid_completion_timestamp, l.application_completion_timestamp) AS application_completion_timestamp,
+        COALESCE(
+          l.days_to_completion,
+          DATE_DIFF(DATE(x.first_valid_completion_timestamp), DATE(x.first_application_start_timestamp), DAY)
+        ) AS days_to_completion
+      ),
+      x.has_start_evidence,
+      x.has_completion_evidence
+    FROM latest_application_record AS l
+    JOIN application_lifecycle AS x USING (application_id)
+  ),
+  qualified_cohort AS (
+    SELECT
+      *,
+      DATE(application_start_timestamp) AS application_start_date,
+      CASE
+        WHEN has_completion_evidence
+         AND application_completion_timestamp IS NOT NULL
+         AND application_completion_timestamp >= application_start_timestamp
+         AND application_completion_timestamp <= TIMESTAMP_ADD(application_start_timestamp, INTERVAL completion_window_days DAY)
+         AND COALESCE(withdrawn_before_submission, FALSE) = FALSE
+         AND COALESCE(lender_ready, FALSE) = TRUE
+         AND COALESCE(documents_complete, FALSE) = TRUE
+         AND COALESCE(esignature_complete, FALSE) = TRUE
+         AND LOWER(COALESCE(consent_status, '')) = 'granted'
+        THEN 1 ELSE 0
+      END AS completed_application_flag
+    FROM application_facts
+    WHERE has_start_evidence
+      AND application_start_timestamp IS NOT NULL
+      AND DATE(application_start_timestamp) BETWEEN @cohort_start_date AND @cohort_end_date
+      AND DATE(application_start_timestamp) <= DATE_SUB(@as_of_date, INTERVAL completion_window_days DAY)
+      AND application_id_type = 'canonical_mortgage_application_id'
+      AND application_type = 'full_mortgage_application'
+      AND COALESCE(qualified_start, FALSE) = TRUE
+      AND COALESCE(full_application, FALSE) = TRUE
+      AND COALESCE(prequalification, FALSE) = FALSE
+      AND COALESCE(duplicate_application, FALSE) = FALSE
+      AND COALESCE(test_application, FALSE) = FALSE
+      AND COALESCE(eligible_application, FALSE) = TRUE
+  ),
+  scored AS (
+    SELECT
+      *,
+      COUNT(*) OVER cohort_window AS qualified_application_starts,
+      SUM(completed_application_flag) OVER cohort_window AS completed_mortgage_applications
+    FROM qualified_cohort
+    WINDOW cohort_window AS (
+      PARTITION BY application_start_date, application_purpose, originating_channel, assistance_type
+    )
+  )
+  SELECT
+    application_id,
+    application_id_type,
+    application_type,
+    application_purpose,
+    application_status,
+    submission_status,
+    application_start_timestamp,
+    application_completion_timestamp,
+    days_to_completion,
+    completion_window_days,
+    within_completion_window,
+    qualified_start,
+    full_application,
+    prequalification,
+    duplicate_application,
+    test_application,
+    withdrawn_before_submission,
+    eligible_application,
+    lender_ready,
+    documents_complete,
+    esignature_complete,
+    consent_status,
+    consent_timestamp,
+    channel,
+    originating_channel,
+    completion_channel,
+    assistance_type,
+    advisor_assisted,
+    advisor_interaction_id,
+    branch_id,
+    call_center_interaction_id,
+    customer_id_hash,
+    user_id_hash,
+    session_id,
+    journey_id,
+    crm_contact_id_hash,
+    loan_origination_application_id_hash,
+    product_id,
+    product_name,
+    currency,
+    requested_loan_amount_band,
+    property_type,
+    property_occupancy,
+    country,
+    region,
+    language,
+    event_timestamp,
+    source_system,
+    event_id,
+    application_start_date,
+    completed_application_flag,
+    qualified_application_starts,
+    completed_mortgage_applications,
+    ROUND(100 * SAFE_DIVIDE(completed_mortgage_applications, qualified_application_starts), 2) AS mortgage_application_completion_rate_pct
+  FROM scored
+  ORDER BY application_start_date, application_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH normalized_events AS (
+    SELECT
+      eventType AS event_name,
+      timestamp AS collected_event_timestamp,
+      _mortgage.application.application_id AS application_id,
+      _mortgage.application.application_id_type AS application_id_type,
+      _mortgage.application.application_type AS application_type,
+      _mortgage.application.application_purpose AS application_purpose,
+      _mortgage.application.application_status AS application_status,
+      _mortgage.application.submission_status AS submission_status,
+      COALESCE(
+        CAST(_mortgage.application.application_start_timestamp AS TIMESTAMP),
+        CASE WHEN eventType = 'begin_checkout' THEN timestamp END
+      ) AS application_start_timestamp,
+      COALESCE(
+        CAST(_mortgage.application.application_completion_timestamp AS TIMESTAMP),
+        CASE WHEN eventType = 'generate_lead' THEN timestamp END
+      ) AS application_completion_timestamp,
+      CAST(_mortgage.application.days_to_completion AS INTEGER) AS days_to_completion,
+      COALESCE(CAST(_mortgage.application.completion_window_days AS INTEGER), 30) AS completion_window_days,
+      CAST(_mortgage.application.within_completion_window AS BOOLEAN) AS within_completion_window,
+      CAST(_mortgage.application.qualified_start AS BOOLEAN) AS qualified_start,
+      CAST(_mortgage.application.full_application AS BOOLEAN) AS full_application,
+      CAST(_mortgage.application.prequalification AS BOOLEAN) AS prequalification,
+      CAST(_mortgage.application.duplicate_application AS BOOLEAN) AS duplicate_application,
+      CAST(_mortgage.application.test_application AS BOOLEAN) AS test_application,
+      CAST(_mortgage.application.withdrawn_before_submission AS BOOLEAN) AS withdrawn_before_submission,
+      CAST(_mortgage.application.eligible_application AS BOOLEAN) AS eligible_application,
+      CAST(_mortgage.application.lender_ready AS BOOLEAN) AS lender_ready,
+      CAST(_mortgage.application.documents_complete AS BOOLEAN) AS documents_complete,
+      CAST(_mortgage.application.esignature_complete AS BOOLEAN) AS esignature_complete,
+      _mortgage.application.consent_status AS consent_status,
+      CAST(_mortgage.application.consent_timestamp AS TIMESTAMP) AS consent_timestamp,
+      _mortgage.application.channel AS channel,
+      _mortgage.application.originating_channel AS originating_channel,
+      _mortgage.application.completion_channel AS completion_channel,
+      _mortgage.application.assistance_type AS assistance_type,
+      CAST(_mortgage.application.advisor_assisted AS BOOLEAN) AS advisor_assisted,
+      _mortgage.application.advisor_interaction_id AS advisor_interaction_id,
+      _mortgage.application.branch_id AS branch_id,
+      _mortgage.application.call_center_interaction_id AS call_center_interaction_id,
+      _mortgage.application.customer_id_hash AS customer_id_hash,
+      _mortgage.application.user_id_hash AS user_id_hash,
+      _mortgage.application.session_id AS session_id,
+      _mortgage.application.journey_id AS journey_id,
+      _mortgage.application.crm_contact_id_hash AS crm_contact_id_hash,
+      _mortgage.application.loan_origination_application_id_hash AS loan_origination_application_id_hash,
+      _mortgage.application.product_id AS product_id,
+      _mortgage.application.product_name AS product_name,
+      _mortgage.application.currency AS currency,
+      _mortgage.application.requested_loan_amount_band AS requested_loan_amount_band,
+      _mortgage.application.property_type AS property_type,
+      _mortgage.application.property_occupancy AS property_occupancy,
+      _mortgage.application.country AS country,
+      _mortgage.application.region AS region,
+      _mortgage.application.language AS language,
+      COALESCE(CAST(_mortgage.application.event_timestamp AS TIMESTAMP), timestamp) AS event_timestamp,
+      _mortgage.application.source_system AS source_system,
+      COALESCE(_mortgage.application.event_id, _id) AS event_id
+    FROM mortgage_application_experience_events
+    WHERE timestamp >= CAST(:cohort_start_date AS TIMESTAMP)
+      AND timestamp < CAST(:as_of_date AS TIMESTAMP) + INTERVAL '1 day'
+      AND eventType IN ('begin_checkout', 'generate_lead')
+      AND _mortgage.application.application_id IS NOT NULL
+  ),
+  ranked_events AS (
+    SELECT
+      n.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY application_id
+        ORDER BY event_timestamp DESC, collected_event_timestamp DESC, event_id DESC
+      ) AS latest_record_number
+    FROM normalized_events n
+  ),
+  latest_application_record AS (
+    SELECT *
+    FROM ranked_events
+    WHERE latest_record_number = 1
+  ),
+  application_lifecycle AS (
+    SELECT
+      application_id,
+      MIN(COALESCE(application_start_timestamp, CASE WHEN event_name = 'begin_checkout' THEN collected_event_timestamp END)) AS first_application_start_timestamp,
+      MIN(
+        CASE
+          WHEN event_name = 'generate_lead'
+           AND LOWER(application_status) = 'completed'
+           AND LOWER(submission_status) = 'successfully_submitted'
+          THEN COALESCE(application_completion_timestamp, collected_event_timestamp)
+        END
+      ) AS first_valid_completion_timestamp,
+      MAX(CASE WHEN event_name = 'begin_checkout' OR qualified_start = TRUE THEN 1 ELSE 0 END) AS has_start_evidence,
+      MAX(
+        CASE
+          WHEN event_name = 'generate_lead'
+           AND LOWER(application_status) = 'completed'
+           AND LOWER(submission_status) = 'successfully_submitted'
+          THEN 1 ELSE 0
+        END
+      ) AS has_completion_evidence
+    FROM normalized_events
+    GROUP BY application_id
+  ),
+  application_facts AS (
+    SELECT
+      l.application_id,
+      l.application_id_type,
+      l.application_type,
+      l.application_purpose,
+      l.application_status,
+      l.submission_status,
+      COALESCE(x.first_application_start_timestamp, l.application_start_timestamp) AS application_start_timestamp,
+      COALESCE(x.first_valid_completion_timestamp, l.application_completion_timestamp) AS application_completion_timestamp,
+      COALESCE(
+        l.days_to_completion,
+        CAST(DATE(x.first_valid_completion_timestamp) - DATE(x.first_application_start_timestamp) AS INTEGER)
+      ) AS days_to_completion,
+      l.completion_window_days,
+      l.within_completion_window,
+      l.qualified_start,
+      l.full_application,
+      l.prequalification,
+      l.duplicate_application,
+      l.test_application,
+      l.withdrawn_before_submission,
+      l.eligible_application,
+      l.lender_ready,
+      l.documents_complete,
+      l.esignature_complete,
+      l.consent_status,
+      l.consent_timestamp,
+      l.channel,
+      l.originating_channel,
+      l.completion_channel,
+      l.assistance_type,
+      l.advisor_assisted,
+      l.advisor_interaction_id,
+      l.branch_id,
+      l.call_center_interaction_id,
+      l.customer_id_hash,
+      l.user_id_hash,
+      l.session_id,
+      l.journey_id,
+      l.crm_contact_id_hash,
+      l.loan_origination_application_id_hash,
+      l.product_id,
+      l.product_name,
+      l.currency,
+      l.requested_loan_amount_band,
+      l.property_type,
+      l.property_occupancy,
+      l.country,
+      l.region,
+      l.language,
+      l.event_timestamp,
+      l.source_system,
+      l.event_id,
+      x.has_start_evidence,
+      x.has_completion_evidence
+    FROM latest_application_record l
+    JOIN application_lifecycle x
+      ON l.application_id = x.application_id
+  ),
+  qualified_cohort AS (
+    SELECT
+      f.*,
+      DATE(application_start_timestamp) AS application_start_date,
+      CASE
+        WHEN has_completion_evidence = 1
+         AND application_completion_timestamp IS NOT NULL
+         AND application_completion_timestamp >= application_start_timestamp
+         AND application_completion_timestamp <= application_start_timestamp + completion_window_days * INTERVAL '1 day'
+         AND COALESCE(withdrawn_before_submission, FALSE) = FALSE
+         AND COALESCE(lender_ready, FALSE) = TRUE
+         AND COALESCE(documents_complete, FALSE) = TRUE
+         AND COALESCE(esignature_complete, FALSE) = TRUE
+         AND LOWER(COALESCE(consent_status, '')) = 'granted'
+        THEN 1 ELSE 0
+      END AS completed_application_flag
+    FROM application_facts f
+    WHERE has_start_evidence = 1
+      AND application_start_timestamp IS NOT NULL
+      AND DATE(application_start_timestamp) BETWEEN CAST(:cohort_start_date AS DATE) AND CAST(:cohort_end_date AS DATE)
+      AND DATE(application_start_timestamp) <= CAST(:as_of_date AS DATE) - completion_window_days
+      AND application_id_type = 'canonical_mortgage_application_id'
+      AND application_type = 'full_mortgage_application'
+      AND COALESCE(qualified_start, FALSE) = TRUE
+      AND COALESCE(full_application, FALSE) = TRUE
+      AND COALESCE(prequalification, FALSE) = FALSE
+      AND COALESCE(duplicate_application, FALSE) = FALSE
+      AND COALESCE(test_application, FALSE) = FALSE
+      AND COALESCE(eligible_application, FALSE) = TRUE
+  ),
+  scored AS (
+    SELECT
+      q.*,
+      COUNT(*) OVER cohort_window AS qualified_application_starts,
+      SUM(completed_application_flag) OVER cohort_window AS completed_mortgage_applications
+    FROM qualified_cohort q
+    WINDOW cohort_window AS (
+      PARTITION BY application_start_date, application_purpose, originating_channel, assistance_type
+    )
+  )
+  SELECT
+    application_id,
+    application_id_type,
+    application_type,
+    application_purpose,
+    application_status,
+    submission_status,
+    application_start_timestamp,
+    application_completion_timestamp,
+    days_to_completion,
+    completion_window_days,
+    within_completion_window,
+    qualified_start,
+    full_application,
+    prequalification,
+    duplicate_application,
+    test_application,
+    withdrawn_before_submission,
+    eligible_application,
+    lender_ready,
+    documents_complete,
+    esignature_complete,
+    consent_status,
+    consent_timestamp,
+    channel,
+    originating_channel,
+    completion_channel,
+    assistance_type,
+    advisor_assisted,
+    advisor_interaction_id,
+    branch_id,
+    call_center_interaction_id,
+    customer_id_hash,
+    user_id_hash,
+    session_id,
+    journey_id,
+    crm_contact_id_hash,
+    loan_origination_application_id_hash,
+    product_id,
+    product_name,
+    currency,
+    requested_loan_amount_band,
+    property_type,
+    property_occupancy,
+    country,
+    region,
+    language,
+    event_timestamp,
+    source_system,
+    event_id,
+    application_start_date,
+    completed_application_flag,
+    qualified_application_starts,
+    completed_mortgage_applications,
+    ROUND(
+      100.0 * completed_mortgage_applications / NULLIF(qualified_application_starts, 0),
+      2
+    ) AS mortgage_application_completion_rate_pct
+  FROM scored
+  ORDER BY application_start_date, application_id;
+
+Calculation Notes: |
+  Attribute the metric to the qualified start cohort rather than the completion date to prevent completed applications from being compared with unrelated same-period starts. A completion before the recorded start is invalid and must be quarantined for event-order investigation; applications still inside the 30-day window are provisional, denominator-zero results return null, and cross-midnight sessions do not reset the journey because measurement is application-based rather than session-based. A standard 30-minute digital session timeout may be used for journey diagnostics but must not alter application-level start, resume, or completion qualification.
+
+Business Use Case: |
+  The Chief Product Officer and Mortgage Sales leadership review completion rate by start cohort, channel, device, product, acquisition source, application step, and loan officer. If mobile refinance cohorts show a material decline after the income-verification step, Product can simplify the workflow, Operations can add advisor outreach for affected in-progress applicants, Marketing can suppress abandonment-sensitive campaigns, and leadership can measure whether the intervention improves completed applications, approvals, funded loans, and customer acquisition efficiency.
+
+
+Source Data: Digital Analytics (web and mobile application events), Customer Identity Platform, CRM, loan origination system, document and e-signature platform, consent service, and call-center or branch interaction data stitched through the canonical mortgage application ID.
+
+Report Attributes: |
+  ["Qualified Start Date","Qualified Start Cohort Week","Qualified Start Cohort Month","Application Channel","Completion Channel","Self-Service versus Assisted","Web versus Mobile","Device Type","Operating System","Browser or App Version","Acquisition Source","Campaign","Mortgage Product Type","Purchase versus Refinance","Property State","Applicant State","Loan Amount Band","Down Payment Band","First-Time Homebuyer Indicator","Single versus Joint Application","Current Application Step","Last Completed Step","Document Requirement Status","Loan Officer","Broker Partner","Days to Complete","New versus Returning Customer","Experiment Variant","Accessibility Mode"]
+
+Dashboard Usage: [Executive Mortgage Conversion Dashboard, Omnichannel Mortgage Application Funnel, Digital Onboarding Performance Dashboard, Mortgage Sales and Origination Dashboard, Application Abandonment and Recovery Dashboard, Acquisition-to-Funding Journey Dashboard, Mortgage Product Experimentation Dashboard, Customer Journey Data Quality Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Mortgage Application Start Rate, Mortgage Application Abandonment Rate, Mortgage Application Submission Count, Mortgage Application Time to Complete, Mortgage Application Validation Error Rate, Document Upload Completion Rate, Disclosure Consent Completion Rate, Prequalification-to-Application Conversion Rate, Mortgage Approval Rate, Mortgage Funding Rate]
+
+Derived KPIs: [Completed Mortgage Applications, Application Funnel Conversion Index, Channel-Assisted Completion Lift, Thirty-Day Application Abandonment Rate, Completed Application Cost per Acquisition, Application-to-Approval Conversion Rate, Application-to-Funding Conversion Rate, Projected Funded Loan Volume, Mortgage Acquisition Funnel Health Score]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-06T14:30:21.805108+00:00
+
+Last Modified By: devyendarm
+
+
