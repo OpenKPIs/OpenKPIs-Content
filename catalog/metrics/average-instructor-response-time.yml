@@ -1,0 +1,642 @@
+# Metric: Average Instructor Response Time
+# Generated: 2026-09-06T13:30:23.168Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Average Instructor Response Time
+Formula: SUM(TIMESTAMP_DIFF(first_qualifying_response_timestamp, inquiry_created_timestamp, SECOND)) / (3600 * COUNT(DISTINCT responded_inquiry_cycle_id))
+
+Description: |
+  Measures the average elapsed clock time between a learner submitting an eligible inquiry and the first qualifying human response from the assigned instructor or authorized instructional staff member. Lower values indicate faster instructional support, while unanswered inquiries are excluded from the average and tracked separately through response-rate and SLA-compliance metrics.
+
+Category: Efficiency
+
+Tags: [metric]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Measure Type: average
+
+Aggregation Window: Time based - Daily/Weekly/Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT
+      DATE_SUB(CURRENT_DATE('UTC'), INTERVAL 91 DAY) AS start_date,
+      DATE_SUB(CURRENT_DATE('UTC'), INTERVAL 1 DAY) AS end_date,
+      1440 AS default_response_sla_minutes
+  ),
+  base_events AS (
+    SELECT
+      e.event_id,
+      e.thread_id,
+      e.event_timestamp,
+      e.actor_id,
+      e.organization_id,
+      e.institution_id,
+      e.course_id,
+      e.course_section_id,
+      e.term_id,
+      e.program_id,
+      e.subject_area,
+      e.course_level,
+      e.channel,
+      e.communication_type AS interaction_type,
+      e.delivery_modality,
+      e.actor_region,
+      e.actor_country,
+      e.actor_timezone,
+      e.message_language,
+      e.device_type,
+      e.priority,
+      e.support_tier,
+      COALESCE(e.response_sla_minutes, p.default_response_sla_minutes) AS response_sla_minutes,
+      (
+        SELECT MIN(ra.role_code)
+        FROM `your-project.lms.instructor_role_assignments` AS ra
+        WHERE ra.organization_id = e.organization_id
+          AND ra.course_id = e.course_id
+          AND ra.user_id = e.actor_id
+          AND ra.role_category = 'instructor'
+          AND ra.assignment_status = 'active'
+          AND e.event_timestamp >= ra.effective_start_at
+          AND (ra.effective_end_at IS NULL OR e.event_timestamp < ra.effective_end_at)
+      ) AS instructor_role_code,
+      EXISTS (
+        SELECT 1
+        FROM `your-project.lms.course_enrollments` AS ce
+        WHERE ce.organization_id = e.organization_id
+          AND ce.course_id = e.course_id
+          AND ce.learner_id = e.actor_id
+          AND ce.enrollment_status IN ('active', 'completed')
+          AND e.event_timestamp >= ce.enrollment_start_at
+          AND (ce.enrollment_end_at IS NULL OR e.event_timestamp < ce.enrollment_end_at)
+      ) AS has_valid_learner_enrollment
+    FROM `your-project.enterprise_analytics.fact_learning_communication_events` AS e
+    CROSS JOIN parameters AS p
+    WHERE DATE(e.event_timestamp, 'UTC') BETWEEN DATE_SUB(p.start_date, INTERVAL 1 DAY)
+                                               AND DATE_ADD(p.end_date, INTERVAL 2 DAY)
+      AND e.action_type = 'created'
+      AND e.communication_type IN ('message', 'discussion_post', 'chat_message')
+      AND e.thread_id IS NOT NULL
+      AND e.actor_id IS NOT NULL
+      AND e.record_status = 'active'
+      AND COALESCE(e.is_deleted, FALSE) = FALSE
+  ),
+  classified_events AS (
+    SELECT
+      b.*,
+      CASE
+        WHEN b.instructor_role_code IS NOT NULL THEN 'instructor'
+        WHEN b.has_valid_learner_enrollment THEN 'learner'
+        ELSE NULL
+      END AS participant_role
+    FROM base_events AS b
+  ),
+  eligible_participant_events AS (
+    SELECT *
+    FROM classified_events
+    WHERE participant_role IS NOT NULL
+  ),
+  sequenced_events AS (
+    SELECT
+      e.*,
+      LAG(participant_role) OVER (
+        PARTITION BY organization_id, course_id, thread_id
+        ORDER BY event_timestamp, event_id
+      ) AS previous_participant_role
+    FROM eligible_participant_events AS e
+  ),
+  marked_events AS (
+    SELECT
+      e.*,
+      CASE
+        WHEN participant_role = 'learner'
+         AND COALESCE(previous_participant_role, 'none') <> 'learner'
+        THEN 1 ELSE 0
+      END AS learner_turn_start
+    FROM sequenced_events AS e
+  ),
+  numbered_events AS (
+    SELECT
+      e.*,
+      SUM(learner_turn_start) OVER (
+        PARTITION BY organization_id, course_id, thread_id
+        ORDER BY event_timestamp, event_id
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS learner_turn_number
+    FROM marked_events AS e
+  ),
+  learner_turn_events AS (
+    SELECT
+      e.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY organization_id, course_id, thread_id, learner_turn_number
+        ORDER BY event_timestamp, event_id
+      ) AS learner_event_rank
+    FROM numbered_events AS e
+    WHERE participant_role = 'learner'
+      AND learner_turn_number > 0
+  ),
+  learner_turn_summary AS (
+    SELECT
+      organization_id,
+      course_id,
+      thread_id,
+      learner_turn_number,
+      MIN(event_timestamp) AS first_learner_message_at,
+      MAX(event_timestamp) AS last_learner_message_at,
+      COUNT(*) AS learner_message_count
+    FROM learner_turn_events
+    GROUP BY organization_id, course_id, thread_id, learner_turn_number
+  ),
+  learner_turn_anchor AS (
+    SELECT *
+    FROM learner_turn_events
+    WHERE learner_event_rank = 1
+  ),
+  eligible_turns AS (
+    SELECT
+      s.*,
+      a.actor_id AS learner_id,
+      a.institution_id,
+      a.course_section_id,
+      a.term_id,
+      a.program_id,
+      a.subject_area,
+      a.course_level,
+      a.channel,
+      a.interaction_type,
+      a.delivery_modality,
+      a.actor_region AS learner_region,
+      a.actor_country AS learner_country,
+      a.actor_timezone AS learner_timezone,
+      a.message_language,
+      a.device_type,
+      a.priority,
+      a.support_tier,
+      a.response_sla_minutes
+    FROM learner_turn_summary AS s
+    JOIN learner_turn_anchor AS a
+      USING (organization_id, course_id, thread_id, learner_turn_number)
+    CROSS JOIN parameters AS p
+    WHERE DATE(s.first_learner_message_at, 'UTC') BETWEEN p.start_date AND p.end_date
+  ),
+  response_candidates AS (
+    SELECT
+      t.*,
+      r.actor_id AS instructor_id,
+      r.instructor_role_code AS instructor_role,
+      r.actor_region AS instructor_region,
+      r.actor_country AS instructor_country,
+      r.actor_timezone AS instructor_timezone,
+      r.event_timestamp AS instructor_response_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY t.organization_id, t.course_id, t.thread_id, t.learner_turn_number
+        ORDER BY r.event_timestamp, r.event_id
+      ) AS response_rank
+    FROM eligible_turns AS t
+    LEFT JOIN eligible_participant_events AS r
+      ON r.organization_id = t.organization_id
+     AND r.course_id = t.course_id
+     AND r.thread_id = t.thread_id
+     AND r.participant_role = 'instructor'
+     AND r.event_timestamp > t.last_learner_message_at
+  ),
+  paired_turns AS (
+    SELECT
+      r.*,
+      CASE
+        WHEN instructor_response_at IS NOT NULL
+        THEN TIMESTAMP_DIFF(instructor_response_at, first_learner_message_at, SECOND)
+      END AS response_time_seconds
+    FROM response_candidates AS r
+    WHERE response_rank = 1
+  ),
+  mature_turns AS (
+    SELECT *
+    FROM paired_turns
+    WHERE instructor_response_at IS NOT NULL
+       OR CURRENT_TIMESTAMP() >= TIMESTAMP_ADD(
+            last_learner_message_at,
+            INTERVAL CAST(response_sla_minutes AS INT64) MINUTE
+          )
+  )
+  SELECT
+    DATE(first_learner_message_at, 'UTC') AS metric_date,
+    organization_id,
+    institution_id,
+    course_id,
+    course_section_id,
+    term_id,
+    program_id,
+    COALESCE(subject_area, 'unknown') AS subject_area,
+    COALESCE(course_level, 'unknown') AS course_level,
+    instructor_id,
+    COALESCE(instructor_role, 'unassigned') AS instructor_role,
+    COALESCE(channel, 'unknown') AS channel,
+    COALESCE(interaction_type, 'unknown') AS interaction_type,
+    COALESCE(delivery_modality, 'unknown') AS delivery_modality,
+    COALESCE(learner_region, 'unknown') AS learner_region,
+    COALESCE(learner_country, 'unknown') AS learner_country,
+    COALESCE(learner_timezone, 'unknown') AS learner_timezone,
+    COALESCE(instructor_region, 'unknown') AS instructor_region,
+    COALESCE(instructor_country, 'unknown') AS instructor_country,
+    COALESCE(instructor_timezone, 'unknown') AS instructor_timezone,
+    COALESCE(message_language, 'unknown') AS message_language,
+    COALESCE(device_type, 'unknown') AS device_type,
+    COALESCE(priority, 'normal') AS priority,
+    COALESCE(support_tier, 'standard') AS support_tier,
+    response_sla_minutes,
+    COUNT(*) AS eligible_learner_message_count,
+    COUNTIF(instructor_response_at IS NOT NULL) AS answered_message_count,
+    COUNTIF(instructor_response_at IS NULL) AS unanswered_message_count,
+    COUNTIF(response_time_seconds <= response_sla_minutes * 60) AS within_sla_count,
+    COUNTIF(response_time_seconds > response_sla_minutes * 60) AS breached_sla_count,
+    SAFE_DIVIDE(COUNTIF(instructor_response_at IS NOT NULL), COUNT(*)) AS response_rate,
+    SAFE_DIVIDE(
+      COUNTIF(response_time_seconds <= response_sla_minutes * 60),
+      COUNTIF(instructor_response_at IS NOT NULL)
+    ) AS sla_compliance_rate,
+    AVG(response_time_seconds) AS average_response_time_seconds,
+    AVG(response_time_seconds) / 60.0 AS average_response_time_minutes,
+    APPROX_QUANTILES(response_time_seconds, 100 IGNORE NULLS)[OFFSET(50)] AS median_response_time_seconds,
+    APPROX_QUANTILES(response_time_seconds, 100 IGNORE NULLS)[OFFSET(75)] AS p75_response_time_seconds,
+    APPROX_QUANTILES(response_time_seconds, 100 IGNORE NULLS)[OFFSET(90)] AS p90_response_time_seconds,
+    APPROX_QUANTILES(response_time_seconds, 100 IGNORE NULLS)[OFFSET(95)] AS p95_response_time_seconds,
+    MIN(response_time_seconds) AS minimum_response_time_seconds,
+    MAX(response_time_seconds) AS maximum_response_time_seconds,
+    SUM(response_time_seconds) AS total_response_time_seconds,
+    MIN(first_learner_message_at) AS first_learner_message_at,
+    MAX(first_learner_message_at) AS last_learner_message_at,
+    MIN(instructor_response_at) AS first_instructor_response_at,
+    MAX(instructor_response_at) AS last_instructor_response_at,
+    COUNT(DISTINCT learner_id) AS distinct_learner_count,
+    COUNT(DISTINCT thread_id) AS distinct_thread_count,
+    '1.0.0' AS metric_version,
+    CURRENT_TIMESTAMP() AS computed_at
+  FROM mature_turns
+  GROUP BY
+    metric_date,
+    organization_id,
+    institution_id,
+    course_id,
+    course_section_id,
+    term_id,
+    program_id,
+    subject_area,
+    course_level,
+    instructor_id,
+    instructor_role,
+    channel,
+    interaction_type,
+    delivery_modality,
+    learner_region,
+    learner_country,
+    learner_timezone,
+    instructor_region,
+    instructor_country,
+    instructor_timezone,
+    message_language,
+    device_type,
+    priority,
+    support_tier,
+    response_sla_minutes;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT
+      CURRENT_DATE - INTERVAL '91 days' AS start_date,
+      CURRENT_DATE - INTERVAL '1 day' AS end_date,
+      1440 AS default_response_sla_minutes
+  ),
+  base_events AS (
+    SELECT
+      e.event_id,
+      e.thread_id,
+      e.event_timestamp,
+      e.actor_id,
+      e.organization_id,
+      e.institution_id,
+      e.course_id,
+      e.course_section_id,
+      e.term_id,
+      e.program_id,
+      e.subject_area,
+      e.course_level,
+      e.channel,
+      e.communication_type AS interaction_type,
+      e.delivery_modality,
+      e.actor_region,
+      e.actor_country,
+      e.actor_timezone,
+      e.message_language,
+      e.device_type,
+      e.priority,
+      e.support_tier,
+      COALESCE(e.response_sla_minutes, p.default_response_sla_minutes) AS response_sla_minutes,
+      (
+        SELECT MIN(ra.role_code)
+        FROM lms_instructor_role_assignments AS ra
+        WHERE ra.organization_id = e.organization_id
+          AND ra.course_id = e.course_id
+          AND ra.user_id = e.actor_id
+          AND ra.role_category = 'instructor'
+          AND ra.assignment_status = 'active'
+          AND e.event_timestamp >= ra.effective_start_at
+          AND (ra.effective_end_at IS NULL OR e.event_timestamp < ra.effective_end_at)
+      ) AS instructor_role_code,
+      CASE WHEN EXISTS (
+        SELECT 1
+        FROM lms_course_enrollments AS ce
+        WHERE ce.organization_id = e.organization_id
+          AND ce.course_id = e.course_id
+          AND ce.learner_id = e.actor_id
+          AND ce.enrollment_status IN ('active', 'completed')
+          AND e.event_timestamp >= ce.enrollment_start_at
+          AND (ce.enrollment_end_at IS NULL OR e.event_timestamp < ce.enrollment_end_at)
+      ) THEN 1 ELSE 0 END AS has_valid_learner_enrollment
+    FROM enterprise_analytics_learning_communication_events AS e
+    CROSS JOIN parameters AS p
+    WHERE CAST(e.event_timestamp AS DATE) BETWEEN CAST(p.start_date - INTERVAL '1 day' AS DATE)
+                                                AND CAST(p.end_date + INTERVAL '2 days' AS DATE)
+      AND e.action_type = 'created'
+      AND e.communication_type IN ('message', 'discussion_post', 'chat_message')
+      AND e.thread_id IS NOT NULL
+      AND e.actor_id IS NOT NULL
+      AND e.record_status = 'active'
+      AND COALESCE(e.is_deleted, FALSE) = FALSE
+  ),
+  classified_events AS (
+    SELECT
+      b.*,
+      CASE
+        WHEN b.instructor_role_code IS NOT NULL THEN 'instructor'
+        WHEN b.has_valid_learner_enrollment = 1 THEN 'learner'
+        ELSE NULL
+      END AS participant_role
+    FROM base_events AS b
+  ),
+  eligible_participant_events AS (
+    SELECT *
+    FROM classified_events
+    WHERE participant_role IS NOT NULL
+  ),
+  sequenced_events AS (
+    SELECT
+      e.*,
+      LAG(participant_role) OVER (
+        PARTITION BY organization_id, course_id, thread_id
+        ORDER BY event_timestamp, event_id
+      ) AS previous_participant_role
+    FROM eligible_participant_events AS e
+  ),
+  marked_events AS (
+    SELECT
+      e.*,
+      CASE
+        WHEN participant_role = 'learner'
+         AND COALESCE(previous_participant_role, 'none') <> 'learner'
+        THEN 1 ELSE 0
+      END AS learner_turn_start
+    FROM sequenced_events AS e
+  ),
+  numbered_events AS (
+    SELECT
+      e.*,
+      SUM(learner_turn_start) OVER (
+        PARTITION BY organization_id, course_id, thread_id
+        ORDER BY event_timestamp, event_id
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS learner_turn_number
+    FROM marked_events AS e
+  ),
+  learner_turn_events AS (
+    SELECT
+      e.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY organization_id, course_id, thread_id, learner_turn_number
+        ORDER BY event_timestamp, event_id
+      ) AS learner_event_rank
+    FROM numbered_events AS e
+    WHERE participant_role = 'learner'
+      AND learner_turn_number > 0
+  ),
+  learner_turn_summary AS (
+    SELECT
+      organization_id,
+      course_id,
+      thread_id,
+      learner_turn_number,
+      MIN(event_timestamp) AS first_learner_message_at,
+      MAX(event_timestamp) AS last_learner_message_at,
+      COUNT(*) AS learner_message_count
+    FROM learner_turn_events
+    GROUP BY organization_id, course_id, thread_id, learner_turn_number
+  ),
+  learner_turn_anchor AS (
+    SELECT *
+    FROM learner_turn_events
+    WHERE learner_event_rank = 1
+  ),
+  eligible_turns AS (
+    SELECT
+      s.*,
+      a.actor_id AS learner_id,
+      a.institution_id,
+      a.course_section_id,
+      a.term_id,
+      a.program_id,
+      a.subject_area,
+      a.course_level,
+      a.channel,
+      a.interaction_type,
+      a.delivery_modality,
+      a.actor_region AS learner_region,
+      a.actor_country AS learner_country,
+      a.actor_timezone AS learner_timezone,
+      a.message_language,
+      a.device_type,
+      a.priority,
+      a.support_tier,
+      a.response_sla_minutes
+    FROM learner_turn_summary AS s
+    JOIN learner_turn_anchor AS a
+      ON a.organization_id = s.organization_id
+     AND a.course_id = s.course_id
+     AND a.thread_id = s.thread_id
+     AND a.learner_turn_number = s.learner_turn_number
+    CROSS JOIN parameters AS p
+    WHERE CAST(s.first_learner_message_at AS DATE)
+          BETWEEN CAST(p.start_date AS DATE) AND CAST(p.end_date AS DATE)
+  ),
+  response_candidates AS (
+    SELECT
+      t.*,
+      r.actor_id AS instructor_id,
+      r.instructor_role_code AS instructor_role,
+      r.actor_region AS instructor_region,
+      r.actor_country AS instructor_country,
+      r.actor_timezone AS instructor_timezone,
+      r.event_timestamp AS instructor_response_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY t.organization_id, t.course_id, t.thread_id, t.learner_turn_number
+        ORDER BY r.event_timestamp, r.event_id
+      ) AS response_rank
+    FROM eligible_turns AS t
+    LEFT JOIN eligible_participant_events AS r
+      ON r.organization_id = t.organization_id
+     AND r.course_id = t.course_id
+     AND r.thread_id = t.thread_id
+     AND r.participant_role = 'instructor'
+     AND r.event_timestamp > t.last_learner_message_at
+  ),
+  paired_turns AS (
+    SELECT
+      r.*,
+      CASE
+        WHEN instructor_response_at IS NOT NULL
+        THEN EXTRACT(EPOCH FROM (instructor_response_at - first_learner_message_at))
+      END AS response_time_seconds
+    FROM response_candidates AS r
+    WHERE response_rank = 1
+  ),
+  mature_turns AS (
+    SELECT *
+    FROM paired_turns
+    WHERE instructor_response_at IS NOT NULL
+       OR CURRENT_TIMESTAMP >= last_learner_message_at
+          + response_sla_minutes * INTERVAL '1 minute'
+  )
+  SELECT
+    CAST(first_learner_message_at AS DATE) AS metric_date,
+    organization_id,
+    institution_id,
+    course_id,
+    course_section_id,
+    term_id,
+    program_id,
+    COALESCE(subject_area, 'unknown') AS subject_area,
+    COALESCE(course_level, 'unknown') AS course_level,
+    instructor_id,
+    COALESCE(instructor_role, 'unassigned') AS instructor_role,
+    COALESCE(channel, 'unknown') AS channel,
+    COALESCE(interaction_type, 'unknown') AS interaction_type,
+    COALESCE(delivery_modality, 'unknown') AS delivery_modality,
+    COALESCE(learner_region, 'unknown') AS learner_region,
+    COALESCE(learner_country, 'unknown') AS learner_country,
+    COALESCE(learner_timezone, 'unknown') AS learner_timezone,
+    COALESCE(instructor_region, 'unknown') AS instructor_region,
+    COALESCE(instructor_country, 'unknown') AS instructor_country,
+    COALESCE(instructor_timezone, 'unknown') AS instructor_timezone,
+    COALESCE(message_language, 'unknown') AS message_language,
+    COALESCE(device_type, 'unknown') AS device_type,
+    COALESCE(priority, 'normal') AS priority,
+    COALESCE(support_tier, 'standard') AS support_tier,
+    response_sla_minutes,
+    COUNT(*) AS eligible_learner_message_count,
+    SUM(CASE WHEN instructor_response_at IS NOT NULL THEN 1 ELSE 0 END) AS answered_message_count,
+    SUM(CASE WHEN instructor_response_at IS NULL THEN 1 ELSE 0 END) AS unanswered_message_count,
+    SUM(CASE WHEN response_time_seconds <= response_sla_minutes * 60 THEN 1 ELSE 0 END) AS within_sla_count,
+    SUM(CASE WHEN response_time_seconds > response_sla_minutes * 60 THEN 1 ELSE 0 END) AS breached_sla_count,
+    CAST(SUM(CASE WHEN instructor_response_at IS NOT NULL THEN 1 ELSE 0 END) AS DOUBLE PRECISION)
+      / NULLIF(COUNT(*), 0) AS response_rate,
+    CAST(SUM(CASE WHEN response_time_seconds <= response_sla_minutes * 60 THEN 1 ELSE 0 END) AS DOUBLE PRECISION)
+      / NULLIF(SUM(CASE WHEN instructor_response_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS sla_compliance_rate,
+    AVG(response_time_seconds) AS average_response_time_seconds,
+    AVG(response_time_seconds) / 60.0 AS average_response_time_minutes,
+    PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY response_time_seconds) AS median_response_time_seconds,
+    PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY response_time_seconds) AS p75_response_time_seconds,
+    PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY response_time_seconds) AS p90_response_time_seconds,
+    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY response_time_seconds) AS p95_response_time_seconds,
+    MIN(response_time_seconds) AS minimum_response_time_seconds,
+    MAX(response_time_seconds) AS maximum_response_time_seconds,
+    SUM(response_time_seconds) AS total_response_time_seconds,
+    MIN(first_learner_message_at) AS first_learner_message_at,
+    MAX(first_learner_message_at) AS last_learner_message_at,
+    MIN(instructor_response_at) AS first_instructor_response_at,
+    MAX(instructor_response_at) AS last_instructor_response_at,
+    COUNT(DISTINCT learner_id) AS distinct_learner_count,
+    COUNT(DISTINCT thread_id) AS distinct_thread_count,
+    '1.0.0' AS metric_version,
+    CURRENT_TIMESTAMP AS computed_at
+  FROM mature_turns
+  GROUP BY
+    CAST(first_learner_message_at AS DATE),
+    organization_id,
+    institution_id,
+    course_id,
+    course_section_id,
+    term_id,
+    program_id,
+    subject_area,
+    course_level,
+    instructor_id,
+    instructor_role,
+    channel,
+    interaction_type,
+    delivery_modality,
+    learner_region,
+    learner_country,
+    learner_timezone,
+    instructor_region,
+    instructor_country,
+    instructor_timezone,
+    message_language,
+    device_type,
+    priority,
+    support_tier,
+    response_sla_minutes;
+
+Calculation Notes: |
+  Create one record per inquiry cycle and select the earliest qualifying instructor response occurring after the learner inquiry timestamp. Additional learner messages before the first instructor response remain part of the original cycle and do not reset the start time; a learner message sent after a qualifying response starts a new cycle only when it contains a new question or reopens the issue. Deduplicate retried or replicated events using the source event identifier, calculate duration from UTC timestamps, and convert seconds to decimal hours without rounding before aggregation. Unanswered inquiries must not be assigned an artificial duration or zero value; report them through Unanswered Learner Inquiry Count and Instructor Response Rate. The arithmetic mean is sensitive to extreme values, so operational reporting should display the median and 90th percentile alongside this metric.
+
+Business Use Case: |
+  Academic Operations reviews this metric by course, instructor, inquiry channel, weekday, and course week to identify response backlogs. When a course exceeds 24 hours or shows sustained deterioration, leadership can rebalance teaching-assistant coverage, revise instructor workload, add weekend support, trigger escalation workflows, or coach instructors on communication practices, then monitor response-time and SLA-compliance improvements.
+
+
+Source Data: Learning Management System messaging and discussion events, virtual classroom or tutoring platform events, instructor-role assignments, course enrollment records, and the enterprise analytics warehouse
+
+Report Attributes: |
+  ["Course","Course Category","Course Modality","Course Section","Academic Term","Cohort","Instructor","Instructor Role","Department","Program","Inquiry Channel","Inquiry Type","Learner Region","Course Week","Day of Week","Hour of Day","Response SLA Band","Device Type"]
+
+Dashboard Usage: [Instructor Performance Dashboard, Academic Operations Dashboard, Learner Support SLA Dashboard, Course Quality Dashboard, Teaching and Learning Executive Scorecard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Median Instructor Response Time, 90th Percentile Instructor Response Time, Instructor Response Rate, Instructor Response SLA Compliance Rate, Unanswered Learner Inquiry Count, Learner Support Satisfaction Score, Course Completion Rate, Learner Engagement Rate]
+
+Derived KPIs: [Percentage of Instructor Responses Within 24 Hours, Percentage of Instructor Responses Within 48 Hours, Instructor Responsiveness Index, At-Risk Course Responsiveness Rate, Response-Time Improvement Rate]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-06T13:30:22.457943+00:00
+
+Last Modified By: devyendarm
+
+
