@@ -1,0 +1,96 @@
+# Dimension: Booking Channel Distribution
+# Generated: 2026-09-07T15:30:23.472Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Booking Channel Distribution
+
+Description: |
+  Measures the distribution of bookings across different sales channels, providing insights into channel performance and customer preferences.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Other
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"digitalData":{"transaction":{"attributes":{"bookingChannel":"..."}}}}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"transaction_id":"...","booking_channel":"..."}}
+
+Adobe Client Data Layer: |
+  {"event":"purchase","ecommerce":{"transaction":{"bookingChannel":"..."}}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"bookingChannel":"..."}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT booking_channel AS channel, COUNT(*) AS booking_count
+  FROM `your-project.erp.warehouse_logs`
+  WHERE event_type = 'booking'
+  GROUP BY booking_channel
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT bookingChannel AS channel, COUNT(*) AS booking_count
+  FROM aep_backend_dataset
+  WHERE event_type = 'booking'
+  GROUP BY bookingChannel
+
+Calculation Notes: |
+  Ensure accurate channel attribution by excluding duplicate entries and accounting for session timeouts.
+
+Business Use Case: |
+  Executives use this dimension to allocate marketing budgets effectively by identifying high-performing channels and optimizing underperforming ones.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Channel Type","Booking Volume","Conversion Rate"]
+
+Dashboard Usage: [Channel Performance Dashboard, Marketing Insights Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Booking Source, Customer Segment, Geographic Region]
+
+Derived Dimensions: [Channel Performance, Channel Preference]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-07T15:30:21.947566+00:00
+
+Last Modified By: devyendarm
+
+
