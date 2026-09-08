@@ -1,0 +1,590 @@
+# Metric: Assignment Submission Rate
+# Generated: 2026-09-08T12:30:31.083Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Assignment Submission Rate
+Formula: 100 * COUNT_DISTINCT({learner_assignment_key in E_W with at least one valid submission where submitted_at <= report_as_of_at}) / NULLIF(COUNT_DISTINCT({learner_assignment_key in E_W}), 0), where E_W is the set of non-excused, released learner-assignment obligations with due_at >= window_start_at, due_at < window_end_at, and due_at <= report_as_of_at
+
+Description: |
+  Assignment Submission Rate measures the percentage of eligible learner-assignment obligations due within a reporting window that have at least one valid submission recorded by the report as-of time. It indicates how consistently learners convert assigned coursework into submitted work, with late but valid submissions included unless a report explicitly applies an on-time filter.
+
+Category: Engagement
+
+Tags: [metric]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Item
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily/Weekly/Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT CURRENT_TIMESTAMP() AS as_of_timestamp
+  ),
+  valid_enrollments AS (
+    SELECT
+      e.enrollment_id,
+      e.course_section_id,
+      e.student_id,
+      UPPER(e.enrollment_status) AS enrollment_status,
+      e.enrollment_start_at,
+      e.enrollment_end_at
+    FROM `your-project.lms.enrollments` AS e
+    WHERE UPPER(e.enrollment_role) = 'STUDENT'
+      AND UPPER(e.enrollment_status) IN ('ACTIVE', 'COMPLETED')
+      AND COALESCE(e.is_test_record, FALSE) = FALSE
+      AND e.deleted_at IS NULL
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY e.course_section_id, e.student_id
+      ORDER BY
+        CASE UPPER(e.enrollment_status) WHEN 'ACTIVE' THEN 1 ELSE 2 END,
+        e.updated_at DESC,
+        e.enrollment_id DESC
+    ) = 1
+  ),
+  approved_exemptions AS (
+    SELECT DISTINCT
+      x.assignment_id,
+      x.student_id
+    FROM `your-project.lms.assignment_exemptions` AS x
+    CROSS JOIN parameters AS p
+    WHERE UPPER(x.exemption_status) IN ('APPROVED', 'GRANTED')
+      AND COALESCE(x.effective_at, x.created_at) <= p.as_of_timestamp
+      AND (x.expires_at IS NULL OR x.expires_at > p.as_of_timestamp)
+      AND x.deleted_at IS NULL
+  ),
+  qualifying_submissions AS (
+    SELECT
+      s.assignment_id,
+      s.student_id,
+      MIN(s.submitted_at) AS first_submitted_at,
+      MAX(s.submitted_at) AS latest_submitted_at
+    FROM `your-project.lms.submissions` AS s
+    CROSS JOIN parameters AS p
+    WHERE s.submitted_at IS NOT NULL
+      AND s.submitted_at <= p.as_of_timestamp
+      AND UPPER(s.submission_status) IN (
+        'SUBMITTED', 'LATE', 'GRADED', 'RETURNED', 'COMPLETED'
+      )
+      AND COALESCE(s.is_test_record, FALSE) = FALSE
+      AND s.deleted_at IS NULL
+    GROUP BY s.assignment_id, s.student_id
+  ),
+  eligible_obligations AS (
+    SELECT
+      p.as_of_timestamp,
+      COALESCE(a.due_at, a.closed_at, a.available_at) AS eligibility_at,
+      t.academic_year,
+      t.term_id,
+      t.term_name,
+      cs.institution_id,
+      cs.institution_name,
+      cs.campus_id,
+      cs.campus_name,
+      cs.school_id,
+      cs.school_name,
+      cs.department_id,
+      cs.department_name,
+      st.primary_program_id AS program_id,
+      st.primary_program_name AS program_name,
+      cs.course_id,
+      cs.course_code,
+      cs.course_name,
+      cs.course_section_id AS section_id,
+      cs.section_code,
+      cs.section_name,
+      cs.delivery_mode,
+      cs.primary_instructor_id AS instructor_id,
+      cs.primary_instructor_name AS instructor_name,
+      a.assignment_id,
+      a.assignment_name,
+      a.assignment_type,
+      UPPER(a.assignment_status) AS assignment_status,
+      a.available_at AS assignment_available_at,
+      a.due_at AS assignment_due_at,
+      a.closed_at AS assignment_closed_at,
+      a.points_possible,
+      st.student_level,
+      st.student_type,
+      st.residency_status,
+      e.enrollment_status,
+      q.first_submitted_at,
+      q.latest_submitted_at
+    FROM `your-project.lms.assignments` AS a
+    JOIN `your-project.lms.course_sections` AS cs
+      ON cs.course_section_id = a.course_section_id
+     AND cs.deleted_at IS NULL
+    JOIN `your-project.sis.academic_terms` AS t
+      ON t.term_id = cs.term_id
+    JOIN valid_enrollments AS e
+      ON e.course_section_id = a.course_section_id
+    JOIN `your-project.sis.students` AS st
+      ON st.student_id = e.student_id
+     AND COALESCE(st.is_test_student, FALSE) = FALSE
+    CROSS JOIN parameters AS p
+    LEFT JOIN approved_exemptions AS x
+      ON x.assignment_id = a.assignment_id
+     AND x.student_id = e.student_id
+    LEFT JOIN qualifying_submissions AS q
+      ON q.assignment_id = a.assignment_id
+     AND q.student_id = e.student_id
+    WHERE UPPER(a.assignment_status) IN ('PUBLISHED', 'ACTIVE', 'CLOSED')
+      AND COALESCE(a.is_published, TRUE) = TRUE
+      AND COALESCE(a.is_test_record, FALSE) = FALSE
+      AND a.deleted_at IS NULL
+      AND COALESCE(a.due_at, a.closed_at, a.available_at) IS NOT NULL
+      AND COALESCE(a.due_at, a.closed_at, a.available_at) <= p.as_of_timestamp
+      AND e.enrollment_start_at <= COALESCE(a.due_at, a.closed_at, a.available_at)
+      AND (
+        e.enrollment_end_at IS NULL
+        OR e.enrollment_end_at >= COALESCE(a.available_at, a.created_at)
+      )
+      AND x.assignment_id IS NULL
+  ),
+  aggregated AS (
+    SELECT
+      as_of_timestamp,
+      DATE(eligibility_at) AS reporting_due_date,
+      DATE_TRUNC(DATE(eligibility_at), MONTH) AS reporting_month,
+      academic_year,
+      term_id,
+      term_name,
+      institution_id,
+      institution_name,
+      campus_id,
+      campus_name,
+      school_id,
+      school_name,
+      department_id,
+      department_name,
+      program_id,
+      program_name,
+      course_id,
+      course_code,
+      course_name,
+      section_id,
+      section_code,
+      section_name,
+      delivery_mode,
+      instructor_id,
+      instructor_name,
+      assignment_id,
+      assignment_name,
+      assignment_type,
+      assignment_status,
+      assignment_available_at,
+      assignment_due_at,
+      assignment_closed_at,
+      points_possible,
+      student_level,
+      student_type,
+      residency_status,
+      enrollment_status,
+      COUNT(*) AS eligible_assignment_count,
+      COUNTIF(first_submitted_at IS NOT NULL) AS submitted_assignment_count,
+      COUNTIF(first_submitted_at IS NULL) AS unsubmitted_assignment_count,
+      COUNTIF(
+        first_submitted_at IS NOT NULL
+        AND assignment_due_at IS NOT NULL
+        AND first_submitted_at <= assignment_due_at
+      ) AS on_time_submission_count,
+      COUNTIF(
+        first_submitted_at IS NOT NULL
+        AND assignment_due_at IS NOT NULL
+        AND first_submitted_at > assignment_due_at
+      ) AS late_submission_count
+    FROM eligible_obligations
+    GROUP BY
+      as_of_timestamp, reporting_due_date, reporting_month, academic_year,
+      term_id, term_name, institution_id, institution_name, campus_id,
+      campus_name, school_id, school_name, department_id, department_name,
+      program_id, program_name, course_id, course_code, course_name, section_id,
+      section_code, section_name, delivery_mode, instructor_id, instructor_name,
+      assignment_id, assignment_name, assignment_type, assignment_status,
+      assignment_available_at, assignment_due_at, assignment_closed_at,
+      points_possible, student_level, student_type, residency_status,
+      enrollment_status
+  )
+  SELECT
+    'Assignment Submission Rate' AS metric_name,
+    'Submitted eligible student-assignment obligations divided by all eligible non-exempt student-assignment obligations' AS metric_description,
+    'RATE' AS metric_unit,
+    as_of_timestamp,
+    reporting_due_date,
+    reporting_month,
+    academic_year,
+    term_id,
+    term_name,
+    institution_id,
+    institution_name,
+    campus_id,
+    campus_name,
+    school_id,
+    school_name,
+    department_id,
+    department_name,
+    program_id,
+    program_name,
+    course_id,
+    course_code,
+    course_name,
+    section_id,
+    section_code,
+    section_name,
+    delivery_mode,
+    instructor_id,
+    instructor_name,
+    assignment_id,
+    assignment_name,
+    assignment_type,
+    assignment_status,
+    assignment_available_at,
+    assignment_due_at,
+    assignment_closed_at,
+    points_possible,
+    student_level,
+    student_type,
+    residency_status,
+    enrollment_status,
+    'NOT_EXEMPT' AS exemption_status,
+    CASE
+      WHEN submitted_assignment_count = 0 THEN 'NONE_SUBMITTED'
+      WHEN submitted_assignment_count = eligible_assignment_count THEN 'ALL_SUBMITTED'
+      ELSE 'PARTIALLY_SUBMITTED'
+    END AS submission_coverage_status,
+    eligible_assignment_count,
+    submitted_assignment_count,
+    unsubmitted_assignment_count,
+    on_time_submission_count,
+    late_submission_count,
+    SAFE_DIVIDE(submitted_assignment_count, eligible_assignment_count) AS assignment_submission_rate,
+    ROUND(100 * SAFE_DIVIDE(submitted_assignment_count, eligible_assignment_count), 2) AS assignment_submission_rate_pct
+  FROM aggregated;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT CURRENT_TIMESTAMP AS as_of_timestamp
+  ),
+  ranked_enrollments AS (
+    SELECT
+      e.enrollment_id,
+      e.course_section_id,
+      e.student_id,
+      UPPER(e.enrollment_status) AS enrollment_status,
+      e.enrollment_start_at,
+      e.enrollment_end_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY e.course_section_id, e.student_id
+        ORDER BY
+          CASE UPPER(e.enrollment_status) WHEN 'ACTIVE' THEN 1 ELSE 2 END,
+          e.updated_at DESC,
+          e.enrollment_id DESC
+      ) AS row_number
+    FROM lms_enrollments e
+    WHERE UPPER(e.enrollment_role) = 'STUDENT'
+      AND UPPER(e.enrollment_status) IN ('ACTIVE', 'COMPLETED')
+      AND COALESCE(e.is_test_record, FALSE) = FALSE
+      AND e.deleted_at IS NULL
+  ),
+  valid_enrollments AS (
+    SELECT
+      enrollment_id,
+      course_section_id,
+      student_id,
+      enrollment_status,
+      enrollment_start_at,
+      enrollment_end_at
+    FROM ranked_enrollments
+    WHERE row_number = 1
+  ),
+  approved_exemptions AS (
+    SELECT DISTINCT
+      x.assignment_id,
+      x.student_id
+    FROM lms_assignment_exemptions x
+    CROSS JOIN parameters p
+    WHERE UPPER(x.exemption_status) IN ('APPROVED', 'GRANTED')
+      AND COALESCE(x.effective_at, x.created_at) <= p.as_of_timestamp
+      AND (x.expires_at IS NULL OR x.expires_at > p.as_of_timestamp)
+      AND x.deleted_at IS NULL
+  ),
+  qualifying_submissions AS (
+    SELECT
+      s.assignment_id,
+      s.student_id,
+      MIN(s.submitted_at) AS first_submitted_at,
+      MAX(s.submitted_at) AS latest_submitted_at
+    FROM lms_submissions s
+    CROSS JOIN parameters p
+    WHERE s.submitted_at IS NOT NULL
+      AND s.submitted_at <= p.as_of_timestamp
+      AND UPPER(s.submission_status) IN (
+        'SUBMITTED', 'LATE', 'GRADED', 'RETURNED', 'COMPLETED'
+      )
+      AND COALESCE(s.is_test_record, FALSE) = FALSE
+      AND s.deleted_at IS NULL
+    GROUP BY s.assignment_id, s.student_id
+  ),
+  eligible_obligations AS (
+    SELECT
+      p.as_of_timestamp,
+      COALESCE(a.due_at, a.closed_at, a.available_at) AS eligibility_at,
+      t.academic_year,
+      t.term_id,
+      t.term_name,
+      cs.institution_id,
+      cs.institution_name,
+      cs.campus_id,
+      cs.campus_name,
+      cs.school_id,
+      cs.school_name,
+      cs.department_id,
+      cs.department_name,
+      st.primary_program_id AS program_id,
+      st.primary_program_name AS program_name,
+      cs.course_id,
+      cs.course_code,
+      cs.course_name,
+      cs.course_section_id AS section_id,
+      cs.section_code,
+      cs.section_name,
+      cs.delivery_mode,
+      cs.primary_instructor_id AS instructor_id,
+      cs.primary_instructor_name AS instructor_name,
+      a.assignment_id,
+      a.assignment_name,
+      a.assignment_type,
+      UPPER(a.assignment_status) AS assignment_status,
+      a.available_at AS assignment_available_at,
+      a.due_at AS assignment_due_at,
+      a.closed_at AS assignment_closed_at,
+      a.points_possible,
+      st.student_level,
+      st.student_type,
+      st.residency_status,
+      e.enrollment_status,
+      q.first_submitted_at,
+      q.latest_submitted_at
+    FROM lms_assignments a
+    JOIN lms_course_sections cs
+      ON cs.course_section_id = a.course_section_id
+     AND cs.deleted_at IS NULL
+    JOIN sis_academic_terms t
+      ON t.term_id = cs.term_id
+    JOIN valid_enrollments e
+      ON e.course_section_id = a.course_section_id
+    JOIN sis_students st
+      ON st.student_id = e.student_id
+     AND COALESCE(st.is_test_student, FALSE) = FALSE
+    CROSS JOIN parameters p
+    LEFT JOIN approved_exemptions x
+      ON x.assignment_id = a.assignment_id
+     AND x.student_id = e.student_id
+    LEFT JOIN qualifying_submissions q
+      ON q.assignment_id = a.assignment_id
+     AND q.student_id = e.student_id
+    WHERE UPPER(a.assignment_status) IN ('PUBLISHED', 'ACTIVE', 'CLOSED')
+      AND COALESCE(a.is_published, TRUE) = TRUE
+      AND COALESCE(a.is_test_record, FALSE) = FALSE
+      AND a.deleted_at IS NULL
+      AND COALESCE(a.due_at, a.closed_at, a.available_at) IS NOT NULL
+      AND COALESCE(a.due_at, a.closed_at, a.available_at) <= p.as_of_timestamp
+      AND e.enrollment_start_at <= COALESCE(a.due_at, a.closed_at, a.available_at)
+      AND (
+        e.enrollment_end_at IS NULL
+        OR e.enrollment_end_at >= COALESCE(a.available_at, a.created_at)
+      )
+      AND x.assignment_id IS NULL
+  ),
+  aggregated AS (
+    SELECT
+      as_of_timestamp,
+      CAST(eligibility_at AS DATE) AS reporting_due_date,
+      DATE_TRUNC('month', CAST(eligibility_at AS DATE)) AS reporting_month,
+      academic_year,
+      term_id,
+      term_name,
+      institution_id,
+      institution_name,
+      campus_id,
+      campus_name,
+      school_id,
+      school_name,
+      department_id,
+      department_name,
+      program_id,
+      program_name,
+      course_id,
+      course_code,
+      course_name,
+      section_id,
+      section_code,
+      section_name,
+      delivery_mode,
+      instructor_id,
+      instructor_name,
+      assignment_id,
+      assignment_name,
+      assignment_type,
+      assignment_status,
+      assignment_available_at,
+      assignment_due_at,
+      assignment_closed_at,
+      points_possible,
+      student_level,
+      student_type,
+      residency_status,
+      enrollment_status,
+      COUNT(*) AS eligible_assignment_count,
+      SUM(CASE WHEN first_submitted_at IS NOT NULL THEN 1 ELSE 0 END) AS submitted_assignment_count,
+      SUM(CASE WHEN first_submitted_at IS NULL THEN 1 ELSE 0 END) AS unsubmitted_assignment_count,
+      SUM(
+        CASE
+          WHEN first_submitted_at IS NOT NULL
+           AND assignment_due_at IS NOT NULL
+           AND first_submitted_at <= assignment_due_at THEN 1
+          ELSE 0
+        END
+      ) AS on_time_submission_count,
+      SUM(
+        CASE
+          WHEN first_submitted_at IS NOT NULL
+           AND assignment_due_at IS NOT NULL
+           AND first_submitted_at > assignment_due_at THEN 1
+          ELSE 0
+        END
+      ) AS late_submission_count
+    FROM eligible_obligations
+    GROUP BY
+      as_of_timestamp, CAST(eligibility_at AS DATE),
+      DATE_TRUNC('month', CAST(eligibility_at AS DATE)), academic_year,
+      term_id, term_name, institution_id, institution_name, campus_id,
+      campus_name, school_id, school_name, department_id, department_name,
+      program_id, program_name, course_id, course_code, course_name, section_id,
+      section_code, section_name, delivery_mode, instructor_id, instructor_name,
+      assignment_id, assignment_name, assignment_type, assignment_status,
+      assignment_available_at, assignment_due_at, assignment_closed_at,
+      points_possible, student_level, student_type, residency_status,
+      enrollment_status
+  )
+  SELECT
+    'Assignment Submission Rate' AS metric_name,
+    'Submitted eligible student-assignment obligations divided by all eligible non-exempt student-assignment obligations' AS metric_description,
+    'RATE' AS metric_unit,
+    as_of_timestamp,
+    reporting_due_date,
+    reporting_month,
+    academic_year,
+    term_id,
+    term_name,
+    institution_id,
+    institution_name,
+    campus_id,
+    campus_name,
+    school_id,
+    school_name,
+    department_id,
+    department_name,
+    program_id,
+    program_name,
+    course_id,
+    course_code,
+    course_name,
+    section_id,
+    section_code,
+    section_name,
+    delivery_mode,
+    instructor_id,
+    instructor_name,
+    assignment_id,
+    assignment_name,
+    assignment_type,
+    assignment_status,
+    assignment_available_at,
+    assignment_due_at,
+    assignment_closed_at,
+    points_possible,
+    student_level,
+    student_type,
+    residency_status,
+    enrollment_status,
+    'NOT_EXEMPT' AS exemption_status,
+    CASE
+      WHEN submitted_assignment_count = 0 THEN 'NONE_SUBMITTED'
+      WHEN submitted_assignment_count = eligible_assignment_count THEN 'ALL_SUBMITTED'
+      ELSE 'PARTIALLY_SUBMITTED'
+    END AS submission_coverage_status,
+    eligible_assignment_count,
+    submitted_assignment_count,
+    unsubmitted_assignment_count,
+    on_time_submission_count,
+    late_submission_count,
+    CASE
+      WHEN eligible_assignment_count = 0 THEN NULL
+      ELSE CAST(submitted_assignment_count AS DOUBLE) /
+           CAST(eligible_assignment_count AS DOUBLE)
+    END AS assignment_submission_rate,
+    ROUND(
+      100.0 * CASE
+        WHEN eligible_assignment_count = 0 THEN NULL
+        ELSE CAST(submitted_assignment_count AS DOUBLE) /
+             CAST(eligible_assignment_count AS DOUBLE)
+      END,
+      2
+    ) AS assignment_submission_rate_pct
+  FROM aggregated;
+
+Calculation Notes: |
+  Use one learner_assignment_key per learner and assigned assignment instance. The denominator includes obligations due in the selected window only after their due time has passed and excludes drafts, unreleased assignments, deleted assignments, test accounts, auditors, withdrawn enrollments effective before the due time, and formally excused or waived obligations. The numerator requires at least one accepted, non-draft, non-deleted submission recorded by report_as_of_at; multiple attempts and resubmissions count once. Late submissions are included in the canonical rate and must be separated using On-Time Assignment Submission Rate when deadline compliance is required. Return null, not zero, when the eligible denominator is zero.
+
+Business Use Case: |
+  Academic Operations reviews the rate by course, instructor, assignment type, and learner cohort each week. If a course falls below 70%, the team examines release timing, workload concentration, notification delivery, and assignment accessibility, then triggers learner reminders, instructor outreach, deadline adjustments, or assignment redesign and monitors the subsequent submission-rate change.
+
+
+Source Data: Learning Management System assignment, enrollment, exemption, and submission records supplemented by the digital learning event store and Student Information System
+
+Report Attributes: |
+  ["Due Date","Course","Course Section","Academic Term","Program","Instructor","Assignment","Assignment Type","Delivery Modality","Learner Cohort","Enrollment Type","Grade Level","Subject Area","Institution","Region","Device Type","Submission Timeliness"]
+
+Dashboard Usage: [Learner Engagement Dashboard, Course Operations Dashboard, Academic Performance Dashboard, Instructor Effectiveness Dashboard, Learner Risk and Intervention Dashboard, Executive Learning Outcomes Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Assignment Submission Count, Assignment Completion Rate, On-Time Assignment Submission Rate, Late Assignment Submission Rate, Assignment Non-Submission Rate, Assignment Resubmission Rate, Course Completion Rate, Active Learner Rate]
+
+Derived KPIs: [Assignment Submission Gap, At-Risk Learner Rate, Course Engagement Health Score, Submission Rate Change, Cohort Submission Rate Variance]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-08T12:30:26.5298+00:00
+
+Last Modified By: devyendarm
+
+
