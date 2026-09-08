@@ -1,0 +1,359 @@
+# Dimension: Playback Quality Tier
+# Generated: 2026-09-08T12:30:37.817Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Playback Quality Tier
+
+Description: |
+  Classifies the effective media quality rendered to the customer at a playback observation into a governed tier such as Audio Only, Data Saver, SD, HD, Full HD, or UHD/4K. It reflects experienced playback quality rather than the customer’s selected setting, subscription entitlement, device capability, or the quality originally requested from the player.
+
+Category: Quality
+
+Tags: [dimension]
+
+Industry: Media & Streaming
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, with state carried across the player session until the rendered rendition changes
+
+GA4 Event: |
+  video_progress
+
+Adobe Event: |
+  video_progress
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"video_progress","eventAction":"progress"},"attributes":{"playbackQualityTier":"HD"}}],"media":{"playback":{"qualityTier":"HD"}}}}
+
+GA4 Data Layer: |
+  {"event":"video_progress","playback_quality_tier":"HD"}
+
+Adobe Client Data Layer: |
+  {"event":"video_progress","media":{"playback":{"qualityTier":"HD"}}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar49":"HD"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH parameter_pivot AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      event_timestamp,
+      user_pseudo_id,
+      stream_id,
+      platform,
+      MAX(IF(
+        ep.key = 'playback_quality_tier',
+        COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING)),
+        NULL
+      )) AS playback_quality_tier,
+      MAX(IF(
+        ep.key = 'playbackQualityTier',
+        COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING)),
+        NULL
+      )) AS playback_quality_tier_camel_case,
+      MAX(IF(
+        ep.key = 'quality_tier',
+        COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING)),
+        NULL
+      )) AS quality_tier,
+      MAX(IF(
+        ep.key = 'media.playback.qualityTier',
+        COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING)),
+        NULL
+      )) AS media_playback_quality_tier,
+      MAX(IF(
+        ep.key = 'digitalData.media.playback.qualityTier',
+        COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING)),
+        NULL
+      )) AS digital_data_media_quality_tier,
+      MAX(IF(
+        ep.key = 'digitalData.event.attributes.playbackQualityTier',
+        COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING)),
+        NULL
+      )) AS digital_data_attribute_quality_tier,
+      MAX(IF(
+        ep.key IN ('eVar49', '_experience.analytics.customDimensions.eVars.eVar49'),
+        COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING)),
+        NULL
+      )) AS evar49_playback_quality_tier,
+      MAX(IF(
+        ep.key IN ('video_height', 'resolution_height', 'playback_resolution_height'),
+        COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING)),
+        NULL
+      )) AS resolution_height_value,
+      MAX(IF(
+        ep.key IN ('video_resolution', 'playback_resolution', 'rendition_resolution'),
+        COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING)),
+        NULL
+      )) AS resolution_value,
+      MAX(IF(
+        ep.key IN ('video_bitrate_kbps', 'playback_bitrate_kbps', 'bitrate_kbps'),
+        COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING)),
+        NULL
+      )) AS bitrate_kbps_value
+    FROM `your-project.analytics_123456789.events_*` AS events
+    LEFT JOIN UNNEST(events.event_params) AS ep ON TRUE
+    WHERE event_name = 'video_progress'
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date)
+                            AND FORMAT_DATE('%Y%m%d', @end_date)
+    GROUP BY
+      event_date,
+      event_timestamp,
+      user_pseudo_id,
+      stream_id,
+      platform
+  ),
+  resolved AS (
+    SELECT
+      *,
+      COALESCE(
+        NULLIF(TRIM(playback_quality_tier), ''),
+        NULLIF(TRIM(playback_quality_tier_camel_case), ''),
+        NULLIF(TRIM(quality_tier), ''),
+        NULLIF(TRIM(media_playback_quality_tier), ''),
+        NULLIF(TRIM(digital_data_media_quality_tier), ''),
+        NULLIF(TRIM(digital_data_attribute_quality_tier), ''),
+        NULLIF(TRIM(evar49_playback_quality_tier), '')
+      ) AS raw_quality_tier,
+      COALESCE(
+        SAFE_CAST(resolution_height_value AS INT64),
+        SAFE_CAST(REGEXP_EXTRACT(resolution_value, r'(?i)(?:x|^)([0-9]{3,4})p?$') AS INT64)
+      ) AS resolution_height,
+      SAFE_CAST(REGEXP_EXTRACT(bitrate_kbps_value, r'[0-9]+') AS INT64) AS bitrate_kbps,
+      CASE
+        WHEN NULLIF(TRIM(playback_quality_tier), '') IS NOT NULL THEN 'playback_quality_tier'
+        WHEN NULLIF(TRIM(playback_quality_tier_camel_case), '') IS NOT NULL THEN 'playbackQualityTier'
+        WHEN NULLIF(TRIM(quality_tier), '') IS NOT NULL THEN 'quality_tier'
+        WHEN NULLIF(TRIM(media_playback_quality_tier), '') IS NOT NULL THEN 'media.playback.qualityTier'
+        WHEN NULLIF(TRIM(digital_data_media_quality_tier), '') IS NOT NULL THEN 'digitalData.media.playback.qualityTier'
+        WHEN NULLIF(TRIM(digital_data_attribute_quality_tier), '') IS NOT NULL THEN 'digitalData.event.attributes.playbackQualityTier'
+        WHEN NULLIF(TRIM(evar49_playback_quality_tier), '') IS NOT NULL THEN '_experience.analytics.customDimensions.eVars.eVar49'
+        WHEN resolution_height_value IS NOT NULL OR resolution_value IS NOT NULL THEN 'derived_from_resolution'
+        WHEN bitrate_kbps_value IS NOT NULL THEN 'derived_from_bitrate'
+        ELSE 'not_provided'
+      END AS quality_tier_source
+    FROM parameter_pivot
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN REGEXP_CONTAINS(LOWER(COALESCE(raw_quality_tier, '')), r'(^|[^a-z0-9])(8k|4320p)([^a-z0-9]|$)')
+          OR resolution_height >= 4320 THEN 'UHD_8K'
+        WHEN REGEXP_CONTAINS(LOWER(COALESCE(raw_quality_tier, '')), r'(^|[^a-z0-9])(4k|uhd|2160p)([^a-z0-9]|$)')
+          OR resolution_height >= 2160 THEN 'UHD_4K'
+        WHEN REGEXP_CONTAINS(LOWER(COALESCE(raw_quality_tier, '')), r'(^|[^a-z0-9])(qhd|2k|1440p)([^a-z0-9]|$)')
+          OR resolution_height >= 1440 THEN 'QHD'
+        WHEN REGEXP_CONTAINS(LOWER(COALESCE(raw_quality_tier, '')), r'(^|[^a-z0-9])(full[ _-]?hd|fhd|1080p)([^a-z0-9]|$)')
+          OR resolution_height >= 1080 THEN 'FULL_HD'
+        WHEN REGEXP_CONTAINS(LOWER(COALESCE(raw_quality_tier, '')), r'(^|[^a-z0-9])(hd|720p)([^a-z0-9]|$)')
+          OR resolution_height >= 720 THEN 'HD'
+        WHEN REGEXP_CONTAINS(LOWER(COALESCE(raw_quality_tier, '')), r'(^|[^a-z0-9])(sd|576p|480p|360p|240p|low)([^a-z0-9]|$)')
+          OR resolution_height BETWEEN 1 AND 719 THEN 'SD'
+        WHEN REGEXP_CONTAINS(LOWER(COALESCE(raw_quality_tier, '')), r'audio') THEN 'AUDIO_ONLY'
+        WHEN REGEXP_CONTAINS(LOWER(COALESCE(raw_quality_tier, '')), r'auto|adaptive') THEN 'AUTO'
+        WHEN raw_quality_tier IS NULL AND bitrate_kbps >= 15000 THEN 'UHD_4K'
+        WHEN raw_quality_tier IS NULL AND bitrate_kbps >= 5000 THEN 'FULL_HD'
+        WHEN raw_quality_tier IS NULL AND bitrate_kbps >= 2500 THEN 'HD'
+        WHEN raw_quality_tier IS NULL AND bitrate_kbps > 0 THEN 'SD'
+        WHEN raw_quality_tier IS NULL THEN 'UNKNOWN'
+        ELSE REGEXP_REPLACE(UPPER(TRIM(raw_quality_tier)), r'[^A-Z0-9]+', '_')
+      END AS playback_quality_tier_code
+    FROM resolved
+  ),
+  observed AS (
+    SELECT
+      playback_quality_tier_code,
+      MIN(event_date) AS first_observed_date,
+      MAX(event_date) AS last_observed_date,
+      COUNT(*) AS observed_event_count,
+      COUNT(DISTINCT user_pseudo_id) AS observed_user_count,
+      COUNT(DISTINCT stream_id) AS observed_stream_count,
+      STRING_AGG(DISTINCT raw_quality_tier, ', ' ORDER BY raw_quality_tier LIMIT 20) AS observed_raw_values,
+      STRING_AGG(DISTINCT quality_tier_source, ', ' ORDER BY quality_tier_source) AS source_attributes
+    FROM classified
+    GROUP BY playback_quality_tier_code
+  )
+  SELECT
+    playback_quality_tier_code AS playback_quality_tier_key,
+    playback_quality_tier_code,
+    CASE playback_quality_tier_code
+      WHEN 'AUDIO_ONLY' THEN 'Audio Only'
+      WHEN 'SD' THEN 'Standard Definition'
+      WHEN 'HD' THEN 'High Definition'
+      WHEN 'FULL_HD' THEN 'Full High Definition'
+      WHEN 'QHD' THEN 'Quad High Definition'
+      WHEN 'UHD_4K' THEN 'Ultra High Definition 4K'
+      WHEN 'UHD_8K' THEN 'Ultra High Definition 8K'
+      WHEN 'AUTO' THEN 'Automatic / Adaptive'
+      WHEN 'UNKNOWN' THEN 'Unknown'
+      ELSE INITCAP(REPLACE(playback_quality_tier_code, '_', ' '))
+    END AS playback_quality_tier_name,
+    CASE playback_quality_tier_code
+      WHEN 'UNKNOWN' THEN 0
+      WHEN 'AUDIO_ONLY' THEN 1
+      WHEN 'SD' THEN 2
+      WHEN 'HD' THEN 3
+      WHEN 'FULL_HD' THEN 4
+      WHEN 'QHD' THEN 5
+      WHEN 'UHD_4K' THEN 6
+      WHEN 'UHD_8K' THEN 7
+      WHEN 'AUTO' THEN 98
+      ELSE 99
+    END AS quality_rank,
+    playback_quality_tier_code IN ('HD', 'FULL_HD', 'QHD', 'UHD_4K', 'UHD_8K') AS is_hd_or_better,
+    playback_quality_tier_code IN ('UHD_4K', 'UHD_8K') AS is_ultra_hd,
+    first_observed_date,
+    last_observed_date,
+    observed_event_count,
+    observed_user_count,
+    observed_stream_count,
+    observed_raw_values,
+    source_attributes
+  FROM observed
+  ORDER BY quality_rank, playback_quality_tier_code;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH extracted AS (
+    SELECT
+      timestamp AS event_timestamp,
+      NULLIF(
+        TRIM(_experience.analytics.customDimensions.eVars.eVar49),
+        ''
+      ) AS raw_quality_tier
+    FROM aep_analytics_dataset
+    WHERE eventType = 'video_progress'
+      AND timestamp >= CURRENT_TIMESTAMP - INTERVAL '90 days'
+  ),
+  classified AS (
+    SELECT
+      event_timestamp,
+      raw_quality_tier,
+      CASE
+        WHEN LOWER(COALESCE(raw_quality_tier, '')) LIKE '%4320p%'
+          OR LOWER(COALESCE(raw_quality_tier, '')) LIKE '%8k%' THEN 'UHD_8K'
+        WHEN LOWER(COALESCE(raw_quality_tier, '')) LIKE '%2160p%'
+          OR LOWER(COALESCE(raw_quality_tier, '')) LIKE '%4k%'
+          OR LOWER(COALESCE(raw_quality_tier, '')) = 'uhd' THEN 'UHD_4K'
+        WHEN LOWER(COALESCE(raw_quality_tier, '')) LIKE '%1440p%'
+          OR LOWER(COALESCE(raw_quality_tier, '')) = 'qhd'
+          OR LOWER(COALESCE(raw_quality_tier, '')) = '2k' THEN 'QHD'
+        WHEN LOWER(COALESCE(raw_quality_tier, '')) LIKE '%1080p%'
+          OR LOWER(COALESCE(raw_quality_tier, '')) IN ('full hd', 'full_hd', 'full-hd', 'fhd') THEN 'FULL_HD'
+        WHEN LOWER(COALESCE(raw_quality_tier, '')) LIKE '%720p%'
+          OR LOWER(COALESCE(raw_quality_tier, '')) = 'hd' THEN 'HD'
+        WHEN LOWER(COALESCE(raw_quality_tier, '')) IN ('sd', 'low')
+          OR LOWER(COALESCE(raw_quality_tier, '')) LIKE '%576p%'
+          OR LOWER(COALESCE(raw_quality_tier, '')) LIKE '%480p%'
+          OR LOWER(COALESCE(raw_quality_tier, '')) LIKE '%360p%'
+          OR LOWER(COALESCE(raw_quality_tier, '')) LIKE '%240p%' THEN 'SD'
+        WHEN LOWER(COALESCE(raw_quality_tier, '')) LIKE '%audio%' THEN 'AUDIO_ONLY'
+        WHEN LOWER(COALESCE(raw_quality_tier, '')) LIKE '%auto%'
+          OR LOWER(COALESCE(raw_quality_tier, '')) LIKE '%adaptive%' THEN 'AUTO'
+        WHEN raw_quality_tier IS NULL THEN 'UNKNOWN'
+        ELSE REGEXP_REPLACE(UPPER(TRIM(raw_quality_tier)), '[^A-Z0-9]+', '_')
+      END AS playback_quality_tier_code
+    FROM extracted
+  ),
+  observed AS (
+    SELECT
+      playback_quality_tier_code,
+      MIN(event_timestamp) AS first_observed_timestamp,
+      MAX(event_timestamp) AS last_observed_timestamp,
+      COUNT(*) AS observed_event_count,
+      STRING_AGG(DISTINCT COALESCE(raw_quality_tier, '(not set)'), ', ') AS observed_raw_values
+    FROM classified
+    GROUP BY playback_quality_tier_code
+  )
+  SELECT
+    playback_quality_tier_code AS playback_quality_tier_key,
+    playback_quality_tier_code,
+    CASE playback_quality_tier_code
+      WHEN 'AUDIO_ONLY' THEN 'Audio Only'
+      WHEN 'SD' THEN 'Standard Definition'
+      WHEN 'HD' THEN 'High Definition'
+      WHEN 'FULL_HD' THEN 'Full High Definition'
+      WHEN 'QHD' THEN 'Quad High Definition'
+      WHEN 'UHD_4K' THEN 'Ultra High Definition 4K'
+      WHEN 'UHD_8K' THEN 'Ultra High Definition 8K'
+      WHEN 'AUTO' THEN 'Automatic / Adaptive'
+      WHEN 'UNKNOWN' THEN 'Unknown'
+      ELSE INITCAP(REPLACE(playback_quality_tier_code, '_', ' '))
+    END AS playback_quality_tier_name,
+    CASE playback_quality_tier_code
+      WHEN 'UNKNOWN' THEN 0
+      WHEN 'AUDIO_ONLY' THEN 1
+      WHEN 'SD' THEN 2
+      WHEN 'HD' THEN 3
+      WHEN 'FULL_HD' THEN 4
+      WHEN 'QHD' THEN 5
+      WHEN 'UHD_4K' THEN 6
+      WHEN 'UHD_8K' THEN 7
+      WHEN 'AUTO' THEN 98
+      ELSE 99
+    END AS quality_rank,
+    CASE
+      WHEN playback_quality_tier_code IN ('HD', 'FULL_HD', 'QHD', 'UHD_4K', 'UHD_8K') THEN TRUE
+      ELSE FALSE
+    END AS is_hd_or_better,
+    CASE
+      WHEN playback_quality_tier_code IN ('UHD_4K', 'UHD_8K') THEN TRUE
+      ELSE FALSE
+    END AS is_ultra_hd,
+    first_observed_timestamp,
+    last_observed_timestamp,
+    observed_event_count,
+    observed_raw_values,
+    '_experience.analytics.customDimensions.eVars.eVar49' AS source_attribute
+  FROM observed
+  ORDER BY quality_rank, playback_quality_tier_code;
+
+Calculation Notes: |
+  Assign the tier from the rendition actually decoded and rendered after playback begins, using a centrally governed resolution and codec-aware mapping. Recommended canonical values are Audio Only, Data Saver, SD, HD, Full HD, UHD/4K, Other, Unknown, and Not Applicable; the exact pixel and bitrate boundaries must be versioned and applied consistently across web, mobile, connected TV, game console, and set-top box telemetry. Emit or update the value at first rendered frame and on every confirmed rendition change, and carry the latest confirmed tier across subsequent playback events until another change occurs. Do not infer the tier solely from the user-selected quality setting, manifest maximum, subscription entitlement, device capability, or requested rendition when rendered-rendition telemetry is available. Use Unknown when playback occurred but the rendered rendition cannot be determined, and Not Applicable for events before any frame is rendered, including failed starts, entitlement denials, and DRM failures. Exclude manifest prefetches, thumbnail previews, autoplay previews that never render a qualifying frame, synthetic monitoring, internal test traffic, and downloaded assets until the customer actually plays them. Classify legitimate audio-only playback as Audio Only rather than SD or Unknown. Treat advertisements consistently with editorial content but retain Content Type or Ad Indicator as a reporting attribute so ad and content quality can be separated. A player session begins with a playback attempt and ends at explicit playback termination, content change, application termination, or 30 minutes of inactivity; pauses shorter than the timeout retain the last confirmed tier. For session- or user-level reporting, do not select an arbitrary event value: use a separately governed derived dimension such as initial, dominant, highest, or lowest tier.
+
+Business Use Case: |
+  The Streaming Product organization can identify device, application-version, CDN, network, and market segments where UHD-entitled customers are predominantly receiving SD or HD playback, then prioritize player fixes, CDN routing changes, encoding-ladder adjustments, or targeted retention communications and monitor whether engagement and cancellation outcomes improve.
+
+
+Source Data: Client and server playback telemetry from web, mobile, connected TV, set-top box, and console players; video player SDK rendition-change and first-frame events; CDN and streaming-session logs; content metadata and encoding-ladder catalogs; subscription entitlement data stitched through governed anonymous user, device, content, and player-session identifiers
+
+Report Attributes: |
+  ["Content Title","Content Type","Series","Genre","Live or On-Demand","Ad or Editorial Content","Device Type","Device Model","Operating System","Application Version","Browser","Network Connection Type","Internet Service Provider","CDN Provider","Streaming Protocol","Video Codec","Subscription Plan","Acquisition Channel","Customer Tenure Band","Market","Playback Start Date","Playback Experience Score","Rebuffering Severity","Playback Error Type"]
+
+Dashboard Usage: [Executive Streaming Experience, Playback Quality and Reliability, Customer Engagement by Viewing Quality, Device and Application Performance, CDN and Network Experience, Subscription Entitlement Experience, Content Playback Operations, Retention Risk and Quality of Experience, Acquisition Cohort Viewing Experience, Live Event Streaming Command Center]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Playback Resolution, Playback Bitrate Band, Playback Experience Score, Video Start Quality, Streaming Protocol, Content Type, Device Type, Operating System, Application Version, Network Connection Type, CDN Provider, Subscription Plan, Playback Mode, Player Session ID, Content ID, Market]
+
+Derived Dimensions: [Playback Quality Tier Group, Playback Quality Upgrade or Downgrade, Initial Playback Quality Tier, Highest Playback Quality Tier Reached, Lowest Playback Quality Tier Reached, Session Dominant Playback Quality Tier, Expected versus Actual Quality Tier, Playback Quality Tier Transition Type]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-07T22:30:23.900188+00:00
+
+Last Modified By: devyendarm
+
+
