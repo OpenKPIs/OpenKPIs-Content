@@ -1,0 +1,82 @@
+# KPI: Customer Lifetime Value
+# Generated: 2026-05-30T04:02:50.715Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Customer Lifetime Value
+Formula: SUM(customer_net_revenue - customer_variable_costs) over customer lifetime, or Average Order Value × Purchase Frequency × Gross Margin × Expected Customer Lifespan
+
+Description: |
+  Customer Lifetime Value estimates the total net value a customer generates over their relationship with the business. It helps prioritize acquisition spend, retention programs, and customer experience investments based on long-term value rather than one-time revenue.
+
+Category: Retention
+
+Tags: [clv, ltv, customer-value, retention, profitability]
+
+Industry: [["Retail","E-commerce","SaaS","Finance","Media","Technology","Healthcare","Education"]]
+
+Priority: High
+
+Core Area: Business Intelligence
+
+Scope: User
+
+Measure Type: currency
+
+Aggregation Window: User, Cohort, Time based - Monthly/Quarterly/Yearly/Lifetime
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"digitalData":{"user":[{"profile":[{"profileInfo":{"profileID":"CUSTOMER_123","customerLifetimeValue":1250}}]}],"event":[{"eventInfo":{"eventName":"customer_value_update"}}]}}
+
+GA4 Data Layer: |
+  {"event":"customer_value_update","user_id":"CUSTOMER_123","customer_lifetime_value":1250,"currency":"USD"}
+
+Adobe Client Data Layer: |
+  {"event":"customer.valueUpdate","identity":{"customerID":"CUSTOMER_123"},"customer":{"lifetimeValue":1250,"currency":"USD"}}
+
+XDM Mapping: |
+  {"identityMap.CRMID":"customer_id","personID":"customer_id","commerce.order.priceTotal":"revenue","_experience.customerJourneyManagement.entities.customerLifetimeValue":"customer_lifetime_value","timestamp":"calculation_timestamp"}
+
+SQL Query: |
+  WITH customer_orders AS (SELECT COALESCE(user_id, user_pseudo_id) AS customer_id, SUM((SELECT value.double_value FROM UNNEST(event_params) WHERE key='value')) AS lifetime_revenue, COUNT(DISTINCT (SELECT value.string_value FROM UNNEST(event_params) WHERE key='transaction_id')) AS lifetime_orders FROM `project.dataset.events_*` WHERE event_name='purchase' GROUP BY customer_id) SELECT customer_id, lifetime_revenue AS customer_lifetime_value, lifetime_orders FROM customer_orders;
+
+Calculation Notes: |
+  Use a stable customer identifier and include historical orders across devices and channels where possible. Decide whether CLV is revenue-based, margin-based, historical, predictive, or discounted cash flow. Treat customer-level CLV as sensitive and govern access carefully.
+
+Business Use Case: |
+  A retention team builds high-CLV customer segments for loyalty offers and compares acquisition campaigns by predicted CLV instead of first-order ROAS.
+
+Dependencies: |
+  customer_id; purchase history; revenue; margin or cost data; refunds; churn or retention model; identity resolution
+
+Source Data: CRM; CDP; Ecommerce Platform; Subscription Billing; ERP; Digital Analytics
+
+Report Attributes: |
+  Dimensions: customer cohort, acquisition channel, first purchase date, loyalty tier, geography. Metrics: historical CLV, predicted CLV, purchase frequency, retention rate, churn probability.
+
+Dashboard Usage: [Customer Analytics, Retention, Executive KPI, Marketing Performance, Finance]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Revenue, Average Order Value, Purchase, Order Conversion Rate (Visitor), Retention Rate]
+
+Data Sensitivity: restricted
+
+Contains PII: Yes
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-05-30T04:02:50.343713+00:00
+
+Last Modified By: devyendarm
+
+
