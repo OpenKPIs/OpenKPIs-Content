@@ -1,0 +1,315 @@
+# Dimension: Listing Age Band
+# Generated: 2026-09-04T14:30:19.193Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Listing Age Band
+
+Description: |
+  Classifies each listing episode by the number of completed 24-hour periods between its governed episode start timestamp and the effective analysis timestamp. It enables consistent analysis of inventory freshness, exposure, engagement, and conversion across standardized age ranges.
+
+Category: Performance
+
+Tags: [dimension]
+
+Industry: Technology
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Time based - Daily
+
+
+
+W3 Data Layer: |
+  {}
+
+GA4 Data Layer: |
+  {}
+
+Adobe Client Data Layer: |
+  {}
+
+XDM Mapping: |
+  {}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH age_bands AS (
+    SELECT *
+    FROM UNNEST([
+      STRUCT('AGE_000_007' AS band_key, '0-7 days' AS band_name, 0 AS lower_days, 7 AS upper_days, 1 AS sort_order),
+      STRUCT('AGE_008_014', '8-14 days', 8, 14, 2),
+      STRUCT('AGE_015_030', '15-30 days', 15, 30, 3),
+      STRUCT('AGE_031_060', '31-60 days', 31, 60, 4),
+      STRUCT('AGE_061_090', '61-90 days', 61, 90, 5),
+      STRUCT('AGE_091_180', '91-180 days', 91, 180, 6),
+      STRUCT('AGE_181_365', '181-365 days', 181, 365, 7),
+      STRUCT('AGE_366_PLUS', '366+ days', 366, CAST(NULL AS INT64), 8)
+    ])
+  ),
+  execution_context AS (
+    SELECT CURRENT_DATE('UTC') AS listing_age_as_of_date
+  ),
+  latest_listing AS (
+    SELECT
+      listing_id,
+      created_at,
+      activated_at,
+      published_at,
+      updated_at
+    FROM `your-project.listing_management.listings`
+    WHERE listing_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY listing_id
+      ORDER BY
+        updated_at DESC NULLS LAST,
+        published_at DESC NULLS LAST,
+        activated_at DESC NULLS LAST,
+        created_at DESC NULLS LAST
+    ) = 1
+  ),
+  listing_dates AS (
+    SELECT
+      l.listing_id,
+      COALESCE(l.published_at, l.activated_at, l.created_at) AS listing_age_reference_timestamp,
+      DATE(COALESCE(l.published_at, l.activated_at, l.created_at), 'UTC') AS listing_age_reference_date,
+      e.listing_age_as_of_date,
+      l.updated_at AS source_updated_at
+    FROM latest_listing AS l
+    CROSS JOIN execution_context AS e
+  ),
+  listing_age AS (
+    SELECT
+      listing_id,
+      listing_age_reference_timestamp,
+      listing_age_reference_date,
+      listing_age_as_of_date,
+      DATE_DIFF(listing_age_as_of_date, listing_age_reference_date, DAY) AS listing_age_days,
+      source_updated_at
+    FROM listing_dates
+  ),
+  classified_listing AS (
+    SELECT
+      a.*,
+      b.band_key,
+      b.band_name,
+      b.lower_days,
+      b.upper_days,
+      b.sort_order
+    FROM listing_age AS a
+    LEFT JOIN age_bands AS b
+      ON a.listing_age_days >= b.lower_days
+     AND (b.upper_days IS NULL OR a.listing_age_days <= b.upper_days)
+  )
+  SELECT
+    listing_id,
+    listing_age_reference_timestamp,
+    listing_age_reference_date,
+    listing_age_as_of_date,
+    listing_age_days,
+    CASE
+      WHEN listing_age_days IS NULL THEN 'UNKNOWN'
+      WHEN listing_age_days < 0 THEN 'FUTURE_DATED'
+      ELSE band_key
+    END AS listing_age_band_key,
+    CASE
+      WHEN listing_age_days IS NULL THEN 'Unknown'
+      WHEN listing_age_days < 0 THEN 'Future-dated / Invalid'
+      ELSE band_name
+    END AS listing_age_band,
+    CASE
+      WHEN listing_age_days IS NULL OR listing_age_days < 0 THEN NULL
+      ELSE lower_days
+    END AS listing_age_band_lower_days,
+    CASE
+      WHEN listing_age_days IS NULL OR listing_age_days < 0 THEN NULL
+      ELSE upper_days
+    END AS listing_age_band_upper_days,
+    CASE
+      WHEN listing_age_days IS NULL THEN 99
+      WHEN listing_age_days < 0 THEN 98
+      ELSE sort_order
+    END AS listing_age_band_sort_order,
+    CASE
+      WHEN listing_age_reference_date IS NULL THEN 'MISSING_REFERENCE_DATE'
+      WHEN listing_age_days < 0 THEN 'FUTURE_REFERENCE_DATE'
+      ELSE 'VALID'
+    END AS listing_age_data_quality_status,
+    source_updated_at
+  FROM classified_listing;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH age_bands (
+    band_key,
+    band_name,
+    lower_days,
+    upper_days,
+    sort_order
+  ) AS (
+    VALUES
+      ('AGE_000_007', '0-7 days', 0, 7, 1),
+      ('AGE_008_014', '8-14 days', 8, 14, 2),
+      ('AGE_015_030', '15-30 days', 15, 30, 3),
+      ('AGE_031_060', '31-60 days', 31, 60, 4),
+      ('AGE_061_090', '61-90 days', 61, 90, 5),
+      ('AGE_091_180', '91-180 days', 91, 180, 6),
+      ('AGE_181_365', '181-365 days', 181, 365, 7),
+      ('AGE_366_PLUS', '366+ days', 366, CAST(NULL AS INTEGER), 8)
+  ),
+  execution_context AS (
+    SELECT CAST(CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AS DATE) AS listing_age_as_of_date
+  ),
+  ranked_listing AS (
+    SELECT
+      listing_id,
+      created_at,
+      activated_at,
+      published_at,
+      updated_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY listing_id
+        ORDER BY
+          updated_at DESC NULLS LAST,
+          published_at DESC NULLS LAST,
+          activated_at DESC NULLS LAST,
+          created_at DESC NULLS LAST
+      ) AS listing_row_number
+    FROM listing_management_dataset
+    WHERE listing_id IS NOT NULL
+  ),
+  latest_listing AS (
+    SELECT
+      listing_id,
+      created_at,
+      activated_at,
+      published_at,
+      updated_at
+    FROM ranked_listing
+    WHERE listing_row_number = 1
+  ),
+  listing_dates AS (
+    SELECT
+      l.listing_id,
+      COALESCE(l.published_at, l.activated_at, l.created_at) AS listing_age_reference_timestamp,
+      CAST(
+        COALESCE(l.published_at, l.activated_at, l.created_at) AT TIME ZONE 'UTC'
+        AS DATE
+      ) AS listing_age_reference_date,
+      e.listing_age_as_of_date,
+      l.updated_at AS source_updated_at
+    FROM latest_listing l
+    CROSS JOIN execution_context e
+  ),
+  listing_age AS (
+    SELECT
+      listing_id,
+      listing_age_reference_timestamp,
+      listing_age_reference_date,
+      listing_age_as_of_date,
+      CASE
+        WHEN listing_age_reference_date IS NULL THEN NULL
+        ELSE listing_age_as_of_date - listing_age_reference_date
+      END AS listing_age_days,
+      source_updated_at
+    FROM listing_dates
+  ),
+  classified_listing AS (
+    SELECT
+      a.listing_id,
+      a.listing_age_reference_timestamp,
+      a.listing_age_reference_date,
+      a.listing_age_as_of_date,
+      a.listing_age_days,
+      a.source_updated_at,
+      b.band_key,
+      b.band_name,
+      b.lower_days,
+      b.upper_days,
+      b.sort_order
+    FROM listing_age a
+    LEFT JOIN age_bands b
+      ON a.listing_age_days >= b.lower_days
+     AND (b.upper_days IS NULL OR a.listing_age_days <= b.upper_days)
+  )
+  SELECT
+    listing_id,
+    listing_age_reference_timestamp,
+    listing_age_reference_date,
+    listing_age_as_of_date,
+    listing_age_days,
+    CASE
+      WHEN listing_age_days IS NULL THEN 'UNKNOWN'
+      WHEN listing_age_days < 0 THEN 'FUTURE_DATED'
+      ELSE band_key
+    END AS listing_age_band_key,
+    CASE
+      WHEN listing_age_days IS NULL THEN 'Unknown'
+      WHEN listing_age_days < 0 THEN 'Future-dated / Invalid'
+      ELSE band_name
+    END AS listing_age_band,
+    CASE
+      WHEN listing_age_days IS NULL OR listing_age_days < 0 THEN NULL
+      ELSE lower_days
+    END AS listing_age_band_lower_days,
+    CASE
+      WHEN listing_age_days IS NULL OR listing_age_days < 0 THEN NULL
+      ELSE upper_days
+    END AS listing_age_band_upper_days,
+    CASE
+      WHEN listing_age_days IS NULL THEN 99
+      WHEN listing_age_days < 0 THEN 98
+      ELSE sort_order
+    END AS listing_age_band_sort_order,
+    CASE
+      WHEN listing_age_reference_date IS NULL THEN 'MISSING_REFERENCE_DATE'
+      WHEN listing_age_days < 0 THEN 'FUTURE_REFERENCE_DATE'
+      ELSE 'VALID'
+    END AS listing_age_data_quality_status,
+    source_updated_at
+  FROM classified_listing;
+
+Calculation Notes: |
+  Calculate listing age as the integer number of completed 24-hour periods from listing_episode_start_at to the effective analysis timestamp after both timestamps are normalized to UTC. Assign 0-7 Days, 8-14 Days, 15-30 Days, 31-60 Days, 61-90 Days, 91-180 Days, 181-365 Days, or 366+ Days using inclusive boundaries. Use the event occurrence timestamp for event analysis and the snapshot timestamp for inventory analysis; assign Unknown when the episode start or effective timestamp is missing, invalid, or future-dated. Exclude unpublished drafts from active-inventory reporting. Active and paused listings continue aging, while sold, rented, expired, withdrawn, canceled, or deleted listings retain the band effective at the terminal-status timestamp. Reset age only when a new listing_episode_id is created under the approved relisting policy; edits, price changes, temporary pauses, syndication refreshes, and republication within the same episode do not reset age.
+
+Business Use Case: |
+  The Marketplace Product team monitors search impressions and inquiry conversion by Listing Age Band and market. If inventory shifts into the 61-90 Days and older bands while inquiry conversion declines, the team can initiate seller repricing prompts, broker outreach, listing-quality remediation, or ranking experiments for the affected inventory.
+
+
+Source Data: Listing Lifecycle Service
+
+Report Attributes: |
+  ["Market","Country","Region","City","Property Type","Listing Type","Listing Status","Price Band","Seller Type","Brokerage","Acquisition Channel","Lead Channel","Device Type"]
+
+Dashboard Usage: [Marketplace Inventory Health, Listing Freshness and Staleness, Search and Discovery Performance, Lead Conversion by Inventory Segment, Seller and Broker Performance, Market Supply and Demand]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Listing ID, Listing Episode ID, Listing Status, Listing Type, Property Type, Market, Geography, Price Band, Seller Type, Brokerage, Publication Date, Terminal Status Date]
+
+Derived Dimensions: [Listing Freshness Segment, Stale Listing Flag, Listing Age Cohort, Long-Tenure Inventory Flag]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-04T14:30:18.205108+00:00
+
+Last Modified By: devyendarm
+
+
