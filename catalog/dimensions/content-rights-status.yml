@@ -1,0 +1,645 @@
+# Dimension: Content Rights Status
+# Generated: 2026-09-09T18:30:48.558Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Content Rights Status
+
+Description: |
+  Classifies whether an individual content item is legally distributable for the applicable country, platform, channel, subscription tier, and interaction timestamp. It separates rights-enabled demand from demand restricted by licensing windows, territory rules, platform terms, tier requirements, suspensions, embargoes, or blackouts.
+
+Category: Engagement
+
+Tags: [dimension]
+
+Industry: Media
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  view_item
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventId":"EVENT_ID","eventName":"view_item","timestamp":"2025-01-15T12:00:00Z","eventAction":"view_item"}}],"product":[{"attributes":{"itemIndex":0,"playbackPlatform":"web","subscriptionTier":"premium","rightsCountryCode":"US","contentRightsStatus":"available","distributionChannel":"streaming","contentRightsEvaluatedAt":"2025-01-15T12:00:00Z","contentRightsStatusSource":"rights_service","contentRightsRestrictionReason":"none"},"productInfo":{"productID":"CONTENT_ID","productName":"CONTENT_NAME"}}]}}
+
+GA4 Data Layer: |
+  {"event":"view_item","event_id":"EVENT_ID","ecommerce":{"items":[{"index":0,"item_id":"CONTENT_ID","item_name":"CONTENT_NAME","playback_platform":"web","subscription_tier":"premium","rights_country_code":"US","distribution_channel":"streaming","content_rights_status":"available","content_rights_evaluated_at":"2025-01-15T12:00:00Z","content_rights_status_source":"rights_service","content_rights_restriction_reason":"none"}]}}
+
+Adobe Client Data Layer: |
+  {"data":{"content":{"items":[{"id":"CONTENT_ID","name":"CONTENT_NAME","itemIndex":0,"rightsStatus":"available","rightsContext":{"countryCode":"US","playbackPlatform":"web","subscriptionTier":"premium","distributionChannel":"streaming"},"rightsEvaluatedAt":"2025-01-15T12:00:00Z","rightsStatusSource":"rights_service","rightsRestrictionReason":"none"}]},"eventInfo":{"eventId":"EVENT_ID","eventName":"view_item","timestamp":"2025-01-15T12:00:00Z","eventAction":"view_item"}},"event":"view_item"}
+
+XDM Mapping: |
+  {"_id":"EVENT_ID","commerce":{"productViews":{"value":1}},"eventType":"commerce.productViews","timestamp":"2025-01-15T12:00:00Z","productListItems":[{"SKU":"CONTENT_ID","name":"CONTENT_NAME","_yourTenant":{"itemIndex":0,"playbackPlatform":"web","subscriptionTier":"premium","rightsCountryCode":"US","contentRightsStatus":"available","distributionChannel":"streaming","contentRightsEvaluatedAt":"2025-01-15T12:00:00Z","contentRightsStatusSource":"rights_service","contentRightsRestrictionReason":"none"}}]}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH event_base AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS event_timestamp,
+      COALESCE(
+        params.event_id,
+        TO_HEX(MD5(CONCAT(
+          COALESCE(user_pseudo_id, ''), '|',
+          CAST(event_timestamp AS STRING), '|',
+          COALESCE(items[SAFE_OFFSET(0)].item_id, params.content_id, '')
+        )))
+      ) AS event_id,
+      user_pseudo_id,
+      user_id,
+      params.session_id,
+      COALESCE(items[SAFE_OFFSET(0)].item_id, params.content_id) AS content_id,
+      COALESCE(items[SAFE_OFFSET(0)].item_name, params.content_name) AS content_name,
+      params.event_reported_rights_status,
+      COALESCE(params.platform, device.category, 'unknown') AS event_platform,
+      device.category AS device_category,
+      geo.country AS user_country,
+      params.subscription_tier AS event_subscription_tier
+    FROM `your-project.analytics_123456789.events_*`
+    CROSS JOIN (
+      SELECT AS STRUCT
+        MAX(IF(key = 'event_id', value.string_value, NULL)) AS event_id,
+        MAX(IF(key = 'ga_session_id', COALESCE(CAST(value.int_value AS STRING), value.string_value), NULL)) AS session_id,
+        MAX(IF(key = 'content_id', value.string_value, NULL)) AS content_id,
+        MAX(IF(key = 'content_name', value.string_value, NULL)) AS content_name,
+        MAX(IF(key = 'content_rights_status', LOWER(TRIM(value.string_value)), NULL)) AS event_reported_rights_status,
+        MAX(IF(key = 'platform', LOWER(TRIM(value.string_value)), NULL)) AS platform,
+        MAX(IF(key = 'subscription_tier', LOWER(TRIM(value.string_value)), NULL)) AS subscription_tier
+      FROM UNNEST(event_params)
+    ) AS params
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date)
+                            AND FORMAT_DATE('%Y%m%d', @end_date)
+      AND event_name = 'view_item'
+      AND COALESCE(items[SAFE_OFFSET(0)].item_id, params.content_id) IS NOT NULL
+  ),
+  catalog AS (
+    SELECT * EXCEPT(row_number)
+    FROM (
+      SELECT
+        content_id,
+        content_name,
+        content_type,
+        series_id,
+        season_number,
+        episode_number,
+        provider_id,
+        rights_owner_id,
+        is_active,
+        age_restriction,
+        updated_at,
+        ROW_NUMBER() OVER (PARTITION BY content_id ORDER BY updated_at DESC) AS row_number
+      FROM `your-project.content_catalog.content`
+    )
+    WHERE row_number = 1
+  ),
+  contracts AS (
+    SELECT
+      contract_id,
+      content_id,
+      rights_owner_id,
+      license_type,
+      rights_start_ts,
+      rights_end_ts,
+      country_code,
+      LOWER(platform) AS platform,
+      contract_status,
+      required_subscription_tier,
+      entitlement_required,
+      drm_required,
+      drm_scheme,
+      download_allowed,
+      stream_allowed,
+      concurrent_stream_limit,
+      blackout_flag,
+      embargo_end_ts,
+      updated_at
+    FROM `your-project.content_rights.contract_rights`
+    WHERE rights_end_ts >= TIMESTAMP(@start_date)
+      AND rights_start_ts < TIMESTAMP(DATE_ADD(@end_date, INTERVAL 1 DAY))
+  ),
+  subscriptions AS (
+    SELECT
+      user_id,
+      LOWER(subscription_tier) AS subscription_tier,
+      LOWER(subscription_status) AS subscription_status,
+      valid_from,
+      valid_to,
+      updated_at
+    FROM `your-project.subscription.customer_subscription_history`
+  ),
+  entitlements AS (
+    SELECT
+      user_id,
+      content_id,
+      entitlement_granted,
+      decision_reason,
+      valid_from,
+      valid_to,
+      updated_at
+    FROM `your-project.entitlement.entitlement_decisions`
+  ),
+  playback_authorizations AS (
+    SELECT
+      event_id,
+      user_id,
+      content_id,
+      authorization_timestamp,
+      authorization_granted,
+      authorization_reason,
+      updated_at
+    FROM `your-project.playback.authorization_logs`
+  ),
+  candidates AS (
+    SELECT
+      e.*,
+      c.content_name AS catalog_content_name,
+      c.content_type,
+      c.series_id,
+      c.season_number,
+      c.episode_number,
+      c.provider_id,
+      COALESCE(r.rights_owner_id, c.rights_owner_id) AS rights_owner_id,
+      c.is_active AS catalog_active,
+      c.age_restriction,
+      c.updated_at AS catalog_updated_at,
+      r.contract_id,
+      r.license_type,
+      r.rights_start_ts,
+      r.rights_end_ts,
+      r.country_code AS territory,
+      r.platform AS contract_platform,
+      r.contract_status,
+      r.required_subscription_tier,
+      COALESCE(r.entitlement_required, FALSE) AS entitlement_required,
+      r.drm_required,
+      r.drm_scheme,
+      r.download_allowed,
+      r.stream_allowed,
+      r.concurrent_stream_limit,
+      COALESCE(r.blackout_flag, FALSE) AS blackout_flag,
+      r.embargo_end_ts,
+      r.updated_at AS contract_updated_at,
+      s.subscription_tier,
+      s.subscription_status,
+      s.updated_at AS subscription_updated_at,
+      n.entitlement_granted,
+      n.decision_reason AS entitlement_reason,
+      n.updated_at AS entitlement_updated_at,
+      p.authorization_granted AS playback_authorized,
+      p.authorization_reason,
+      p.authorization_timestamp,
+      p.updated_at AS playback_updated_at,
+      r.country_code IS NULL OR UPPER(r.country_code) = UPPER(e.user_country) AS geo_allowed,
+      r.platform IS NULL OR r.platform = 'all' OR r.platform = LOWER(e.event_platform) AS platform_allowed,
+      e.event_timestamp >= r.rights_start_ts
+        AND e.event_timestamp < COALESCE(r.rights_end_ts, TIMESTAMP '9999-12-31 00:00:00+00') AS window_active,
+      LOWER(COALESCE(r.contract_status, 'missing')) = 'active' AS contract_active
+    FROM event_base e
+    LEFT JOIN catalog c
+      ON c.content_id = e.content_id
+    LEFT JOIN contracts r
+      ON r.content_id = e.content_id
+    LEFT JOIN subscriptions s
+      ON s.user_id = e.user_id
+     AND e.event_timestamp >= s.valid_from
+     AND e.event_timestamp < COALESCE(s.valid_to, TIMESTAMP '9999-12-31 00:00:00+00')
+    LEFT JOIN entitlements n
+      ON n.user_id = e.user_id
+     AND n.content_id = e.content_id
+     AND e.event_timestamp >= n.valid_from
+     AND e.event_timestamp < COALESCE(n.valid_to, TIMESTAMP '9999-12-31 00:00:00+00')
+    LEFT JOIN playback_authorizations p
+      ON p.content_id = e.content_id
+     AND (p.event_id = e.event_id OR (p.event_id IS NULL AND p.user_id = e.user_id))
+     AND p.authorization_timestamp BETWEEN TIMESTAMP_SUB(e.event_timestamp, INTERVAL 30 MINUTE)
+                                           AND TIMESTAMP_ADD(e.event_timestamp, INTERVAL 5 MINUTE)
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY e.event_id
+      ORDER BY
+        IF(r.country_code IS NULL OR UPPER(r.country_code) = UPPER(e.user_country), 0, 1),
+        IF(r.platform IS NULL OR r.platform = 'all' OR r.platform = LOWER(e.event_platform), 0, 1),
+        IF(e.event_timestamp >= r.rights_start_ts AND e.event_timestamp < COALESCE(r.rights_end_ts, TIMESTAMP '9999-12-31 00:00:00+00'), 0, 1),
+        p.authorization_timestamp DESC,
+        n.updated_at DESC,
+        s.updated_at DESC,
+        r.updated_at DESC
+    ) = 1
+  ),
+  status_resolved AS (
+    SELECT
+      *,
+      CASE
+        WHEN catalog_active = FALSE THEN 'unavailable'
+        WHEN embargo_end_ts IS NOT NULL AND event_timestamp < embargo_end_ts THEN 'embargoed'
+        WHEN blackout_flag THEN 'blackout'
+        WHEN contract_id IS NOT NULL AND event_timestamp < rights_start_ts THEN 'upcoming'
+        WHEN contract_id IS NOT NULL AND rights_end_ts IS NOT NULL AND event_timestamp >= rights_end_ts THEN 'expired'
+        WHEN contract_id IS NOT NULL AND NOT contract_active THEN 'unavailable'
+        WHEN contract_id IS NOT NULL AND NOT geo_allowed THEN 'geo_restricted'
+        WHEN contract_id IS NOT NULL AND NOT platform_allowed THEN 'platform_restricted'
+        WHEN required_subscription_tier IS NOT NULL
+         AND (subscription_status IS NULL OR subscription_status NOT IN ('active', 'trialing')) THEN 'subscription_required'
+        WHEN required_subscription_tier IS NOT NULL
+         AND COALESCE(subscription_tier, event_subscription_tier) IS NULL THEN 'subscription_required'
+        WHEN entitlement_required AND entitlement_granted IS NOT TRUE THEN 'entitlement_denied'
+        WHEN playback_authorized IS FALSE THEN 'playback_denied'
+        WHEN contract_id IS NOT NULL AND contract_active AND window_active
+         AND geo_allowed AND platform_allowed THEN 'available'
+        WHEN event_reported_rights_status IN (
+          'available', 'unavailable', 'upcoming', 'expired', 'embargoed', 'blackout',
+          'geo_restricted', 'platform_restricted', 'subscription_required',
+          'entitlement_denied', 'playback_denied'
+        ) THEN event_reported_rights_status
+        ELSE 'unknown'
+      END AS computed_content_rights_status
+    FROM candidates
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    event_id,
+    user_pseudo_id,
+    user_id,
+    session_id,
+    content_id,
+    COALESCE(catalog_content_name, content_name) AS content_name,
+    content_type,
+    series_id,
+    season_number,
+    episode_number,
+    provider_id,
+    rights_owner_id,
+    contract_id,
+    license_type,
+    rights_start_ts,
+    rights_end_ts,
+    territory,
+    user_country,
+    COALESCE(contract_platform, event_platform) AS platform,
+    device_category,
+    COALESCE(subscription_tier, event_subscription_tier) AS subscription_tier,
+    subscription_status,
+    entitlement_required,
+    IF(entitlement_required, COALESCE(entitlement_granted, FALSE), TRUE) AS entitlement_granted,
+    catalog_active,
+    geo_allowed,
+    platform_allowed,
+    window_active,
+    contract_active,
+    playback_authorized,
+    COALESCE(authorization_reason, entitlement_reason) AS authorization_reason,
+    drm_required,
+    drm_scheme,
+    download_allowed,
+    stream_allowed,
+    concurrent_stream_limit,
+    age_restriction,
+    blackout_flag,
+    embargo_end_ts,
+    event_reported_rights_status,
+    computed_content_rights_status,
+    CASE computed_content_rights_status
+      WHEN 'unavailable' THEN IF(catalog_active = FALSE, 'catalog_inactive', 'contract_inactive_or_missing')
+      WHEN 'embargoed' THEN 'embargo_window_active'
+      WHEN 'blackout' THEN 'contractual_blackout'
+      WHEN 'upcoming' THEN 'rights_window_not_started'
+      WHEN 'expired' THEN 'rights_window_ended'
+      WHEN 'geo_restricted' THEN 'territory_not_licensed'
+      WHEN 'platform_restricted' THEN 'platform_not_licensed'
+      WHEN 'subscription_required' THEN 'eligible_subscription_missing'
+      WHEN 'entitlement_denied' THEN COALESCE(entitlement_reason, 'entitlement_not_granted')
+      WHEN 'playback_denied' THEN COALESCE(authorization_reason, 'playback_authorization_denied')
+      WHEN 'available' THEN 'all_rights_checks_passed'
+      ELSE 'insufficient_authoritative_rights_data'
+    END AS content_rights_status_reason,
+    CASE
+      WHEN contract_id IS NOT NULL THEN 'rights_contract_stitch'
+      WHEN event_reported_rights_status IS NOT NULL THEN 'analytics_event_fallback'
+      ELSE 'unresolved'
+    END AS rights_status_source,
+    (SELECT MAX(ts) FROM UNNEST([
+      event_timestamp,
+      catalog_updated_at,
+      contract_updated_at,
+      subscription_updated_at,
+      entitlement_updated_at,
+      playback_updated_at
+    ]) AS ts) AS status_effective_ts,
+    CASE
+      WHEN content_id IS NULL THEN 'missing_content_id'
+      WHEN catalog_content_name IS NULL THEN 'content_not_found_in_catalog'
+      WHEN contract_id IS NULL AND event_reported_rights_status IS NULL THEN 'missing_rights_evidence'
+      WHEN computed_content_rights_status != COALESCE(event_reported_rights_status, computed_content_rights_status) THEN 'event_authoritative_status_mismatch'
+      ELSE 'valid'
+    END AS data_quality_flag,
+    CURRENT_DATE() AS ingestion_date,
+    CURRENT_TIMESTAMP() AS record_updated_ts
+  FROM status_resolved;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH event_base AS (
+    SELECT
+      CAST(e.timestamp AS DATE) AS event_date,
+      e.timestamp AS event_timestamp,
+      COALESCE(e._id, MD5(CONCAT(COALESCE(e.identityMap['ECID'][0].id, ''), '|', CAST(e.timestamp AS VARCHAR), '|', i.SKU))) AS event_id,
+      e.identityMap['ECID'][0].id AS user_pseudo_id,
+      COALESCE(e.identityMap['CRMID'][0].id, e.identityMap['customerId'][0].id) AS user_id,
+      e.web.webInteraction.name AS session_id,
+      i.SKU AS content_id,
+      i.name AS content_name,
+      LOWER(e._experience.analytics.customDimensions.eVars.eVar1) AS event_reported_rights_status,
+      COALESCE(LOWER(e.device.type), 'unknown') AS event_platform,
+      e.device.type AS device_category,
+      e.placeContext.geo.countryCode AS user_country,
+      LOWER(e._experience.analytics.customDimensions.eVars.eVar2) AS event_subscription_tier
+    FROM aep_digital_experience_events e
+    CROSS JOIN UNNEST(e.productListItems) AS t(i)
+    WHERE CAST(e.timestamp AS DATE) BETWEEN CAST(:start_date AS DATE) AND CAST(:end_date AS DATE)
+      AND e.eventType = 'commerce.productViews'
+      AND COALESCE(e.commerce.productViews.value, 0) > 0
+      AND i.SKU IS NOT NULL
+  ),
+  catalog AS (
+    SELECT *
+    FROM (
+      SELECT
+        c.*,
+        ROW_NUMBER() OVER (PARTITION BY content_id ORDER BY updated_at DESC) AS rn
+      FROM aep_content_catalog c
+    ) x
+    WHERE rn = 1
+  ),
+  contracts AS (
+    SELECT
+      contract_id,
+      content_id,
+      rights_owner_id,
+      license_type,
+      rights_start_ts,
+      rights_end_ts,
+      country_code,
+      LOWER(platform) AS platform,
+      contract_status,
+      required_subscription_tier,
+      entitlement_required,
+      drm_required,
+      drm_scheme,
+      download_allowed,
+      stream_allowed,
+      concurrent_stream_limit,
+      blackout_flag,
+      embargo_end_ts,
+      updated_at
+    FROM aep_content_rights_contracts
+    WHERE rights_end_ts >= CAST(:start_date AS TIMESTAMP)
+      AND rights_start_ts < CAST(:end_date AS TIMESTAMP) + INTERVAL '1' DAY
+  ),
+  candidate_rows AS (
+    SELECT
+      e.*,
+      c.content_name AS catalog_content_name,
+      c.content_type,
+      c.series_id,
+      c.season_number,
+      c.episode_number,
+      c.provider_id,
+      COALESCE(r.rights_owner_id, c.rights_owner_id) AS rights_owner_id,
+      c.is_active AS catalog_active,
+      c.age_restriction,
+      c.updated_at AS catalog_updated_at,
+      r.contract_id,
+      r.license_type,
+      r.rights_start_ts,
+      r.rights_end_ts,
+      r.country_code AS territory,
+      r.platform AS contract_platform,
+      r.contract_status,
+      r.required_subscription_tier,
+      COALESCE(r.entitlement_required, FALSE) AS entitlement_required,
+      r.drm_required,
+      r.drm_scheme,
+      r.download_allowed,
+      r.stream_allowed,
+      r.concurrent_stream_limit,
+      COALESCE(r.blackout_flag, FALSE) AS blackout_flag,
+      r.embargo_end_ts,
+      r.updated_at AS contract_updated_at,
+      LOWER(s.subscription_tier) AS subscription_tier,
+      LOWER(s.subscription_status) AS subscription_status,
+      s.updated_at AS subscription_updated_at,
+      n.entitlement_granted,
+      n.decision_reason AS entitlement_reason,
+      n.updated_at AS entitlement_updated_at,
+      p.authorization_granted AS playback_authorized,
+      p.authorization_reason,
+      p.authorization_timestamp,
+      p.updated_at AS playback_updated_at,
+      CASE WHEN r.country_code IS NULL OR UPPER(r.country_code) = UPPER(e.user_country) THEN TRUE ELSE FALSE END AS geo_allowed,
+      CASE WHEN r.platform IS NULL OR r.platform = 'all' OR r.platform = LOWER(e.event_platform) THEN TRUE ELSE FALSE END AS platform_allowed,
+      CASE
+        WHEN e.event_timestamp >= r.rights_start_ts
+         AND e.event_timestamp < COALESCE(r.rights_end_ts, TIMESTAMP '9999-12-31 00:00:00')
+        THEN TRUE ELSE FALSE
+      END AS window_active,
+      CASE WHEN LOWER(COALESCE(r.contract_status, 'missing')) = 'active' THEN TRUE ELSE FALSE END AS contract_active,
+      ROW_NUMBER() OVER (
+        PARTITION BY e.event_id
+        ORDER BY
+          CASE WHEN r.country_code IS NULL OR UPPER(r.country_code) = UPPER(e.user_country) THEN 0 ELSE 1 END,
+          CASE WHEN r.platform IS NULL OR r.platform = 'all' OR r.platform = LOWER(e.event_platform) THEN 0 ELSE 1 END,
+          CASE WHEN e.event_timestamp >= r.rights_start_ts AND e.event_timestamp < COALESCE(r.rights_end_ts, TIMESTAMP '9999-12-31 00:00:00') THEN 0 ELSE 1 END,
+          p.authorization_timestamp DESC,
+          n.updated_at DESC,
+          s.updated_at DESC,
+          r.updated_at DESC
+      ) AS rn
+    FROM event_base e
+    LEFT JOIN catalog c
+      ON c.content_id = e.content_id
+    LEFT JOIN contracts r
+      ON r.content_id = e.content_id
+    LEFT JOIN aep_subscription_history s
+      ON s.user_id = e.user_id
+     AND e.event_timestamp >= s.valid_from
+     AND e.event_timestamp < COALESCE(s.valid_to, TIMESTAMP '9999-12-31 00:00:00')
+    LEFT JOIN aep_entitlement_decisions n
+      ON n.user_id = e.user_id
+     AND n.content_id = e.content_id
+     AND e.event_timestamp >= n.valid_from
+     AND e.event_timestamp < COALESCE(n.valid_to, TIMESTAMP '9999-12-31 00:00:00')
+    LEFT JOIN aep_playback_authorization_logs p
+      ON p.content_id = e.content_id
+     AND (p.event_id = e.event_id OR (p.event_id IS NULL AND p.user_id = e.user_id))
+     AND p.authorization_timestamp BETWEEN e.event_timestamp - INTERVAL '30' MINUTE
+                                           AND e.event_timestamp + INTERVAL '5' MINUTE
+  ),
+  candidates AS (
+    SELECT * FROM candidate_rows WHERE rn = 1
+  ),
+  status_resolved AS (
+    SELECT
+      c.*,
+      CASE
+        WHEN catalog_active = FALSE THEN 'unavailable'
+        WHEN embargo_end_ts IS NOT NULL AND event_timestamp < embargo_end_ts THEN 'embargoed'
+        WHEN blackout_flag = TRUE THEN 'blackout'
+        WHEN contract_id IS NOT NULL AND event_timestamp < rights_start_ts THEN 'upcoming'
+        WHEN contract_id IS NOT NULL AND rights_end_ts IS NOT NULL AND event_timestamp >= rights_end_ts THEN 'expired'
+        WHEN contract_id IS NOT NULL AND contract_active = FALSE THEN 'unavailable'
+        WHEN contract_id IS NOT NULL AND geo_allowed = FALSE THEN 'geo_restricted'
+        WHEN contract_id IS NOT NULL AND platform_allowed = FALSE THEN 'platform_restricted'
+        WHEN required_subscription_tier IS NOT NULL
+         AND (subscription_status IS NULL OR subscription_status NOT IN ('active', 'trialing')) THEN 'subscription_required'
+        WHEN required_subscription_tier IS NOT NULL
+         AND COALESCE(subscription_tier, event_subscription_tier) IS NULL THEN 'subscription_required'
+        WHEN entitlement_required = TRUE AND entitlement_granted IS NOT TRUE THEN 'entitlement_denied'
+        WHEN playback_authorized = FALSE THEN 'playback_denied'
+        WHEN contract_id IS NOT NULL AND contract_active = TRUE AND window_active = TRUE
+         AND geo_allowed = TRUE AND platform_allowed = TRUE THEN 'available'
+        WHEN event_reported_rights_status IN (
+          'available', 'unavailable', 'upcoming', 'expired', 'embargoed', 'blackout',
+          'geo_restricted', 'platform_restricted', 'subscription_required',
+          'entitlement_denied', 'playback_denied'
+        ) THEN event_reported_rights_status
+        ELSE 'unknown'
+      END AS computed_content_rights_status
+    FROM candidates c
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    event_id,
+    user_pseudo_id,
+    user_id,
+    session_id,
+    content_id,
+    COALESCE(catalog_content_name, content_name) AS content_name,
+    content_type,
+    series_id,
+    season_number,
+    episode_number,
+    provider_id,
+    rights_owner_id,
+    contract_id,
+    license_type,
+    rights_start_ts,
+    rights_end_ts,
+    territory,
+    user_country,
+    COALESCE(contract_platform, event_platform) AS platform,
+    device_category,
+    COALESCE(subscription_tier, event_subscription_tier) AS subscription_tier,
+    subscription_status,
+    entitlement_required,
+    CASE WHEN entitlement_required = TRUE THEN COALESCE(entitlement_granted, FALSE) ELSE TRUE END AS entitlement_granted,
+    catalog_active,
+    geo_allowed,
+    platform_allowed,
+    window_active,
+    contract_active,
+    playback_authorized,
+    COALESCE(authorization_reason, entitlement_reason) AS authorization_reason,
+    drm_required,
+    drm_scheme,
+    download_allowed,
+    stream_allowed,
+    concurrent_stream_limit,
+    age_restriction,
+    blackout_flag,
+    embargo_end_ts,
+    event_reported_rights_status,
+    computed_content_rights_status,
+    CASE computed_content_rights_status
+      WHEN 'unavailable' THEN CASE WHEN catalog_active = FALSE THEN 'catalog_inactive' ELSE 'contract_inactive_or_missing' END
+      WHEN 'embargoed' THEN 'embargo_window_active'
+      WHEN 'blackout' THEN 'contractual_blackout'
+      WHEN 'upcoming' THEN 'rights_window_not_started'
+      WHEN 'expired' THEN 'rights_window_ended'
+      WHEN 'geo_restricted' THEN 'territory_not_licensed'
+      WHEN 'platform_restricted' THEN 'platform_not_licensed'
+      WHEN 'subscription_required' THEN 'eligible_subscription_missing'
+      WHEN 'entitlement_denied' THEN COALESCE(entitlement_reason, 'entitlement_not_granted')
+      WHEN 'playback_denied' THEN COALESCE(authorization_reason, 'playback_authorization_denied')
+      WHEN 'available' THEN 'all_rights_checks_passed'
+      ELSE 'insufficient_authoritative_rights_data'
+    END AS content_rights_status_reason,
+    CASE
+      WHEN contract_id IS NOT NULL THEN 'rights_contract_stitch'
+      WHEN event_reported_rights_status IS NOT NULL THEN 'analytics_event_fallback'
+      ELSE 'unresolved'
+    END AS rights_status_source,
+    GREATEST(
+      event_timestamp,
+      COALESCE(catalog_updated_at, event_timestamp),
+      COALESCE(contract_updated_at, event_timestamp),
+      COALESCE(subscription_updated_at, event_timestamp),
+      COALESCE(entitlement_updated_at, event_timestamp),
+      COALESCE(playback_updated_at, event_timestamp)
+    ) AS status_effective_ts,
+    CASE
+      WHEN content_id IS NULL THEN 'missing_content_id'
+      WHEN catalog_content_name IS NULL THEN 'content_not_found_in_catalog'
+      WHEN contract_id IS NULL AND event_reported_rights_status IS NULL THEN 'missing_rights_evidence'
+      WHEN computed_content_rights_status <> COALESCE(event_reported_rights_status, computed_content_rights_status) THEN 'event_authoritative_status_mismatch'
+      ELSE 'valid'
+    END AS data_quality_flag,
+    CURRENT_DATE AS ingestion_date,
+    CURRENT_TIMESTAMP AS record_updated_ts
+  FROM status_resolved;
+
+Calculation Notes: |
+  1️⃣ Evaluate every content item independently by exploding the event item array and preserving the grain of event ID, item index, and content ID.
+  2️⃣ Resolve contracts as of the interaction timestamp using a half-open rights interval: rights start timestamp is inclusive and rights end timestamp is exclusive.
+  3️⃣ Treat a null rights end timestamp as open-ended; do not exclude an otherwise applicable contract because its end timestamp is missing.
+  4️⃣ Evaluate all candidate grants and classify the item as available when at least one active grant authorizes the applicable territory, platform, channel, tier, and rights window; an inactive grant must never displace a valid active grant.
+  5️⃣ Compare the actual subscription tier with the required tier using the governed tier hierarchy; classify a failed or missing tier match as tier_restricted rather than merely testing for subscription presence.
+  6️⃣ Apply the governed status precedence: suspended, geo_restricted, platform_restricted, tier_restricted, upcoming, expired, window_restricted, unavailable, available, then unknown when authoritative evidence is insufficient.
+  7️⃣ Retain event-reported status only for reconciliation and data-quality monitoring; customer entitlement decisions and playback authorization outcomes must remain separate dimensions and must not produce rights-status values.
+
+Business Use Case: |
+  The Chief Content Officer and licensing team identify high-demand titles classified as geo_restricted, platform_restricted, tier_restricted, upcoming, or expired, then prioritize contract renewals, territory expansion, platform amendments, and tier packaging changes. Digital merchandising and acquisition teams use the same status to suppress unavailable titles, redirect customers to authorized alternatives, and prevent licensing constraints from being misdiagnosed as discovery, conversion, or product-performance failures.
+
+
+Source Data: Digital Analytics (GA4 and Adobe Experience Platform) + digital Content Rights Management contracts + Content Catalog
+
+Report Attributes: |
+  ["Content Title","Content Type","Content Genre","Content Provider","Rights Owner","Rights Contract Status","Customer Country","Market","Subscription Tier","Distribution Channel","Playback Platform","Device Type","Content Discovery Surface","Acquisition Channel","Customer Lifecycle Stage","Rights Window Start Date","Rights Window End Date"]
+
+Dashboard Usage: [Content Availability and Rights Coverage, Customer Journey Conversion by Rights Status, Content Discovery Funnel, Rights Expiration and Renewal Prioritization, Geographic Content Availability, Platform Rights Coverage, Subscription Tier Content Value, Acquisition Campaign Content Readiness, Executive Content Portfolio Performance]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Content ID, Content Title, Content Type, Content Genre, Content Provider, Rights Owner, Rights Contract Status, Rights Window Start Date, Rights Window End Date, Customer Country, Market, Distribution Channel, Playback Platform, Subscription Tier, Content Publication Status, Content Discovery Surface]
+
+Derived Dimensions: [Content Rights Availability Flag, Content Rights Restriction Reason, Content Rights Lifecycle Group, Content Rights Restriction Family]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T18:30:43.492038+00:00
+
+Last Modified By: devyendarm
+
+
