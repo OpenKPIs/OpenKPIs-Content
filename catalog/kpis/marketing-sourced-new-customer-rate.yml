@@ -1,0 +1,182 @@
+# KPI: Marketing-Sourced New Customer Rate
+# Generated: 2026-09-09T16:46:23.358Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Marketing-Sourced New Customer Rate
+Formula: (First-Time Purchasers with Marketing First Touch / Total First-Time Purchasers) × 100
+
+Description: |
+  Share of first-time purchasers in a period whose first recorded digital touch was a marketing-driven channel (paid search, paid social, display, affiliate, email or SMS) rather than direct, organic or referral traffic. It isolates how much of new-customer growth is being bought or earned by the marketing program versus arriving on its own.
+
+Category: Acquisition
+
+Tags: [kpi, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: [E-commerce]
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: User
+
+Measure Type: Percentage
+
+Aggregation Window: Time based - Daily/Weekly/Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  Purchase Confirmation
+
+W3 Data Layer: |
+  {"digitalData":{"user":[{"profile":[{"profileInfo":{"profileID":"<pseudonymous_user_id>","returningStatus":"new"}}]}],"transaction":{"transactionID":"<order_id>","total":{"basePrice":"<order_value>","currency":"USD"}},"page":{"pageInfo":{"pageID":"order-confirmation"},"attributes":{"firstTouchChannel":"<channel_grouping>","firstTouchSourceMedium":"<source/medium>"}}}}
+
+GA4 Data Layer: |
+  {"event":"purchase","user_id":"<pseudonymous_user_id>","customer_type":"new","first_touch_channel":"<channel_grouping>","first_touch_source_medium":"<source/medium>","ecommerce":{"transaction_id":"<order_id>","value":"<order_value>","currency":"USD","items":[{"item_id":"<sku>","item_name":"<product_name>","price":"<unit_price>","quantity":1}]}}
+
+Adobe Client Data Layer: |
+  {"event":"purchase","eventInfo":{"eventName":"Purchase Confirmation"},"commerce":{"order":{"purchaseID":"<order_id>","priceTotal":"<order_value>","currencyCode":"USD"}},"user":{"customerType":"new","firstTouchChannel":"<channel_grouping>","firstTouchSourceMedium":"<source/medium>"}}
+
+XDM Mapping: |
+  {"eventType":"commerce.purchases","commerce":{"purchases":{"value":1},"order":{"purchaseID":"<order_id>","priceTotal":"<order_value>","currencyCode":"USD"}},"marketing":{"trackingCode":"<campaign_tracking_code>"},"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar10":"<first_touch_channel_grouping>","eVar11":"new"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH first_purchase AS (
+    SELECT
+      user_pseudo_id,
+      MIN(event_timestamp) AS first_purchase_ts,
+      MIN(DATE(TIMESTAMP_MICROS(event_timestamp))) AS first_purchase_date
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE event_name = 'purchase'
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(@report_start, INTERVAL 730 DAY)) AND FORMAT_DATE('%Y%m%d', @report_end)
+    GROUP BY user_pseudo_id
+  ),
+  new_customers AS (
+    SELECT user_pseudo_id, first_purchase_ts, first_purchase_date
+    FROM first_purchase
+    WHERE first_purchase_date BETWEEN @report_start AND @report_end
+  ),
+  first_touch AS (
+    SELECT
+      e.user_pseudo_id,
+      ARRAY_AGG(
+        STRUCT(
+          LOWER(COALESCE(e.traffic_source.medium, '(none)')) AS medium,
+          LOWER(COALESCE(e.traffic_source.source, '(direct)')) AS source
+        )
+        ORDER BY e.event_timestamp ASC LIMIT 1
+      )[OFFSET(0)] AS ft
+    FROM `your-project.analytics_123456789.events_*` e
+    JOIN new_customers n USING (user_pseudo_id)
+    WHERE e.event_name = 'session_start'
+      AND e.event_timestamp <= n.first_purchase_ts
+      AND e.event_timestamp >= n.first_purchase_ts - 90 * 24 * 60 * 60 * 1000000
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(@report_start, INTERVAL 90 DAY)) AND FORMAT_DATE('%Y%m%d', @report_end)
+    GROUP BY e.user_pseudo_id
+  )
+  SELECT
+    n.first_purchase_date AS purchase_date,
+    COUNT(DISTINCT n.user_pseudo_id) AS first_time_purchasers,
+    COUNT(DISTINCT IF(ft.ft.medium IN ('cpc', 'ppc', 'paidsocial', 'paid_social', 'display', 'affiliate', 'email', 'sms'), n.user_pseudo_id, NULL)) AS marketing_sourced_first_time_purchasers,
+    SAFE_DIVIDE(
+      COUNT(DISTINCT IF(ft.ft.medium IN ('cpc', 'ppc', 'paidsocial', 'paid_social', 'display', 'affiliate', 'email', 'sms'), n.user_pseudo_id, NULL)),
+      COUNT(DISTINCT n.user_pseudo_id)
+    ) * 100 AS marketing_sourced_new_customer_rate
+  FROM new_customers n
+  LEFT JOIN first_touch ft USING (user_pseudo_id)
+  GROUP BY purchase_date
+  ORDER BY purchase_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH first_purchase AS (
+    SELECT
+      endUserIDs._experience.mcid.id AS user_id,
+      MIN(timestamp) AS first_purchase_ts,
+      MIN(DATE(timestamp)) AS first_purchase_date
+    FROM web_experience_events
+    WHERE eventType = 'commerce.purchases'
+      AND commerce.purchases.value > 0
+      AND timestamp >= DATE_SUB(CAST(@report_start AS DATE), INTERVAL 730 DAY)
+    GROUP BY 1
+  ),
+  new_customers AS (
+    SELECT user_id, first_purchase_ts, first_purchase_date
+    FROM first_purchase
+    WHERE first_purchase_date BETWEEN CAST(@report_start AS DATE) AND CAST(@report_end AS DATE)
+  ),
+  first_touch AS (
+    SELECT
+      user_id,
+      medium
+    FROM (
+      SELECT
+        e.endUserIDs._experience.mcid.id AS user_id,
+        LOWER(COALESCE(e.marketing.trackingCode, e.channel._type, 'direct')) AS medium,
+        ROW_NUMBER() OVER (PARTITION BY e.endUserIDs._experience.mcid.id ORDER BY e.timestamp ASC) AS rn
+      FROM web_experience_events e
+      JOIN new_customers n ON n.user_id = e.endUserIDs._experience.mcid.id
+      WHERE e.eventType = 'web.webpagedetails.pageViews'
+        AND e.timestamp <= n.first_purchase_ts
+        AND e.timestamp >= DATE_SUB(n.first_purchase_ts, INTERVAL 90 DAY)
+    )
+    WHERE rn = 1
+  )
+  SELECT
+    n.first_purchase_date AS purchase_date,
+    COUNT(DISTINCT n.user_id) AS first_time_purchasers,
+    COUNT(DISTINCT CASE WHEN ft.medium LIKE '%paid%' OR ft.medium LIKE '%cpc%' OR ft.medium LIKE '%display%' OR ft.medium LIKE '%affiliate%' OR ft.medium LIKE '%email%' OR ft.medium LIKE '%sms%' THEN n.user_id END) AS marketing_sourced_first_time_purchasers,
+    COUNT(DISTINCT CASE WHEN ft.medium LIKE '%paid%' OR ft.medium LIKE '%cpc%' OR ft.medium LIKE '%display%' OR ft.medium LIKE '%affiliate%' OR ft.medium LIKE '%email%' OR ft.medium LIKE '%sms%' THEN n.user_id END) * 100.0
+      / NULLIF(COUNT(DISTINCT n.user_id), 0) AS marketing_sourced_new_customer_rate
+  FROM new_customers n
+  LEFT JOIN first_touch ft ON ft.user_id = n.user_id
+  GROUP BY 1
+  ORDER BY 1;
+
+Calculation Notes: |
+  1️⃣ A first-time purchaser is a user_pseudo_id / CRM customer with no prior purchase event across web, app and stitched order history; returning customers are excluded from both numerator and denominator.
+  2️⃣ First touch is the earliest session source/medium for that user within the 90-day lookback before the first purchase; marketing channels are cpc, paidsocial, display, affiliate, email and sms mediums as defined in the channel grouping.
+  3️⃣ Direct, organic, referral and (not set) first touches count in the denominator only.
+  4️⃣ Sessions expire after 30 minutes of inactivity; midnight session splits must not create a second first touch for the same user.
+  5️⃣ Purchases later refunded or cancelled within the period are removed from both numerator and denominator when the refund event is stitched.
+  6️⃣ Exclude internal traffic, known bots and test orders identified by the order-flag dimension.
+  7️⃣ Report by purchase date, not first-touch date, so the KPI reconciles to new-customer counts in finance reporting.
+
+Business Use Case: |
+  The CMO reviews this KPI weekly against Customer Acquisition Cost: when the marketing-sourced share rises while CAC stays flat, paid budgets are scaled; when the share falls below plan, the growth team shifts spend from prospecting campaigns that are only harvesting organic demand toward net-new audience segments.
+
+
+Source Data: Digital Analytics (GA4) + CRM order history (Salesforce Commerce)
+
+Report Attributes: |
+  ["First Touch Channel Grouping","Campaign Name","Device Category","Country","Landing Page","New vs Returning Customer","Purchase Date","Product Category of First Order"]
+
+Dashboard Usage: [Marketing Acquisition Scorecard, Executive Growth Dashboard, Paid Media Efficiency Dashboard, New Customer Cohort Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [customer-acquisition-cost, new-customer-conversion-rate, first-purchase-rate, marketing-channel-revenue-share]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T16:46:13.866+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-09T16:46:22.428+00:00
+
