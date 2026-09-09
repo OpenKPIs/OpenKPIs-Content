@@ -1,0 +1,110 @@
+# Metric: Gated Content Download Rate
+# Generated: 2026-05-29T23:19:40.219Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Gated Content Download Rate
+Formula: Gated Content Download Rate = Successful Gated Content Downloads / Gated Content Landing Page Views * 100
+
+Description: |
+  Measures the percentage of gated content views that result in a successful content download, such as a whitepaper, analyst report, benchmark guide, or technical eBook. This metric helps demand generation and product marketing teams understand how effectively gated assets convert high-intent visitors into known prospects.
+
+Category: Conversion
+
+Tags: [gated content, content marketing, lead generation, download, demand generation, form conversion, enterprise software, cybersecurity, observability, aiops]
+
+Industry: ["SaaS","Technology"]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Global
+
+Measure Type: percentage
+
+Aggregation Window: Event, Session, User, Content Asset, Campaign, Channel, Time based - Hourly/Daily/Weekly/Monthly/Quarterly/Yearly
+
+GA4 Event: |
+  gated_content_download
+
+Adobe Event: |
+  gated_content_download
+
+W3 Data Layer: |
+  {"event":{"eventInfo":{"eventName":"gated_content_download","eventAction":"download","eventType":"conversion","eventTimestamp":"2026-05-29T12:00:00Z"}},"page":{"pageInfo":{"pageName":"Resource Detail - Cloud Security Report","pageURL":"https://www.example.com/resources/cloud-security-report","pageType":"gated_resource"}},"content":{"contentID":"asset-12345","contentName":"2026 Cloud Security Report","contentType":"analyst_report","contentTopic":"cloud security","contentFormat":"pdf","contentGateType":"lead_form","contentAccess":"gated"},"form":{"formID":"form-67890","formName":"Gated Content Lead Form","formType":"lead_generation"},"campaign":{"campaignID":"cmp-abc123","campaignName":"Cloud Security Demand Gen Q2","utmSource":"linkedin","utmMedium":"paid_social","utmCampaign":"cloud-security-report"}}
+
+GA4 Data Layer: |
+  {"event":"gated_content_download","content_id":"asset-12345","content_name":"2026 Cloud Security Report","content_type":"analyst_report","content_topic":"cloud security","content_format":"pdf","gate_type":"lead_form","form_id":"form-67890","form_name":"Gated Content Lead Form","conversion_type":"content_download","lead_stage":"marketing_inquiry","campaign_id":"cmp-abc123","utm_source":"linkedin","utm_medium":"paid_social","utm_campaign":"cloud-security-report"}
+
+Adobe Client Data Layer: |
+  {"event":"gated_content_download","eventInfo":{"path":"content.gated.download","type":"conversion"},"content":{"id":"asset-12345","name":"2026 Cloud Security Report","type":"analyst_report","topic":"cloud security","format":"pdf","access":"gated","gateType":"lead_form"},"form":{"id":"form-67890","name":"Gated Content Lead Form","type":"lead_generation"},"campaign":{"id":"cmp-abc123","name":"Cloud Security Demand Gen Q2","utmSource":"linkedin","utmMedium":"paid_social","utmCampaign":"cloud-security-report"}}
+
+XDM Mapping: |
+  {"eventType":"web.formFilledOut","web.webInteraction.name":"gated_content_download","web.webInteraction.type":"download","web.webInteraction.linkClicks.value":1,"web.webPageDetails.URL":"https://www.example.com/resources/cloud-security-report","web.webPageDetails.name":"Resource Detail - Cloud Security Report","_tenant.content.id":"asset-12345","_tenant.content.name":"2026 Cloud Security Report","_tenant.content.type":"analyst_report","_tenant.content.topic":"cloud security","_tenant.content.format":"pdf","_tenant.content.access":"gated","_tenant.content.gateType":"lead_form","_tenant.form.id":"form-67890","_tenant.form.name":"Gated Content Lead Form","_tenant.form.type":"lead_generation","_tenant.conversion.type":"content_download","_tenant.campaign.id":"cmp-abc123","_tenant.campaign.utmSource":"linkedin","_tenant.campaign.utmMedium":"paid_social","_tenant.campaign.utmCampaign":"cloud-security-report","timestamp":"2026-05-29T12:00:00Z"}
+
+SQL Query: |
+  WITH events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      user_pseudo_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'content_id') AS content_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'content_name') AS content_name,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'content_type') AS content_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'utm_source') AS utm_source,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'utm_medium') AS utm_medium,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'utm_campaign') AS utm_campaign,
+      event_name
+    FROM `project.dataset.events_*`
+    WHERE event_name IN ('gated_content_view', 'gated_content_download')
+  )
+  SELECT
+    event_date,
+    content_id,
+    ANY_VALUE(content_name) AS content_name,
+    ANY_VALUE(content_type) AS content_type,
+    utm_source,
+    utm_medium,
+    utm_campaign,
+    COUNTIF(event_name = 'gated_content_view') AS gated_content_views,
+    COUNTIF(event_name = 'gated_content_download') AS successful_gated_content_downloads,
+    SAFE_DIVIDE(COUNTIF(event_name = 'gated_content_download'), COUNTIF(event_name = 'gated_content_view')) * 100 AS gated_content_download_rate
+  FROM events
+  WHERE content_id IS NOT NULL
+  GROUP BY event_date, content_id, utm_source, utm_medium, utm_campaign
+  ORDER BY event_date DESC, gated_content_download_rate DESC;
+
+Calculation Notes: |
+  Count only successful downloads where the gated asset is actually made available or downloaded after a valid form submission, SSO step, or progressive profiling step. Exclude ungated file_download events, bot traffic, internal employee traffic, QA/test submissions, duplicate rapid-fire clicks from the same user/session, and failed form submissions. The denominator should be gated content landing page views or gated_content_view events for the same asset; if the business prefers a form efficiency view, also track a separate metric using form submissions or form starts as the denominator. Use unique user/session deduplication when reporting audience-level conversion, but raw event counts may be useful for operational QA.
+
+Business Use Case: |
+  A demand generation team compares download rates across cybersecurity whitepapers, observability eBooks, and AIOps webinars by traffic source. If a high-value analyst report has strong paid LinkedIn traffic but a low download rate, the team can simplify the form, adjust page messaging, add proof points, or test ungating part of the content to improve lead capture efficiency.
+
+Dependencies: |
+  gated_content_view event; gated_content_download event; content_id dimension; content_name dimension; content_type dimension; form_id dimension; campaign attribution parameters; bot/internal traffic filters; consent state; valid asset taxonomy
+
+Source Data: Digital Analytics; Marketing Automation Platform; CRM; Consent Management Platform; Web CMS; Tag Management System
+
+Report Attributes: |
+  Dimensions: content_id, content_name, content_type, content_topic, content_format, gate_type, form_id, page_location, landing_page, source, medium, campaign, channel_group, device_category, geo, industry_segment, account_segment. Metrics: gated content views, successful gated content downloads, gated content download rate, form starts, form submissions, form error rate, leads created, MQLs, pipeline influenced.
+
+Dashboard Usage: [Demand Generation Performance Dashboard, Content Marketing Dashboard, Lead Generation Funnel Dashboard, Campaign Performance Dashboard, ABM Engagement Dashboard, Executive Marketing KPI Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-05-29T23:19:39.9018+00:00
+
+Last Modified By: devyendarm
+
+
