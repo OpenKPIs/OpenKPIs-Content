@@ -1,0 +1,636 @@
+# KPI: Active Property Listing Rate
+# Generated: 2026-09-04T13:30:23.219Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Active Property Listing Rate
+Formula: (Distinct denominator-eligible canonical listing IDs active in at least one enabled customer-facing channel at the snapshot / Total distinct denominator-eligible canonical listing IDs at the snapshot) × 100
+
+Description: |
+  Active Property Listing Rate is the percentage of denominator-eligible canonical property listings that, at the market-local daily snapshot, are approved, currently available, published, indexed, and discoverable in at least one enabled customer-facing digital channel. It measures discovery inventory supporting acquisition, engagement, and conversion and, when analyzed by partner subscription, identifies retention, billing-entitlement, and lifetime-value risks.
+
+Category: Quality
+
+Tags: [kpi]
+
+Industry: [Technology]
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Item
+
+Measure Type: rate
+
+Aggregation Window: Time based - Daily
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH
+  parameters AS (
+    SELECT @as_of_date AS snapshot_date
+  ),
+  required_attributes AS (
+    SELECT attribute_name
+    FROM UNNEST([
+      'title',
+      'description',
+      'property_type',
+      'listing_type',
+      'address_line1',
+      'city',
+      'state_region',
+      'postal_code',
+      'country_code',
+      'latitude',
+      'longitude',
+      'price_amount',
+      'currency_code',
+      'bedrooms',
+      'bathrooms',
+      'floor_area',
+      'floor_area_unit',
+      'lot_area',
+      'lot_area_unit',
+      'year_built',
+      'condition',
+      'furnishing_status',
+      'tenure_type',
+      'availability_date',
+      'energy_rating',
+      'parking_spaces',
+      'parking_type',
+      'heating_type',
+      'cooling_type',
+      'pet_policy',
+      'smoking_policy',
+      'accessibility_features',
+      'amenities',
+      'media_count',
+      'primary_image_url',
+      'video_url',
+      'virtual_tour_url',
+      'floor_plan_url',
+      'agent_name',
+      'agent_phone',
+      'agent_email',
+      'brokerage_name',
+      'external_reference',
+      'ownership_verified',
+      'tax_or_fee_amount',
+      'hoa_fee_amount',
+      'deposit_amount',
+      'lease_term',
+      'last_catalog_updated_at'
+    ]) AS attribute_name
+  ),
+  base_listings AS (
+    SELECT
+      l.listing_id,
+      l.property_id,
+      l.account_id,
+      l.partner_id,
+      l.source_channel,
+      l.lifecycle_status,
+      l.valid_from,
+      l.valid_to,
+      l.created_at,
+      l.deleted_at,
+      l.is_test_listing
+    FROM `your-project.listing_management.listings` AS l
+    CROSS JOIN parameters AS prm
+    WHERE l.created_at < TIMESTAMP(DATE_ADD(prm.snapshot_date, INTERVAL 1 DAY))
+      AND (l.deleted_at IS NULL OR l.deleted_at >= TIMESTAMP(DATE_ADD(prm.snapshot_date, INTERVAL 1 DAY)))
+      AND COALESCE(l.is_test_listing, FALSE) = FALSE
+  ),
+  catalog_attribute_latest AS (
+    SELECT
+      pa.property_id,
+      pa.attribute_name,
+      pa.attribute_value
+    FROM `your-project.property_catalog.property_attributes` AS pa
+    INNER JOIN required_attributes AS ra
+      ON ra.attribute_name = pa.attribute_name
+    CROSS JOIN parameters AS prm
+    WHERE pa.updated_at < TIMESTAMP(DATE_ADD(prm.snapshot_date, INTERVAL 1 DAY))
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY pa.property_id, pa.attribute_name
+      ORDER BY pa.updated_at DESC, pa.attribute_version DESC
+    ) = 1
+  ),
+  attribute_completeness AS (
+    SELECT
+      cal.property_id,
+      COUNT(DISTINCT IF(
+        NULLIF(TRIM(CAST(cal.attribute_value AS STRING)), '') IS NOT NULL,
+        cal.attribute_name,
+        NULL
+      )) AS completed_required_attribute_count
+    FROM catalog_attribute_latest AS cal
+    GROUP BY cal.property_id
+  ),
+  moderation_latest AS (
+    SELECT
+      msh.listing_id,
+      msh.moderation_status,
+      msh.reason_code AS moderation_reason_code
+    FROM `your-project.moderation.listing_status_history` AS msh
+    CROSS JOIN parameters AS prm
+    WHERE msh.status_timestamp < TIMESTAMP(DATE_ADD(prm.snapshot_date, INTERVAL 1 DAY))
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY msh.listing_id
+      ORDER BY msh.status_timestamp DESC, msh.status_sequence DESC
+    ) = 1
+  ),
+  availability_latest AS (
+    SELECT
+      ash.listing_id,
+      ash.availability_status,
+      ash.available_from,
+      ash.available_until
+    FROM `your-project.availability.listing_status_history` AS ash
+    CROSS JOIN parameters AS prm
+    WHERE ash.status_timestamp < TIMESTAMP(DATE_ADD(prm.snapshot_date, INTERVAL 1 DAY))
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY ash.listing_id
+      ORDER BY ash.status_timestamp DESC, ash.status_sequence DESC
+    ) = 1
+  ),
+  publication_latest AS (
+    SELECT
+      spl.listing_id,
+      spl.publication_status,
+      spl.index_name,
+      spl.published_at
+    FROM `your-project.search_index.publication_logs` AS spl
+    CROSS JOIN parameters AS prm
+    WHERE spl.log_timestamp < TIMESTAMP(DATE_ADD(prm.snapshot_date, INTERVAL 1 DAY))
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY spl.listing_id
+      ORDER BY spl.log_timestamp DESC, spl.log_id DESC
+    ) = 1
+  ),
+  feed_latest AS (
+    SELECT
+      fil.listing_id,
+      fil.partner_id,
+      fil.ingestion_status,
+      fil.feed_name,
+      fil.ingestion_timestamp
+    FROM `your-project.partner_feed.ingestion_logs` AS fil
+    CROSS JOIN parameters AS prm
+    WHERE fil.ingestion_timestamp < TIMESTAMP(DATE_ADD(prm.snapshot_date, INTERVAL 1 DAY))
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY fil.listing_id
+      ORDER BY fil.ingestion_timestamp DESC, fil.ingestion_id DESC
+    ) = 1
+  ),
+  marketplace_activity AS (
+    SELECT
+      mad.listing_id,
+      SUM(COALESCE(mad.detail_view_count, 0)) AS detail_view_count,
+      SUM(COALESCE(mad.lead_count, 0)) AS lead_count,
+      SUM(COALESCE(mad.save_count, 0)) AS save_count
+    FROM `your-project.marketplace_analytics.listing_activity_daily` AS mad
+    CROSS JOIN parameters AS prm
+    WHERE mad.activity_date = prm.snapshot_date
+    GROUP BY mad.listing_id
+  ),
+  listing_evaluation AS (
+    SELECT
+      prm.snapshot_date,
+      bl.listing_id,
+      COALESCE(pc.country_code, 'unknown') AS country_code,
+      COALESCE(pc.state_region, 'unknown') AS state_region,
+      COALESCE(pc.city, 'unknown') AS city,
+      COALESCE(pc.property_type, 'unknown') AS property_type,
+      COALESCE(pc.listing_type, 'unknown') AS listing_type,
+      COALESCE(bl.source_channel, 'unknown') AS source_channel,
+      COALESCE(fl.feed_name, 'not_applicable') AS feed_name,
+      COALESCE(ca.account_segment, 'unknown') AS account_segment,
+      COALESCE(ca.account_tier, 'unknown') AS account_tier,
+      COALESCE(ca.agent_type, 'unknown') AS agent_type,
+      LEAST(COALESCE(ac.completed_required_attribute_count, 0), 49) AS completed_required_attribute_count,
+      COALESCE(ac.completed_required_attribute_count, 0) >= 49 AS has_complete_required_attributes,
+      CASE
+        WHEN LOWER(COALESCE(bl.lifecycle_status, '')) = 'active'
+         AND LOWER(COALESCE(ml.moderation_status, '')) IN ('approved', 'accepted')
+         AND LOWER(COALESCE(al.availability_status, '')) IN ('available', 'active')
+         AND (al.available_from IS NULL OR DATE(al.available_from) <= prm.snapshot_date)
+         AND (al.available_until IS NULL OR DATE(al.available_until) >= prm.snapshot_date)
+         AND LOWER(COALESCE(pl.publication_status, '')) IN ('published', 'indexed', 'success')
+         AND (bl.valid_from IS NULL OR DATE(bl.valid_from) <= prm.snapshot_date)
+         AND (bl.valid_to IS NULL OR DATE(bl.valid_to) >= prm.snapshot_date)
+         AND (
+           LOWER(COALESCE(bl.source_channel, 'direct')) NOT IN ('partner_feed', 'agent_feed')
+           OR LOWER(COALESCE(fl.ingestion_status, '')) IN ('accepted', 'completed', 'success')
+         )
+         AND COALESCE(ac.completed_required_attribute_count, 0) >= 49
+        THEN 1
+        ELSE 0
+      END AS is_active_listing,
+      COALESCE(ma.detail_view_count, 0) AS detail_view_count,
+      COALESCE(ma.lead_count, 0) AS lead_count,
+      COALESCE(ma.save_count, 0) AS save_count
+    FROM base_listings AS bl
+    CROSS JOIN parameters AS prm
+    LEFT JOIN `your-project.property_catalog.properties` AS pc
+      ON pc.property_id = bl.property_id
+    LEFT JOIN attribute_completeness AS ac
+      ON ac.property_id = bl.property_id
+    LEFT JOIN moderation_latest AS ml
+      ON ml.listing_id = bl.listing_id
+    LEFT JOIN availability_latest AS al
+      ON al.listing_id = bl.listing_id
+    LEFT JOIN publication_latest AS pl
+      ON pl.listing_id = bl.listing_id
+    LEFT JOIN feed_latest AS fl
+      ON fl.listing_id = bl.listing_id
+    LEFT JOIN `your-project.crm.accounts` AS ca
+      ON ca.account_id = bl.account_id
+    LEFT JOIN marketplace_activity AS ma
+      ON ma.listing_id = bl.listing_id
+  )
+  SELECT
+    snapshot_date,
+    country_code,
+    state_region,
+    city,
+    property_type,
+    listing_type,
+    source_channel,
+    feed_name,
+    account_segment,
+    account_tier,
+    agent_type,
+    COUNT(DISTINCT listing_id) AS total_property_listing_count,
+    COUNT(DISTINCT IF(is_active_listing = 1, listing_id, NULL)) AS active_property_listing_count,
+    SAFE_DIVIDE(
+      COUNT(DISTINCT IF(is_active_listing = 1, listing_id, NULL)),
+      COUNT(DISTINCT listing_id)
+    ) AS active_property_listing_rate,
+    SAFE_DIVIDE(
+      100 * COUNT(DISTINCT IF(is_active_listing = 1, listing_id, NULL)),
+      COUNT(DISTINCT listing_id)
+    ) AS active_property_listing_rate_percent,
+    COUNT(DISTINCT IF(has_complete_required_attributes, listing_id, NULL)) AS complete_attribute_listing_count,
+    COUNT(DISTINCT IF(NOT has_complete_required_attributes, listing_id, NULL)) AS incomplete_attribute_listing_count,
+    AVG(completed_required_attribute_count) AS average_completed_required_attribute_count,
+    SAFE_DIVIDE(
+      SUM(completed_required_attribute_count),
+      49 * COUNT(DISTINCT listing_id)
+    ) AS required_attribute_completion_rate,
+    COUNT(DISTINCT IF(detail_view_count > 0, listing_id, NULL)) AS viewed_listing_count,
+    SUM(detail_view_count) AS detail_view_count,
+    SUM(lead_count) AS lead_count,
+    SUM(save_count) AS save_count
+  FROM listing_evaluation
+  GROUP BY
+    snapshot_date,
+    country_code,
+    state_region,
+    city,
+    property_type,
+    listing_type,
+    source_channel,
+    feed_name,
+    account_segment,
+    account_tier,
+    agent_type;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH
+  parameters AS (
+    SELECT CAST(CURRENT_DATE - INTERVAL '1 day' AS DATE) AS snapshot_date
+  ),
+  required_attributes(attribute_name) AS (
+    VALUES
+      ('title'),
+      ('description'),
+      ('property_type'),
+      ('listing_type'),
+      ('address_line1'),
+      ('city'),
+      ('state_region'),
+      ('postal_code'),
+      ('country_code'),
+      ('latitude'),
+      ('longitude'),
+      ('price_amount'),
+      ('currency_code'),
+      ('bedrooms'),
+      ('bathrooms'),
+      ('floor_area'),
+      ('floor_area_unit'),
+      ('lot_area'),
+      ('lot_area_unit'),
+      ('year_built'),
+      ('condition'),
+      ('furnishing_status'),
+      ('tenure_type'),
+      ('availability_date'),
+      ('energy_rating'),
+      ('parking_spaces'),
+      ('parking_type'),
+      ('heating_type'),
+      ('cooling_type'),
+      ('pet_policy'),
+      ('smoking_policy'),
+      ('accessibility_features'),
+      ('amenities'),
+      ('media_count'),
+      ('primary_image_url'),
+      ('video_url'),
+      ('virtual_tour_url'),
+      ('floor_plan_url'),
+      ('agent_name'),
+      ('agent_phone'),
+      ('agent_email'),
+      ('brokerage_name'),
+      ('external_reference'),
+      ('ownership_verified'),
+      ('tax_or_fee_amount'),
+      ('hoa_fee_amount'),
+      ('deposit_amount'),
+      ('lease_term'),
+      ('last_catalog_updated_at')
+  ),
+  base_listings AS (
+    SELECT
+      l.listing_id,
+      l.property_id,
+      l.account_id,
+      l.partner_id,
+      l.source_channel,
+      l.lifecycle_status,
+      l.valid_from,
+      l.valid_to,
+      l.created_at,
+      l.deleted_at,
+      l.is_test_listing
+    FROM listing_management_service_listings AS l
+    CROSS JOIN parameters AS prm
+    WHERE l.created_at < CAST(prm.snapshot_date + INTERVAL '1 day' AS TIMESTAMP)
+      AND (
+        l.deleted_at IS NULL
+        OR l.deleted_at >= CAST(prm.snapshot_date + INTERVAL '1 day' AS TIMESTAMP)
+      )
+      AND COALESCE(l.is_test_listing, FALSE) = FALSE
+  ),
+  catalog_attribute_ranked AS (
+    SELECT
+      pa.property_id,
+      pa.attribute_name,
+      pa.attribute_value,
+      ROW_NUMBER() OVER (
+        PARTITION BY pa.property_id, pa.attribute_name
+        ORDER BY pa.updated_at DESC, pa.attribute_version DESC
+      ) AS row_num
+    FROM property_catalog_property_attributes AS pa
+    INNER JOIN required_attributes AS ra
+      ON ra.attribute_name = pa.attribute_name
+    CROSS JOIN parameters AS prm
+    WHERE pa.updated_at < CAST(prm.snapshot_date + INTERVAL '1 day' AS TIMESTAMP)
+  ),
+  attribute_completeness AS (
+    SELECT
+      property_id,
+      COUNT(DISTINCT CASE
+        WHEN NULLIF(TRIM(CAST(attribute_value AS VARCHAR)), '') IS NOT NULL
+        THEN attribute_name
+        ELSE NULL
+      END) AS completed_required_attribute_count
+    FROM catalog_attribute_ranked
+    WHERE row_num = 1
+    GROUP BY property_id
+  ),
+  moderation_ranked AS (
+    SELECT
+      msh.listing_id,
+      msh.moderation_status,
+      msh.reason_code AS moderation_reason_code,
+      ROW_NUMBER() OVER (
+        PARTITION BY msh.listing_id
+        ORDER BY msh.status_timestamp DESC, msh.status_sequence DESC
+      ) AS row_num
+    FROM moderation_listing_status_history AS msh
+    CROSS JOIN parameters AS prm
+    WHERE msh.status_timestamp < CAST(prm.snapshot_date + INTERVAL '1 day' AS TIMESTAMP)
+  ),
+  moderation_latest AS (
+    SELECT listing_id, moderation_status, moderation_reason_code
+    FROM moderation_ranked
+    WHERE row_num = 1
+  ),
+  availability_ranked AS (
+    SELECT
+      ash.listing_id,
+      ash.availability_status,
+      ash.available_from,
+      ash.available_until,
+      ROW_NUMBER() OVER (
+        PARTITION BY ash.listing_id
+        ORDER BY ash.status_timestamp DESC, ash.status_sequence DESC
+      ) AS row_num
+    FROM availability_listing_status_history AS ash
+    CROSS JOIN parameters AS prm
+    WHERE ash.status_timestamp < CAST(prm.snapshot_date + INTERVAL '1 day' AS TIMESTAMP)
+  ),
+  availability_latest AS (
+    SELECT listing_id, availability_status, available_from, available_until
+    FROM availability_ranked
+    WHERE row_num = 1
+  ),
+  publication_ranked AS (
+    SELECT
+      spl.listing_id,
+      spl.publication_status,
+      spl.index_name,
+      spl.published_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY spl.listing_id
+        ORDER BY spl.log_timestamp DESC, spl.log_id DESC
+      ) AS row_num
+    FROM search_index_publication_logs AS spl
+    CROSS JOIN parameters AS prm
+    WHERE spl.log_timestamp < CAST(prm.snapshot_date + INTERVAL '1 day' AS TIMESTAMP)
+  ),
+  publication_latest AS (
+    SELECT listing_id, publication_status, index_name, published_at
+    FROM publication_ranked
+    WHERE row_num = 1
+  ),
+  feed_ranked AS (
+    SELECT
+      fil.listing_id,
+      fil.partner_id,
+      fil.ingestion_status,
+      fil.feed_name,
+      fil.ingestion_timestamp,
+      ROW_NUMBER() OVER (
+        PARTITION BY fil.listing_id
+        ORDER BY fil.ingestion_timestamp DESC, fil.ingestion_id DESC
+      ) AS row_num
+    FROM partner_agent_feed_ingestion_logs AS fil
+    CROSS JOIN parameters AS prm
+    WHERE fil.ingestion_timestamp < CAST(prm.snapshot_date + INTERVAL '1 day' AS TIMESTAMP)
+  ),
+  feed_latest AS (
+    SELECT listing_id, partner_id, ingestion_status, feed_name, ingestion_timestamp
+    FROM feed_ranked
+    WHERE row_num = 1
+  ),
+  marketplace_activity AS (
+    SELECT
+      mad.listing_id,
+      SUM(COALESCE(mad.detail_view_count, 0)) AS detail_view_count,
+      SUM(COALESCE(mad.lead_count, 0)) AS lead_count,
+      SUM(COALESCE(mad.save_count, 0)) AS save_count
+    FROM marketplace_listing_activity_daily AS mad
+    CROSS JOIN parameters AS prm
+    WHERE CAST(mad.activity_date AS DATE) = prm.snapshot_date
+    GROUP BY mad.listing_id
+  ),
+  listing_evaluation AS (
+    SELECT
+      prm.snapshot_date,
+      bl.listing_id,
+      COALESCE(pc.country_code, 'unknown') AS country_code,
+      COALESCE(pc.state_region, 'unknown') AS state_region,
+      COALESCE(pc.city, 'unknown') AS city,
+      COALESCE(pc.property_type, 'unknown') AS property_type,
+      COALESCE(pc.listing_type, 'unknown') AS listing_type,
+      COALESCE(bl.source_channel, 'unknown') AS source_channel,
+      COALESCE(fl.feed_name, 'not_applicable') AS feed_name,
+      COALESCE(ca.account_segment, 'unknown') AS account_segment,
+      COALESCE(ca.account_tier, 'unknown') AS account_tier,
+      COALESCE(ca.agent_type, 'unknown') AS agent_type,
+      LEAST(COALESCE(ac.completed_required_attribute_count, 0), 49) AS completed_required_attribute_count,
+      CASE
+        WHEN COALESCE(ac.completed_required_attribute_count, 0) >= 49 THEN 1
+        ELSE 0
+      END AS has_complete_required_attributes,
+      CASE
+        WHEN LOWER(COALESCE(bl.lifecycle_status, '')) = 'active'
+         AND LOWER(COALESCE(ml.moderation_status, '')) IN ('approved', 'accepted')
+         AND LOWER(COALESCE(al.availability_status, '')) IN ('available', 'active')
+         AND (al.available_from IS NULL OR CAST(al.available_from AS DATE) <= prm.snapshot_date)
+         AND (al.available_until IS NULL OR CAST(al.available_until AS DATE) >= prm.snapshot_date)
+         AND LOWER(COALESCE(pl.publication_status, '')) IN ('published', 'indexed', 'success')
+         AND (bl.valid_from IS NULL OR CAST(bl.valid_from AS DATE) <= prm.snapshot_date)
+         AND (bl.valid_to IS NULL OR CAST(bl.valid_to AS DATE) >= prm.snapshot_date)
+         AND (
+           LOWER(COALESCE(bl.source_channel, 'direct')) NOT IN ('partner_feed', 'agent_feed')
+           OR LOWER(COALESCE(fl.ingestion_status, '')) IN ('accepted', 'completed', 'success')
+         )
+         AND COALESCE(ac.completed_required_attribute_count, 0) >= 49
+        THEN 1
+        ELSE 0
+      END AS is_active_listing,
+      COALESCE(ma.detail_view_count, 0) AS detail_view_count,
+      COALESCE(ma.lead_count, 0) AS lead_count,
+      COALESCE(ma.save_count, 0) AS save_count
+    FROM base_listings AS bl
+    CROSS JOIN parameters AS prm
+    LEFT JOIN property_catalog_properties AS pc
+      ON pc.property_id = bl.property_id
+    LEFT JOIN attribute_completeness AS ac
+      ON ac.property_id = bl.property_id
+    LEFT JOIN moderation_latest AS ml
+      ON ml.listing_id = bl.listing_id
+    LEFT JOIN availability_latest AS al
+      ON al.listing_id = bl.listing_id
+    LEFT JOIN publication_latest AS pl
+      ON pl.listing_id = bl.listing_id
+    LEFT JOIN feed_latest AS fl
+      ON fl.listing_id = bl.listing_id
+    LEFT JOIN crm_account_attributes AS ca
+      ON ca.account_id = bl.account_id
+    LEFT JOIN marketplace_activity AS ma
+      ON ma.listing_id = bl.listing_id
+  )
+  SELECT
+    snapshot_date,
+    country_code,
+    state_region,
+    city,
+    property_type,
+    listing_type,
+    source_channel,
+    feed_name,
+    account_segment,
+    account_tier,
+    agent_type,
+    COUNT(DISTINCT listing_id) AS total_property_listing_count,
+    COUNT(DISTINCT CASE WHEN is_active_listing = 1 THEN listing_id END) AS active_property_listing_count,
+    CAST(COUNT(DISTINCT CASE WHEN is_active_listing = 1 THEN listing_id END) AS DECIMAL(38,10))
+      / NULLIF(COUNT(DISTINCT listing_id), 0) AS active_property_listing_rate,
+    CAST(100 * COUNT(DISTINCT CASE WHEN is_active_listing = 1 THEN listing_id END) AS DECIMAL(38,10))
+      / NULLIF(COUNT(DISTINCT listing_id), 0) AS active_property_listing_rate_percent,
+    COUNT(DISTINCT CASE WHEN has_complete_required_attributes = 1 THEN listing_id END) AS complete_attribute_listing_count,
+    COUNT(DISTINCT CASE WHEN has_complete_required_attributes = 0 THEN listing_id END) AS incomplete_attribute_listing_count,
+    AVG(CAST(completed_required_attribute_count AS DECIMAL(38,10))) AS average_completed_required_attribute_count,
+    CAST(SUM(completed_required_attribute_count) AS DECIMAL(38,10))
+      / NULLIF(49 * COUNT(DISTINCT listing_id), 0) AS required_attribute_completion_rate,
+    COUNT(DISTINCT CASE WHEN detail_view_count > 0 THEN listing_id END) AS viewed_listing_count,
+    SUM(detail_view_count) AS detail_view_count,
+    SUM(lead_count) AS lead_count,
+    SUM(save_count) AS save_count
+  FROM listing_evaluation
+  GROUP BY
+    snapshot_date,
+    country_code,
+    state_region,
+    city,
+    property_type,
+    listing_type,
+    source_channel,
+    feed_name,
+    account_segment,
+    account_tier,
+    agent_type;
+
+Calculation Notes: |
+  Calculate from a point-in-time snapshot at 23:59:59 in each property's market time zone. The denominator includes distinct canonical production listings intended for marketing on the snapshot date, associated with an enabled market and applicable customer-facing channel, within inclusive marketing start and end boundaries, and not deleted, fraudulent, duplicated, sold, rented, permanently withdrawn, rejected, or terminally expired. Temporarily paused, moderation-suspended, availability-suppressed, or indexing-failed listings remain denominator-eligible when they are still intended for marketing. The numerator includes denominator-eligible listings that meet the market- and channel-specific minimum publishability requirements, have an approved moderation state, are currently available, are successfully published, and are present in at least one applicable customer-facing search or browse index. Do not require a fixed universal attribute count when requirements vary by market, property type, listing purpose, or channel. Missing status records fail the numerator but do not remove an otherwise eligible listing from the denominator. Deduplicate syndicated copies and channel variants by canonical listing ID within each market; for channel-level reporting, evaluate eligibility and active status separately for that channel. Customer views, saves, or inquiries are not required to establish discoverability. Return null when the denominator is zero, calculate cross-market results from summed counts rather than averaged rates, and restate affected snapshots for qualifying late-arriving corrections received within seven days.
+
+Business Use Case: |
+  Marketplace Operations reviews the daily rate by market, channel, listing source, and property type. If a market falls below 90% or declines by more than five percentage points, the team isolates moderation backlogs, expired availability records, publication failures, search-index defects, or partner-feed issues and routes remediation to the responsible operational owner; after recovery, Product and Growth compare restored inventory with search impressions, detail views, inquiries, transactions, partner retention, and subscription-entitlement performance.
+
+
+Source Data: Listing Management Service, property catalog, moderation and availability services, partner-feed ingestion records, customer-facing web and mobile publication logs, search-index status, CRM account attributes, and digital marketplace analytics
+
+Report Attributes: |
+  ["Market","Country","Region","City","Property Type","Listing Purpose","Listing Source","Customer-Facing Channel","Account Segment","Subscription Plan","Listing Age Band","Price Band","Moderation Status","Availability Status","Publication Status","Search Index Status"]
+
+Dashboard Usage: [Marketplace Inventory Health Dashboard, Property Discovery and Search Dashboard, Listing Operations Executive Scorecard, Partner Feed Quality Dashboard, Customer Journey Conversion Dashboard, Market Supply and Demand Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Active Property Listing Count, Listing Activation Rate, Listing Deactivation Rate, Searchable Listing Coverage, Property Search Result Coverage, Property Detail View Rate, Listing Inquiry Conversion Rate, Median Time to Listing Activation, Listing Retention Rate]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-04T13:30:18.160091+00:00
+
+Last Modified By: devyendarm
+
+
