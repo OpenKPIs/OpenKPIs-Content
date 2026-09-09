@@ -1,0 +1,90 @@
+# Metric: unique visitors
+# Generated: 2026-06-14T01:01:37.747Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: unique visitors
+Formula: COUNT(DISTINCT visitor_id) over the reporting period, where visitor_id is typically user_id when available, otherwise an anonymous device/browser identifier such as GA4 user_pseudo_id or Adobe Experience Cloud ID.
+
+Description: |
+  Unique visitors measures the number of distinct people or browser/app identifiers who visited a digital property during a selected reporting period. It is a core reach metric used to understand audience size, acquisition effectiveness, and top-of-funnel growth.
+
+Category: Acquisition
+
+Tags: [audience, traffic, users, reach, visitor-count, top-of-funnel]
+
+Industry: ["Retail","E-commerce","SaaS","Healthcare","Education","Finance","Media","Technology","Manufacturing","Other"]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: User
+
+Measure Type: count
+
+Aggregation Window: User and time based - Hourly/Daily/Monthly/Yearly; can also be segmented by acquisition, content, device, geography, campaign, and other user/session dimensions.
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  page_view
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"page_view","eventAction":"view"}}],"page":{"pageInfo":{"pageName":"Home","destinationURL":"https://www.example.com/"}},"user":[{"profile":[{"profileInfo":{"visitorID":"<anonymous_or_authenticated_visitor_id>"}}]}]}}
+
+GA4 Data Layer: |
+  {"event":"page_view","page_location":"https://www.example.com/","page_title":"Home","user_id":"<authenticated_user_id_if_available>","visitor_id":"<anonymous_or_authenticated_visitor_id>"}
+
+Adobe Client Data Layer: |
+  {"event":"page_view","page":{"pageInfo":{"pageName":"Home","destinationURL":"https://www.example.com/"}},"user":{"visitorId":"<anonymous_or_authenticated_visitor_id>"}}
+
+XDM Mapping: |
+  {"identityMap":{"ECID":[{"id":"<experience_cloud_id>","authenticatedState":"ambiguous","primary":true}],"CRMID":[{"id":"<authenticated_user_id>","authenticatedState":"authenticated","primary":false}]},"web":{"webPageDetails":{"URL":"https://www.example.com/","name":"Home","pageViews":{"value":1}}},"timestamp":"<event_timestamp>"}
+
+SQL Query: |
+  -- GA4 BigQuery example: unique visitors by day
+  SELECT
+    PARSE_DATE('%Y%m%d', event_date) AS event_day,
+    COUNT(DISTINCT COALESCE(user_id, user_pseudo_id)) AS unique_visitors
+  FROM `project.dataset.events_*`
+  WHERE _TABLE_SUFFIX BETWEEN '20250101' AND '20250131'
+    AND event_name IN ('page_view', 'screen_view', 'session_start', 'user_engagement')
+  GROUP BY event_day
+  ORDER BY event_day;
+
+Calculation Notes: |
+  Use a stable visitor identifier and define the reporting period clearly. Prefer authenticated user_id for cross-device deduplication when available; otherwise use anonymous cookie/device IDs, which may overcount due to cookie deletion, browser changes, app reinstalls, consent restrictions, or multiple devices. Do not sum daily unique visitors to calculate monthly unique visitors because the same visitor may appear on multiple days. Exclude known bots, internal traffic, QA environments, and invalid events where possible.
+
+Business Use Case: |
+  A marketing team tracks unique visitors by campaign and landing page to determine which acquisition channels are expanding reach. If paid search drives high sessions but low unique visitor growth, budget may be shifted toward channels bringing net-new audiences.
+
+Dependencies: |
+  page_view event; screen_view event for apps; session_start event; visitor_id or user_pseudo_id; user_id where available; bot filtering; consent status; reporting date range
+
+Source Data: Digital Analytics; Web Analytics; App Analytics; Tag Management; Consent Management Platform; Customer Identity where available
+
+Report Attributes: |
+  Dimensions: date, channel group, source / medium, campaign, landing page, page path, device category, country, region, browser, operating system, consent status. Metrics: unique visitors, sessions, page views, engaged sessions, new users, returning users. KPIs: traffic growth, acquisition reach, conversion rate.
+
+Dashboard Usage: [Executive Traffic Overview, Acquisition Performance Dashboard, Audience Growth Dashboard, Content Performance Dashboard, Campaign Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-06-14T01:01:37.466163+00:00
+
+Last Modified By: devyendarm
+
+
