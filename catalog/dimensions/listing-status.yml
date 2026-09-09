@@ -1,0 +1,493 @@
+# Dimension: Listing Status
+# Generated: 2026-09-07T12:30:22.424Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Listing Status
+
+Description: |
+  Listing Status identifies the canonical lifecycle and market-availability state of a real estate listing at a specified effective time. It measures whether the listing is being prepared, publicly marketable, in transaction, successfully closed, or removed without a successful close.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Real Estate Tech
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event; point-in-time snapshots analyzed hourly, daily, monthly, or yearly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH source_records AS (
+    SELECT
+      CAST(listing_id AS STRING) AS listing_id,
+      UPPER(TRIM(CAST(source_system AS STRING))) AS source_system,
+      CAST(source_listing_id AS STRING) AS source_listing_id,
+      CAST(status_event_id AS STRING) AS source_event_id,
+      NULLIF(TRIM(CAST(status_code AS STRING)), '') AS raw_status_code,
+      NULLIF(TRIM(CAST(status_name AS STRING)), '') AS raw_status_name,
+      NULLIF(TRIM(CAST(status_reason_code AS STRING)), '') AS status_reason_code,
+      NULLIF(TRIM(CAST(status_reason_description AS STRING)), '') AS status_reason_description,
+      COALESCE(
+        SAFE_CAST(effective_at AS TIMESTAMP),
+        SAFE_CAST(updated_at AS TIMESTAMP),
+        SAFE_CAST(created_at AS TIMESTAMP),
+        SAFE_CAST(ingested_at AS TIMESTAMP)
+      ) AS status_effective_at,
+      SAFE_CAST(end_at AS TIMESTAMP) AS supplied_status_end_at,
+      CAST(mls_id AS STRING) AS mls_id,
+      CAST(brokerage_id AS STRING) AS brokerage_id,
+      CAST(agent_id AS STRING) AS agent_id,
+      CAST(office_id AS STRING) AS office_id,
+      CAST(property_id AS STRING) AS property_id,
+      CAST(market_id AS STRING) AS market_id,
+      UPPER(TRIM(CAST(country_code AS STRING))) AS country_code,
+      UPPER(TRIM(CAST(region_code AS STRING))) AS region_code,
+      SAFE_CAST(created_at AS TIMESTAMP) AS source_created_at,
+      SAFE_CAST(updated_at AS TIMESTAMP) AS source_updated_at,
+      SAFE_CAST(ingested_at AS TIMESTAMP) AS ingested_at
+    FROM `your-project.analytics_backend.listing_status_events`
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+      AND listing_id IS NOT NULL
+      AND COALESCE(
+        SAFE_CAST(effective_at AS TIMESTAMP),
+        SAFE_CAST(updated_at AS TIMESTAMP),
+        SAFE_CAST(created_at AS TIMESTAMP),
+        SAFE_CAST(ingested_at AS TIMESTAMP)
+      ) IS NOT NULL
+  ),
+  normalized AS (
+    SELECT
+      *,
+      REGEXP_REPLACE(
+        UPPER(TRIM(COALESCE(raw_status_code, raw_status_name, 'UNKNOWN'))),
+        r'[^A-Z0-9]+',
+        '_'
+      ) AS normalized_status
+    FROM source_records
+  ),
+  deduplicated AS (
+    SELECT * EXCEPT (deduplication_rank)
+    FROM (
+      SELECT
+        *,
+        ROW_NUMBER() OVER (
+          PARTITION BY
+            source_system,
+            listing_id,
+            COALESCE(
+              source_event_id,
+              CONCAT(
+                COALESCE(normalized_status, 'UNKNOWN'), '|',
+                FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E6S', status_effective_at)
+              )
+            )
+          ORDER BY
+            source_updated_at DESC,
+            ingested_at DESC,
+            source_created_at DESC
+        ) AS deduplication_rank
+      FROM normalized
+    )
+    WHERE deduplication_rank = 1
+  ),
+  mapped AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_status IN ('COMING_SOON', 'PRE_MARKET', 'PREMARKET') THEN 'COMING_SOON'
+        WHEN normalized_status IN ('ACTIVE', 'AVAILABLE', 'FOR_SALE', 'FOR_RENT', 'LISTED', 'NEW') THEN 'ACTIVE'
+        WHEN normalized_status IN ('PENDING', 'SALE_PENDING', 'LEASE_PENDING') THEN 'PENDING'
+        WHEN normalized_status IN ('UNDER_CONTRACT', 'ACTIVE_UNDER_CONTRACT', 'CONTRACT', 'CONTINGENT') THEN 'UNDER_CONTRACT'
+        WHEN normalized_status IN ('SOLD', 'CLOSED', 'CLOSED_SALE', 'SALE_CLOSED') THEN 'SOLD'
+        WHEN normalized_status IN ('LEASED', 'RENTED', 'CLOSED_LEASE', 'LEASE_CLOSED') THEN 'LEASED'
+        WHEN normalized_status IN ('TEMPORARILY_OFF_MARKET', 'TEMP_OFF_MARKET', 'TOM') THEN 'TEMPORARILY_OFF_MARKET'
+        WHEN normalized_status IN ('WITHDRAWN', 'WITHDRAWN_CONDITIONAL', 'WITHDRAWN_UNCONDITIONAL') THEN 'WITHDRAWN'
+        WHEN normalized_status = 'EXPIRED' THEN 'EXPIRED'
+        WHEN normalized_status IN ('CANCELED', 'CANCELLED', 'TERMINATED') THEN 'CANCELED'
+        WHEN normalized_status IN ('OFF_MARKET', 'INACTIVE', 'UNAVAILABLE') THEN 'OFF_MARKET'
+        ELSE 'UNKNOWN'
+      END AS canonical_status_code
+    FROM deduplicated
+  ),
+  sequenced AS (
+    SELECT
+      *,
+      LEAD(status_effective_at) OVER (
+        PARTITION BY source_system, listing_id
+        ORDER BY status_effective_at, COALESCE(source_event_id, ''), normalized_status
+      ) AS next_status_effective_at,
+      LAG(canonical_status_code) OVER (
+        PARTITION BY source_system, listing_id
+        ORDER BY status_effective_at, COALESCE(source_event_id, ''), normalized_status
+      ) AS prior_canonical_status_code,
+      LAG(status_effective_at) OVER (
+        PARTITION BY source_system, listing_id
+        ORDER BY status_effective_at, COALESCE(source_event_id, ''), normalized_status
+      ) AS prior_status_effective_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY source_system, listing_id
+        ORDER BY status_effective_at, COALESCE(source_event_id, ''), normalized_status
+      ) AS status_sequence_number
+    FROM mapped
+  ),
+  enriched AS (
+    SELECT
+      *,
+      CASE
+        WHEN next_status_effective_at IS NULL
+          THEN IF(supplied_status_end_at > status_effective_at, supplied_status_end_at, NULL)
+        WHEN supplied_status_end_at > status_effective_at
+          THEN LEAST(supplied_status_end_at, next_status_effective_at)
+        ELSE next_status_effective_at
+      END AS status_end_at
+    FROM sequenced
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT(
+      source_system, '|',
+      listing_id, '|',
+      FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E6S', status_effective_at), '|',
+      canonical_status_code, '|',
+      COALESCE(source_event_id, '')
+    ))) AS listing_status_sk,
+    listing_id,
+    source_system,
+    source_listing_id,
+    source_event_id,
+    raw_status_code,
+    raw_status_name,
+    canonical_status_code,
+    INITCAP(REPLACE(canonical_status_code, '_', ' ')) AS canonical_status_name,
+    CASE
+      WHEN canonical_status_code = 'COMING_SOON' THEN 'PRE_MARKET'
+      WHEN canonical_status_code = 'ACTIVE' THEN 'ON_MARKET'
+      WHEN canonical_status_code IN ('PENDING', 'UNDER_CONTRACT') THEN 'CONTINGENT'
+      WHEN canonical_status_code IN ('SOLD', 'LEASED') THEN 'CLOSED'
+      WHEN canonical_status_code IN ('TEMPORARILY_OFF_MARKET', 'WITHDRAWN', 'EXPIRED', 'CANCELED', 'OFF_MARKET') THEN 'OFF_MARKET'
+      ELSE 'UNKNOWN'
+    END AS status_category,
+    CASE canonical_status_code
+      WHEN 'COMING_SOON' THEN 'Listing is approved for future marketing but is not yet active.'
+      WHEN 'ACTIVE' THEN 'Listing is active and available for market engagement.'
+      WHEN 'PENDING' THEN 'Listing has a pending transaction awaiting completion.'
+      WHEN 'UNDER_CONTRACT' THEN 'Listing is subject to an accepted contract or contingency.'
+      WHEN 'SOLD' THEN 'Listing has completed a sale transaction.'
+      WHEN 'LEASED' THEN 'Listing has completed a lease transaction.'
+      WHEN 'TEMPORARILY_OFF_MARKET' THEN 'Listing has been temporarily removed from active marketing.'
+      WHEN 'WITHDRAWN' THEN 'Listing was withdrawn before expiration or closing.'
+      WHEN 'EXPIRED' THEN 'Listing agreement expired without a completed transaction.'
+      WHEN 'CANCELED' THEN 'Listing agreement or transaction was canceled.'
+      WHEN 'OFF_MARKET' THEN 'Listing is not currently offered on the market.'
+      ELSE 'Source status could not be mapped to a canonical listing status.'
+    END AS status_description,
+    CASE
+      WHEN canonical_status_code = 'COMING_SOON' THEN 'PRE_LISTING'
+      WHEN canonical_status_code = 'ACTIVE' THEN 'MARKETING'
+      WHEN canonical_status_code IN ('PENDING', 'UNDER_CONTRACT') THEN 'TRANSACTION'
+      WHEN canonical_status_code IN ('SOLD', 'LEASED') THEN 'COMPLETED'
+      WHEN canonical_status_code IN ('TEMPORARILY_OFF_MARKET', 'WITHDRAWN', 'EXPIRED', 'CANCELED', 'OFF_MARKET') THEN 'INACTIVE'
+      ELSE 'UNKNOWN'
+    END AS lifecycle_stage,
+    canonical_status_code IN ('COMING_SOON', 'ACTIVE') AS availability_flag,
+    canonical_status_code IN ('COMING_SOON', 'ACTIVE', 'PENDING', 'UNDER_CONTRACT') AS marketable_flag,
+    canonical_status_code = 'ACTIVE' AS active_flag,
+    canonical_status_code = 'PENDING' AS pending_flag,
+    canonical_status_code = 'UNDER_CONTRACT' AS under_contract_flag,
+    canonical_status_code = 'SOLD' AS sold_flag,
+    canonical_status_code = 'LEASED' AS leased_flag,
+    canonical_status_code = 'WITHDRAWN' AS withdrawn_flag,
+    canonical_status_code = 'EXPIRED' AS expired_flag,
+    canonical_status_code = 'CANCELED' AS canceled_flag,
+    canonical_status_code IN ('TEMPORARILY_OFF_MARKET', 'WITHDRAWN', 'EXPIRED', 'CANCELED', 'OFF_MARKET') AS off_market_flag,
+    canonical_status_code = 'COMING_SOON' AS coming_soon_flag,
+    canonical_status_code = 'TEMPORARILY_OFF_MARKET' AS temporarily_off_market_flag,
+    status_reason_code,
+    status_reason_description,
+    status_effective_at,
+    status_end_at,
+    DATE(status_effective_at) AS status_date,
+    GREATEST(0, TIMESTAMP_DIFF(COALESCE(status_end_at, CURRENT_TIMESTAMP()), status_effective_at, DAY)) AS days_in_status,
+    prior_canonical_status_code,
+    prior_status_effective_at,
+    status_sequence_number,
+    next_status_effective_at IS NULL AS is_current,
+    status_sequence_number = 1 AS is_initial_status,
+    canonical_status_code IN ('SOLD', 'LEASED', 'EXPIRED', 'CANCELED') AS is_terminal_status,
+    mls_id,
+    brokerage_id,
+    agent_id,
+    office_id,
+    property_id,
+    market_id,
+    country_code,
+    region_code,
+    source_created_at,
+    source_updated_at,
+    CURRENT_TIMESTAMP() AS dw_created_at,
+    CASE
+      WHEN canonical_status_code = 'UNKNOWN' THEN 'UNMAPPED_STATUS'
+      WHEN source_event_id IS NULL THEN 'MISSING_SOURCE_EVENT_ID'
+      WHEN source_system IS NULL OR source_system = '' THEN 'MISSING_SOURCE_SYSTEM'
+      WHEN supplied_status_end_at IS NOT NULL AND supplied_status_end_at <= status_effective_at THEN 'INVALID_SOURCE_END_TIMESTAMP'
+      ELSE 'VALID'
+    END AS data_quality_status
+  FROM enriched;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH source_records AS (
+    SELECT
+      CAST(listing_id AS VARCHAR) AS listing_id,
+      UPPER(TRIM(CAST(source_system AS VARCHAR))) AS source_system,
+      CAST(source_listing_id AS VARCHAR) AS source_listing_id,
+      CAST(status_event_id AS VARCHAR) AS source_event_id,
+      NULLIF(TRIM(CAST(status_code AS VARCHAR)), '') AS raw_status_code,
+      NULLIF(TRIM(CAST(status_name AS VARCHAR)), '') AS raw_status_name,
+      NULLIF(TRIM(CAST(status_reason_code AS VARCHAR)), '') AS status_reason_code,
+      NULLIF(TRIM(CAST(status_reason_description AS VARCHAR)), '') AS status_reason_description,
+      COALESCE(effective_at, updated_at, created_at, ingested_at) AS status_effective_at,
+      end_at AS supplied_status_end_at,
+      CAST(mls_id AS VARCHAR) AS mls_id,
+      CAST(brokerage_id AS VARCHAR) AS brokerage_id,
+      CAST(agent_id AS VARCHAR) AS agent_id,
+      CAST(office_id AS VARCHAR) AS office_id,
+      CAST(property_id AS VARCHAR) AS property_id,
+      CAST(market_id AS VARCHAR) AS market_id,
+      UPPER(TRIM(CAST(country_code AS VARCHAR))) AS country_code,
+      UPPER(TRIM(CAST(region_code AS VARCHAR))) AS region_code,
+      created_at AS source_created_at,
+      updated_at AS source_updated_at,
+      ingested_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY
+          UPPER(TRIM(CAST(source_system AS VARCHAR))),
+          CAST(listing_id AS VARCHAR),
+          COALESCE(
+            CAST(status_event_id AS VARCHAR),
+            CONCAT(
+              UPPER(REGEXP_REPLACE(TRIM(COALESCE(CAST(status_code AS VARCHAR), CAST(status_name AS VARCHAR), 'UNKNOWN')), '[^A-Z0-9]+', '_', 'g')),
+              '|',
+              CAST(COALESCE(effective_at, updated_at, created_at, ingested_at) AS VARCHAR)
+            )
+          )
+        ORDER BY updated_at DESC NULLS LAST, ingested_at DESC NULLS LAST, created_at DESC NULLS LAST
+      ) AS deduplication_rank
+    FROM listing_status_events_backend
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+      AND listing_id IS NOT NULL
+      AND COALESCE(effective_at, updated_at, created_at, ingested_at) IS NOT NULL
+  ),
+  deduplicated AS (
+    SELECT
+      *,
+      UPPER(REGEXP_REPLACE(
+        TRIM(COALESCE(raw_status_code, raw_status_name, 'UNKNOWN')),
+        '[^A-Z0-9]+',
+        '_',
+        'g'
+      )) AS normalized_status
+    FROM source_records
+    WHERE deduplication_rank = 1
+  ),
+  mapped AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_status IN ('COMING_SOON', 'PRE_MARKET', 'PREMARKET') THEN 'COMING_SOON'
+        WHEN normalized_status IN ('ACTIVE', 'AVAILABLE', 'FOR_SALE', 'FOR_RENT', 'LISTED', 'NEW') THEN 'ACTIVE'
+        WHEN normalized_status IN ('PENDING', 'SALE_PENDING', 'LEASE_PENDING') THEN 'PENDING'
+        WHEN normalized_status IN ('UNDER_CONTRACT', 'ACTIVE_UNDER_CONTRACT', 'CONTRACT', 'CONTINGENT') THEN 'UNDER_CONTRACT'
+        WHEN normalized_status IN ('SOLD', 'CLOSED', 'CLOSED_SALE', 'SALE_CLOSED') THEN 'SOLD'
+        WHEN normalized_status IN ('LEASED', 'RENTED', 'CLOSED_LEASE', 'LEASE_CLOSED') THEN 'LEASED'
+        WHEN normalized_status IN ('TEMPORARILY_OFF_MARKET', 'TEMP_OFF_MARKET', 'TOM') THEN 'TEMPORARILY_OFF_MARKET'
+        WHEN normalized_status IN ('WITHDRAWN', 'WITHDRAWN_CONDITIONAL', 'WITHDRAWN_UNCONDITIONAL') THEN 'WITHDRAWN'
+        WHEN normalized_status = 'EXPIRED' THEN 'EXPIRED'
+        WHEN normalized_status IN ('CANCELED', 'CANCELLED', 'TERMINATED') THEN 'CANCELED'
+        WHEN normalized_status IN ('OFF_MARKET', 'INACTIVE', 'UNAVAILABLE') THEN 'OFF_MARKET'
+        ELSE 'UNKNOWN'
+      END AS canonical_status_code
+    FROM deduplicated
+  ),
+  sequenced AS (
+    SELECT
+      *,
+      LEAD(status_effective_at) OVER (
+        PARTITION BY source_system, listing_id
+        ORDER BY status_effective_at, COALESCE(source_event_id, ''), normalized_status
+      ) AS next_status_effective_at,
+      LAG(canonical_status_code) OVER (
+        PARTITION BY source_system, listing_id
+        ORDER BY status_effective_at, COALESCE(source_event_id, ''), normalized_status
+      ) AS prior_canonical_status_code,
+      LAG(status_effective_at) OVER (
+        PARTITION BY source_system, listing_id
+        ORDER BY status_effective_at, COALESCE(source_event_id, ''), normalized_status
+      ) AS prior_status_effective_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY source_system, listing_id
+        ORDER BY status_effective_at, COALESCE(source_event_id, ''), normalized_status
+      ) AS status_sequence_number
+    FROM mapped
+  ),
+  enriched AS (
+    SELECT
+      *,
+      CASE
+        WHEN next_status_effective_at IS NULL
+          THEN CASE WHEN supplied_status_end_at > status_effective_at THEN supplied_status_end_at ELSE NULL END
+        WHEN supplied_status_end_at > status_effective_at
+          THEN CASE
+            WHEN supplied_status_end_at < next_status_effective_at THEN supplied_status_end_at
+            ELSE next_status_effective_at
+          END
+        ELSE next_status_effective_at
+      END AS status_end_at
+    FROM sequenced
+  )
+  SELECT
+    MD5(CONCAT(
+      source_system, '|',
+      listing_id, '|',
+      CAST(status_effective_at AS VARCHAR), '|',
+      canonical_status_code, '|',
+      COALESCE(source_event_id, '')
+    )) AS listing_status_sk,
+    listing_id,
+    source_system,
+    source_listing_id,
+    source_event_id,
+    raw_status_code,
+    raw_status_name,
+    canonical_status_code,
+    INITCAP(REPLACE(canonical_status_code, '_', ' ')) AS canonical_status_name,
+    CASE
+      WHEN canonical_status_code = 'COMING_SOON' THEN 'PRE_MARKET'
+      WHEN canonical_status_code = 'ACTIVE' THEN 'ON_MARKET'
+      WHEN canonical_status_code IN ('PENDING', 'UNDER_CONTRACT') THEN 'CONTINGENT'
+      WHEN canonical_status_code IN ('SOLD', 'LEASED') THEN 'CLOSED'
+      WHEN canonical_status_code IN ('TEMPORARILY_OFF_MARKET', 'WITHDRAWN', 'EXPIRED', 'CANCELED', 'OFF_MARKET') THEN 'OFF_MARKET'
+      ELSE 'UNKNOWN'
+    END AS status_category,
+    CASE canonical_status_code
+      WHEN 'COMING_SOON' THEN 'Listing is approved for future marketing but is not yet active.'
+      WHEN 'ACTIVE' THEN 'Listing is active and available for market engagement.'
+      WHEN 'PENDING' THEN 'Listing has a pending transaction awaiting completion.'
+      WHEN 'UNDER_CONTRACT' THEN 'Listing is subject to an accepted contract or contingency.'
+      WHEN 'SOLD' THEN 'Listing has completed a sale transaction.'
+      WHEN 'LEASED' THEN 'Listing has completed a lease transaction.'
+      WHEN 'TEMPORARILY_OFF_MARKET' THEN 'Listing has been temporarily removed from active marketing.'
+      WHEN 'WITHDRAWN' THEN 'Listing was withdrawn before expiration or closing.'
+      WHEN 'EXPIRED' THEN 'Listing agreement expired without a completed transaction.'
+      WHEN 'CANCELED' THEN 'Listing agreement or transaction was canceled.'
+      WHEN 'OFF_MARKET' THEN 'Listing is not currently offered on the market.'
+      ELSE 'Source status could not be mapped to a canonical listing status.'
+    END AS status_description,
+    CASE
+      WHEN canonical_status_code = 'COMING_SOON' THEN 'PRE_LISTING'
+      WHEN canonical_status_code = 'ACTIVE' THEN 'MARKETING'
+      WHEN canonical_status_code IN ('PENDING', 'UNDER_CONTRACT') THEN 'TRANSACTION'
+      WHEN canonical_status_code IN ('SOLD', 'LEASED') THEN 'COMPLETED'
+      WHEN canonical_status_code IN ('TEMPORARILY_OFF_MARKET', 'WITHDRAWN', 'EXPIRED', 'CANCELED', 'OFF_MARKET') THEN 'INACTIVE'
+      ELSE 'UNKNOWN'
+    END AS lifecycle_stage,
+    canonical_status_code IN ('COMING_SOON', 'ACTIVE') AS availability_flag,
+    canonical_status_code IN ('COMING_SOON', 'ACTIVE', 'PENDING', 'UNDER_CONTRACT') AS marketable_flag,
+    canonical_status_code = 'ACTIVE' AS active_flag,
+    canonical_status_code = 'PENDING' AS pending_flag,
+    canonical_status_code = 'UNDER_CONTRACT' AS under_contract_flag,
+    canonical_status_code = 'SOLD' AS sold_flag,
+    canonical_status_code = 'LEASED' AS leased_flag,
+    canonical_status_code = 'WITHDRAWN' AS withdrawn_flag,
+    canonical_status_code = 'EXPIRED' AS expired_flag,
+    canonical_status_code = 'CANCELED' AS canceled_flag,
+    canonical_status_code IN ('TEMPORARILY_OFF_MARKET', 'WITHDRAWN', 'EXPIRED', 'CANCELED', 'OFF_MARKET') AS off_market_flag,
+    canonical_status_code = 'COMING_SOON' AS coming_soon_flag,
+    canonical_status_code = 'TEMPORARILY_OFF_MARKET' AS temporarily_off_market_flag,
+    status_reason_code,
+    status_reason_description,
+    status_effective_at,
+    status_end_at,
+    CAST(status_effective_at AS DATE) AS status_date,
+    GREATEST(
+      0,
+      CAST(EXTRACT(EPOCH FROM (COALESCE(status_end_at, CURRENT_TIMESTAMP) - status_effective_at)) / 86400 AS BIGINT)
+    ) AS days_in_status,
+    prior_canonical_status_code,
+    prior_status_effective_at,
+    status_sequence_number,
+    next_status_effective_at IS NULL AS is_current,
+    status_sequence_number = 1 AS is_initial_status,
+    canonical_status_code IN ('SOLD', 'LEASED', 'EXPIRED', 'CANCELED') AS is_terminal_status,
+    mls_id,
+    brokerage_id,
+    agent_id,
+    office_id,
+    property_id,
+    market_id,
+    country_code,
+    region_code,
+    source_created_at,
+    source_updated_at,
+    CURRENT_TIMESTAMP AS dw_created_at,
+    CASE
+      WHEN canonical_status_code = 'UNKNOWN' THEN 'UNMAPPED_STATUS'
+      WHEN source_event_id IS NULL THEN 'MISSING_SOURCE_EVENT_ID'
+      WHEN source_system IS NULL OR source_system = '' THEN 'MISSING_SOURCE_SYSTEM'
+      WHEN supplied_status_end_at IS NOT NULL AND supplied_status_end_at <= status_effective_at THEN 'INVALID_SOURCE_END_TIMESTAMP'
+      ELSE 'VALID'
+    END AS data_quality_status
+  FROM enriched;
+
+Calculation Notes: |
+  Assign one canonical status to each listing episode at each effective timestamp using the source status mapping maintained for the originating MLS, brokerage, CRM, or internal listing workflow. For current-state reporting, select the latest non-duplicate status event by status_effective_at, then source_updated_at, then ingestion timestamp; for historical reporting, use the status whose effective interval contains the reporting timestamp. Preserve backdated corrections by rebuilding affected effective intervals rather than overwriting history. Treat relisted inventory as a new listing episode when the source provides a new listing identifier or the governed relisting rules identify a materially new marketing period. Do not infer sold, rented, withdrawn, expired, or cancelled status from listing inactivity, page unavailability, missing feed records, or elapsed time alone. Map null, blank, unmapped, contradictory, or stale source values to unknown and retain the original source value for remediation. Exclude test, duplicate, fraudulent, and administratively suppressed listings from marketplace reporting through separate governance flags rather than changing their canonical lifecycle status.
+
+Business Use Case: |
+  Marketplace leadership uses Listing Status to compare active inventory, listings entering transaction, successful closures, and unsuccessful removals by market and property type. If a market shows falling active supply alongside elevated expired or withdrawn listings, acquisition and marketplace operations can adjust broker outreach, listing-quality interventions, pricing guidance, and feed-remediation priorities.
+
+
+Source Data: Listing Management Platform, MLS and brokerage feeds, CRM, property management systems, and internal listing status events
+
+Report Attributes: |
+  ["Market","City","Neighborhood","Property Type","Transaction Type","Listing Type","Price Band","Listing Source","Brokerage","Listing Age Band","Acquisition Channel","Status Effective Date"]
+
+Dashboard Usage: [Marketplace Inventory Health, Listing Conversion Funnel, Supply and Demand Executive Dashboard, Listing Operations Quality, Market Performance, Broker and Feed Health]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Listing ID, Listing Episode ID, Property ID, Listing Type, Transaction Type, Property Type, Market, Listing Source, Listing Agent, Brokerage, Status Effective Date]
+
+Derived Dimensions: [Listing Availability Group, Listing Lifecycle Stage, Is Active Listing, Is Terminal Listing, Listing Outcome, Days in Current Listing Status, Previous Listing Status]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-07T12:30:21.997465+00:00
+
+Last Modified By: devyendarm
+
+
