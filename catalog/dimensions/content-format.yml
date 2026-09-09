@@ -1,0 +1,208 @@
+# Dimension: Content Format
+# Generated: 2026-09-09T21:30:45.406Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Content Format
+
+Description: |
+  Content Format identifies the standardized presentation and delivery form in which a customer encounters or consumes a content item, such as video on demand, live video, linear video, audio, text, image gallery, interactive, or mixed media. It enables acquisition, engagement, conversion, retention, monetization, and lifetime-value performance to be compared across consistent customer experiences rather than source-system labels.
+
+Category: Engagement
+
+Tags: [dimension]
+
+Industry: Media
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  select_content
+
+Adobe Event: |
+  select_content
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"select_content"},"attributes":{"contentFormat":"video_on_demand"}}]}}
+
+GA4 Data Layer: |
+  {"event":"select_content","content_type":"video_on_demand"}
+
+Adobe Client Data Layer: |
+  {"event":"select_content","eventInfo":{"contentFormat":"video_on_demand"}}
+
+XDM Mapping: |
+  {"mediaCollection":{"sessionDetails":{"contentType":"video_on_demand"}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH source_events AS (
+    SELECT
+      event_timestamp,
+      COALESCE(
+        (
+          SELECT ep.value.string_value
+          FROM UNNEST(event_params) AS ep
+          WHERE ep.key = 'content_type'
+          LIMIT 1
+        ),
+        (
+          SELECT ep.value.string_value
+          FROM UNNEST(event_params) AS ep
+          WHERE ep.key = 'content_format'
+          LIMIT 1
+        )
+      ) AS raw_content_format
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE event_name = 'select_content'
+      AND REGEXP_CONTAINS(_TABLE_SUFFIX, r'^[0-9]{8}$')
+  ),
+  normalized_events AS (
+    SELECT
+      event_timestamp,
+      COALESCE(
+        NULLIF(
+          REGEXP_REPLACE(
+            REGEXP_REPLACE(LOWER(TRIM(raw_content_format)), r'[^a-z0-9]+', '_'),
+            r'^_+|_+$',
+            ''
+          ),
+          ''
+        ),
+        'unknown'
+      ) AS normalized_content_format
+    FROM source_events
+  ),
+  canonical_events AS (
+    SELECT
+      event_timestamp,
+      CASE
+        WHEN normalized_content_format IN ('vod', 'video_on_demand') THEN 'video_on_demand'
+        WHEN normalized_content_format IN ('live_streaming', 'live_video', 'live_stream') THEN 'live_stream'
+        WHEN normalized_content_format IN ('aod', 'audio_on_demand') THEN 'audio_on_demand'
+        ELSE normalized_content_format
+      END AS content_format_code
+    FROM normalized_events
+  )
+  SELECT
+    TO_HEX(MD5(content_format_code)) AS content_format_key,
+    content_format_code,
+    CASE content_format_code
+      WHEN 'video_on_demand' THEN 'Video On Demand'
+      WHEN 'audio_on_demand' THEN 'Audio On Demand'
+      WHEN 'live_stream' THEN 'Live Stream'
+      WHEN 'unknown' THEN 'Unknown'
+      ELSE INITCAP(REPLACE(content_format_code, '_', ' '))
+    END AS content_format_name,
+    TIMESTAMP_MICROS(MIN(event_timestamp)) AS first_seen_at,
+    TIMESTAMP_MICROS(MAX(event_timestamp)) AS last_seen_at,
+    COUNT(*) AS observed_event_count
+  FROM canonical_events
+  GROUP BY
+    content_format_code;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH source_events AS (
+    SELECT
+      timestamp AS event_timestamp,
+      mediaCollection.sessionDetails.contentType AS raw_content_format
+    FROM aep_analytics_dataset
+    WHERE eventType = 'select_content'
+  ),
+  normalized_events AS (
+    SELECT
+      event_timestamp,
+      COALESCE(
+        NULLIF(
+          REGEXP_REPLACE(
+            REGEXP_REPLACE(LOWER(TRIM(raw_content_format)), '[^a-z0-9]+', '_'),
+            '^_+|_+$',
+            ''
+          ),
+          ''
+        ),
+        'unknown'
+      ) AS normalized_content_format
+    FROM source_events
+  ),
+  canonical_events AS (
+    SELECT
+      event_timestamp,
+      CASE
+        WHEN normalized_content_format IN ('vod', 'video_on_demand') THEN 'video_on_demand'
+        WHEN normalized_content_format IN ('live_streaming', 'live_video', 'live_stream') THEN 'live_stream'
+        WHEN normalized_content_format IN ('aod', 'audio_on_demand') THEN 'audio_on_demand'
+        ELSE normalized_content_format
+      END AS content_format_code
+    FROM normalized_events
+  )
+  SELECT
+    MD5(content_format_code) AS content_format_key,
+    content_format_code,
+    CASE content_format_code
+      WHEN 'video_on_demand' THEN 'Video On Demand'
+      WHEN 'audio_on_demand' THEN 'Audio On Demand'
+      WHEN 'live_stream' THEN 'Live Stream'
+      WHEN 'unknown' THEN 'Unknown'
+      ELSE INITCAP(REPLACE(content_format_code, '_', ' '))
+    END AS content_format_name,
+    MIN(event_timestamp) AS first_seen_at,
+    MAX(event_timestamp) AS last_seen_at,
+    COUNT(*) AS observed_event_count
+  FROM canonical_events
+  GROUP BY
+    content_format_code;
+
+Calculation Notes: |
+  1️⃣ Resolve Content Format using governed content taxonomy and effective version at event timestamp.  
+  2️⃣ Canonical values include: Video On Demand, Live Video, Linear Video, Audio On Demand, Live Audio, Text, Image Gallery, Interactive, Mixed Media, Other, Unknown.  
+  3️⃣ Content types (e.g., movie, series episode) must not substitute for format; duration alone is insufficient for classification.  
+  4️⃣ Use delivered asset/rendition for playback events; use displayed catalog item format for impressions and selections.  
+  5️⃣ Retain format delivered/displayed at each event for titles available in multiple formats.  
+  6️⃣ Map recognized source labels through version-controlled crosswalk; assign Other to unmapped labels and Unknown for missing identifiers.  
+  7️⃣ Exclude test, employee, synthetic-monitoring, duplicate, bot, and malformed events under standard analytics governance rules.
+
+Business Use Case: |
+  The Chief Product Officer reviews discovery-to-consumption conversion, completion, subscription conversion, advertising yield, repeat engagement, churn, and customer lifetime value by content format. If live video attracts new customers but produces lower repeat usage than video on demand, Product can change onboarding recommendations, Marketing can revise campaign destinations, Programming can rebalance promotional inventory, and Revenue Management can adjust ad loads or entitlement offers for the affected formats.
+
+
+Source Data: Content Management System and Media Asset Management catalog stitched with Digital Analytics (GA4 and Adobe Analytics), streaming playback telemetry, search and recommendation events, CRM customer identifiers, advertising platforms, and subscription billing systems
+
+Report Attributes: |
+  ["Content Type","Content Title","Content Genre","Content Series","Content Duration Band","Content Access Model","Playback Type","Distribution Channel","Recommendation Placement","Acquisition Channel","Customer Lifecycle Stage","Subscription Plan","Platform","Device Type","Country","Reporting Date"]
+
+Dashboard Usage: [Executive Customer Journey Performance, Content Engagement and Completion, Discovery-to-Consumption Conversion, Subscriber Acquisition and Trial Conversion, Retention and Churn by Content, Content Monetization and Advertising Yield, Customer Lifetime Value by Content Behavior, Cross-Platform Content Performance, Content Taxonomy Data Quality]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Content ID, Asset ID, Content Title, Content Type, Content Genre, Content Series, Content Duration Band, Content Access Model, Playback Type, Distribution Channel, Platform, Device Type, Recommendation Placement, Acquisition Channel, Customer Lifecycle Stage, Subscription Plan, Geography]
+
+Derived Dimensions: [Content Medium, Content Delivery Mode, Live vs On-Demand Format, Playable vs Non-Playable Format, Content Interactivity Class, Content Format Group]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T21:30:44.881875+00:00
+
+Last Modified By: devyendarm
+
+
