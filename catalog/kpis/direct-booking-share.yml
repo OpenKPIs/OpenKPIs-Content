@@ -1,0 +1,263 @@
+# KPI: Direct Booking Share
+# Generated: 2026-09-03T12:30:25.969Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Direct Booking Share
+Formula: (Distinct Eligible Reservations Created Through Direct Channels / Distinct Eligible Reservations Created Through Governed Direct and Indirect Channels) × 100
+
+Description: |
+  Measures the percentage of eligible reservations created during the reporting period through governed brand-owned or brand-controlled direct channels. It is based on distinct reservation counts and original booking-channel attribution, not revenue, room nights, booking conversion, or completed stays.
+
+Category: Acquisition
+
+Tags: [kpi]
+
+Industry: [Other]
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Global
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH normalized_reservations AS (
+    SELECT
+      CASE
+        WHEN NULLIF(TRIM(CAST(enterprise_reservation_id AS STRING)), '') IS NOT NULL
+          THEN CONCAT('E:', TRIM(CAST(enterprise_reservation_id AS STRING)))
+        WHEN NULLIF(TRIM(CAST(source_system AS STRING)), '') IS NOT NULL
+          AND NULLIF(TRIM(CAST(source_reservation_id AS STRING)), '') IS NOT NULL
+          THEN CONCAT(
+            'S:',
+            UPPER(TRIM(CAST(source_system AS STRING))),
+            ':',
+            TRIM(CAST(source_reservation_id AS STRING))
+          )
+      END AS reservation_key,
+      CAST(booking_date AS DATE) AS booking_date,
+      NULLIF(UPPER(TRIM(CAST(booking_channel_code AS STRING))), '') AS booking_channel_code,
+      NULLIF(UPPER(TRIM(CAST(reservation_status AS STRING))), '') AS reservation_status,
+      COALESCE(is_test_booking, FALSE) AS is_test_booking,
+      updated_at
+    FROM `your-project.enterprise_dw.fact_reservation`
+  ),
+  ranked_reservations AS (
+    SELECT
+      normalized_reservations.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY reservation_key
+        ORDER BY
+          updated_at DESC NULLS LAST,
+          booking_date DESC NULLS LAST,
+          reservation_status DESC NULLS LAST,
+          booking_channel_code DESC NULLS LAST
+      ) AS record_rank
+    FROM normalized_reservations
+    WHERE reservation_key IS NOT NULL
+  ),
+  channel_map AS (
+    SELECT
+      UPPER(TRIM(CAST(booking_channel_code AS STRING))) AS booking_channel_code,
+      LOGICAL_OR(
+        COALESCE(
+          UPPER(TRIM(channel_group)) = 'DIRECT'
+          OR UPPER(TRIM(channel_type)) IN (
+            'BRAND_WEBSITE',
+            'MOBILE_APP',
+            'CALL_CENTER',
+            'PROPERTY_DIRECT',
+            'WALK_IN'
+          ),
+          FALSE
+        )
+      ) AS is_direct_channel
+    FROM `your-project.enterprise_dw.dim_booking_channel`
+    WHERE COALESCE(is_current, FALSE) = TRUE
+      AND NULLIF(TRIM(CAST(booking_channel_code AS STRING)), '') IS NOT NULL
+    GROUP BY booking_channel_code
+  ),
+  eligible_bookings AS (
+    SELECT
+      r.reservation_key,
+      r.booking_date,
+      COALESCE(c.is_direct_channel, FALSE) AS is_direct_booking
+    FROM ranked_reservations AS r
+    LEFT JOIN channel_map AS c
+      ON r.booking_channel_code = c.booking_channel_code
+    WHERE r.record_rank = 1
+      AND r.booking_date IS NOT NULL
+      AND r.is_test_booking = FALSE
+      AND r.reservation_status IN (
+        'BOOKED',
+        'CONFIRMED',
+        'MODIFIED',
+        'IN_HOUSE',
+        'CHECKED_IN',
+        'CHECKED_OUT',
+        'COMPLETED'
+      )
+  )
+  SELECT
+    DATE_TRUNC(booking_date, MONTH) AS booking_month,
+    COUNTIF(is_direct_booking) AS direct_booking_count,
+    COUNT(*) AS total_booking_count,
+    SAFE_DIVIDE(COUNTIF(is_direct_booking), COUNT(*)) AS direct_booking_share,
+    ROUND(
+      100 * SAFE_DIVIDE(COUNTIF(is_direct_booking), COUNT(*)),
+      2
+    ) AS direct_booking_share_pct
+  FROM eligible_bookings
+  GROUP BY booking_month
+  ORDER BY booking_month;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH normalized_reservations AS (
+    SELECT
+      CASE
+        WHEN NULLIF(TRIM(CAST(enterprise_reservation_id AS VARCHAR)), '') IS NOT NULL
+          THEN CONCAT('E:', TRIM(CAST(enterprise_reservation_id AS VARCHAR)))
+        WHEN NULLIF(TRIM(CAST(source_system AS VARCHAR)), '') IS NOT NULL
+          AND NULLIF(TRIM(CAST(source_reservation_id AS VARCHAR)), '') IS NOT NULL
+          THEN CONCAT(
+            'S:',
+            UPPER(TRIM(CAST(source_system AS VARCHAR))),
+            ':',
+            TRIM(CAST(source_reservation_id AS VARCHAR))
+          )
+      END AS reservation_key,
+      CAST(booking_date AS DATE) AS booking_date,
+      NULLIF(UPPER(TRIM(CAST(booking_channel_code AS VARCHAR))), '') AS booking_channel_code,
+      NULLIF(UPPER(TRIM(CAST(reservation_status AS VARCHAR))), '') AS reservation_status,
+      COALESCE(is_test_booking, FALSE) AS is_test_booking,
+      updated_at
+    FROM enterprise_reservation_dataset
+  ),
+  ranked_reservations AS (
+    SELECT
+      normalized_reservations.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY reservation_key
+        ORDER BY
+          updated_at DESC NULLS LAST,
+          booking_date DESC NULLS LAST,
+          reservation_status DESC NULLS LAST,
+          booking_channel_code DESC NULLS LAST
+      ) AS record_rank
+    FROM normalized_reservations
+    WHERE reservation_key IS NOT NULL
+  ),
+  channel_map AS (
+    SELECT
+      UPPER(TRIM(CAST(booking_channel_code AS VARCHAR))) AS booking_channel_code,
+      MAX(
+        CASE
+          WHEN UPPER(TRIM(channel_group)) = 'DIRECT'
+            OR UPPER(TRIM(channel_type)) IN (
+              'BRAND_WEBSITE',
+              'MOBILE_APP',
+              'CALL_CENTER',
+              'PROPERTY_DIRECT',
+              'WALK_IN'
+            )
+          THEN 1
+          ELSE 0
+        END
+      ) AS is_direct_channel
+    FROM booking_channel_reference_dataset
+    WHERE COALESCE(is_current, FALSE) = TRUE
+      AND NULLIF(TRIM(CAST(booking_channel_code AS VARCHAR)), '') IS NOT NULL
+    GROUP BY UPPER(TRIM(CAST(booking_channel_code AS VARCHAR)))
+  ),
+  eligible_bookings AS (
+    SELECT
+      r.reservation_key,
+      r.booking_date,
+      COALESCE(c.is_direct_channel, 0) AS is_direct_booking
+    FROM ranked_reservations AS r
+    LEFT JOIN channel_map AS c
+      ON r.booking_channel_code = c.booking_channel_code
+    WHERE r.record_rank = 1
+      AND r.booking_date IS NOT NULL
+      AND r.is_test_booking = FALSE
+      AND r.reservation_status IN (
+        'BOOKED',
+        'CONFIRMED',
+        'MODIFIED',
+        'IN_HOUSE',
+        'CHECKED_IN',
+        'CHECKED_OUT',
+        'COMPLETED'
+      )
+  ),
+  monthly_bookings AS (
+    SELECT
+      CAST(DATE_TRUNC('month', booking_date) AS DATE) AS booking_month,
+      SUM(CASE WHEN is_direct_booking = 1 THEN 1 ELSE 0 END) AS direct_booking_count,
+      COUNT(*) AS total_booking_count
+    FROM eligible_bookings
+    GROUP BY CAST(DATE_TRUNC('month', booking_date) AS DATE)
+  )
+  SELECT
+    booking_month,
+    direct_booking_count,
+    total_booking_count,
+    CAST(direct_booking_count AS DECIMAL(38,6))
+      / NULLIF(total_booking_count, 0) AS direct_booking_share,
+    ROUND(
+      100.0 * CAST(direct_booking_count AS DECIMAL(38,6))
+        / NULLIF(total_booking_count, 0),
+      2
+    ) AS direct_booking_share_pct
+  FROM monthly_bookings
+  ORDER BY booking_month;
+
+Calculation Notes: |
+  Count each eligible reservation identifier once using its original creation timestamp and original booking channel. Use the booked property's local calendar date for period assignment. Include sellable guest-accommodation reservations from active properties whose original channel maps to exactly one governed direct or indirect group. Exclude tests, training records, duplicates, complimentary or house-use stays, owner stays, inventory blocks, waitlist inquiries, quotes, abandoned attempts, non-accommodation reservations, and unresolved or unmapped channels. Retain an otherwise eligible reservation in its original booking-date cohort if it is later cancelled or becomes a no-show; publish cancellation-adjusted results separately using a defined status-as-of date. Modifications do not create another booking or change channel attribution, while a genuinely new reservation identifier counts separately unless identified as a technical reissue or duplicate replacement. Return null rather than zero when no eligible reservations exist in a reporting slice.
+
+Business Use Case: |
+  Commercial Distribution reviews the KPI by property, brand, market, and channel each month to identify excessive reliance on intermediaries. When performance falls below target, the team can shift campaign investment to owned channels, revise direct-booking offers, improve call-center or booking-engine performance, and address property-level channel-mapping or distribution issues.
+
+
+Source Data: Central Reservation System, Property Management System, Internet Booking Engine, Mobile Booking Platform, Call Center Reservation Platform, Channel Manager, and Enterprise Data Warehouse
+
+Report Attributes: |
+  ["Booking Creation Date","Property","Brand","Region","Market","Original Booking Channel","Channel Group","Source System"]
+
+Dashboard Usage: [Executive Commercial Performance Dashboard, Distribution Channel Mix Dashboard, Property Channel Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Direct Booking Revenue Share, OTA Booking Share, Direct Booking Conversion Rate, Distribution Cost per Booking, Net Direct Booking Share]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-03T12:30:25.686475+00:00
+
+Last Modified By: devyendarm
+
+
