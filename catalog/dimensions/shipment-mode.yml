@@ -1,0 +1,119 @@
+# Dimension: Shipment Mode
+# Generated: 2026-09-09T19:30:24.264Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Shipment Mode
+
+Description: |
+  Shipment Mode classifies the normalized shipping service selected or confirmed for a digital commerce event, such as standard, expedited, same-day, pickup, or digital delivery. For digital-only analysis, it represents the customer-facing shipping option captured during checkout or purchase rather than the carrier's physical transportation method.
+
+Category: Efficiency
+
+Tags: [dimension]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  shipping_tier
+
+Adobe Event: |
+  add_shipping_info
+
+W3 Data Layer: |
+  {"digitalData":{"cart":{"attributes":{"shippingMethod":"standard"}},"event":[{"eventInfo":{"eventName":"add_shipping_info"},"attributes":{"shipmentMode":"standard"}}]}}
+
+GA4 Data Layer: |
+  {"event":"add_shipping_info","ecommerce":{"shipping_tier":"standard"}}
+
+Adobe Client Data Layer: |
+  {"data":{"commerce":{"order":{"shippingMethod":"standard"}}},"event":"add_shipping_info"}
+
+XDM Mapping: |
+  {"commerce":{"order":{"shippingMethod":"standard"}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH shipment_modes AS (
+    SELECT
+      TRIM(ep.value.string_value) AS shipmentMode
+    FROM `your-project.analytics_123456789.events_*` AS events
+    CROSS JOIN UNNEST(events.event_params) AS ep
+    WHERE events.event_name = 'add_shipping_info'
+      AND ep.key = 'shipping_tier'
+  )
+  SELECT DISTINCT
+    shipmentMode
+  FROM shipment_modes
+  WHERE shipmentMode IS NOT NULL
+    AND shipmentMode != ''
+  ORDER BY shipmentMode;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH shipment_modes AS (
+    SELECT
+      TRIM(commerce.order.shippingMethod) AS shipmentMode
+    FROM aep_analytics_dataset
+    WHERE eventType = 'add_shipping_info'
+  )
+  SELECT DISTINCT
+    shipmentMode
+  FROM shipment_modes
+  WHERE shipmentMode IS NOT NULL
+    AND shipmentMode != ''
+  ORDER BY shipmentMode;
+
+Calculation Notes: |
+  1️⃣ Capture the shipping option selected on the add-shipping-information or purchase event.
+  2️⃣ Normalize source values to a governed vocabulary such as Standard, Expedited, Same-Day, Pickup, Digital, Mixed, and Unknown.
+  3️⃣ Use the option confirmed at purchase for order-level reporting; do not overwrite historical events with later selections.
+  4️⃣ Assign Mixed when one order contains multiple shipment modes and the implementation supports only one event-level string.
+  5️⃣ Preserve Unknown for missing or unmapped values rather than converting them to Standard.
+  6️⃣ Exclude canceled or test orders only when analyzing completed-order fulfillment; retain them for checkout behavior analysis.
+
+Business Use Case: |
+  Commerce and fulfillment leaders compare checkout conversion, abandonment, and order volume by shipment mode to determine whether expedited, same-day, or pickup options should be repriced, promoted, expanded, or removed.
+
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  ["Event Date","Device Category","Traffic Channel","Shipping Destination","Product Category","Order Status"]
+
+Dashboard Usage: [Digital Checkout Performance, Shipping Option Performance, E-commerce Conversion Overview, Fulfillment Experience]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Shipping Carrier, Shipping Destination, Shipping Cost, Order Status, Fulfillment Method, Product Category]
+
+Derived Dimensions: [Shipment Speed Category, Shipment Mode Group]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T19:30:23.599828+00:00
+
+Last Modified By: devyendarm
+
+
