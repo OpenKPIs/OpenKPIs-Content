@@ -1,0 +1,434 @@
+# Metric: Property Viewing Completion Count
+# Generated: 2026-09-07T13:30:25.506Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Property Viewing Completion Count
+Formula: COUNT(DISTINCT viewing_id) FILTER (WHERE event_name = 'property_viewing_completed' AND completion_timestamp >= window_start AND completion_timestamp < window_end AND viewing_id IS NOT NULL AND is_test = false AND is_cancelled = false)
+
+Description: |
+  Counts distinct property viewing appointments that reached a verified completed status during the reporting window across in-person, agent-led virtual, and self-guided channels. Each viewing is counted once by its canonical viewing ID at the completion timestamp, regardless of duplicate completion signals or the number of attendees.
+
+Category: Conversion
+
+Tags: [metric]
+
+Industry: Real Estate Tech
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Measure Type: count
+
+Aggregation Window: Time based - Hourly/Daily/Monthly/Yearly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH latest_record AS (
+    SELECT * EXCEPT (record_rank)
+    FROM (
+      SELECT
+        source.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY viewing_id
+          ORDER BY record_updated_at DESC, source_priority DESC
+        ) AS record_rank
+      FROM `your-project.omnichannel.viewing_fulfillment_records` AS source
+      WHERE _PARTITIONDATE BETWEEN @start_date AND @end_date
+        AND viewing_id IS NOT NULL
+    )
+    WHERE record_rank = 1
+  ),
+  completion_evidence AS (
+    SELECT
+      latest_record.*,
+      COALESCE(
+        platform_completed_at,
+        crm_completed_at,
+        agent_check_out_at,
+        self_guided_exit_at,
+        virtual_tour_ended_at,
+        status_updated_at,
+        scheduled_end_at
+      ) AS completion_timestamp,
+      CASE
+        WHEN agent_check_in_at IS NOT NULL AND agent_check_out_at IS NOT NULL
+          THEN 'agent_confirmation'
+        WHEN self_guided_entry_at IS NOT NULL AND self_guided_exit_at IS NOT NULL
+          THEN 'self_guided_access'
+        WHEN virtual_tour_started_at IS NOT NULL AND virtual_tour_ended_at IS NOT NULL
+          THEN 'virtual_tour_provider'
+        WHEN platform_completed_at IS NOT NULL
+          THEN 'property_viewing_platform'
+        WHEN crm_completed_at IS NOT NULL
+             OR LOWER(TRIM(COALESCE(appointment_status, ''))) IN ('completed', 'fulfilled')
+          THEN 'crm'
+        ELSE NULL
+      END AS derived_completion_source,
+      CASE
+        WHEN platform_completed_at IS NOT NULL THEN TRUE
+        WHEN crm_completed_at IS NOT NULL THEN TRUE
+        WHEN LOWER(TRIM(COALESCE(appointment_status, ''))) IN ('completed', 'fulfilled') THEN TRUE
+        WHEN agent_check_in_at IS NOT NULL AND agent_check_out_at IS NOT NULL THEN TRUE
+        WHEN self_guided_entry_at IS NOT NULL AND self_guided_exit_at IS NOT NULL THEN TRUE
+        WHEN virtual_tour_started_at IS NOT NULL AND virtual_tour_ended_at IS NOT NULL THEN TRUE
+        ELSE FALSE
+      END AS is_completed
+    FROM latest_record
+  ),
+  completed_viewings AS (
+    SELECT *
+    FROM completion_evidence
+    WHERE is_completed
+      AND completion_timestamp IS NOT NULL
+      AND DATE(completion_timestamp) BETWEEN @start_date AND @end_date
+  ),
+  attributed AS (
+    SELECT
+      DATE(completion_timestamp) AS metric_date,
+      DATE(appointment_created_at) AS appointment_created_date,
+      DATE(scheduled_start_at) AS scheduled_start_date,
+      EXTRACT(HOUR FROM scheduled_start_at) AS scheduled_hour,
+      EXTRACT(YEAR FROM completion_timestamp) AS completion_year,
+      EXTRACT(MONTH FROM completion_timestamp) AS completion_month,
+      EXTRACT(ISOWEEK FROM completion_timestamp) AS completion_week,
+      EXTRACT(DAYOFWEEK FROM completion_timestamp) AS completion_day_of_week,
+      COALESCE(CAST(market_id AS STRING), 'unknown') AS market_id,
+      COALESCE(market_name, 'unknown') AS market_name,
+      COALESCE(region_name, 'unknown') AS region_name,
+      COALESCE(country_code, 'unknown') AS country_code,
+      COALESCE(state_region, 'unknown') AS state_region,
+      COALESCE(city, 'unknown') AS city,
+      COALESCE(postal_code, 'unknown') AS postal_code,
+      COALESCE(CAST(property_id AS STRING), 'unknown') AS property_id,
+      COALESCE(property_type, 'unknown') AS property_type,
+      COALESCE(CAST(listing_id AS STRING), 'unknown') AS listing_id,
+      COALESCE(CAST(community_id AS STRING), 'unknown') AS community_id,
+      COALESCE(CAST(office_id AS STRING), 'unknown') AS office_id,
+      COALESCE(CAST(agent_id AS STRING), 'unknown') AS agent_id,
+      COALESCE(CAST(agent_team_id AS STRING), 'unknown') AS agent_team_id,
+      COALESCE(CAST(customer_id AS STRING), 'unknown') AS customer_id,
+      COALESCE(CAST(lead_id AS STRING), 'unknown') AS lead_id,
+      COALESCE(CAST(account_id AS STRING), 'unknown') AS account_id,
+      COALESCE(appointment_channel, 'unknown') AS appointment_channel,
+      COALESCE(booking_source, 'unknown') AS booking_source,
+      COALESCE(viewing_mode, 'unknown') AS viewing_mode,
+      COALESCE(device_category, 'unknown') AS device_category,
+      COALESCE(platform_name, 'unknown') AS platform_name,
+      COALESCE(CAST(campaign_id AS STRING), 'unknown') AS campaign_id,
+      COALESCE(campaign_source, 'unknown') AS campaign_source,
+      COALESCE(campaign_medium, 'unknown') AS campaign_medium,
+      COALESCE(campaign_name, 'unknown') AS campaign_name,
+      COALESCE(referrer_domain, 'unknown') AS referrer_domain,
+      COALESCE(is_new_customer, FALSE) AS is_new_customer,
+      COALESCE(customer_segment, 'unknown') AS customer_segment,
+      COALESCE(lead_stage, 'unknown') AS lead_stage,
+      COALESCE(appointment_status, 'unknown') AS appointment_status,
+      derived_completion_source AS completion_source,
+      COALESCE(completion_method, viewing_mode, 'unknown') AS completion_method,
+      'completed' AS completion_status,
+      COALESCE(reschedule_flag, FALSE) AS reschedule_flag,
+      COALESCE(cancellation_flag, FALSE) AS cancellation_flag,
+      COALESCE(no_show_flag, FALSE) AS no_show_flag,
+      CASE
+        WHEN viewing_duration_seconds IS NULL THEN 'unknown'
+        WHEN viewing_duration_seconds < 300 THEN 'under_5_minutes'
+        WHEN viewing_duration_seconds < 900 THEN '5_to_14_minutes'
+        WHEN viewing_duration_seconds < 1800 THEN '15_to_29_minutes'
+        WHEN viewing_duration_seconds < 3600 THEN '30_to_59_minutes'
+        ELSE '60_minutes_or_more'
+      END AS duration_bucket,
+      COALESCE(access_method, 'unknown') AS access_method,
+      COALESCE(identity_stitch_status, 'unknown') AS identity_stitch_status,
+      COALESCE(consent_status, 'unknown') AS consent_status,
+      viewing_id
+    FROM completed_viewings
+  )
+  SELECT
+    metric_date,
+    appointment_created_date,
+    scheduled_start_date,
+    scheduled_hour,
+    completion_year,
+    completion_month,
+    completion_week,
+    completion_day_of_week,
+    market_id,
+    market_name,
+    region_name,
+    country_code,
+    state_region,
+    city,
+    postal_code,
+    property_id,
+    property_type,
+    listing_id,
+    community_id,
+    office_id,
+    agent_id,
+    agent_team_id,
+    customer_id,
+    lead_id,
+    account_id,
+    appointment_channel,
+    booking_source,
+    viewing_mode,
+    device_category,
+    platform_name,
+    campaign_id,
+    campaign_source,
+    campaign_medium,
+    campaign_name,
+    referrer_domain,
+    is_new_customer,
+    customer_segment,
+    lead_stage,
+    appointment_status,
+    completion_source,
+    completion_method,
+    completion_status,
+    reschedule_flag,
+    cancellation_flag,
+    no_show_flag,
+    duration_bucket,
+    access_method,
+    identity_stitch_status,
+    consent_status,
+    COUNT(DISTINCT viewing_id) AS property_viewing_completion_count
+  FROM attributed
+  GROUP BY
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+    31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+    41, 42, 43, 44, 45, 46, 47, 48, 49;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH ranked_records AS (
+    SELECT
+      source.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY viewing_id
+        ORDER BY record_updated_at DESC, source_priority DESC
+      ) AS record_rank
+    FROM viewing_fulfillment_records AS source
+    WHERE viewing_id IS NOT NULL
+  ),
+  latest_record AS (
+    SELECT *
+    FROM ranked_records
+    WHERE record_rank = 1
+  ),
+  completion_evidence AS (
+    SELECT
+      latest_record.*,
+      COALESCE(
+        platform_completed_at,
+        crm_completed_at,
+        agent_check_out_at,
+        self_guided_exit_at,
+        virtual_tour_ended_at,
+        status_updated_at,
+        scheduled_end_at
+      ) AS completion_timestamp,
+      CASE
+        WHEN agent_check_in_at IS NOT NULL AND agent_check_out_at IS NOT NULL
+          THEN 'agent_confirmation'
+        WHEN self_guided_entry_at IS NOT NULL AND self_guided_exit_at IS NOT NULL
+          THEN 'self_guided_access'
+        WHEN virtual_tour_started_at IS NOT NULL AND virtual_tour_ended_at IS NOT NULL
+          THEN 'virtual_tour_provider'
+        WHEN platform_completed_at IS NOT NULL
+          THEN 'property_viewing_platform'
+        WHEN crm_completed_at IS NOT NULL
+             OR LOWER(TRIM(COALESCE(appointment_status, ''))) IN ('completed', 'fulfilled')
+          THEN 'crm'
+        ELSE NULL
+      END AS derived_completion_source,
+      CASE
+        WHEN platform_completed_at IS NOT NULL THEN TRUE
+        WHEN crm_completed_at IS NOT NULL THEN TRUE
+        WHEN LOWER(TRIM(COALESCE(appointment_status, ''))) IN ('completed', 'fulfilled') THEN TRUE
+        WHEN agent_check_in_at IS NOT NULL AND agent_check_out_at IS NOT NULL THEN TRUE
+        WHEN self_guided_entry_at IS NOT NULL AND self_guided_exit_at IS NOT NULL THEN TRUE
+        WHEN virtual_tour_started_at IS NOT NULL AND virtual_tour_ended_at IS NOT NULL THEN TRUE
+        ELSE FALSE
+      END AS is_completed
+    FROM latest_record
+  ),
+  completed_viewings AS (
+    SELECT *
+    FROM completion_evidence
+    WHERE is_completed = TRUE
+      AND completion_timestamp IS NOT NULL
+      AND CAST(completion_timestamp AS DATE)
+          BETWEEN CAST('${START_DATE}' AS DATE) AND CAST('${END_DATE}' AS DATE)
+  ),
+  attributed AS (
+    SELECT
+      CAST(completion_timestamp AS DATE) AS metric_date,
+      CAST(appointment_created_at AS DATE) AS appointment_created_date,
+      CAST(scheduled_start_at AS DATE) AS scheduled_start_date,
+      EXTRACT(HOUR FROM scheduled_start_at) AS scheduled_hour,
+      EXTRACT(YEAR FROM completion_timestamp) AS completion_year,
+      EXTRACT(MONTH FROM completion_timestamp) AS completion_month,
+      EXTRACT(WEEK FROM completion_timestamp) AS completion_week,
+      EXTRACT(DOW FROM completion_timestamp) AS completion_day_of_week,
+      COALESCE(CAST(market_id AS VARCHAR), 'unknown') AS market_id,
+      COALESCE(market_name, 'unknown') AS market_name,
+      COALESCE(region_name, 'unknown') AS region_name,
+      COALESCE(country_code, 'unknown') AS country_code,
+      COALESCE(state_region, 'unknown') AS state_region,
+      COALESCE(city, 'unknown') AS city,
+      COALESCE(postal_code, 'unknown') AS postal_code,
+      COALESCE(CAST(property_id AS VARCHAR), 'unknown') AS property_id,
+      COALESCE(property_type, 'unknown') AS property_type,
+      COALESCE(CAST(listing_id AS VARCHAR), 'unknown') AS listing_id,
+      COALESCE(CAST(community_id AS VARCHAR), 'unknown') AS community_id,
+      COALESCE(CAST(office_id AS VARCHAR), 'unknown') AS office_id,
+      COALESCE(CAST(agent_id AS VARCHAR), 'unknown') AS agent_id,
+      COALESCE(CAST(agent_team_id AS VARCHAR), 'unknown') AS agent_team_id,
+      COALESCE(CAST(customer_id AS VARCHAR), 'unknown') AS customer_id,
+      COALESCE(CAST(lead_id AS VARCHAR), 'unknown') AS lead_id,
+      COALESCE(CAST(account_id AS VARCHAR), 'unknown') AS account_id,
+      COALESCE(appointment_channel, 'unknown') AS appointment_channel,
+      COALESCE(booking_source, 'unknown') AS booking_source,
+      COALESCE(viewing_mode, 'unknown') AS viewing_mode,
+      COALESCE(device_category, 'unknown') AS device_category,
+      COALESCE(platform_name, 'unknown') AS platform_name,
+      COALESCE(CAST(campaign_id AS VARCHAR), 'unknown') AS campaign_id,
+      COALESCE(campaign_source, 'unknown') AS campaign_source,
+      COALESCE(campaign_medium, 'unknown') AS campaign_medium,
+      COALESCE(campaign_name, 'unknown') AS campaign_name,
+      COALESCE(referrer_domain, 'unknown') AS referrer_domain,
+      COALESCE(is_new_customer, FALSE) AS is_new_customer,
+      COALESCE(customer_segment, 'unknown') AS customer_segment,
+      COALESCE(lead_stage, 'unknown') AS lead_stage,
+      COALESCE(appointment_status, 'unknown') AS appointment_status,
+      derived_completion_source AS completion_source,
+      COALESCE(completion_method, viewing_mode, 'unknown') AS completion_method,
+      'completed' AS completion_status,
+      COALESCE(reschedule_flag, FALSE) AS reschedule_flag,
+      COALESCE(cancellation_flag, FALSE) AS cancellation_flag,
+      COALESCE(no_show_flag, FALSE) AS no_show_flag,
+      CASE
+        WHEN viewing_duration_seconds IS NULL THEN 'unknown'
+        WHEN viewing_duration_seconds < 300 THEN 'under_5_minutes'
+        WHEN viewing_duration_seconds < 900 THEN '5_to_14_minutes'
+        WHEN viewing_duration_seconds < 1800 THEN '15_to_29_minutes'
+        WHEN viewing_duration_seconds < 3600 THEN '30_to_59_minutes'
+        ELSE '60_minutes_or_more'
+      END AS duration_bucket,
+      COALESCE(access_method, 'unknown') AS access_method,
+      COALESCE(identity_stitch_status, 'unknown') AS identity_stitch_status,
+      COALESCE(consent_status, 'unknown') AS consent_status,
+      viewing_id
+    FROM completed_viewings
+  )
+  SELECT
+    metric_date,
+    appointment_created_date,
+    scheduled_start_date,
+    scheduled_hour,
+    completion_year,
+    completion_month,
+    completion_week,
+    completion_day_of_week,
+    market_id,
+    market_name,
+    region_name,
+    country_code,
+    state_region,
+    city,
+    postal_code,
+    property_id,
+    property_type,
+    listing_id,
+    community_id,
+    office_id,
+    agent_id,
+    agent_team_id,
+    customer_id,
+    lead_id,
+    account_id,
+    appointment_channel,
+    booking_source,
+    viewing_mode,
+    device_category,
+    platform_name,
+    campaign_id,
+    campaign_source,
+    campaign_medium,
+    campaign_name,
+    referrer_domain,
+    is_new_customer,
+    customer_segment,
+    lead_stage,
+    appointment_status,
+    completion_source,
+    completion_method,
+    completion_status,
+    reschedule_flag,
+    cancellation_flag,
+    no_show_flag,
+    duration_bucket,
+    access_method,
+    identity_stitch_status,
+    consent_status,
+    COUNT(DISTINCT viewing_id) AS property_viewing_completion_count
+  FROM attributed
+  GROUP BY
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+    31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+    41, 42, 43, 44, 45, 46, 47, 48, 49;
+
+Calculation Notes: |
+  Use the canonical completion timestamp rather than the scheduling, start, ingestion, or update timestamp. Count one record per canonical viewing_id after cross-channel deduplication; multiple attendees, repeated status updates, webhook retries, and client/server duplicates do not increase the count. A rescheduled appointment counts only when its active appointment instance completes, while the superseded instance is excluded; a later repeat visit counts separately when it has a new viewing_id. Include completed walk-in and on-demand self-guided viewings when a canonical viewing_id and approved completion signal exist. Exclude cancellations, no-shows, abandoned starts, test records, employee demonstrations, bot activity, deleted fraudulent events, and records without a verifiable completion signal. Session timeout does not determine completion; digital session boundaries may support validation but cannot create or remove a completed viewing.
+
+Business Use Case: |
+  The Chief Product Officer and regional sales leadership compare completed viewings by property, market, booking channel, and acquisition source to identify where scheduled demand fails to become attended engagement. If a market has strong bookings but a low completion rate, teams can adjust reminder journeys, agent capacity, self-guided access reliability, scheduling availability, and follow-up messaging, then measure whether completed viewings and downstream offers increase.
+
+
+Source Data: Property Viewing Platform and CRM appointment records stitched with Web/Mobile Digital Analytics, virtual-tour provider events, self-guided access events, and agent check-in or check-out confirmations
+
+Report Attributes: |
+  ["Completion Date","Completion Hour","Property ID","Property Type","Listing ID","Listing Market","City","Region","Viewing Channel","Booking Channel","Acquisition Source","Acquisition Campaign","Customer Type","New versus Returning Customer","Agent or Brokerage","Office","Device Type","Days from Booking to Viewing","Completion Verification Method"]
+
+Dashboard Usage: [Property Viewing Conversion Funnel, Customer Journey Conversion Dashboard, Property Demand and Engagement Dashboard, Market and Listing Performance Dashboard, Agent and Brokerage Performance Dashboard, Acquisition-to-Viewing Dashboard, Viewing Operations and Experience Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Property Viewing Scheduled Count, Property Viewing Started Count, Property Viewing Cancellation Count, Property Viewing No-Show Count, Property Viewing Completion Rate, Average Property Viewing Duration, Offer Submission Count, Property Inquiry Count, Property Viewing Reschedule Count]
+
+Derived KPIs: [Property Viewing Completion Rate, Viewing-to-Offer Conversion Rate, Viewing-to-Application Conversion Rate, Viewing-to-Purchase Conversion Rate, Viewing-to-Lease Conversion Rate, Cost per Completed Property Viewing, Completed Viewings per Active Property Seeker]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-07T13:30:24.639147+00:00
+
+Last Modified By: devyendarm
+
+
