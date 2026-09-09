@@ -1,0 +1,432 @@
+# Dimension: Content Acquisition Type
+# Generated: 2026-09-09T22:30:44.548Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Content Acquisition Type
+
+Description: |
+  Classifies each content item by the commercial or editorial method through which the media company obtained the right to distribute it, such as commissioned original, licensed exclusive, licensed non-exclusive, co-production, syndicated, partner-supplied, user-generated, or public-domain content. It enables comparison of discovery, customer acquisition, engagement, conversion, retention, billing outcomes, and lifetime value across content sourcing models.
+
+Category: Acquisition
+
+Tags: [dimension]
+
+Industry: Media & Streaming
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  view_item
+
+W3 Data Layer: |
+  {"event":[{"eventInfo":{"eventName":"view_item","eventAction":"view_item"},"attributes":{"contentAcquisitionType":"licensed_exclusive"}}],"product":[{"attributes":{"contentAcquisitionType":"licensed_exclusive"},"productInfo":{"productID":"{{content_id}}","productName":"{{content_title}}"}}]}
+
+GA4 Data Layer: |
+  {"event":"view_item","ecommerce":{"items":[{"item_id":"{{content_id}}","item_name":"{{content_title}}","content_acquisition_type":"licensed_exclusive"}]}}
+
+Adobe Client Data Layer: |
+  {"data":{"content":{"id":"{{content_id}}","title":"{{content_title}}","acquisitionType":"licensed_exclusive"}},"event":"view_item"}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar49":"licensed_exclusive"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH cms_content AS (
+    SELECT
+      CAST(content_id AS STRING) AS content_id,
+      content_title,
+      acquisition_type AS cms_acquisition_type
+    FROM `your-project.content_management.content_metadata`
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY CAST(content_id AS STRING)
+      ORDER BY updated_at DESC
+    ) = 1
+  ),
+  rights_contracts AS (
+    SELECT
+      CAST(content_id AS STRING) AS content_id,
+      contract_id,
+      acquisition_type AS rights_acquisition_type,
+      acquisition_model,
+      exclusivity_type,
+      ownership_type,
+      production_funding_type,
+      rights_start_date,
+      rights_end_date,
+      updated_at
+    FROM `your-project.content_rights.contract_content_rights`
+    WHERE COALESCE(contract_status, 'active') NOT IN ('cancelled', 'void', 'deleted')
+  ),
+  ga4_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS event_timestamp,
+      user_pseudo_id,
+      event_bundle_sequence_id,
+      event_name,
+      COALESCE(
+        selected_item.item_id,
+        (
+          SELECT ep.value.string_value
+          FROM UNNEST(event_params) AS ep
+          WHERE ep.key IN ('content_id', 'item_id')
+          ORDER BY IF(ep.key = 'content_id', 1, 2)
+          LIMIT 1
+        )
+      ) AS content_id,
+      COALESCE(
+        selected_item.item_name,
+        (
+          SELECT ep.value.string_value
+          FROM UNNEST(event_params) AS ep
+          WHERE ep.key IN ('content_title', 'item_name')
+          ORDER BY IF(ep.key = 'content_title', 1, 2)
+          LIMIT 1
+        )
+      ) AS content_title,
+      selected_item.item_acquisition_type,
+      (
+        SELECT ep.value.string_value
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key IN (
+          'content_acquisition_type',
+          'contentAcquisitionType',
+          'acquisition_type'
+        )
+        ORDER BY CASE ep.key
+          WHEN 'content_acquisition_type' THEN 1
+          WHEN 'contentAcquisitionType' THEN 2
+          ELSE 3
+        END
+        LIMIT 1
+      ) AS event_acquisition_type
+    FROM (
+      SELECT
+        e.*,
+        (
+          SELECT AS STRUCT
+            CAST(i.item_id AS STRING) AS item_id,
+            i.item_name,
+            (
+              SELECT ip.value.string_value
+              FROM UNNEST(i.item_params) AS ip
+              WHERE ip.key IN (
+                'content_acquisition_type',
+                'contentAcquisitionType',
+                'acquisition_type'
+              )
+              ORDER BY CASE ip.key
+                WHEN 'content_acquisition_type' THEN 1
+                WHEN 'contentAcquisitionType' THEN 2
+                ELSE 3
+              END
+              LIMIT 1
+            ) AS item_acquisition_type
+          FROM UNNEST(e.items) AS i WITH OFFSET item_offset
+          ORDER BY item_offset
+          LIMIT 1
+        ) AS selected_item
+      FROM `your-project.analytics_123456789.events_*` AS e
+      WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                              AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+        AND event_name = 'view_item'
+    )
+  ),
+  enriched AS (
+    SELECT
+      e.event_date,
+      e.event_timestamp,
+      e.user_pseudo_id,
+      e.event_bundle_sequence_id,
+      e.event_name,
+      e.content_id,
+      COALESCE(e.content_title, c.content_title) AS content_title,
+      r.contract_id,
+      COALESCE(
+        NULLIF(TRIM(e.item_acquisition_type), ''),
+        NULLIF(TRIM(e.event_acquisition_type), ''),
+        NULLIF(TRIM(r.rights_acquisition_type), ''),
+        NULLIF(TRIM(c.cms_acquisition_type), ''),
+        CASE
+          WHEN LOWER(COALESCE(r.ownership_type, '')) IN ('owned', 'original', 'in_house')
+            OR LOWER(COALESCE(r.production_funding_type, '')) IN ('fully_funded', 'commissioned')
+            THEN 'owned_original'
+          WHEN LOWER(COALESCE(r.acquisition_model, '')) IN ('license', 'licensed')
+            AND LOWER(COALESCE(r.exclusivity_type, '')) IN ('exclusive', 'window_exclusive')
+            THEN 'licensed_exclusive'
+          WHEN LOWER(COALESCE(r.acquisition_model, '')) IN ('license', 'licensed')
+            THEN 'licensed_non_exclusive'
+          WHEN LOWER(COALESCE(r.acquisition_model, '')) IN ('acquisition', 'acquired', 'purchase')
+            THEN 'acquired'
+          WHEN LOWER(COALESCE(r.ownership_type, '')) IN ('user_generated', 'ugc')
+            THEN 'user_generated'
+        END
+      ) AS raw_acquisition_type,
+      CASE
+        WHEN NULLIF(TRIM(e.item_acquisition_type), '') IS NOT NULL THEN 'ga4_item_parameter'
+        WHEN NULLIF(TRIM(e.event_acquisition_type), '') IS NOT NULL THEN 'ga4_event_parameter'
+        WHEN NULLIF(TRIM(r.rights_acquisition_type), '') IS NOT NULL THEN 'rights_contract'
+        WHEN NULLIF(TRIM(c.cms_acquisition_type), '') IS NOT NULL THEN 'cms_metadata'
+        WHEN r.content_id IS NOT NULL THEN 'derived_from_rights_contract'
+        ELSE 'unresolved'
+      END AS acquisition_type_source
+    FROM ga4_events AS e
+    LEFT JOIN cms_content AS c
+      ON e.content_id = c.content_id
+    LEFT JOIN rights_contracts AS r
+      ON e.content_id = r.content_id
+     AND e.event_date BETWEEN COALESCE(r.rights_start_date, DATE '1900-01-01')
+                          AND COALESCE(r.rights_end_date, DATE '9999-12-31')
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY e.event_date, e.event_timestamp, e.user_pseudo_id,
+                   e.event_bundle_sequence_id, e.content_id
+      ORDER BY r.updated_at DESC, r.rights_start_date DESC
+    ) = 1
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    user_pseudo_id,
+    event_bundle_sequence_id,
+    event_name,
+    content_id,
+    content_title,
+    CASE
+      WHEN raw_acquisition_type IS NULL THEN 'unknown'
+      WHEN REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), r'[^a-z0-9]+', '_')
+        IN ('owned_original', 'original', 'owned', 'in_house', 'inhouse')
+        THEN 'owned_original'
+      WHEN REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), r'[^a-z0-9]+', '_')
+        IN ('commissioned_original', 'commissioned', 'fully_funded')
+        THEN 'commissioned_original'
+      WHEN REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), r'[^a-z0-9]+', '_')
+        IN ('licensed_exclusive', 'exclusive_license', 'exclusive_licensed')
+        THEN 'licensed_exclusive'
+      WHEN REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), r'[^a-z0-9]+', '_')
+        IN ('licensed_non_exclusive', 'non_exclusive_license', 'nonexclusive_license', 'licensed')
+        THEN 'licensed_non_exclusive'
+      WHEN REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), r'[^a-z0-9]+', '_')
+        IN ('acquired', 'acquisition', 'purchased')
+        THEN 'acquired'
+      WHEN REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), r'[^a-z0-9]+', '_')
+        IN ('user_generated', 'ugc')
+        THEN 'user_generated'
+      ELSE REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), r'[^a-z0-9]+', '_')
+    END AS content_acquisition_type,
+    acquisition_type_source,
+    contract_id
+  FROM enriched
+  WHERE content_id IS NOT NULL;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH cms_content_ranked AS (
+    SELECT
+      CAST(content_id AS VARCHAR) AS content_id,
+      content_title,
+      acquisition_type AS cms_acquisition_type,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(content_id AS VARCHAR)
+        ORDER BY updated_at DESC
+      ) AS row_number
+    FROM aep_content_management_metadata
+  ),
+  cms_content AS (
+    SELECT
+      content_id,
+      content_title,
+      cms_acquisition_type
+    FROM cms_content_ranked
+    WHERE row_number = 1
+  ),
+  rights_contracts AS (
+    SELECT
+      CAST(content_id AS VARCHAR) AS content_id,
+      contract_id,
+      acquisition_type AS rights_acquisition_type,
+      acquisition_model,
+      exclusivity_type,
+      ownership_type,
+      production_funding_type,
+      rights_start_date,
+      rights_end_date,
+      updated_at
+    FROM aep_content_rights_contracts
+    WHERE COALESCE(contract_status, 'active') NOT IN ('cancelled', 'void', 'deleted')
+  ),
+  exploded_events AS (
+    SELECT
+      timestamp AS event_timestamp,
+      _id AS experience_event_id,
+      identityMap,
+      eventType,
+      _experience.analytics.customDimensions.eVars.eVar49 AS evar49_acquisition_type,
+      EXPLODE(productListItems) AS product_item
+    FROM aep_analytics_experience_events
+    WHERE eventType = 'view_item'
+      AND timestamp >= CURRENT_TIMESTAMP - INTERVAL '30' DAY
+  ),
+  analytics_events AS (
+    SELECT
+      event_timestamp,
+      experience_event_id,
+      identityMap,
+      eventType,
+      CAST(product_item.SKU AS VARCHAR) AS content_id,
+      product_item.name AS content_title,
+      NULLIF(TRIM(evar49_acquisition_type), '') AS evar49_acquisition_type
+    FROM exploded_events
+  ),
+  enriched_ranked AS (
+    SELECT
+      e.event_timestamp,
+      e.experience_event_id,
+      e.identityMap,
+      e.eventType,
+      e.content_id,
+      COALESCE(e.content_title, c.content_title) AS content_title,
+      r.contract_id,
+      COALESCE(
+        e.evar49_acquisition_type,
+        NULLIF(TRIM(r.rights_acquisition_type), ''),
+        NULLIF(TRIM(c.cms_acquisition_type), ''),
+        CASE
+          WHEN LOWER(COALESCE(r.ownership_type, '')) IN ('owned', 'original', 'in_house')
+            OR LOWER(COALESCE(r.production_funding_type, '')) IN ('fully_funded', 'commissioned')
+            THEN 'owned_original'
+          WHEN LOWER(COALESCE(r.acquisition_model, '')) IN ('license', 'licensed')
+            AND LOWER(COALESCE(r.exclusivity_type, '')) IN ('exclusive', 'window_exclusive')
+            THEN 'licensed_exclusive'
+          WHEN LOWER(COALESCE(r.acquisition_model, '')) IN ('license', 'licensed')
+            THEN 'licensed_non_exclusive'
+          WHEN LOWER(COALESCE(r.acquisition_model, '')) IN ('acquisition', 'acquired', 'purchase')
+            THEN 'acquired'
+          WHEN LOWER(COALESCE(r.ownership_type, '')) IN ('user_generated', 'ugc')
+            THEN 'user_generated'
+        END
+      ) AS raw_acquisition_type,
+      CASE
+        WHEN e.evar49_acquisition_type IS NOT NULL THEN 'adobe_evar49'
+        WHEN NULLIF(TRIM(r.rights_acquisition_type), '') IS NOT NULL THEN 'rights_contract'
+        WHEN NULLIF(TRIM(c.cms_acquisition_type), '') IS NOT NULL THEN 'cms_metadata'
+        WHEN r.content_id IS NOT NULL THEN 'derived_from_rights_contract'
+        ELSE 'unresolved'
+      END AS acquisition_type_source,
+      ROW_NUMBER() OVER (
+        PARTITION BY e.experience_event_id, e.content_id
+        ORDER BY r.updated_at DESC, r.rights_start_date DESC
+      ) AS contract_row_number
+    FROM analytics_events e
+    LEFT JOIN cms_content c
+      ON e.content_id = c.content_id
+    LEFT JOIN rights_contracts r
+      ON e.content_id = r.content_id
+     AND CAST(e.event_timestamp AS DATE)
+         BETWEEN COALESCE(r.rights_start_date, DATE '1900-01-01')
+             AND COALESCE(r.rights_end_date, DATE '9999-12-31')
+  ),
+  enriched AS (
+    SELECT
+      event_timestamp,
+      experience_event_id,
+      identityMap,
+      eventType,
+      content_id,
+      content_title,
+      contract_id,
+      raw_acquisition_type,
+      acquisition_type_source
+    FROM enriched_ranked
+    WHERE contract_row_number = 1
+  )
+  SELECT
+    event_timestamp,
+    experience_event_id,
+    identityMap,
+    eventType AS event_name,
+    content_id,
+    content_title,
+    CASE
+      WHEN raw_acquisition_type IS NULL THEN 'unknown'
+      WHEN REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), '[^a-z0-9]+', '_')
+        IN ('owned_original', 'original', 'owned', 'in_house', 'inhouse')
+        THEN 'owned_original'
+      WHEN REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), '[^a-z0-9]+', '_')
+        IN ('commissioned_original', 'commissioned', 'fully_funded')
+        THEN 'commissioned_original'
+      WHEN REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), '[^a-z0-9]+', '_')
+        IN ('licensed_exclusive', 'exclusive_license', 'exclusive_licensed')
+        THEN 'licensed_exclusive'
+      WHEN REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), '[^a-z0-9]+', '_')
+        IN ('licensed_non_exclusive', 'non_exclusive_license', 'nonexclusive_license', 'licensed')
+        THEN 'licensed_non_exclusive'
+      WHEN REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), '[^a-z0-9]+', '_')
+        IN ('acquired', 'acquisition', 'purchased')
+        THEN 'acquired'
+      WHEN REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), '[^a-z0-9]+', '_')
+        IN ('user_generated', 'ugc')
+        THEN 'user_generated'
+      ELSE REGEXP_REPLACE(LOWER(TRIM(raw_acquisition_type)), '[^a-z0-9]+', '_')
+    END AS content_acquisition_type,
+    acquisition_type_source,
+    contract_id
+  FROM enriched
+  WHERE content_id IS NOT NULL;
+
+Calculation Notes: |
+  1️⃣ Assign standardized value based on content ID, territory, platform, and timestamp.  
+  2️⃣ Use recommended canonical values: Commissioned Original, Internally Produced, Co-production, etc.  
+  3️⃣ Resolve multiple arrangements at the asset or episode level; apply precedence order if unavailable.  
+  4️⃣ Preserve value at interaction timestamp to maintain historical accuracy despite contract changes.  
+  5️⃣ Exclude trailers, promotional clips, and test content unless they have a governed acquisition type.  
+  6️⃣ Use Unknown for valid content IDs with no effective rights record; invalid IDs must remain null.  
+  7️⃣ Retain value for each impression and event in sessions with multiple content items.
+
+Business Use Case: |
+  The Chief Content Officer and Growth team compare trial starts, paid conversions, viewing hours, retention, billing continuity, and customer lifetime value for commissioned originals versus exclusive and non-exclusive licensed titles. They use the results to rebalance commissioning and licensing investment, prioritize high-performing content in discovery experiences, and avoid renewing acquisition types that generate viewing without durable conversion or retention.
+
+
+Source Data: Content Rights Management and Contract Management stitched with Content Management System metadata, OTT/Web/Mobile/Connected TV digital analytics, CRM subscription records, and billing platform data
+
+Report Attributes: |
+  ["Content Title","Content Type","Content Genre","Content Provider","Content Brand","Content Exclusivity","Distribution Territory","Distribution Platform","Acquisition Channel","Subscription Plan","Customer Tenure Band","Customer Journey Stage","Device Type","Reporting Month"]
+
+Dashboard Usage: [Content Portfolio Performance, Original vs Licensed Content, Content Discovery and Engagement, Content-Driven Subscriber Acquisition, Content Conversion and Retention, Content Rights Investment, Subscriber Lifetime Value by Content Strategy, Content Data Quality and Rights Coverage]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Content ID, Content Title, Content Type, Content Genre, Content Provider, Content Brand, Content Ownership Type, Content Exclusivity, Distribution Rights Territory, Distribution Platform, Subscription Plan, Acquisition Channel, Customer Journey Stage]
+
+Derived Dimensions: [Owned vs Licensed Content, Content Supply Model Group, Content Rights Control Group, Original Content Indicator, Third-Party Content Indicator]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T22:30:43.60876+00:00
+
+Last Modified By: devyendarm
+
+
