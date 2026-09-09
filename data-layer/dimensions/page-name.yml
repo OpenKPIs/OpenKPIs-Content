@@ -1,0 +1,125 @@
+# Dimension: Page Name
+# Generated: 2026-04-26T06:36:42.686Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Dimension Name: Page Name
+Formula: Typically captured directly from the page title, CMS page label, route name, or application screen name. If derived, a common fallback logic is: COALESCE(data_layer.page.pageName, page_title, document.title, route_name, page_path).
+
+Description: |
+  A title name assigned to a page or screen view, used to categorize content consumption and navigation behavior across digital properties. It typically represents the logical page label shown in reporting rather than the raw URL, enabling consistent analysis across dynamic URLs, query parameters, and localized variants.
+
+Category: Engagement
+
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Session, User, Time based - Hourly/Daily/Monthly/Yearly
+
+GA4 Event: |
+  page_title
+
+Adobe Event: |
+  eVar10, prop10 or any available eVar or prop
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageName": "Home",
+      "pageTitle": "Home",
+      "pageURL": "https://www.example.com/"
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_title": "Home",
+    "page_location": "https://www.example.com/",
+    "page_path": "/"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "page-view",
+    "page": {
+      "pageName": "Home",
+      "pageTitle": "Home",
+      "pageURL": "https://www.example.com/"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "xdm.web.webPageDetails.name": "Home",
+    "xdm.web.webPageDetails.URL": "https://www.example.com/", "xdm.web.webPageDetails.pageViews.value": 1
+  }
+
+SQL Query: |
+  SELECT
+    event_date,
+    user_pseudo_id,
+    event_timestamp,
+    COALESCE(
+      (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'page_title'),
+      (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'page_name')
+    ) AS page_name
+  FROM `project.dataset.events_*`
+  WHERE event_name = 'page_view';
+  
+
+Calculation Notes: |
+  1) Capture on every page_view or screen_view event. 
+  2)Standardize naming conventions across CMS templates, SPAs, and mobile apps so the same logical page is reported consistently.
+  3) Avoid relying solely on document.title when titles are duplicated, dynamically appended with brand text, or missing. 
+  4) For SPAs, ensure virtual page views update page_name on route changes. 
+  5) Strip volatile elements such as IDs, timestamps, or personalization tokens from the page name. 
+  6) If both page title and internal page label exist, prefer the internal canonical page name for reporting consistency.
+
+Business Use Case: |
+  Content, product, and UX teams use Page_Name to identify which pages drive the most engagement, where users exit, and which content paths lead to conversion.
+   For example, an e-commerce team can compare conversion rate for sessions that included the 'Product Detail' page versus the 'Size Guide' page.
+
+Dependencies:
+  Events: [page_view, screen_view]
+  Dimensions: [page_title, page_url, page_path]
+
+Source Data: Digital Analytics, Content Management System,  Tag Management System
+
+Report Attributes: |
+  Dimensions: Page name, Page title, Landing page, Content group; 
+  Metrics: Views, Users, Sessions, Engagement rate, Conversions, Revenue; 
+  KPIs: Conversion rate, Exit rate, Avg engagement time;
+  
+
+Dashboard Usage: [Traffic Analysis, Content Performance, Conversion Funnel, Executive Summary, UX Optimization]
+
+Segment Eligibility: |
+  True
+  
+
+Related Dimensions: [Page_URL, Page_Path, Landing_Page, Content_Group, Screen_Name, Site_Section]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-04-26T06:25:41.748+00:00
+
+Last Modified By: swapnamagantius
+
+Last Modified At: 2026-04-26T06:36:41.14+00:00
+
