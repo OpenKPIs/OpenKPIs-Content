@@ -1,69 +1,91 @@
 # Metric: Time on Property Page
-# Generated: 2026-08-19T17:33:01.818Z
+# Generated: 2026-08-27T14:30:27.859Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Metric Name: Time on Property Page
-Formula: SUM(time_spent) / COUNT(visits)
+Formula: SUM(time_spent)
 
 Description: |
-  Measures the average duration a user spends on a property listing page, indicating user interest and engagement with the property details.
+  Measures the duration a user spends on a single property listing page, indicating user engagement with property details.
 
 Category: Engagement
 
 Tags: [metric]
 
-Industry: Real Estate Tech
+Industry: Technology
 
 Priority: High
 
 Core Area: Discovery
 
-Scope: Session
+Scope: Event
 
 Measure Type: average
 
 Aggregation Window: Time based - Daily
 
 GA4 Event: |
-  time_on_property_page
+  view_item
 
 Adobe Event: |
-  time_on_property_page
+  view_item
 
 W3 Data Layer: |
-  {"digitalData":{"event":{"eventInfo":{"type":"engagement","eventName":"time_on_property_page","timeStamp":"2023-10-05T14:48:00.000Z"},"attributes":{"timeSpent":120}}}}
+  {"digitalData":{"event":{"eventInfo":{"type":"engagement","eventName":"view_item","timeStamp":"2023-10-05T14:48:00.000Z"},"attributes":{"timeSpent":120}}}}
 
 GA4 Data Layer: |
-  {"event":"time_on_property_page","timeSpent":120}
+  {"event":"view_item","ecommerce":{"items":[{"item_name":"Property Page","timeSpent":120}]}}
 
 Adobe Client Data Layer: |
-  {"event":"time_on_property_page","eventData":{"timeSpent":120}}
+  {"event":"view_item","eventData":{"timeSpent":120}}
 
 XDM Mapping: |
-  {"_experience":{"analytics":{"event1":{"name":"time_on_property_page","timeSpent":120}}}}
+  {"_experience":{"analytics":{"customDimensions":{"view_item":{"timeSpent":120}}}}}
 
 Google Analytics SQL: |
   -- ==========================================
-  -- 1. GOOGLE BIGQUERY SQL (GA4 Export)
+  -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
   SELECT user_pseudo_id, 
-         TIMESTAMP_DIFF(MAX(CASE WHEN event_name = 'page_view' AND param.key = 'page_location' AND param.value.string_value LIKE '%property%' THEN event_timestamp END), 
-                       MIN(CASE WHEN event_name = 'page_view' AND param.key = 'page_location' AND param.value.string_value LIKE '%property%' THEN event_timestamp END), SECOND) AS time_on_property_page
-  FROM `your-project.analytics_123456789.events_*`, 
-       UNNEST(event_params) AS param
-  WHERE _TABLE_SUFFIX BETWEEN '20230101' AND '20231231'
+         SUM(time_spent) AS total_time_on_property_page
+  FROM (
+    SELECT user_pseudo_id, 
+           event_timestamp, 
+           LEAD(event_timestamp) OVER (PARTITION BY user_pseudo_id ORDER BY event_timestamp) AS next_event_timestamp,
+           IF(LEAD(event_name) OVER (PARTITION BY user_pseudo_id ORDER BY event_timestamp) = 'view_item',
+              TIMESTAMP_DIFF(LEAD(event_timestamp) OVER (PARTITION BY user_pseudo_id ORDER BY event_timestamp), 
+                            event_timestamp, SECOND),
+              NULL) AS time_spent
+    FROM `your-project.analytics_123456789.events_*`, 
+         UNNEST(event_params) AS param
+    WHERE event_name = 'view_item'
+      AND param.key = 'page_location'
+      AND param.value.string_value LIKE '%property%'
+      AND _TABLE_SUFFIX BETWEEN '20230101' AND '20231231'
+  ) AS session_times
+  WHERE time_spent IS NOT NULL
   GROUP BY user_pseudo_id
 
 AEP Query Service SQL: |
   -- ==========================================
-  -- 2. ADOBE AEP QUERY SERVICE SQL (XDM Dataset)
+  -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
   SELECT identityMap.ecid AS user_id, 
-         TIMESTAMPDIFF(SECOND, MIN(CASE WHEN eventType = 'web.pageview' AND page.url LIKE '%property%' THEN timestamp END), 
-                             MAX(CASE WHEN eventType = 'web.pageview' AND page.url LIKE '%property%' THEN timestamp END)) AS time_on_property_page
-  FROM your_aep_dataset
-  WHERE timestamp BETWEEN '2023-01-01T00:00:00Z' AND '2023-12-31T23:59:59Z'
+         SUM(time_spent) AS total_time_on_property_page
+  FROM (
+    SELECT identityMap.ecid, 
+           timestamp, 
+           LEAD(timestamp) OVER (PARTITION BY identityMap.ecid ORDER BY timestamp) AS next_timestamp,
+           IF(LEAD(eventType) OVER (PARTITION BY identityMap.ecid ORDER BY timestamp) = 'web.pageview',
+              TIMESTAMPDIFF(SECOND, timestamp, LEAD(timestamp) OVER (PARTITION BY identityMap.ecid ORDER BY timestamp)),
+              NULL) AS time_spent
+    FROM your_aep_dataset
+    WHERE eventType = 'web.pageview'
+      AND page.url LIKE '%property%'
+      AND timestamp BETWEEN '2023-01-01T00:00:00Z' AND '2023-12-31T23:59:59Z'
+  ) AS session_times
+  WHERE time_spent IS NOT NULL
   GROUP BY identityMap.ecid
 
 Calculation Notes: |
@@ -89,11 +111,11 @@ Data Sensitivity: internal
 
 Contains PII: No
 
-Status: published
+Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-08-19T14:01:41.619118+00:00
+Created At: 2026-08-27T14:30:26.398687+00:00
 
 Last Modified By: devyendarm
 
