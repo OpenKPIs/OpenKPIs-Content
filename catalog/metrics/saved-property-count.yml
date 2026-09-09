@@ -1,0 +1,469 @@
+# Metric: Saved Property Count
+# Generated: 2026-09-03T13:30:24.314Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Saved Property Count
+Formula: COUNT(DISTINCT CASE WHEN saved_at <= period_end AND (unsaved_at IS NULL OR unsaved_at > period_end) THEN CONCAT(user_id, '|', property_id) END)
+
+Description: |
+  Counts the distinct properties actively saved by users at the end of the reporting period. Each active user-property relationship counts once, regardless of repeated save events, and is removed from the count after a valid unsave or relationship deletion.
+
+Category: Engagement
+
+Tags: [metric]
+
+Industry: Real Estate Tech
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: User
+
+Measure Type: count
+
+Aggregation Window: Time based - Daily snapshot at period end; rollups supported for weekly, monthly, quarterly, and yearly reporting
+
+GA4 Event: |
+  add_to_wishlist
+
+Adobe Event: |
+  add_to_wishlist
+
+W3 Data Layer: |
+  {"page":{"pageInfo":{"pageURL":"<page_location>","pageName":"<page_title>","referringURL":"<page_referrer>"}},"user":[{"profile":[{"profileInfo":{"profileID":"<user_id>","loginStatus":"<logged_in_or_logged_out>","userPseudoId":"<user_pseudo_id>","analyticsConsent":"<granted_or_denied>"}}]}],"event":[{"eventInfo":{"eventId":"<event_id>","eventName":"add_to_wishlist","saveMethod":"<save_method>","eventTimestamp":"<iso_8601_timestamp>"}}],"metric":{"name":"saved_property_count","unit":"properties","value":0,"snapshotAt":"<iso_8601_snapshot_timestamp>","aggregationType":"distinct_active_user_property_relationships","reportingPeriodEnd":"<iso_8601_period_end>","reportingPeriodStart":"<iso_8601_period_start>"},"product":[{"category":{"subCategory1":"<property_subcategory>","subCategory2":"<property_segment>","primaryCategory":"<property_category>"},"productInfo":{"city":"<city>","price":0,"market":"<market>","region":"<region>","country":"<country_code>","currency":"<iso_4217_currency_code>","quantity":1,"productID":"<property_id>","postalCode":"<postal_code>","productName":"<property_name>","productType":"<property_type>","listingStatus":"<listing_status>"}}],"session":{"sessionId":"<session_id>","sessionNumber":0},"campaign":{"campaignId":"<campaign_id>"},"wishlist":{"listId":"<saved_property_list_id>","listName":"<saved_property_list_name>"},"experiment":{"experimentId":"<experiment_id>"},"environment":{"platform":"<platform>","deviceCategory":"<device_category>"},"relationship":{"status":"active","isActive":true,"createdAt":"<iso_8601_created_timestamp>","deletedAt":null,"updatedAt":"<iso_8601_updated_timestamp>","effectiveAt":"<iso_8601_effective_timestamp>","relationshipId":"<relationship_id>"}}
+
+GA4 Data Layer: |
+  {"event":"add_to_wishlist","list_id":"<saved_property_list_id>","user_id":"<user_id>","event_id":"<event_id>","platform":"<platform>","ecommerce":{"items":[{"city":"<city>","price":0,"region":"<region>","country":"<country_code>","item_id":"<property_id>","quantity":1,"item_name":"<property_name>","postal_code":"<postal_code>","item_list_id":"<saved_property_list_id>","item_category":"<property_type>","item_category2":"<property_category>","item_category3":"<property_subcategory>","item_list_name":"<saved_property_list_name>","listing_status":"<listing_status>"}],"value":0,"currency":"<iso_4217_currency_code>"},"is_active":true,"list_name":"<saved_property_list_name>","page_title":"<page_title>","session_id":"<session_id>","campaign_id":"<campaign_id>","metric_name":"saved_property_count","metric_unit":"properties","save_method":"<save_method>","snapshot_at":"<iso_8601_snapshot_timestamp>","login_status":"<logged_in_or_logged_out>","metric_value":0,"experiment_id":"<experiment_id>","page_location":"<page_location>","page_referrer":"<page_referrer>","session_number":0,"user_pseudo_id":"<user_pseudo_id>","device_category":"<device_category>","event_timestamp":"<iso_8601_timestamp>","relationship_id":"<relationship_id>","aggregation_type":"distinct_active_user_property_relationships","analytics_consent":"<granted_or_denied>","relationship_status":"active","reporting_period_end":"<iso_8601_period_end>","reporting_period_start":"<iso_8601_period_start>","relationship_created_at":"<iso_8601_created_timestamp>","relationship_deleted_at":null,"relationship_updated_at":"<iso_8601_updated_timestamp>","relationship_effective_at":"<iso_8601_effective_timestamp>"}
+
+Adobe Client Data Layer: |
+  {"data":{"page":{"pageTitle":"<page_title>","pageLocation":"<page_location>","pageReferrer":"<page_referrer>"},"user":{"userId":"<user_id>","loginStatus":"<logged_in_or_logged_out>","userPseudoId":"<user_pseudo_id>","analyticsConsent":"<granted_or_denied>"},"metric":{"name":"saved_property_count","unit":"properties","value":0,"snapshotAt":"<iso_8601_snapshot_timestamp>","aggregationType":"distinct_active_user_property_relationships","reportingPeriodEnd":"<iso_8601_period_end>","reportingPeriodStart":"<iso_8601_period_start>"},"session":{"sessionId":"<session_id>","sessionNumber":0},"property":{"city":"<city>","price":0,"market":"<market>","region":"<region>","country":"<country_code>","currency":"<iso_4217_currency_code>","quantity":1,"postalCode":"<postal_code>","propertyId":"<property_id>","propertyName":"<property_name>","propertyType":"<property_type>","listingStatus":"<listing_status>","propertySegment":"<property_segment>","propertyCategory":"<property_category>","propertySubcategory":"<property_subcategory>"},"wishlist":{"listId":"<saved_property_list_id>","listName":"<saved_property_list_name>"},"eventInfo":{"eventId":"<event_id>","eventName":"add_to_wishlist","saveMethod":"<save_method>","eventTimestamp":"<iso_8601_timestamp>"},"attribution":{"campaignId":"<campaign_id>","experimentId":"<experiment_id>"},"environment":{"platform":"<platform>","deviceCategory":"<device_category>"},"relationship":{"status":"active","isActive":true,"createdAt":"<iso_8601_created_timestamp>","deletedAt":null,"updatedAt":"<iso_8601_updated_timestamp>","effectiveAt":"<iso_8601_effective_timestamp>","relationshipId":"<relationship_id>"}},"event":"add_to_wishlist"}
+
+XDM Mapping: |
+  {"_id":"<event_id>","web":{"webReferrer":{"URL":"<page_referrer>"},"webPageDetails":{"URL":"<page_location>","name":"<page_title>"}},"device":{"type":"<device_category>"},"commerce":{"saveForLaters":{"value":1}},"eventType":"commerce.saveForLaters","marketing":{"trackingCode":"<campaign_id>"},"timestamp":"<iso_8601_timestamp>","environment":{"type":"<platform>"},"identityMap":{"ECID":[{"id":"<ecid>","primary":true,"authenticatedState":"ambiguous"}]},"placeContext":{"geo":{"city":"<city>","postalCode":"<postal_code>","countryCode":"<country_code>","stateProvince":"<region>"}},"productListItems":[{"SKU":"<property_id>","name":"<property_name>","quantity":1,"priceTotal":0,"currencyCode":"<iso_4217_currency_code>","productAddMethod":"<save_method>","productCategories":[{"categoryID":"<property_type>","categoryName":"<property_category>"},{"categoryID":"<property_subcategory>","categoryName":"<property_segment>"}]}]}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH runtime_parameters AS (
+    SELECT
+      @reporting_period_start AS reporting_period_start,
+      @reporting_period_end AS reporting_period_end,
+      @snapshot_at AS snapshot_at
+  ),
+  source_events AS (
+    SELECT
+      COALESCE(
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'event_id' LIMIT 1),
+        CONCAT(e.user_pseudo_id, '-', CAST(e.event_timestamp AS STRING), '-', CAST(e.event_bundle_sequence_id AS STRING))
+      ) AS event_id,
+      e.event_name,
+      TIMESTAMP_MICROS(e.event_timestamp) AS event_timestamp,
+      (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'save_method' LIMIT 1) AS save_method,
+      (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'relationship_id' LIMIT 1) AS relationship_id,
+      COALESCE(
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'relationship_status' LIMIT 1),
+        'active'
+      ) AS relationship_status,
+      SAFE_CAST((SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'relationship_effective_at' LIMIT 1) AS TIMESTAMP) AS relationship_effective_at,
+      SAFE_CAST((SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'relationship_created_at' LIMIT 1) AS TIMESTAMP) AS relationship_created_at,
+      SAFE_CAST((SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'relationship_updated_at' LIMIT 1) AS TIMESTAMP) AS relationship_updated_at,
+      SAFE_CAST((SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'relationship_deleted_at' LIMIT 1) AS TIMESTAMP) AS relationship_deleted_at,
+      (SELECT COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)) FROM UNNEST(e.event_params) ep WHERE ep.key = 'is_active' LIMIT 1) AS is_active_raw,
+      COALESCE(
+        e.user_id,
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'user_id' LIMIT 1)
+      ) AS user_id,
+      COALESCE(
+        e.user_pseudo_id,
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'user_pseudo_id' LIMIT 1)
+      ) AS user_pseudo_id,
+      (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'login_status' LIMIT 1) AS login_status,
+      COALESCE(
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'analytics_consent' LIMIT 1),
+        e.privacy_info.analytics_storage
+      ) AS analytics_consent,
+      COALESCE(
+        item.item_id,
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'property_id' LIMIT 1)
+      ) AS property_id,
+      COALESCE(
+        item.item_name,
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'property_name' LIMIT 1)
+      ) AS property_name,
+      COALESCE(
+        item.item_category,
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'property_type' LIMIT 1)
+      ) AS property_type,
+      COALESCE(
+        item.item_category2,
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'property_category' LIMIT 1)
+      ) AS property_category,
+      COALESCE(
+        item.item_category3,
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'property_subcategory' LIMIT 1)
+      ) AS property_subcategory,
+      COALESCE(
+        item.item_category4,
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'property_segment' LIMIT 1)
+      ) AS property_segment,
+      (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'listing_status' LIMIT 1) AS listing_status,
+      (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'market' LIMIT 1) AS market,
+      COALESCE(
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'country' LIMIT 1),
+        e.geo.country
+      ) AS country,
+      COALESCE(
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'region' LIMIT 1),
+        e.geo.region
+      ) AS region,
+      COALESCE(
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'city' LIMIT 1),
+        e.geo.city
+      ) AS city,
+      (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'postal_code' LIMIT 1) AS postal_code,
+      COALESCE(
+        e.ecommerce.purchase_revenue_in_usd IS NULL AND item.item_revenue_in_usd IS NULL,
+        TRUE
+      ) AS non_transactional_save,
+      COALESCE(
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'currency' LIMIT 1),
+        item.currency
+      ) AS currency,
+      item.price AS price,
+      COALESCE(item.quantity, 1) AS quantity,
+      COALESCE(
+        item.item_list_id,
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'list_id' LIMIT 1)
+      ) AS list_id,
+      COALESCE(
+        item.item_list_name,
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'list_name' LIMIT 1)
+      ) AS list_name,
+      (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'page_location' LIMIT 1) AS page_location,
+      (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'page_referrer' LIMIT 1) AS page_referrer,
+      (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'page_title' LIMIT 1) AS page_title,
+      COALESCE(
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'session_id' LIMIT 1),
+        CAST((SELECT ep.value.int_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'ga_session_id' LIMIT 1) AS STRING)
+      ) AS session_id,
+      COALESCE(
+        (SELECT ep.value.int_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'session_number' LIMIT 1),
+        (SELECT ep.value.int_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'ga_session_number' LIMIT 1)
+      ) AS session_number,
+      e.platform AS platform,
+      e.device.category AS device_category,
+      COALESCE(
+        (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'campaign_id' LIMIT 1),
+        e.traffic_source.name
+      ) AS campaign_id,
+      (SELECT ep.value.string_value FROM UNNEST(e.event_params) ep WHERE ep.key = 'experiment_id' LIMIT 1) AS experiment_id,
+      item_offset
+    FROM `your-project.analytics_123456789.events_*` e
+    CROSS JOIN runtime_parameters rp
+    LEFT JOIN UNNEST(e.items) item WITH OFFSET AS item_offset
+    WHERE e.event_name = 'add_to_wishlist'
+      AND _TABLE_SUFFIX <= FORMAT_DATE('%Y%m%d', DATE(rp.snapshot_at))
+      AND TIMESTAMP_MICROS(e.event_timestamp) <= rp.snapshot_at
+  ),
+  normalized_relationships AS (
+    SELECT
+      se.*,
+      COALESCE(NULLIF(se.user_id, ''), NULLIF(se.user_pseudo_id, '')) AS canonical_user_id,
+      CONCAT(
+        COALESCE(NULLIF(se.user_id, ''), NULLIF(se.user_pseudo_id, '')),
+        '|',
+        se.property_id
+      ) AS user_property_relationship_key,
+      COALESCE(
+        SAFE_CAST(se.is_active_raw AS BOOL),
+        IF(LOWER(se.relationship_status) IN ('inactive', 'deleted', 'removed'), FALSE, TRUE)
+      ) AS is_active
+    FROM source_events se
+    WHERE COALESCE(NULLIF(se.user_id, ''), NULLIF(se.user_pseudo_id, '')) IS NOT NULL
+      AND NULLIF(se.property_id, '') IS NOT NULL
+  ),
+  latest_relationship_state AS (
+    SELECT * EXCEPT(state_sequence)
+    FROM (
+      SELECT
+        nr.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY nr.user_property_relationship_key
+          ORDER BY
+            COALESCE(nr.relationship_updated_at, nr.relationship_effective_at, nr.event_timestamp) DESC,
+            nr.event_timestamp DESC,
+            nr.event_id DESC
+        ) AS state_sequence
+      FROM normalized_relationships nr
+    )
+    WHERE state_sequence = 1
+  ),
+  active_relationships AS (
+    SELECT lrs.*
+    FROM latest_relationship_state lrs
+    CROSS JOIN runtime_parameters rp
+    WHERE lrs.is_active
+      AND LOWER(lrs.relationship_status) = 'active'
+      AND COALESCE(lrs.relationship_effective_at, lrs.relationship_created_at, lrs.event_timestamp) <= rp.snapshot_at
+      AND (lrs.relationship_deleted_at IS NULL OR lrs.relationship_deleted_at > rp.snapshot_at)
+  )
+  SELECT
+    'saved_property_count' AS metric_name,
+    COUNT(*) OVER () AS metric_value,
+    'properties' AS metric_unit,
+    'distinct_active_user_property_relationships' AS aggregation_type,
+    rp.reporting_period_start,
+    rp.reporting_period_end,
+    rp.snapshot_at,
+    ar.relationship_id,
+    ar.user_property_relationship_key,
+    ar.relationship_status,
+    ar.relationship_effective_at,
+    ar.relationship_created_at,
+    ar.relationship_updated_at,
+    ar.relationship_deleted_at,
+    ar.is_active,
+    ar.event_id,
+    ar.event_name,
+    ar.event_timestamp,
+    ar.save_method,
+    ar.user_id,
+    ar.user_pseudo_id,
+    ar.canonical_user_id,
+    ar.login_status,
+    ar.analytics_consent,
+    ar.property_id,
+    ar.property_name,
+    ar.property_type,
+    ar.property_category,
+    ar.property_subcategory,
+    ar.property_segment,
+    ar.listing_status,
+    ar.market,
+    ar.country,
+    ar.region,
+    ar.city,
+    ar.postal_code,
+    ar.currency,
+    ar.price,
+    ar.quantity,
+    ar.non_transactional_save,
+    ar.list_id,
+    ar.list_name,
+    ar.page_location,
+    ar.page_referrer,
+    ar.page_title,
+    ar.session_id,
+    ar.session_number,
+    ar.platform,
+    ar.device_category,
+    ar.campaign_id,
+    ar.experiment_id
+  FROM active_relationships ar
+  CROSS JOIN runtime_parameters rp
+  ORDER BY ar.canonical_user_id, ar.property_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH runtime_parameters AS (
+    SELECT
+      CAST('{{ reporting_period_start }}' AS TIMESTAMP) AS reporting_period_start,
+      CAST('{{ reporting_period_end }}' AS TIMESTAMP) AS reporting_period_end,
+      CAST('{{ snapshot_at }}' AS TIMESTAMP) AS snapshot_at
+  ),
+  source_events AS (
+    SELECT
+      COALESCE(e._id, e.data.eventInfo.eventId) AS event_id,
+      e.eventType,
+      COALESCE(e.data.eventInfo.eventName, 'add_to_wishlist') AS event_name,
+      COALESCE(e.timestamp, CAST(e.data.eventInfo.eventTimestamp AS TIMESTAMP)) AS event_timestamp,
+      COALESCE(e.data.eventInfo.saveMethod, e.productListItems[0].productAddMethod) AS save_method,
+      e.data.relationship.relationshipId AS relationship_id,
+      COALESCE(e.data.relationship.status, 'active') AS relationship_status,
+      CAST(e.data.relationship.effectiveAt AS TIMESTAMP) AS relationship_effective_at,
+      CAST(e.data.relationship.createdAt AS TIMESTAMP) AS relationship_created_at,
+      CAST(e.data.relationship.updatedAt AS TIMESTAMP) AS relationship_updated_at,
+      CAST(e.data.relationship.deletedAt AS TIMESTAMP) AS relationship_deleted_at,
+      e.data.relationship.isActive AS is_active,
+      e.data.user.userId AS user_id,
+      e.data.user.userPseudoId AS user_pseudo_id,
+      e.data.user.loginStatus AS login_status,
+      e.data.user.analyticsConsent AS analytics_consent,
+      COALESCE(e.data.property.propertyId, e.productListItems[0].SKU) AS property_id,
+      COALESCE(e.data.property.propertyName, e.productListItems[0].name) AS property_name,
+      COALESCE(e.data.property.propertyType, e.productListItems[0].productCategories[0].categoryID) AS property_type,
+      COALESCE(e.data.property.propertyCategory, e.productListItems[0].productCategories[0].categoryName) AS property_category,
+      COALESCE(e.data.property.propertySubcategory, e.productListItems[0].productCategories[1].categoryID) AS property_subcategory,
+      COALESCE(e.data.property.propertySegment, e.productListItems[0].productCategories[1].categoryName) AS property_segment,
+      e.data.property.listingStatus AS listing_status,
+      e.data.property.market AS market,
+      e.data.property.country AS country,
+      e.data.property.region AS region,
+      e.data.property.city AS city,
+      e.data.property.postalCode AS postal_code,
+      COALESCE(e.data.property.currency, e.productListItems[0].currencyCode) AS currency,
+      COALESCE(e.data.property.price, e.productListItems[0].priceTotal) AS price,
+      COALESCE(e.data.property.quantity, e.productListItems[0].quantity, 1) AS quantity,
+      e.data.wishlist.listId AS list_id,
+      e.data.wishlist.listName AS list_name,
+      COALESCE(e.data.page.pageLocation, e.web.webPageDetails.URL) AS page_location,
+      COALESCE(e.data.page.pageReferrer, e.web.webReferrer.URL) AS page_referrer,
+      COALESCE(e.data.page.pageTitle, e.web.webPageDetails.name) AS page_title,
+      e.data.session.sessionId AS session_id,
+      e.data.session.sessionNumber AS session_number,
+      COALESCE(e.data.environment.platform, e.environment.type) AS platform,
+      COALESCE(e.data.environment.deviceCategory, e.device.type) AS device_category,
+      COALESCE(e.data.attribution.campaignId, e.marketing.trackingCode) AS campaign_id,
+      e.data.attribution.experimentId AS experiment_id,
+      CASE
+        WHEN COALESCE(e.commerce.saveForLaters.value, 0) > 0 THEN TRUE
+        ELSE FALSE
+      END AS has_save_for_later_value
+    FROM your_aep_saved_property_event_dataset e
+    CROSS JOIN runtime_parameters rp
+    WHERE e.eventType = 'commerce.saveForLaters'
+      AND COALESCE(e.timestamp, CAST(e.data.eventInfo.eventTimestamp AS TIMESTAMP)) <= rp.snapshot_at
+      AND COALESCE(e.commerce.saveForLaters.value, 0) > 0
+  ),
+  normalized_relationships AS (
+    SELECT
+      se.*,
+      COALESCE(NULLIF(se.user_id, ''), NULLIF(se.user_pseudo_id, '')) AS canonical_user_id,
+      CONCAT(
+        COALESCE(NULLIF(se.user_id, ''), NULLIF(se.user_pseudo_id, '')),
+        '|',
+        se.property_id
+      ) AS user_property_relationship_key,
+      COALESCE(
+        se.is_active,
+        CASE
+          WHEN LOWER(se.relationship_status) IN ('inactive', 'deleted', 'removed') THEN FALSE
+          ELSE TRUE
+        END
+      ) AS normalized_is_active
+    FROM source_events se
+    WHERE COALESCE(NULLIF(se.user_id, ''), NULLIF(se.user_pseudo_id, '')) IS NOT NULL
+      AND NULLIF(se.property_id, '') IS NOT NULL
+  ),
+  ranked_relationship_states AS (
+    SELECT
+      nr.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY nr.user_property_relationship_key
+        ORDER BY
+          COALESCE(nr.relationship_updated_at, nr.relationship_effective_at, nr.event_timestamp) DESC,
+          nr.event_timestamp DESC,
+          nr.event_id DESC
+      ) AS state_sequence
+    FROM normalized_relationships nr
+  ),
+  latest_relationship_state AS (
+    SELECT *
+    FROM ranked_relationship_states
+    WHERE state_sequence = 1
+  ),
+  active_relationships AS (
+    SELECT lrs.*
+    FROM latest_relationship_state lrs
+    CROSS JOIN runtime_parameters rp
+    WHERE lrs.normalized_is_active = TRUE
+      AND LOWER(lrs.relationship_status) = 'active'
+      AND COALESCE(lrs.relationship_effective_at, lrs.relationship_created_at, lrs.event_timestamp) <= rp.snapshot_at
+      AND (lrs.relationship_deleted_at IS NULL OR lrs.relationship_deleted_at > rp.snapshot_at)
+  )
+  SELECT
+    'saved_property_count' AS metric_name,
+    COUNT(*) OVER () AS metric_value,
+    'properties' AS metric_unit,
+    'distinct_active_user_property_relationships' AS aggregation_type,
+    rp.reporting_period_start,
+    rp.reporting_period_end,
+    rp.snapshot_at,
+    ar.relationship_id,
+    ar.user_property_relationship_key,
+    ar.relationship_status,
+    ar.relationship_effective_at,
+    ar.relationship_created_at,
+    ar.relationship_updated_at,
+    ar.relationship_deleted_at,
+    ar.normalized_is_active AS is_active,
+    ar.event_id,
+    ar.eventType AS event_type,
+    ar.event_name,
+    ar.event_timestamp,
+    ar.save_method,
+    ar.user_id,
+    ar.user_pseudo_id,
+    ar.canonical_user_id,
+    ar.login_status,
+    ar.analytics_consent,
+    ar.property_id,
+    ar.property_name,
+    ar.property_type,
+    ar.property_category,
+    ar.property_subcategory,
+    ar.property_segment,
+    ar.listing_status,
+    ar.market,
+    ar.country,
+    ar.region,
+    ar.city,
+    ar.postal_code,
+    ar.currency,
+    ar.price,
+    ar.quantity,
+    ar.list_id,
+    ar.list_name,
+    ar.page_location,
+    ar.page_referrer,
+    ar.page_title,
+    ar.session_id,
+    ar.session_number,
+    ar.platform,
+    ar.device_category,
+    ar.campaign_id,
+    ar.experiment_id,
+    ar.has_save_for_later_value
+  FROM active_relationships ar
+  CROSS JOIN runtime_parameters rp
+  ORDER BY ar.canonical_user_id, ar.property_id;
+
+Calculation Notes: |
+  Calculate active saved-property state as of the reporting cutoff rather than counting raw save events. Repeated save events for an already-active user-property relationship do not increase the count; an unsave closes the relationship, and a later re-save reactivates it as one relationship. Use the event effective timestamp, not ingestion time, and apply identity resolution before deduplication. Exclude failed saves, test users, internal accounts, bot activity, malformed property identifiers, hard-deleted properties, and anonymous browser-only favorites that were never synchronized to a durable user account. Retain valid saved properties that become off-market or inactive unless the property record or saved relationship is deleted. For aggregate reporting, count distinct user-property pairs or sum user-level counts; do not count only distinct properties because the same property may be saved by multiple users.
+
+Business Use Case: |
+  The Product team monitors Saved Property Count by market, platform, and listing type to determine whether discovery experiences are helping users build a shortlist. If the count or the percentage of active users with a saved property falls materially after a search-ranking or property-detail release, the team investigates save-control visibility, authentication friction, inventory quality, and event failures, then prioritizes remediation or an experiment.
+
+
+Source Data: Product Database and Digital Analytics
+
+Report Attributes: |
+  ["Reporting Date","Market","Country","Region","City","Platform","Device Type","Application Version","User Type","Acquisition Channel","Property Type","Listing Type","Listing Status","Price Band","Bedroom Count","Save Age Band"]
+
+Dashboard Usage: [Property Discovery Engagement Dashboard, User Shortlisting Funnel Dashboard, Marketplace Health Dashboard, Property Detail Performance Dashboard, Executive Product Engagement Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Property Save Event Count, Unique Property Savers, Property Detail View Count, Property Unsave Count, Saved Search Count, Property Inquiry Count, Property Share Count, Active User Count]
+
+Derived KPIs: [Average Saved Properties per Saving User, Property Save Rate, Save-to-Inquiry Conversion Rate, Saved Property Retention Rate, Saved Property Net Growth, Saved Property Unsave Rate, Percentage of Active Users with a Saved Property]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-03T13:30:20.346534+00:00
+
+Last Modified By: devyendarm
+
+
