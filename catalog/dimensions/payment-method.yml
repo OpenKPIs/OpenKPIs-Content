@@ -1,0 +1,80 @@
+# Dimension: Payment Method
+# Generated: 2026-09-04T12:30:22.594Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Payment Method
+
+Description: |
+  Payment Method identifies the normalized payment option selected or used by a customer for a checkout, subscription invoice, renewal, or other billable journey event. It supports analysis of conversion, payment preference, billing success, retention, and lifetime value without exposing account numbers, payment tokens, or other payment credentials.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: E-commerce & SaaS
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  add_payment_info
+
+Adobe Event: |
+  add_payment_info
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"add_payment_info","eventAction":"add_payment_info"},"attributes":{"paymentMethod":"credit_card"}}],"transaction":{"attributes":{"paymentMethod":"credit_card"}}}}
+
+GA4 Data Layer: |
+  {"event":"add_payment_info","ecommerce":{"payment_type":"credit_card"}}
+
+Adobe Client Data Layer: |
+  {"data":{"paymentMethod":"credit_card"},"event":"add_payment_info"}
+
+XDM Mapping: |
+  {"commerce":{"order":{"payments":[{"paymentType":"credit_card"}]}}}
+
+
+
+Calculation Notes: |
+  Record the value known at the timestamp of each payment_method_selected, payment_attempted, purchase_completed, refund, chargeback, or subscription invoice event. If the customer changes methods during checkout, retain each selection on its event and assign the successfully settled method to the completed transaction; for split tender, assign the method with the largest settled amount as primary and resolve equal amounts by tender sequence. Failed attempts retain the attempted method, refunds inherit the original settled method, and recurring off-session charges use the method actually presented to the processor rather than the customer's current default method. Exclude test, sandbox, employee quality-assurance, and processor replay events from production reporting.
+
+Business Use Case: |
+  The Product and Finance teams compare checkout completion and recurring billing success by payment method, device, market, and customer tenure. If mobile customers in a priority market convert materially better with a wallet that has low availability, leadership can prioritize enabling that wallet and then monitor conversion, renewal success, and customer lifetime value after launch.
+
+
+Source Data: Billing and payment processors such as Stripe, Adyen, PayPal, or Braintree stitched with Digital Analytics (GA4 or Adobe Analytics), subscription billing, and the e-commerce order platform
+
+Report Attributes: |
+  ["Checkout Channel","Device Type","Country","Currency","Customer Type","Customer Tenure","Subscription Plan","Payment Processor","Payment Status","Payment Failure Reason","Acquisition Channel","Order Value Band"]
+
+Dashboard Usage: [Checkout Conversion Dashboard, Payment Authorization and Failure Dashboard, Subscription Billing and Renewal Dashboard, Customer Retention Dashboard, Customer Lifetime Value Dashboard, Payment Method Adoption Dashboard, Executive Revenue Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Payment Method Detail, Payment Processor, Payment Status, Payment Failure Reason, Card Brand, Billing Country, Currency, Checkout Channel, Device Type, Subscription Plan, Customer Tenure, Order]
+
+Derived Dimensions: [Payment Method Family, Digital Wallet Indicator, Card-Based Payment Indicator, Alternative Payment Method Indicator, Recurring Payment Capability, Customer Preferred Payment Method, First Successful Payment Method, Latest Successful Payment Method]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-04T12:30:22.138361+00:00
+
+Last Modified By: devyendarm
+
+
