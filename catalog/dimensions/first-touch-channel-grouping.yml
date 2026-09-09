@@ -1,0 +1,167 @@
+# Dimension: First Touch Channel Grouping
+# Generated: 2026-09-09T16:49:32.751Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: First Touch Channel Grouping
+
+Description: |
+  The default channel grouping of the earliest recorded session for a user within the attribution lookback window, persisted at user level so that every later event, order and revenue amount can be attributed back to how that customer was originally acquired. It is the backbone dimension for first-touch acquisition reporting and for separating marketing-sourced growth from organic and direct demand.
+
+Category: Acquisition
+
+Tags: [dimension, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User
+
+GA4 Event: |
+  session_start
+
+Adobe Event: |
+  Session Start
+
+W3 Data Layer: |
+  {"digitalData":{"user":[{"profile":[{"profileInfo":{"profileID":"<pseudonymous_user_id>"},"attributes":{"firstTouchChannelGrouping":"<channel_grouping>"}}]}],"page":{"pageInfo":{"referringURL":"<referrer>"},"attributes":{"campaignSource":"<utm_source>","campaignMedium":"<utm_medium>","campaignName":"<utm_campaign>"}}}}
+
+GA4 Data Layer: |
+  {"event":"session_start","user_id":"<pseudonymous_user_id>","first_touch_channel_grouping":"<channel_grouping>","source":"<utm_source>","medium":"<utm_medium>","campaign":"<utm_campaign>","landing_page":"<landing_page_path>"}
+
+Adobe Client Data Layer: |
+  {"event":"session_start","eventInfo":{"eventName":"Session Start"},"user":{"firstTouchChannelGrouping":"<channel_grouping>"},"marketing":{"source":"<utm_source>","medium":"<utm_medium>","campaign":"<utm_campaign>"},"page":{"landingPage":"<landing_page_path>","referrer":"<referrer>"}}
+
+XDM Mapping: |
+  {"eventType":"web.webinteraction.linkClicks","channel":{"_id":"https://ns.adobe.com/xdm/channels/web","typeAtSource":"<channel_grouping>"},"marketing":{"trackingCode":"<utm_campaign>"},"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar12":"<first_touch_channel_grouping>"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH channel AS (
+    SELECT
+      user_pseudo_id,
+      event_timestamp,
+      LOWER(COALESCE(traffic_source.source, '(direct)')) AS source,
+      LOWER(COALESCE(traffic_source.medium, '(none)')) AS medium,
+      CASE
+        WHEN COALESCE(traffic_source.source, '(direct)') = '(direct)' AND COALESCE(traffic_source.medium, '(none)') IN ('(none)', '(not set)') THEN 'Direct'
+        WHEN LOWER(traffic_source.medium) = 'organic' THEN 'Organic Search'
+        WHEN LOWER(traffic_source.medium) IN ('cpc', 'ppc', 'paidsearch') THEN 'Paid Search'
+        WHEN LOWER(traffic_source.medium) IN ('paidsocial', 'paid_social', 'paid-social') THEN 'Paid Social'
+        WHEN LOWER(traffic_source.medium) IN ('social', 'social-network', 'social-media', 'sm') THEN 'Organic Social'
+        WHEN LOWER(traffic_source.medium) IN ('display', 'cpm', 'banner') THEN 'Display'
+        WHEN LOWER(traffic_source.medium) = 'affiliate' THEN 'Affiliate'
+        WHEN LOWER(traffic_source.medium) IN ('email', 'e-mail', 'e_mail') THEN 'Email'
+        WHEN LOWER(traffic_source.medium) = 'sms' THEN 'SMS'
+        WHEN LOWER(traffic_source.medium) = 'referral' THEN 'Referral'
+        ELSE 'Unassigned'
+      END AS channel_grouping
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE event_name = 'session_start'
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(@report_start, INTERVAL 90 DAY)) AND FORMAT_DATE('%Y%m%d', @report_end)
+  ),
+  first_touch AS (
+    SELECT
+      user_pseudo_id,
+      ARRAY_AGG(STRUCT(channel_grouping, source, medium) ORDER BY event_timestamp ASC LIMIT 1)[OFFSET(0)] AS ft
+    FROM channel
+    GROUP BY user_pseudo_id
+  )
+  SELECT
+    user_pseudo_id,
+    ft.channel_grouping AS first_touch_channel_grouping,
+    ft.source AS first_touch_source,
+    ft.medium AS first_touch_medium
+  FROM first_touch;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH channel AS (
+    SELECT
+      endUserIDs._experience.mcid.id AS user_id,
+      timestamp,
+      LOWER(COALESCE(marketing.trackingCode, 'direct')) AS tracking_code,
+      CASE
+        WHEN marketing.trackingCode IS NULL AND web.webReferrer.URL IS NULL THEN 'Direct'
+        WHEN LOWER(marketing.trackingCode) LIKE '%organic%' THEN 'Organic Search'
+        WHEN LOWER(marketing.trackingCode) LIKE '%cpc%' OR LOWER(marketing.trackingCode) LIKE '%paidsearch%' THEN 'Paid Search'
+        WHEN LOWER(marketing.trackingCode) LIKE '%paidsocial%' THEN 'Paid Social'
+        WHEN LOWER(marketing.trackingCode) LIKE '%social%' THEN 'Organic Social'
+        WHEN LOWER(marketing.trackingCode) LIKE '%display%' THEN 'Display'
+        WHEN LOWER(marketing.trackingCode) LIKE '%affiliate%' THEN 'Affiliate'
+        WHEN LOWER(marketing.trackingCode) LIKE '%email%' THEN 'Email'
+        WHEN LOWER(marketing.trackingCode) LIKE '%sms%' THEN 'SMS'
+        WHEN web.webReferrer.URL IS NOT NULL THEN 'Referral'
+        ELSE 'Unassigned'
+      END AS channel_grouping
+    FROM web_experience_events
+    WHERE eventType = 'web.webpagedetails.pageViews'
+      AND timestamp >= DATE_SUB(CAST(@report_start AS DATE), INTERVAL 90 DAY)
+      AND timestamp < DATE_ADD(CAST(@report_end AS DATE), INTERVAL 1 DAY)
+  ),
+  ranked AS (
+    SELECT
+      user_id,
+      channel_grouping,
+      tracking_code,
+      ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY timestamp ASC) AS rn
+    FROM channel
+  )
+  SELECT
+    user_id,
+    channel_grouping AS first_touch_channel_grouping,
+    tracking_code AS first_touch_tracking_code
+  FROM ranked
+  WHERE rn = 1;
+
+Calculation Notes: |
+  1️⃣ Derived once per user from the first session_start event inside a rolling 90-day lookback that precedes the user's first conversion; it is never re-evaluated after the first purchase.
+  2️⃣ Values follow the GA4 default channel grouping taxonomy: Direct, Organic Search, Paid Search, Paid Social, Organic Social, Display, Affiliate, Email, SMS, Referral, Organic Video, Paid Video, Cross-network, Unassigned.
+  3️⃣ Sessions expire after 30 minutes of inactivity; a session that spans midnight is not treated as a new first touch.
+  4️⃣ When user_id stitching later links an anonymous device to a known customer, the earliest touch across all stitched identities wins.
+  5️⃣ Internal traffic, known bots and test orders are excluded before the first session is selected.
+  6️⃣ Sessions with (not set) source and medium are grouped as Unassigned rather than dropped, so denominators stay complete.
+
+Business Use Case: |
+  Marketing leadership breaks down new customers, first-order revenue and 90-day repeat rate by this dimension to decide which acquisition channels deserve incremental budget, and the finance team uses it to reconcile channel-level customer acquisition cost against channel-level lifetime value.
+
+
+Source Data: Digital Analytics (GA4) stitched with CRM customer identity (Salesforce)
+
+Report Attributes: |
+  ["Purchase Date","New vs Returning Customer","Country","Device Category","Campaign Name","Landing Page","Product Category of First Order"]
+
+Dashboard Usage: [Marketing Acquisition Scorecard, Channel Mix Dashboard, New Customer Cohort Dashboard, Executive Growth Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [traffic-source-medium, campaign-name, landing-page, new-vs-returning-customer, device-category]
+
+Derived Dimensions: [first-touch-marketing-flag, first-touch-paid-vs-owned]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T16:49:23.224+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-09T16:49:32.378+00:00
+
