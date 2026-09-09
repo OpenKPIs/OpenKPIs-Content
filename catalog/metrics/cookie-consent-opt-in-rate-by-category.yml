@@ -1,0 +1,125 @@
+# Metric: Cookie Consent Opt-In Rate by Category
+# Generated: 2026-06-08T21:25:10.548Z
+# Contributed by: swapnamagantius
+# Last modified by: swapnamagantius
+
+Metric Name: Cookie Consent Opt-In Rate by Category
+Formula: Cookie Consent Opt-In Rate by Category = (Distinct users or consent decisions with consent_status = 'granted' for a given consent_category / Distinct users or consent decisions with a recorded consent decision for that consent_category) × 100
+
+Description: |
+  Measures the percentage of visitors who grant cookie consent for each consent category, such as analytics, personalization, advertising, or functional cookies. This matters because consent levels directly affect measurement coverage, personalization eligibility, marketing activation, and privacy compliance in financial services environments.
+
+Category: Conversion
+
+Tags: [cookie consent, privacy, consent management, opt-in rate, analytics consent, marketing consent, financial services compliance]
+
+Industry: ["Finance"]
+
+Priority: High
+
+Core Area: Digital Analytics
+
+Scope: User
+
+Measure Type: percentage
+
+Aggregation Window: Event, User, Time based - Hourly/Daily/Monthly/Quarterly/Yearly; reportable by consent category, region, device, browser, page type, and acquisition channel
+
+GA4 Event: |
+  cookie_consent_update
+
+Adobe Event: |
+  cookie_consent_update
+
+W3 Data Layer: |
+  {"event":"cookie_consent_update","eventInfo":{"eventName":"Cookie Consent Update","eventAction":"consent_update","eventType":"privacy"},"privacy":{"consent":{"category":"analytics","status":"granted","action":"accept","method":"preference_center","version":"2026-01","timestamp":"2026-06-08T12:00:00Z"}},"page":{"pageName":"investment insights article","pageType":"content"},"user":{"anonymousId":"<anonymous_user_id>"}}
+
+GA4 Data Layer: |
+  {"event":"cookie_consent_update","consent_category":"analytics","consent_status":"granted","consent_action":"accept","consent_method":"preference_center","consent_version":"2026-01","region":"US","page_type":"content","gtm_consent_update":{"analytics_storage":"granted","ad_storage":"denied","ad_user_data":"denied","ad_personalization":"denied","functionality_storage":"granted","security_storage":"granted"}}
+
+Adobe Client Data Layer: |
+  {"event":"cookie_consent_update","privacy":{"consent":{"category":"analytics","status":"granted","action":"accept","method":"preference_center","version":"2026-01","region":"US"}},"web":{"webPageDetails":{"name":"investment insights article","type":"content"}},"identity":{"anonymousId":"<anonymous_user_id>"}}
+
+XDM Mapping: |
+  {"eventType":"web.cookieConsent.update","timestamp":"timestamp","identityMap.ECID[0].id":"identity.anonymousId or ECID","web.webPageDetails.name":"page.pageName","web.webPageDetails.type":"page.pageType","consents.collect.val":"privacy.consent.status mapped to y/n","consents.metadata.time":"privacy.consent.timestamp","consents.metadata.consentStandard":"CMP policy or consent framework name","consents.metadata.consentStandardVersion":"privacy.consent.version","_experience.analytics.customDimensions.eVars.consentCategory":"privacy.consent.category","_experience.analytics.customDimensions.eVars.consentAction":"privacy.consent.action","_experience.analytics.customDimensions.eVars.consentMethod":"privacy.consent.method","placeContext.geo.countryCode":"region or derived geo country"}
+
+SQL Query: |
+  -- BigQuery example using GA4 export where one cookie_consent_update event is sent per consent category
+  WITH consent_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      user_pseudo_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'consent_category') AS consent_category,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'consent_status') AS consent_status,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'consent_action') AS consent_action,
+      geo.country AS country,
+      device.category AS device_category
+    FROM `project.dataset.events_*`
+    WHERE event_name = 'cookie_consent_update'
+      AND _TABLE_SUFFIX BETWEEN '20260101' AND '20260131'
+  ), latest_user_category_decision AS (
+    SELECT
+      event_date,
+      user_pseudo_id,
+      consent_category,
+      consent_status,
+      country,
+      device_category,
+      ROW_NUMBER() OVER (
+        PARTITION BY event_date, user_pseudo_id, consent_category
+        ORDER BY event_date DESC
+      ) AS rn
+    FROM consent_events
+    WHERE consent_category IS NOT NULL
+      AND consent_status IN ('granted', 'denied')
+  )
+  SELECT
+    event_date,
+    consent_category,
+    country,
+    device_category,
+    COUNT(DISTINCT user_pseudo_id) AS users_with_consent_decision,
+    COUNT(DISTINCT IF(consent_status = 'granted', user_pseudo_id, NULL)) AS users_opted_in,
+    SAFE_DIVIDE(
+      COUNT(DISTINCT IF(consent_status = 'granted', user_pseudo_id, NULL)),
+      COUNT(DISTINCT user_pseudo_id)
+    ) * 100 AS cookie_consent_opt_in_rate_pct
+  FROM latest_user_category_decision
+  WHERE rn = 1
+  GROUP BY event_date, consent_category, country, device_category
+  ORDER BY event_date, consent_category;
+
+Calculation Notes: |
+  Calculate separately for each consent category; do not combine analytics, advertising, personalization, and functional categories into a single numerator unless explicitly reporting an overall rate. Strictly necessary or security cookies should usually be excluded because they are not optional and can distort opt-in performance. Use the latest consent decision per user per category within the reporting window when measuring user-level opt-in rate; use all events only when measuring decision-level opt-in rate. Exclude internal traffic, test consent banner events, QA environments, bots, and duplicate CMP callbacks. Regional privacy rules may change the available categories and default states, so always segment by country or regulatory region.
+
+Business Use Case: |
+  A digital analytics and compliance team monitors analytics-cookie opt-in rates after launching a revised cookie banner on an investment research website. If analytics consent drops sharply in the EU, the team can review banner language, placement, and preference-center UX while ensuring changes remain compliant with GDPR, FCA, SEC, and internal privacy policies.
+
+Dependencies: |
+  Cookie consent banner impression event; Cookie consent update event; consent_category dimension; consent_status dimension; consent_action dimension; consent_version dimension; anonymous user identifier; CMP configuration; region or country dimension; internal traffic filter
+
+Source Data: Digital Analytics; Consent Management Platform; Tag Management System; Customer Data Platform; Privacy Preference Center
+
+Report Attributes: |
+  Dimensions: consent_category, consent_status, consent_action, consent_method, consent_version, country, region, device category, browser, page type, traffic source, campaign, user type. Metrics: users with consent decision, users opted in, users opted out, consent banner impressions, opt-in rate, opt-out rate, consent update events.
+
+Dashboard Usage: [Privacy & Consent Dashboard, Digital Analytics Data Quality Dashboard, Marketing Measurement Coverage Dashboard, Compliance Monitoring Dashboard, Executive Digital KPI Dashboard]
+
+Segment Eligibility: |
+  true
+
+
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: swapnamagantius
+
+Created At: 2026-06-08T21:25:09.947112+00:00
+
+Last Modified By: swapnamagantius
+
+
