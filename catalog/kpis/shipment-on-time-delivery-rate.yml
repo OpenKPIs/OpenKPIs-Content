@@ -1,19 +1,19 @@
 # KPI: Shipment On-Time Delivery Rate
-# Generated: 2026-08-25T00:04:19.593Z
+# Generated: 2026-09-05T12:30:24.016Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 KPI Name: Shipment On-Time Delivery Rate
-Formula: (On-Time Shipments / Total Shipments) × 100
+Formula: (COUNT(CASE WHEN delivery_date <= promised_date THEN 1 END) / COUNT(order_id)) × 100
 
 Description: |
-  Measures the percentage of shipments delivered on or before the scheduled delivery date. It reflects the efficiency and reliability of the logistics operations.
+  Measures the rate at which shipments are delivered on or before the promised date, indicating logistics efficiency.
 
 Category: Performance
 
 Tags: [kpi]
 
-Industry: [Logistics & Supply Chain]
+Industry: [Other]
 
 Priority: High
 
@@ -35,21 +35,19 @@ Google Analytics SQL: |
   -- ==========================================
   -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
-  SELECT order_id, 
-         COUNT(CASE WHEN delivery_date <= promised_date THEN 1 END) / COUNT(order_id) AS on_time_delivery_rate
+  SELECT 
+    COUNT(CASE WHEN delivery_date <= promised_date THEN 1 END) / COUNT(*) * 100 AS on_time_delivery_rate
   FROM `your-project.erp.shipment_logs`
   WHERE delivery_status = 'Delivered'
-  GROUP BY order_id
 
 AEP Query Service SQL: |
   -- ==========================================
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
-  SELECT order_id, 
-         COUNT(CASE WHEN delivery_date <= promised_date THEN 1 END) / COUNT(order_id) AS on_time_delivery_rate
+  SELECT 
+    COUNT(CASE WHEN delivery_date <= promised_date THEN 1 END) / COUNT(*) * 100 AS on_time_delivery_rate
   FROM aep_backend_dataset.shipment_logs
   WHERE delivery_status = 'Delivered'
-  GROUP BY order_id
 
 Calculation Notes: |
   Exclude shipments with customer-requested delays. Consider timezone differences for international deliveries.
@@ -68,16 +66,17 @@ Dashboard Usage: [Logistics Performance Dashboard, Supply Chain Efficiency Dashb
 Segment Eligibility: |
   true
 
+Related KPIs: [Order Fulfillment Rate, Delivery Accuracy, Customer Satisfaction Score]
 
 Data Sensitivity: internal
 
 Contains PII: No
 
-Status: published
+Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-08-25T00:04:06.371+00:00
+Created At: 2026-09-05T12:30:23.624441+00:00
 
 Last Modified By: devyendarm
 
