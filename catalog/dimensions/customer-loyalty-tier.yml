@@ -1,0 +1,535 @@
+# Dimension: Customer Loyalty Tier
+# Generated: 2026-09-09T23:30:44.466Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Customer Loyalty Tier
+
+Description: |
+  Classifies a digitally identified customer into the loyalty program status level that was effective when an event occurred or at the selected reporting snapshot. It enables comparison of engagement, conversion, revenue contribution, and retention behavior across governed loyalty tiers without exposing the customer's identity.
+
+Category: Retention
+
+Tags: [dimension]
+
+Industry: Travel & Hospitality
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User; Time based - Daily snapshot with event-time attribution
+
+GA4 Event: |
+  login
+
+Adobe Event: |
+  login
+
+W3 Data Layer: |
+  {"digitalData":{"user":[{"profile":[{"attributes":{"loyalty":{"tier":"GOLD"}}}]}],"event":[{"eventInfo":{"eventName":"login"}}]}}
+
+GA4 Data Layer: |
+  {"event":"login","method":"loyalty_program","customer_loyalty_tier":"GOLD"}
+
+Adobe Client Data Layer: |
+  {"data":{"user":{"loyalty":{"tier":"GOLD"}}},"event":"login"}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"GOLD"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH ga4_source AS (
+    SELECT
+      COALESCE(NULLIF(user_id, ''), user_pseudo_id) AS customer_key,
+      NULLIF(user_id, '') AS customer_id,
+      user_pseudo_id,
+      CAST(NULL AS STRING) AS loyalty_member_id,
+      COALESCE(
+        (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'customer_loyalty_tier' LIMIT 1),
+        (SELECT up.value.string_value FROM UNNEST(user_properties) up WHERE up.key = 'customer_loyalty_tier' LIMIT 1)
+      ) AS raw_tier,
+      TIMESTAMP_MICROS(event_timestamp) AS tier_effective_at,
+      TIMESTAMP_MICROS(event_timestamp) AS tier_observed_at,
+      CAST(NULL AS TIMESTAMP) AS tier_expiration_at,
+      TRUE AS tier_is_active,
+      'GA4' AS source_system,
+      'analytics_123456789.events_*' AS source_dataset,
+      event_name AS source_event_name,
+      CAST(
+        FARM_FINGERPRINT(
+          CONCAT(
+            COALESCE(user_pseudo_id, ''), '|',
+            CAST(event_timestamp AS STRING), '|',
+            event_name, '|',
+            CAST(COALESCE(event_bundle_sequence_id, 0) AS STRING)
+          )
+        ) AS STRING
+      ) AS source_event_id,
+      PARSE_DATE('%Y%m%d', event_date) AS source_event_date,
+      platform AS source_platform,
+      CAST(stream_id AS STRING) AS source_stream_id,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'method' LIMIT 1) AS source_method,
+      2 AS source_priority,
+      CASE WHEN NULLIF(user_id, '') IS NOT NULL THEN 'CUSTOMER_ID' ELSE 'GA4_PSEUDO_ID' END AS identity_type,
+      NULLIF(user_id, '') IS NOT NULL AS identity_is_authenticated,
+      geo.country AS country,
+      geo.region AS region,
+      geo.city AS city,
+      device.language AS language,
+      device.category AS device_category,
+      device.operating_system AS operating_system,
+      device.web_info.browser AS browser,
+      traffic_source.source AS acquisition_source,
+      traffic_source.medium AS acquisition_medium,
+      traffic_source.name AS acquisition_campaign,
+      privacy_info.analytics_storage AS consent_analytics_storage,
+      privacy_info.ads_storage AS consent_ads_storage
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE COALESCE(NULLIF(user_id, ''), user_pseudo_id) IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM UNNEST(event_params) ep
+          WHERE ep.key = 'customer_loyalty_tier'
+            AND NULLIF(TRIM(ep.value.string_value), '') IS NOT NULL
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM UNNEST(user_properties) up
+          WHERE up.key = 'customer_loyalty_tier'
+            AND NULLIF(TRIM(up.value.string_value), '') IS NOT NULL
+        )
+      )
+  ),
+  loyalty_platform_source AS (
+    SELECT
+      COALESCE(NULLIF(customer_id, ''), NULLIF(loyalty_member_id, '')) AS customer_key,
+      NULLIF(customer_id, '') AS customer_id,
+      CAST(NULL AS STRING) AS user_pseudo_id,
+      NULLIF(loyalty_member_id, '') AS loyalty_member_id,
+      loyalty_tier AS raw_tier,
+      COALESCE(tier_effective_at, updated_at) AS tier_effective_at,
+      updated_at AS tier_observed_at,
+      tier_expiration_at,
+      COALESCE(is_active, TRUE) AS tier_is_active,
+      'DIGITAL_LOYALTY_PLATFORM' AS source_system,
+      'loyalty.customer_profiles' AS source_dataset,
+      'profile_update' AS source_event_name,
+      CONCAT(
+        COALESCE(customer_id, loyalty_member_id), '|',
+        CAST(updated_at AS STRING)
+      ) AS source_event_id,
+      DATE(updated_at) AS source_event_date,
+      'LOYALTY_PLATFORM' AS source_platform,
+      CAST(NULL AS STRING) AS source_stream_id,
+      'loyalty_profile' AS source_method,
+      1 AS source_priority,
+      CASE WHEN NULLIF(customer_id, '') IS NOT NULL THEN 'CUSTOMER_ID' ELSE 'LOYALTY_MEMBER_ID' END AS identity_type,
+      TRUE AS identity_is_authenticated,
+      country,
+      region,
+      city,
+      CAST(NULL AS STRING) AS language,
+      CAST(NULL AS STRING) AS device_category,
+      CAST(NULL AS STRING) AS operating_system,
+      CAST(NULL AS STRING) AS browser,
+      CAST(NULL AS STRING) AS acquisition_source,
+      CAST(NULL AS STRING) AS acquisition_medium,
+      CAST(NULL AS STRING) AS acquisition_campaign,
+      CAST(NULL AS STRING) AS consent_analytics_storage,
+      CAST(NULL AS STRING) AS consent_ads_storage
+    FROM `your-project.loyalty.customer_profiles`
+    WHERE COALESCE(NULLIF(customer_id, ''), NULLIF(loyalty_member_id, '')) IS NOT NULL
+      AND NULLIF(TRIM(loyalty_tier), '') IS NOT NULL
+  ),
+  normalized AS (
+    SELECT
+      s.*,
+      CASE
+        WHEN REGEXP_REPLACE(UPPER(TRIM(raw_tier)), r'[^A-Z0-9]+', '_') IN ('BRONZE', 'BRONZE_TIER') THEN 'BRONZE'
+        WHEN REGEXP_REPLACE(UPPER(TRIM(raw_tier)), r'[^A-Z0-9]+', '_') IN ('SILVER', 'SILVER_TIER') THEN 'SILVER'
+        WHEN REGEXP_REPLACE(UPPER(TRIM(raw_tier)), r'[^A-Z0-9]+', '_') IN ('GOLD', 'GOLD_TIER') THEN 'GOLD'
+        WHEN REGEXP_REPLACE(UPPER(TRIM(raw_tier)), r'[^A-Z0-9]+', '_') IN ('PLATINUM', 'PLATINUM_TIER') THEN 'PLATINUM'
+        WHEN REGEXP_REPLACE(UPPER(TRIM(raw_tier)), r'[^A-Z0-9]+', '_') IN ('DIAMOND', 'DIAMOND_TIER') THEN 'DIAMOND'
+        ELSE REGEXP_REPLACE(UPPER(TRIM(raw_tier)), r'[^A-Z0-9]+', '_')
+      END AS normalized_tier
+    FROM (
+      SELECT * FROM ga4_source
+      UNION ALL
+      SELECT * FROM loyalty_platform_source
+    ) s
+    WHERE NULLIF(TRIM(raw_tier), '') IS NOT NULL
+  ),
+  sequenced AS (
+    SELECT
+      n.*,
+      LAG(normalized_tier) OVER (
+        PARTITION BY customer_key
+        ORDER BY tier_observed_at, source_priority DESC, source_event_id
+      ) AS prior_loyalty_tier
+    FROM normalized n
+  ),
+  measured AS (
+    SELECT
+      s.*,
+      MIN(tier_observed_at) OVER (PARTITION BY customer_key) AS tier_first_observed_at,
+      MAX(tier_observed_at) OVER (PARTITION BY customer_key) AS tier_last_observed_at,
+      COUNTIF(prior_loyalty_tier IS NOT NULL AND prior_loyalty_tier != normalized_tier)
+        OVER (PARTITION BY customer_key) AS tier_change_count
+    FROM sequenced s
+  ),
+  ranked AS (
+    SELECT
+      m.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY customer_key
+        ORDER BY source_priority, tier_observed_at DESC, tier_effective_at DESC, source_event_id DESC
+      ) AS current_row_number
+    FROM measured m
+  )
+  SELECT
+    customer_key,
+    customer_id,
+    user_pseudo_id,
+    loyalty_member_id,
+    normalized_tier AS customer_loyalty_tier,
+    normalized_tier AS loyalty_tier_code,
+    CASE normalized_tier
+      WHEN 'BRONZE' THEN 'Bronze'
+      WHEN 'SILVER' THEN 'Silver'
+      WHEN 'GOLD' THEN 'Gold'
+      WHEN 'PLATINUM' THEN 'Platinum'
+      WHEN 'DIAMOND' THEN 'Diamond'
+      ELSE INITCAP(REPLACE(normalized_tier, '_', ' '))
+    END AS loyalty_tier_name,
+    CASE normalized_tier
+      WHEN 'BRONZE' THEN 1
+      WHEN 'SILVER' THEN 2
+      WHEN 'GOLD' THEN 3
+      WHEN 'PLATINUM' THEN 4
+      WHEN 'DIAMOND' THEN 5
+      ELSE 0
+    END AS loyalty_tier_rank,
+    CASE
+      WHEN normalized_tier IN ('BRONZE', 'SILVER') THEN 'STANDARD'
+      WHEN normalized_tier IN ('GOLD', 'PLATINUM') THEN 'PREMIUM'
+      WHEN normalized_tier = 'DIAMOND' THEN 'ELITE'
+      ELSE 'UNMAPPED'
+    END AS loyalty_tier_group,
+    CASE WHEN normalized_tier IN ('BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND') THEN 'RECOGNIZED' ELSE 'UNMAPPED' END AS loyalty_tier_status,
+    normalized_tier IN ('BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND') AS tier_is_recognized,
+    tier_is_active,
+    tier_effective_at,
+    tier_observed_at,
+    tier_expiration_at,
+    tier_first_observed_at,
+    tier_last_observed_at,
+    prior_loyalty_tier,
+    COALESCE(prior_loyalty_tier != normalized_tier, FALSE) AS tier_changed_flag,
+    tier_change_count,
+    source_system,
+    source_dataset,
+    source_event_name,
+    source_event_id,
+    source_event_date,
+    source_platform,
+    source_stream_id,
+    source_method,
+    source_priority,
+    identity_type,
+    identity_is_authenticated,
+    country,
+    region,
+    city,
+    language,
+    device_category,
+    operating_system,
+    browser,
+    acquisition_source,
+    acquisition_medium,
+    acquisition_campaign,
+    consent_analytics_storage,
+    consent_ads_storage,
+    tier_effective_at AS record_valid_from,
+    COALESCE(tier_expiration_at, TIMESTAMP '9999-12-31 23:59:59+00') AS record_valid_to,
+    TRUE AS is_current,
+    CURRENT_TIMESTAMP() AS record_created_at,
+    CURRENT_TIMESTAMP() AS record_updated_at,
+    CASE
+      WHEN customer_key IS NULL THEN 'INVALID_IDENTITY'
+      WHEN normalized_tier NOT IN ('BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND') THEN 'UNMAPPED_TIER'
+      ELSE 'VALID'
+    END AS data_quality_status
+  FROM ranked
+  WHERE current_row_number = 1;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH aep_event_source AS (
+    SELECT
+      COALESCE(
+        identityMap['CRMID'][0].id,
+        identityMap['LOYALTY_ID'][0].id,
+        identityMap['ECID'][0].id
+      ) AS customer_key,
+      identityMap['CRMID'][0].id AS customer_id,
+      identityMap['ECID'][0].id AS user_pseudo_id,
+      identityMap['LOYALTY_ID'][0].id AS loyalty_member_id,
+      CAST(_experience.analytics.customDimensions.eVars.eVar1 AS VARCHAR) AS raw_tier,
+      CAST(timestamp AS TIMESTAMP) AS tier_effective_at,
+      CAST(timestamp AS TIMESTAMP) AS tier_observed_at,
+      CAST(NULL AS TIMESTAMP) AS tier_expiration_at,
+      TRUE AS tier_is_active,
+      'ADOBE_AEP' AS source_system,
+      'your_aep_experience_event_dataset' AS source_dataset,
+      eventType AS source_event_name,
+      CAST(_id AS VARCHAR) AS source_event_id,
+      CAST(timestamp AS DATE) AS source_event_date,
+      'WEB' AS source_platform,
+      CAST(NULL AS VARCHAR) AS source_stream_id,
+      'loyalty_program' AS source_method,
+      2 AS source_priority,
+      CASE
+        WHEN identityMap['CRMID'][0].id IS NOT NULL THEN 'CUSTOMER_ID'
+        WHEN identityMap['LOYALTY_ID'][0].id IS NOT NULL THEN 'LOYALTY_MEMBER_ID'
+        ELSE 'ECID'
+      END AS identity_type,
+      CASE
+        WHEN identityMap['CRMID'][0].id IS NOT NULL OR identityMap['LOYALTY_ID'][0].id IS NOT NULL THEN TRUE
+        ELSE FALSE
+      END AS identity_is_authenticated,
+      CAST(NULL AS VARCHAR) AS country,
+      CAST(NULL AS VARCHAR) AS region,
+      CAST(NULL AS VARCHAR) AS city,
+      CAST(NULL AS VARCHAR) AS language,
+      CAST(NULL AS VARCHAR) AS device_category,
+      CAST(NULL AS VARCHAR) AS operating_system,
+      CAST(NULL AS VARCHAR) AS browser,
+      CAST(NULL AS VARCHAR) AS acquisition_source,
+      CAST(NULL AS VARCHAR) AS acquisition_medium,
+      CAST(NULL AS VARCHAR) AS acquisition_campaign,
+      CAST(NULL AS VARCHAR) AS consent_analytics_storage,
+      CAST(NULL AS VARCHAR) AS consent_ads_storage
+    FROM your_aep_experience_event_dataset
+    WHERE _experience.analytics.customDimensions.eVars.eVar1 IS NOT NULL
+      AND TRIM(CAST(_experience.analytics.customDimensions.eVars.eVar1 AS VARCHAR)) <> ''
+      AND COALESCE(
+        identityMap['CRMID'][0].id,
+        identityMap['LOYALTY_ID'][0].id,
+        identityMap['ECID'][0].id
+      ) IS NOT NULL
+  ),
+  loyalty_platform_source AS (
+    SELECT
+      COALESCE(NULLIF(customer_id, ''), NULLIF(loyalty_member_id, '')) AS customer_key,
+      NULLIF(customer_id, '') AS customer_id,
+      CAST(NULL AS VARCHAR) AS user_pseudo_id,
+      NULLIF(loyalty_member_id, '') AS loyalty_member_id,
+      loyalty_tier AS raw_tier,
+      COALESCE(tier_effective_at, updated_at) AS tier_effective_at,
+      updated_at AS tier_observed_at,
+      tier_expiration_at,
+      COALESCE(is_active, TRUE) AS tier_is_active,
+      'DIGITAL_LOYALTY_PLATFORM' AS source_system,
+      'your_aep_loyalty_profile_dataset' AS source_dataset,
+      'profile_update' AS source_event_name,
+      CONCAT(COALESCE(customer_id, loyalty_member_id), '|', CAST(updated_at AS VARCHAR)) AS source_event_id,
+      CAST(updated_at AS DATE) AS source_event_date,
+      'LOYALTY_PLATFORM' AS source_platform,
+      CAST(NULL AS VARCHAR) AS source_stream_id,
+      'loyalty_profile' AS source_method,
+      1 AS source_priority,
+      CASE WHEN NULLIF(customer_id, '') IS NOT NULL THEN 'CUSTOMER_ID' ELSE 'LOYALTY_MEMBER_ID' END AS identity_type,
+      TRUE AS identity_is_authenticated,
+      country,
+      region,
+      city,
+      CAST(NULL AS VARCHAR) AS language,
+      CAST(NULL AS VARCHAR) AS device_category,
+      CAST(NULL AS VARCHAR) AS operating_system,
+      CAST(NULL AS VARCHAR) AS browser,
+      CAST(NULL AS VARCHAR) AS acquisition_source,
+      CAST(NULL AS VARCHAR) AS acquisition_medium,
+      CAST(NULL AS VARCHAR) AS acquisition_campaign,
+      CAST(NULL AS VARCHAR) AS consent_analytics_storage,
+      CAST(NULL AS VARCHAR) AS consent_ads_storage
+    FROM your_aep_loyalty_profile_dataset
+    WHERE COALESCE(NULLIF(customer_id, ''), NULLIF(loyalty_member_id, '')) IS NOT NULL
+      AND NULLIF(TRIM(loyalty_tier), '') IS NOT NULL
+  ),
+  normalized AS (
+    SELECT
+      s.*,
+      CASE
+        WHEN UPPER(TRIM(raw_tier)) IN ('BRONZE', 'BRONZE TIER', 'BRONZE_TIER') THEN 'BRONZE'
+        WHEN UPPER(TRIM(raw_tier)) IN ('SILVER', 'SILVER TIER', 'SILVER_TIER') THEN 'SILVER'
+        WHEN UPPER(TRIM(raw_tier)) IN ('GOLD', 'GOLD TIER', 'GOLD_TIER') THEN 'GOLD'
+        WHEN UPPER(TRIM(raw_tier)) IN ('PLATINUM', 'PLATINUM TIER', 'PLATINUM_TIER') THEN 'PLATINUM'
+        WHEN UPPER(TRIM(raw_tier)) IN ('DIAMOND', 'DIAMOND TIER', 'DIAMOND_TIER') THEN 'DIAMOND'
+        ELSE UPPER(REPLACE(TRIM(raw_tier), ' ', '_'))
+      END AS normalized_tier
+    FROM (
+      SELECT * FROM aep_event_source
+      UNION ALL
+      SELECT * FROM loyalty_platform_source
+    ) s
+    WHERE raw_tier IS NOT NULL
+      AND TRIM(raw_tier) <> ''
+  ),
+  sequenced AS (
+    SELECT
+      n.*,
+      LAG(normalized_tier) OVER (
+        PARTITION BY customer_key
+        ORDER BY tier_observed_at, source_priority DESC, source_event_id
+      ) AS prior_loyalty_tier
+    FROM normalized n
+  ),
+  measured AS (
+    SELECT
+      s.*,
+      MIN(tier_observed_at) OVER (PARTITION BY customer_key) AS tier_first_observed_at,
+      MAX(tier_observed_at) OVER (PARTITION BY customer_key) AS tier_last_observed_at,
+      SUM(
+        CASE
+          WHEN prior_loyalty_tier IS NOT NULL AND prior_loyalty_tier <> normalized_tier THEN 1
+          ELSE 0
+        END
+      ) OVER (PARTITION BY customer_key) AS tier_change_count
+    FROM sequenced s
+  ),
+  ranked AS (
+    SELECT
+      m.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY customer_key
+        ORDER BY source_priority, tier_observed_at DESC, tier_effective_at DESC, source_event_id DESC
+      ) AS current_row_number
+    FROM measured m
+  )
+  SELECT
+    customer_key,
+    customer_id,
+    user_pseudo_id,
+    loyalty_member_id,
+    normalized_tier AS customer_loyalty_tier,
+    normalized_tier AS loyalty_tier_code,
+    CASE normalized_tier
+      WHEN 'BRONZE' THEN 'Bronze'
+      WHEN 'SILVER' THEN 'Silver'
+      WHEN 'GOLD' THEN 'Gold'
+      WHEN 'PLATINUM' THEN 'Platinum'
+      WHEN 'DIAMOND' THEN 'Diamond'
+      ELSE REPLACE(normalized_tier, '_', ' ')
+    END AS loyalty_tier_name,
+    CASE normalized_tier
+      WHEN 'BRONZE' THEN 1
+      WHEN 'SILVER' THEN 2
+      WHEN 'GOLD' THEN 3
+      WHEN 'PLATINUM' THEN 4
+      WHEN 'DIAMOND' THEN 5
+      ELSE 0
+    END AS loyalty_tier_rank,
+    CASE
+      WHEN normalized_tier IN ('BRONZE', 'SILVER') THEN 'STANDARD'
+      WHEN normalized_tier IN ('GOLD', 'PLATINUM') THEN 'PREMIUM'
+      WHEN normalized_tier = 'DIAMOND' THEN 'ELITE'
+      ELSE 'UNMAPPED'
+    END AS loyalty_tier_group,
+    CASE WHEN normalized_tier IN ('BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND') THEN 'RECOGNIZED' ELSE 'UNMAPPED' END AS loyalty_tier_status,
+    CASE WHEN normalized_tier IN ('BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND') THEN TRUE ELSE FALSE END AS tier_is_recognized,
+    tier_is_active,
+    tier_effective_at,
+    tier_observed_at,
+    tier_expiration_at,
+    tier_first_observed_at,
+    tier_last_observed_at,
+    prior_loyalty_tier,
+    CASE WHEN prior_loyalty_tier IS NOT NULL AND prior_loyalty_tier <> normalized_tier THEN TRUE ELSE FALSE END AS tier_changed_flag,
+    tier_change_count,
+    source_system,
+    source_dataset,
+    source_event_name,
+    source_event_id,
+    source_event_date,
+    source_platform,
+    source_stream_id,
+    source_method,
+    source_priority,
+    identity_type,
+    identity_is_authenticated,
+    country,
+    region,
+    city,
+    language,
+    device_category,
+    operating_system,
+    browser,
+    acquisition_source,
+    acquisition_medium,
+    acquisition_campaign,
+    consent_analytics_storage,
+    consent_ads_storage,
+    tier_effective_at AS record_valid_from,
+    COALESCE(tier_expiration_at, TIMESTAMP '9999-12-31 23:59:59') AS record_valid_to,
+    TRUE AS is_current,
+    CURRENT_TIMESTAMP AS record_created_at,
+    CURRENT_TIMESTAMP AS record_updated_at,
+    CASE
+      WHEN customer_key IS NULL THEN 'INVALID_IDENTITY'
+      WHEN normalized_tier NOT IN ('BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND') THEN 'UNMAPPED_TIER'
+      ELSE 'VALID'
+    END AS data_quality_status
+  FROM ranked
+  WHERE current_row_number = 1;
+
+Calculation Notes: |
+  1️⃣ Use the loyalty tier effective interval: effective_start_timestamp <= event_timestamp < effective_end_timestamp in UTC.  
+  2️⃣ Do not backfill current tier onto historical events to avoid look-ahead bias.  
+  3️⃣ Label records without effective-dated history as current-snapshot attribution via metadata.  
+  4️⃣ Preserve NOT_ENROLLED separately from UNKNOWN; map tier names through the approved crosswalk.  
+  5️⃣ Never infer a higher tier from points, spend, bookings, or engagement unless formally assigned.  
+  6️⃣ For overlapping tier records, select the latest source update timestamp after quarantining conflicts.  
+  7️⃣ Exclude employee, test, bot, synthetic-monitoring, and deleted-account profiles from standard reporting unless requested.
+
+Business Use Case: |
+  The Chief Marketing Officer compares digital booking conversion and repeat-visit rates by event-time loyalty tier, identifies that eligible Gold and Platinum members abandon during benefit selection, and prioritizes a personalized digital checkout experience that surfaces applicable benefits before payment. The loyalty team subsequently measures whether the intervention improves conversion and retained digital engagement for those tiers without overstating results by applying current status to historical sessions.
+
+
+Source Data: Digital Analytics (GA4) + Digital Loyalty Platform
+
+Report Attributes: |
+  ["Digital Booking Channel","Device Category","Platform","Customer Login Status","Loyalty Program Name","Customer Country","Traffic Source","Campaign","Trip Type","Booking Lead-Time Band","Property or Destination","Event Date"]
+
+Dashboard Usage: [Digital Loyalty Performance Executive Dashboard, Loyalty Tier Conversion Funnel, Member Digital Engagement and Retention, Digital Booking Revenue by Loyalty Tier, Loyalty Personalization Performance, Loyalty Data Quality and Reconciliation]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Loyalty Program Membership Status, Loyalty Program Name, Customer Digital Identity, Customer Login Status, Loyalty Enrollment Date, Loyalty Tier Effective Date, Loyalty Tier Expiration Date, Digital Booking Channel, Customer Country, Customer Lifetime Value Band]
+
+Derived Dimensions: [Loyalty Tier Group, Elite Status Indicator, Loyalty Tier Rank, Loyalty Tier Tenure Band, Loyalty Tier Change Direction, Days Until Tier Expiration, Tier Upgrade Eligibility Band]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T23:30:43.910163+00:00
+
+Last Modified By: devyendarm
+
+
