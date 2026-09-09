@@ -1,0 +1,513 @@
+# Metric: Damaged Shipment Count
+# Generated: 2026-09-04T13:30:26.569Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Damaged Shipment Count
+Formula: COUNT(DISTINCT CASE WHEN customer_facing_shipment_flag = TRUE AND damage_confirmation_status = 'confirmed' AND damage_incident_stage IN ('carrier_transit', 'last_mile', 'delivery', 'post_delivery_unboxing') AND first_damage_confirmed_at >= reporting_window_start AND first_damage_confirmed_at < reporting_window_end THEN shipment_id END)
+
+Description: |
+  Counts unique customer-facing shipments confirmed as physically damaged during carrier transit, delivery, or customer unboxing within the reporting window. It measures fulfillment quality across the omnichannel journey by linking acquisition promises and conversion outcomes to service engagement, billing remedies, retention, and customer lifetime value.
+
+Category: Quality
+
+Tags: [metric]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Item
+
+Measure Type: count
+
+Aggregation Window: Time based - Daily
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH shipment_ranked AS (
+    SELECT
+      s.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY s.shipment_id
+        ORDER BY s.updated_at DESC, s.shipment_created_at DESC
+      ) AS row_num
+    FROM `your-project.commerce.shipments` AS s
+  ),
+  shipment_base AS (
+    SELECT * EXCEPT (row_num)
+    FROM shipment_ranked
+    WHERE row_num = 1
+  ),
+  damage_evidence AS (
+    SELECT
+      shipment_id,
+      observed_at AS evidence_at,
+      'carrier_tracking' AS evidence_source
+    FROM `your-project.logistics.carrier_tracking_events`
+    WHERE UPPER(exception_code) IN ('DAMAGE', 'DAMAGED', 'PACKAGE_DAMAGED', 'CONTENT_DAMAGED')
+  
+    UNION ALL
+  
+    SELECT
+      shipment_id,
+      reported_at AS evidence_at,
+      'self_service_claim' AS evidence_source
+    FROM `your-project.customer_service.customer_claims`
+    WHERE UPPER(issue_type) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(claim_status) NOT IN ('DRAFT', 'CANCELLED', 'REJECTED_AS_DUPLICATE')
+  
+    UNION ALL
+  
+    SELECT
+      shipment_id,
+      completed_at AS evidence_at,
+      'support_journey' AS evidence_source
+    FROM `your-project.digital_support.support_journeys`
+    WHERE UPPER(issue_category) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(journey_status) IN ('SUBMITTED', 'COMPLETED', 'ESCALATED')
+  
+    UNION ALL
+  
+    SELECT
+      shipment_id,
+      created_at AS evidence_at,
+      'crm_service_case' AS evidence_source
+    FROM `your-project.crm.service_cases`
+    WHERE UPPER(case_category) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(case_status) NOT IN ('CANCELLED', 'DUPLICATE')
+  
+    UNION ALL
+  
+    SELECT
+      shipment_id,
+      created_at AS evidence_at,
+      'billing_refund' AS evidence_source
+    FROM `your-project.billing.refunds`
+    WHERE UPPER(refund_reason) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(refund_status) IN ('APPROVED', 'PROCESSED', 'COMPLETED')
+  ),
+  evidence_by_source AS (
+    SELECT
+      shipment_id,
+      evidence_source,
+      MIN(evidence_at) AS first_source_evidence_at,
+      MAX(evidence_at) AS last_source_evidence_at
+    FROM damage_evidence
+    WHERE shipment_id IS NOT NULL
+      AND evidence_at IS NOT NULL
+    GROUP BY shipment_id, evidence_source
+  ),
+  first_evidence_source AS (
+    SELECT shipment_id, evidence_source
+    FROM evidence_by_source
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY shipment_id
+      ORDER BY first_source_evidence_at, evidence_source
+    ) = 1
+  ),
+  evidence_rollup AS (
+    SELECT
+      shipment_id,
+      MIN(first_source_evidence_at) AS first_damage_reported_at,
+      MAX(last_source_evidence_at) AS last_damage_reported_at,
+      MAX(IF(evidence_source = 'carrier_tracking', 1, 0)) AS carrier_damage_flag,
+      MAX(IF(evidence_source = 'self_service_claim', 1, 0)) AS self_service_damage_flag,
+      MAX(IF(evidence_source = 'support_journey', 1, 0)) AS support_journey_damage_flag,
+      MAX(IF(evidence_source = 'crm_service_case', 1, 0)) AS crm_damage_flag,
+      MAX(IF(evidence_source = 'billing_refund', 1, 0)) AS refund_damage_flag
+    FROM evidence_by_source
+    GROUP BY shipment_id
+  ),
+  item_rollup AS (
+    SELECT
+      shipment_id,
+      SUM(COALESCE(quantity, 0)) AS item_quantity,
+      COUNT(DISTINCT sku) AS distinct_sku_count
+    FROM `your-project.commerce.shipment_items`
+    GROUP BY shipment_id
+  ),
+  claim_rollup AS (
+    SELECT
+      shipment_id,
+      ARRAY_AGG(claim_id IGNORE NULLS ORDER BY reported_at LIMIT 1)[SAFE_OFFSET(0)] AS primary_claim_id
+    FROM `your-project.customer_service.customer_claims`
+    WHERE UPPER(issue_type) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(claim_status) NOT IN ('DRAFT', 'CANCELLED', 'REJECTED_AS_DUPLICATE')
+    GROUP BY shipment_id
+  ),
+  case_rollup AS (
+    SELECT
+      shipment_id,
+      ARRAY_AGG(case_id IGNORE NULLS ORDER BY created_at LIMIT 1)[SAFE_OFFSET(0)] AS primary_service_case_id
+    FROM `your-project.crm.service_cases`
+    WHERE UPPER(case_category) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(case_status) NOT IN ('CANCELLED', 'DUPLICATE')
+    GROUP BY shipment_id
+  ),
+  refund_rollup AS (
+    SELECT
+      shipment_id,
+      SUM(COALESCE(refund_amount, 0)) AS damage_refund_amount,
+      MAX(updated_at) AS refund_updated_at
+    FROM `your-project.billing.refunds`
+    WHERE UPPER(refund_reason) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(refund_status) IN ('APPROVED', 'PROCESSED', 'COMPLETED')
+    GROUP BY shipment_id
+  )
+  SELECT
+    DATE(e.first_damage_reported_at) AS metric_date,
+    'Damaged Shipment Count' AS metric_name,
+    '1.0' AS metric_version,
+    'Distinct shipments with at least one validated carrier, claim, support, CRM, or refund damage signal; each output row is one additive damaged shipment.' AS metric_definition,
+    CAST(1 AS INT64) AS damaged_shipment_count,
+    s.shipment_id,
+    s.tracking_number,
+    s.order_id,
+    o.order_number,
+    o.customer_id,
+    o.account_id,
+    o.checkout_id,
+    s.shipment_created_at,
+    s.shipped_at,
+    s.promised_delivery_at,
+    s.delivered_at,
+    e.first_damage_reported_at,
+    e.last_damage_reported_at,
+    fs.evidence_source AS damage_detection_source,
+    e.carrier_damage_flag = 1 AS carrier_damage_flag,
+    e.self_service_damage_flag = 1 AS self_service_damage_flag,
+    e.support_journey_damage_flag = 1 AS support_journey_damage_flag,
+    e.crm_damage_flag = 1 AS crm_damage_flag,
+    e.refund_damage_flag = 1 AS refund_damage_flag,
+    s.carrier_code,
+    cr.carrier_name,
+    s.service_level,
+    s.shipment_status,
+    s.fulfillment_center_id,
+    fc.warehouse_id,
+    fc.country_code AS origin_country_code,
+    s.destination_country_code,
+    s.destination_region,
+    s.destination_city,
+    o.sales_channel,
+    o.device_channel,
+    o.currency_code AS order_currency,
+    o.order_value,
+    s.shipment_value,
+    COALESCE(i.item_quantity, 0) AS item_quantity,
+    COALESCE(i.distinct_sku_count, 0) AS distinct_sku_count,
+    COALESCE(s.package_count, 0) AS package_count,
+    s.total_weight,
+    s.weight_unit,
+    c.customer_type,
+    cl.primary_claim_id,
+    sc.primary_service_case_id,
+    COALESCE(r.damage_refund_amount, 0) AS damage_refund_amount,
+    GREATEST(
+      COALESCE(s.updated_at, TIMESTAMP '1970-01-01 00:00:00+00'),
+      e.last_damage_reported_at,
+      COALESCE(r.refund_updated_at, TIMESTAMP '1970-01-01 00:00:00+00')
+    ) AS record_updated_at
+  FROM shipment_base AS s
+  JOIN evidence_rollup AS e
+    ON e.shipment_id = s.shipment_id
+  JOIN first_evidence_source AS fs
+    ON fs.shipment_id = s.shipment_id
+  LEFT JOIN `your-project.commerce.orders` AS o
+    ON o.order_id = s.order_id
+  LEFT JOIN `your-project.logistics.carriers` AS cr
+    ON cr.carrier_code = s.carrier_code
+  LEFT JOIN `your-project.logistics.fulfillment_centers` AS fc
+    ON fc.fulfillment_center_id = s.fulfillment_center_id
+  LEFT JOIN `your-project.customer.customer_profiles` AS c
+    ON c.customer_id = o.customer_id
+  LEFT JOIN item_rollup AS i
+    ON i.shipment_id = s.shipment_id
+  LEFT JOIN claim_rollup AS cl
+    ON cl.shipment_id = s.shipment_id
+  LEFT JOIN case_rollup AS sc
+    ON sc.shipment_id = s.shipment_id
+  LEFT JOIN refund_rollup AS r
+    ON r.shipment_id = s.shipment_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH shipment_ranked AS (
+    SELECT
+      s.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY s.shipment_id
+        ORDER BY s.updated_at DESC, s.shipment_created_at DESC
+      ) AS row_num
+    FROM aep_backend_shipments AS s
+  ),
+  shipment_base AS (
+    SELECT
+      shipment_id,
+      tracking_number,
+      order_id,
+      shipment_created_at,
+      shipped_at,
+      promised_delivery_at,
+      delivered_at,
+      carrier_code,
+      service_level,
+      shipment_status,
+      fulfillment_center_id,
+      destination_country_code,
+      destination_region,
+      destination_city,
+      shipment_value,
+      package_count,
+      total_weight,
+      weight_unit,
+      updated_at
+    FROM shipment_ranked
+    WHERE row_num = 1
+  ),
+  damage_evidence AS (
+    SELECT
+      shipment_id,
+      observed_at AS evidence_at,
+      'carrier_tracking' AS evidence_source
+    FROM aep_backend_carrier_tracking
+    WHERE UPPER(exception_code) IN ('DAMAGE', 'DAMAGED', 'PACKAGE_DAMAGED', 'CONTENT_DAMAGED')
+  
+    UNION ALL
+  
+    SELECT
+      shipment_id,
+      reported_at AS evidence_at,
+      'self_service_claim' AS evidence_source
+    FROM aep_backend_customer_claims
+    WHERE UPPER(issue_type) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(claim_status) NOT IN ('DRAFT', 'CANCELLED', 'REJECTED_AS_DUPLICATE')
+  
+    UNION ALL
+  
+    SELECT
+      shipment_id,
+      completed_at AS evidence_at,
+      'support_journey' AS evidence_source
+    FROM aep_backend_support_journeys
+    WHERE UPPER(issue_category) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(journey_status) IN ('SUBMITTED', 'COMPLETED', 'ESCALATED')
+  
+    UNION ALL
+  
+    SELECT
+      shipment_id,
+      created_at AS evidence_at,
+      'crm_service_case' AS evidence_source
+    FROM aep_backend_service_cases
+    WHERE UPPER(case_category) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(case_status) NOT IN ('CANCELLED', 'DUPLICATE')
+  
+    UNION ALL
+  
+    SELECT
+      shipment_id,
+      created_at AS evidence_at,
+      'billing_refund' AS evidence_source
+    FROM aep_backend_refunds
+    WHERE UPPER(refund_reason) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(refund_status) IN ('APPROVED', 'PROCESSED', 'COMPLETED')
+  ),
+  evidence_by_source AS (
+    SELECT
+      shipment_id,
+      evidence_source,
+      MIN(evidence_at) AS first_source_evidence_at,
+      MAX(evidence_at) AS last_source_evidence_at
+    FROM damage_evidence
+    WHERE shipment_id IS NOT NULL
+      AND evidence_at IS NOT NULL
+    GROUP BY shipment_id, evidence_source
+  ),
+  first_source_ranked AS (
+    SELECT
+      shipment_id,
+      evidence_source,
+      ROW_NUMBER() OVER (
+        PARTITION BY shipment_id
+        ORDER BY first_source_evidence_at, evidence_source
+      ) AS row_num
+    FROM evidence_by_source
+  ),
+  first_evidence_source AS (
+    SELECT shipment_id, evidence_source
+    FROM first_source_ranked
+    WHERE row_num = 1
+  ),
+  evidence_rollup AS (
+    SELECT
+      shipment_id,
+      MIN(first_source_evidence_at) AS first_damage_reported_at,
+      MAX(last_source_evidence_at) AS last_damage_reported_at,
+      MAX(CASE WHEN evidence_source = 'carrier_tracking' THEN 1 ELSE 0 END) AS carrier_damage_flag,
+      MAX(CASE WHEN evidence_source = 'self_service_claim' THEN 1 ELSE 0 END) AS self_service_damage_flag,
+      MAX(CASE WHEN evidence_source = 'support_journey' THEN 1 ELSE 0 END) AS support_journey_damage_flag,
+      MAX(CASE WHEN evidence_source = 'crm_service_case' THEN 1 ELSE 0 END) AS crm_damage_flag,
+      MAX(CASE WHEN evidence_source = 'billing_refund' THEN 1 ELSE 0 END) AS refund_damage_flag
+    FROM evidence_by_source
+    GROUP BY shipment_id
+  ),
+  item_rollup AS (
+    SELECT
+      shipment_id,
+      SUM(COALESCE(quantity, 0)) AS item_quantity,
+      COUNT(DISTINCT sku) AS distinct_sku_count
+    FROM aep_backend_shipment_items
+    GROUP BY shipment_id
+  ),
+  claim_rollup AS (
+    SELECT
+      shipment_id,
+      MIN(claim_id) AS primary_claim_id
+    FROM aep_backend_customer_claims
+    WHERE UPPER(issue_type) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(claim_status) NOT IN ('DRAFT', 'CANCELLED', 'REJECTED_AS_DUPLICATE')
+    GROUP BY shipment_id
+  ),
+  case_rollup AS (
+    SELECT
+      shipment_id,
+      MIN(case_id) AS primary_service_case_id
+    FROM aep_backend_service_cases
+    WHERE UPPER(case_category) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(case_status) NOT IN ('CANCELLED', 'DUPLICATE')
+    GROUP BY shipment_id
+  ),
+  refund_rollup AS (
+    SELECT
+      shipment_id,
+      SUM(COALESCE(refund_amount, 0)) AS damage_refund_amount,
+      MAX(updated_at) AS refund_updated_at
+    FROM aep_backend_refunds
+    WHERE UPPER(refund_reason) IN ('DAMAGED_ITEM', 'DAMAGED_PACKAGE', 'SHIPPING_DAMAGE')
+      AND UPPER(refund_status) IN ('APPROVED', 'PROCESSED', 'COMPLETED')
+    GROUP BY shipment_id
+  )
+  SELECT
+    CAST(e.first_damage_reported_at AS DATE) AS metric_date,
+    'Damaged Shipment Count' AS metric_name,
+    '1.0' AS metric_version,
+    'Distinct shipments with at least one validated carrier, claim, support, CRM, or refund damage signal; each output row is one additive damaged shipment.' AS metric_definition,
+    CAST(1 AS BIGINT) AS damaged_shipment_count,
+    s.shipment_id,
+    s.tracking_number,
+    s.order_id,
+    o.order_number,
+    o.customer_id,
+    o.account_id,
+    o.checkout_id,
+    s.shipment_created_at,
+    s.shipped_at,
+    s.promised_delivery_at,
+    s.delivered_at,
+    e.first_damage_reported_at,
+    e.last_damage_reported_at,
+    fs.evidence_source AS damage_detection_source,
+    CASE WHEN e.carrier_damage_flag = 1 THEN TRUE ELSE FALSE END AS carrier_damage_flag,
+    CASE WHEN e.self_service_damage_flag = 1 THEN TRUE ELSE FALSE END AS self_service_damage_flag,
+    CASE WHEN e.support_journey_damage_flag = 1 THEN TRUE ELSE FALSE END AS support_journey_damage_flag,
+    CASE WHEN e.crm_damage_flag = 1 THEN TRUE ELSE FALSE END AS crm_damage_flag,
+    CASE WHEN e.refund_damage_flag = 1 THEN TRUE ELSE FALSE END AS refund_damage_flag,
+    s.carrier_code,
+    cr.carrier_name,
+    s.service_level,
+    s.shipment_status,
+    s.fulfillment_center_id,
+    fc.warehouse_id,
+    fc.country_code AS origin_country_code,
+    s.destination_country_code,
+    s.destination_region,
+    s.destination_city,
+    o.sales_channel,
+    o.device_channel,
+    o.currency_code AS order_currency,
+    o.order_value,
+    s.shipment_value,
+    COALESCE(i.item_quantity, 0) AS item_quantity,
+    COALESCE(i.distinct_sku_count, 0) AS distinct_sku_count,
+    COALESCE(s.package_count, 0) AS package_count,
+    s.total_weight,
+    s.weight_unit,
+    c.customer_type,
+    cl.primary_claim_id,
+    sc.primary_service_case_id,
+    COALESCE(r.damage_refund_amount, 0) AS damage_refund_amount,
+    GREATEST(
+      COALESCE(s.updated_at, CAST('1970-01-01 00:00:00' AS TIMESTAMP)),
+      e.last_damage_reported_at,
+      COALESCE(r.refund_updated_at, CAST('1970-01-01 00:00:00' AS TIMESTAMP))
+    ) AS record_updated_at
+  FROM shipment_base AS s
+  JOIN evidence_rollup AS e
+    ON e.shipment_id = s.shipment_id
+  JOIN first_evidence_source AS fs
+    ON fs.shipment_id = s.shipment_id
+  LEFT JOIN aep_backend_orders AS o
+    ON o.order_id = s.order_id
+  LEFT JOIN aep_backend_carriers AS cr
+    ON cr.carrier_code = s.carrier_code
+  LEFT JOIN aep_backend_fulfillment_centers AS fc
+    ON fc.fulfillment_center_id = s.fulfillment_center_id
+  LEFT JOIN aep_backend_customer_profiles AS c
+    ON c.customer_id = o.customer_id
+  LEFT JOIN item_rollup AS i
+    ON i.shipment_id = s.shipment_id
+  LEFT JOIN claim_rollup AS cl
+    ON cl.shipment_id = s.shipment_id
+  LEFT JOIN case_rollup AS sc
+    ON sc.shipment_id = s.shipment_id
+  LEFT JOIN refund_rollup AS r
+    ON r.shipment_id = s.shipment_id;
+
+Calculation Notes: |
+  Count each shipment_id once using its first qualifying confirmation timestamp, regardless of the number of damaged packages, items, customer contacts, claim updates, refunds, or replacements associated with that shipment. A shipment qualifies when damage is confirmed by an accepted customer claim, carrier evidence, or a completed customer remedy coded with a damage reason; customer reports are eligible when submitted within 30 calendar days after delivery or attempted delivery. Exclude unverified allegations, cosmetic packaging marks that do not affect the parcel or merchandise, loss or theft without physical damage, damage recorded before carrier handoff, canceled orders never handed to a carrier, test orders, fraudulent claims, duplicate cases, and reverse-logistics damage occurring during a customer return. If a confirmed status is later rejected or reversed, remove the shipment and restate affected reporting periods.
+
+Business Use Case: |
+  The Customer Experience executive reviews damaged shipment trends by order channel, carrier, fulfillment route, product category, and customer cohort. When a carrier-route combination exceeds the control threshold, the team can change delivery options shown at checkout, suppress a high-risk service level, improve proactive customer messaging, accelerate refunds or replacements, and measure whether those actions restore repeat conversion and retention.
+
+
+Source Data: E-commerce order management and digital checkout data stitched with carrier tracking webhooks, customer self-service claims, mobile or web support journeys, CRM service cases, and billing or refund platforms
+
+Report Attributes: |
+  ["Confirmation Date","Order Date","Delivery Date","Order Channel","Damage Report Channel","Customer Journey Stage","Carrier","Shipping Service Level","Origin Market","Destination Market","Fulfillment Location","Delivery Route","Product Category","Merchandise Fragility Class","Package Type","Damage Reason","Damage Incident Stage","Customer Remedy Type","Customer Tenure Band","Loyalty Tier","Acquisition Channel","New Versus Returning Customer"]
+
+Dashboard Usage: [Omnichannel Fulfillment Quality Dashboard, Customer Delivery Experience Dashboard, Post-Purchase Journey Dashboard, Customer Retention Risk Dashboard, Refund and Replacement Dashboard, Executive Customer Experience Scorecard, Carrier Experience Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Total Shipment Count, Delivered Shipment Count, Damage Claim Count, Replacement Shipment Count, Damage-Related Refund Amount, Customer Complaint Count, On-Time Delivery Rate, Return Count, Order Cancellation Count, Customer Support Contact Count]
+
+Derived KPIs: [Damaged Shipment Rate, Damage Claims per 1,000 Shipments, Damage-Related Refund Rate, Replacement Rate for Damaged Shipments, Average Recovery Cost per Damaged Shipment, Repeat Purchase Rate After Shipment Damage, Customer Retention Rate After Shipment Damage, Damage-Free Delivery Rate, Damage Resolution SLA Compliance Rate]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-04T13:30:25.694677+00:00
+
+Last Modified By: devyendarm
+
+
