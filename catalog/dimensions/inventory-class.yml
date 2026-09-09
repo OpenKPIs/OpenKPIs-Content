@@ -1,0 +1,301 @@
+# Dimension: Inventory Class
+# Generated: 2026-09-06T15:30:18.692Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Inventory Class
+
+Description: |
+  Inventory Class identifies the governed customer-facing availability and fulfillment model assigned to an item when a customer interaction occurs, such as stocked, preorder, dropship, or digital non-inventory. It enables journey teams to compare discovery, checkout, billing, delivery-promise, retention, and lifetime-value outcomes for items carrying different purchase and fulfillment expectations.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  view_item
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"view_item"}}],"product":[{"attributes":{"inventoryClass":"<inventory_class>"},"productInfo":{"productID":"<item_id>","productName":"<item_name>"}}]}}
+
+GA4 Data Layer: |
+  {"event":"view_item","ecommerce":{"items":[{"item_id":"<item_id>","item_name":"<item_name>","inventory_class":"<inventory_class>"}]}}
+
+Adobe Client Data Layer: |
+  {"xdm":{"commerce":{"productViews":{"value":1}},"eventType":"commerce.productViews","productListItems":[{"SKU":"<item_id>","name":"<item_name>","_experience":{"analytics":{"customDimensions":{"eVars":{"eVar49":"<inventory_class>"}}}}}]},"event":"view_item"}
+
+XDM Mapping: |
+  {"commerce":{"productViews":{"value":1}},"eventType":"commerce.productViews","productListItems":[{"SKU":"<item_id>","name":"<item_name>","_experience":{"analytics":{"customDimensions":{"eVars":{"eVar49":"<inventory_class>"}}}}}]}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH commerce_items AS (
+    SELECT
+      e.event_date,
+      e.event_timestamp,
+      e.event_name,
+      e.stream_id,
+      i.item_id,
+      i.item_name,
+      COALESCE(
+        NULLIF(TRIM((
+          SELECT ANY_VALUE(p.value.string_value)
+          FROM UNNEST(i.item_params) AS p
+          WHERE p.key = 'inventory_class'
+        )), ''),
+        NULLIF(TRIM(CAST((
+          SELECT ANY_VALUE(p.value.int_value)
+          FROM UNNEST(i.item_params) AS p
+          WHERE p.key = 'inventory_class'
+        ) AS STRING)), ''),
+        NULLIF(TRIM((
+          SELECT ANY_VALUE(ep.value.string_value)
+          FROM UNNEST(e.event_params) AS ep
+          WHERE ep.key = 'inventory_class'
+        )), ''),
+        NULLIF(TRIM(CAST((
+          SELECT ANY_VALUE(ep.value.int_value)
+          FROM UNNEST(e.event_params) AS ep
+          WHERE ep.key = 'inventory_class'
+        ) AS STRING)), '')
+      ) AS inventory_class_raw,
+      CASE
+        WHEN NULLIF(TRIM((
+          SELECT ANY_VALUE(p.value.string_value)
+          FROM UNNEST(i.item_params) AS p
+          WHERE p.key = 'inventory_class'
+        )), '') IS NOT NULL
+        OR (
+          SELECT ANY_VALUE(p.value.int_value)
+          FROM UNNEST(i.item_params) AS p
+          WHERE p.key = 'inventory_class'
+        ) IS NOT NULL
+          THEN 'items.item_params.inventory_class'
+        ELSE 'event_params.inventory_class'
+      END AS source_attribute
+    FROM `your-project.analytics_123456789.events_*` AS e
+    CROSS JOIN UNNEST(e.items) AS i
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 730 DAY))
+                            AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND e.event_name IN (
+        'view_item',
+        'add_to_cart',
+        'begin_checkout',
+        'purchase'
+      )
+  ),
+  normalized AS (
+    SELECT
+      *,
+      UPPER(REGEXP_REPLACE(TRIM(inventory_class_raw), r'[[:space:]]+', ' '))
+        AS normalized_inventory_class
+    FROM commerce_items
+    WHERE inventory_class_raw IS NOT NULL
+      AND TRIM(inventory_class_raw) <> ''
+  ),
+  class_rollup AS (
+    SELECT
+      normalized_inventory_class,
+      ARRAY_AGG(
+        inventory_class_raw IGNORE NULLS
+        ORDER BY event_timestamp DESC
+        LIMIT 1
+      )[SAFE_OFFSET(0)] AS inventory_class,
+      MIN(DATE(TIMESTAMP_MICROS(event_timestamp))) AS first_observed_date,
+      MAX(DATE(TIMESTAMP_MICROS(event_timestamp))) AS last_observed_date,
+      MIN(event_timestamp) AS first_observed_timestamp_micros,
+      MAX(event_timestamp) AS last_observed_timestamp_micros,
+      COUNT(*) AS commerce_event_count,
+      COUNTIF(event_name = 'view_item') AS view_item_event_count,
+      COUNTIF(event_name = 'add_to_cart') AS add_to_cart_event_count,
+      COUNTIF(event_name = 'begin_checkout') AS begin_checkout_event_count,
+      COUNTIF(event_name = 'purchase') AS purchase_event_count,
+      COUNT(DISTINCT item_id) AS distinct_item_count,
+      COUNT(DISTINCT stream_id) AS distinct_stream_count,
+      COUNTIF(source_attribute = 'items.item_params.inventory_class') AS item_scoped_observation_count,
+      COUNTIF(source_attribute = 'event_params.inventory_class') AS event_scoped_observation_count,
+      ARRAY_AGG(
+        item_id IGNORE NULLS
+        ORDER BY event_timestamp DESC
+        LIMIT 1
+      )[SAFE_OFFSET(0)] AS most_recent_item_id,
+      ARRAY_AGG(
+        item_name IGNORE NULLS
+        ORDER BY event_timestamp DESC
+        LIMIT 1
+      )[SAFE_OFFSET(0)] AS most_recent_item_name
+    FROM normalized
+    GROUP BY normalized_inventory_class
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT('INVENTORY_CLASS|', normalized_inventory_class))) AS inventory_class_key,
+    inventory_class,
+    normalized_inventory_class AS inventory_class_normalized,
+    'Inventory Class' AS dimension_name,
+    'inventory_class' AS ga4_custom_attribute,
+    49 AS corresponding_adobe_evar_number,
+    'GA4' AS source_system,
+    'ITEM_OR_EVENT_SCOPED' AS collection_scope,
+    first_observed_date,
+    last_observed_date,
+    TIMESTAMP_MICROS(first_observed_timestamp_micros) AS first_observed_timestamp,
+    TIMESTAMP_MICROS(last_observed_timestamp_micros) AS last_observed_timestamp,
+    commerce_event_count,
+    view_item_event_count,
+    add_to_cart_event_count,
+    begin_checkout_event_count,
+    purchase_event_count,
+    distinct_item_count,
+    distinct_stream_count,
+    item_scoped_observation_count,
+    event_scoped_observation_count,
+    most_recent_item_id,
+    most_recent_item_name,
+    last_observed_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY) AS is_active,
+    CURRENT_TIMESTAMP() AS dimension_refreshed_at
+  FROM class_rollup
+  WHERE normalized_inventory_class IS NOT NULL;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH commerce_items AS (
+    SELECT
+      timestamp AS event_timestamp,
+      eventType AS event_type,
+      item.SKU AS item_id,
+      item.name AS item_name,
+      NULLIF(
+        TRIM(
+          CAST(
+            item._experience.analytics.customDimensions.eVars.eVar49 AS STRING
+          )
+        ),
+        ''
+      ) AS inventory_class_raw
+    FROM aep_analytics_event_dataset
+    LATERAL VIEW EXPLODE(productListItems) exploded_items AS item
+    WHERE timestamp >= CURRENT_TIMESTAMP() - INTERVAL 730 DAYS
+      AND eventType IN (
+        'commerce.productViews',
+        'commerce.productListAdds',
+        'commerce.checkouts',
+        'commerce.purchases'
+      )
+  ),
+  normalized AS (
+    SELECT
+      event_timestamp,
+      event_type,
+      item_id,
+      item_name,
+      inventory_class_raw,
+      UPPER(REGEXP_REPLACE(TRIM(inventory_class_raw), ' +', ' '))
+        AS normalized_inventory_class
+    FROM commerce_items
+    WHERE inventory_class_raw IS NOT NULL
+      AND TRIM(inventory_class_raw) <> ''
+  ),
+  class_rollup AS (
+    SELECT
+      normalized_inventory_class,
+      MIN(inventory_class_raw) AS inventory_class,
+      MIN(event_timestamp) AS first_observed_timestamp,
+      MAX(event_timestamp) AS last_observed_timestamp,
+      COUNT(*) AS commerce_event_count,
+      SUM(CASE WHEN event_type = 'commerce.productViews' THEN 1 ELSE 0 END)
+        AS product_view_event_count,
+      SUM(CASE WHEN event_type = 'commerce.productListAdds' THEN 1 ELSE 0 END)
+        AS product_list_add_event_count,
+      SUM(CASE WHEN event_type = 'commerce.checkouts' THEN 1 ELSE 0 END)
+        AS checkout_event_count,
+      SUM(CASE WHEN event_type = 'commerce.purchases' THEN 1 ELSE 0 END)
+        AS purchase_event_count,
+      COUNT(DISTINCT item_id) AS distinct_item_count,
+      MIN(item_id) AS representative_item_id,
+      MIN(item_name) AS representative_item_name
+    FROM normalized
+    GROUP BY normalized_inventory_class
+  )
+  SELECT
+    SHA2(CONCAT('INVENTORY_CLASS|', normalized_inventory_class), 256) AS inventory_class_key,
+    inventory_class,
+    normalized_inventory_class AS inventory_class_normalized,
+    'Inventory Class' AS dimension_name,
+    'eVar49' AS adobe_custom_attribute,
+    49 AS adobe_evar_number,
+    '_experience.analytics.customDimensions.eVars.eVar49' AS source_attribute_path,
+    'ADOBE_AEP' AS source_system,
+    'PRODUCT_LIST_ITEM_SCOPED' AS collection_scope,
+    CAST(first_observed_timestamp AS DATE) AS first_observed_date,
+    CAST(last_observed_timestamp AS DATE) AS last_observed_date,
+    first_observed_timestamp,
+    last_observed_timestamp,
+    commerce_event_count,
+    product_view_event_count,
+    product_list_add_event_count,
+    checkout_event_count,
+    purchase_event_count,
+    distinct_item_count,
+    representative_item_id,
+    representative_item_name,
+    CASE
+      WHEN last_observed_timestamp >= CURRENT_TIMESTAMP() - INTERVAL 90 DAYS THEN TRUE
+      ELSE FALSE
+    END AS is_active,
+    CURRENT_TIMESTAMP() AS dimension_refreshed_at
+  FROM class_rollup
+  WHERE normalized_inventory_class IS NOT NULL;
+
+Calculation Notes: |
+  Assign one normalized Inventory Class to each item occurrence using the class valid for the selling channel, fulfillment market, and event timestamp. Preserve the original event-time value for product views, cart actions, checkout lines, orders, billing events, cancellations, and returns; do not replace it with the item's current class or infer it from the eventual shipping location. For mixed baskets, retain the class at item level and use a separate value of mixed only when an order-level presentation is unavoidable. Map missing, unmapped, retired, or conflicting source codes to unknown, and classify digital goods or services as explicit non-inventory classes rather than null.
+
+Business Use Case: |
+  The Chief Digital Officer reviews conversion, payment authorization, cancellation, repeat-purchase, and customer-lifetime-value performance by Inventory Class. If preorder items generate strong engagement but elevated checkout abandonment and billing inquiries, the commerce team can clarify charge timing and delivery promises, while merchandising can adjust preorder exposure without reducing visibility for stocked products.
+
+
+Source Data: Commerce Product Catalog/PIM and customer-facing availability services stitched with Digital Analytics (GA4 or Adobe Analytics), commerce platform cart and checkout events, CRM customer profiles, and billing or order-line events
+
+Report Attributes: |
+  ["Customer Journey Stage","Sales Channel","Product Category","Brand","Campaign","Customer Type","Fulfillment Method","Delivery Promise","Payment Capture Timing","Order Status","Return Reason","Geographic Market"]
+
+Dashboard Usage: [Omnichannel Conversion Executive Dashboard, Product Discovery and Availability Dashboard, Checkout and Payment Performance Dashboard, Delivery Promise and Cancellation Dashboard, Customer Retention and LTV Dashboard, Merchandising Journey Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Product, Product Category, Inventory Availability Status, Fulfillment Method, Sales Channel, Customer Journey Stage, Delivery Promise, Order Status, Payment Capture Timing, Return Reason]
+
+Derived Dimensions: [Inventory Class Group, Inventory-Bearing Item Flag, Customer Promise Model, Inventory Class at Conversion, Inventory Class Transition]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-06T15:30:18.12107+00:00
+
+Last Modified By: devyendarm
+
+
