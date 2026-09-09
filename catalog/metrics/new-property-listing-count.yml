@@ -1,0 +1,749 @@
+# Metric: New Property Listing Count
+# Generated: 2026-09-04T14:30:22.868Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: New Property Listing Count
+Formula: COUNT(DISTINCT CASE WHEN first_approved_publication_at >= window_start AND first_approved_publication_at < window_end AND is_publicly_discoverable = true AND is_test_listing = false AND is_duplicate_listing = false THEN property_listing_id END)
+
+Description: |
+  Counts distinct, non-test property listings that become publicly discoverable for the first time after satisfying required moderation and publication controls during the reporting period. It measures successful conversion of listing supply into customer-visible inventory that can drive discovery, engagement, inquiries, monetization, retention, and lifetime value.
+
+Category: Conversion
+
+Tags: [metric]
+
+Industry: Technology
+
+Priority: High
+
+Core Area: Onboarding
+
+Scope: Item
+
+Measure Type: count
+
+Aggregation Window: Time based - Hourly/Daily/Monthly/Yearly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH publication_event_versions AS (
+    SELECT
+      event_id,
+      property_listing_id,
+      seller_account_id,
+      publication_status,
+      publication_source,
+      platform,
+      device_category,
+      app_version,
+      published_at,
+      ingested_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY event_id
+        ORDER BY
+          CASE WHEN ingested_at IS NULL THEN 1 ELSE 0 END,
+          ingested_at DESC,
+          published_at DESC
+      ) AS version_rank
+    FROM `your-project.publication_events.listing_publication_events`
+    WHERE event_id IS NOT NULL
+      AND property_listing_id IS NOT NULL
+  ),
+  published_events AS (
+    SELECT
+      event_id,
+      property_listing_id,
+      seller_account_id,
+      publication_source,
+      platform,
+      device_category,
+      app_version,
+      published_at
+    FROM publication_event_versions
+    WHERE version_rank = 1
+      AND LOWER(TRIM(publication_status)) = 'published'
+      AND published_at IS NOT NULL
+  ),
+  ranked_publications AS (
+    SELECT
+      published_events.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY property_listing_id
+        ORDER BY published_at, event_id
+      ) AS publication_rank
+    FROM published_events
+  ),
+  first_publication AS (
+    SELECT
+      event_id,
+      property_listing_id,
+      seller_account_id,
+      publication_source,
+      platform,
+      device_category,
+      app_version,
+      published_at
+    FROM ranked_publications
+    WHERE publication_rank = 1
+  ),
+  moderation_decision_versions AS (
+    SELECT
+      decision_id,
+      property_listing_id,
+      decision,
+      reason_code,
+      decided_at,
+      ingested_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY decision_id
+        ORDER BY
+          CASE WHEN ingested_at IS NULL THEN 1 ELSE 0 END,
+          ingested_at DESC,
+          decided_at DESC
+      ) AS version_rank
+    FROM `your-project.moderation.listing_moderation_decisions`
+    WHERE decision_id IS NOT NULL
+      AND property_listing_id IS NOT NULL
+  ),
+  ranked_moderation AS (
+    SELECT
+      fp.event_id,
+      fp.property_listing_id,
+      fp.seller_account_id,
+      fp.publication_source,
+      fp.platform,
+      fp.device_category,
+      fp.app_version,
+      fp.published_at,
+      md.decision AS moderation_decision,
+      md.reason_code AS moderation_reason_code,
+      ROW_NUMBER() OVER (
+        PARTITION BY fp.property_listing_id
+        ORDER BY
+          CASE WHEN md.decided_at IS NULL THEN 1 ELSE 0 END,
+          md.decided_at DESC,
+          md.decision_id DESC
+      ) AS moderation_rank
+    FROM first_publication AS fp
+    LEFT JOIN moderation_decision_versions AS md
+      ON fp.property_listing_id = md.property_listing_id
+     AND md.version_rank = 1
+     AND md.decided_at <= fp.published_at
+  ),
+  qualified_new_listings AS (
+    SELECT
+      event_id,
+      property_listing_id,
+      seller_account_id,
+      publication_source,
+      platform,
+      device_category,
+      app_version,
+      published_at,
+      moderation_decision,
+      moderation_reason_code
+    FROM ranked_moderation
+    WHERE moderation_rank = 1
+      AND LOWER(TRIM(moderation_decision)) = 'approved'
+      AND DATE(published_at, 'UTC') BETWEEN @start_date AND @end_date
+  ),
+  ranked_listing_candidates AS (
+    SELECT
+      q.property_listing_id,
+      q.seller_account_id AS event_seller_account_id,
+      q.publication_source,
+      q.platform,
+      q.device_category,
+      q.app_version,
+      q.published_at,
+      q.moderation_decision,
+      q.moderation_reason_code,
+      l.country_code,
+      l.region,
+      l.city,
+      l.postal_code,
+      l.market_id,
+      l.latitude_band,
+      l.longitude_band,
+      l.property_type,
+      l.property_subtype,
+      l.listing_type,
+      l.tenure_type,
+      l.bedroom_count,
+      l.bathroom_count,
+      l.parking_space_count,
+      l.floor_area_band,
+      l.lot_area_band,
+      l.price_band,
+      l.price_currency,
+      l.furnished_status,
+      l.is_new_build,
+      l.energy_rating,
+      l.seller_account_id AS listing_seller_account_id,
+      l.agent_id,
+      l.acquisition_channel,
+      l.acquisition_source,
+      l.acquisition_medium,
+      l.acquisition_campaign,
+      l.acquisition_content,
+      l.acquisition_term,
+      ROW_NUMBER() OVER (
+        PARTITION BY q.property_listing_id
+        ORDER BY l.created_at DESC
+      ) AS listing_rank
+    FROM qualified_new_listings AS q
+    INNER JOIN `your-project.listing_management.property_listings` AS l
+      ON q.property_listing_id = l.property_listing_id
+     AND l.created_at <= q.published_at
+     AND COALESCE(l.is_test_listing, FALSE) = FALSE
+  ),
+  listing_as_of_publication AS (
+    SELECT * EXCEPT (listing_rank)
+    FROM ranked_listing_candidates
+    WHERE listing_rank = 1
+  ),
+  seller_accounts AS (
+    SELECT
+      seller_account_id,
+      MAX(seller_type) AS seller_type,
+      MAX(agency_id) AS agency_id,
+      MAX(office_id) AS office_id,
+      MAX(crm_segment) AS crm_segment,
+      MAX(subscription_plan) AS subscription_plan
+    FROM `your-project.crm.seller_accounts`
+    WHERE seller_account_id IS NOT NULL
+    GROUP BY seller_account_id
+  ),
+  identity_accounts AS (
+    SELECT
+      account_id,
+      MAX(country_code) AS country_code,
+      MAX(account_status) AS account_status
+    FROM `your-project.identity.accounts`
+    WHERE account_id IS NOT NULL
+    GROUP BY account_id
+  ),
+  listing_dimensions AS (
+    SELECT
+      l.property_listing_id,
+      DATE(l.published_at, 'UTC') AS listing_date,
+      DATE_TRUNC(DATE(l.published_at, 'UTC'), WEEK(MONDAY)) AS listing_week_start,
+      DATE_TRUNC(DATE(l.published_at, 'UTC'), MONTH) AS listing_month,
+      DATE_TRUNC(DATE(l.published_at, 'UTC'), QUARTER) AS listing_quarter,
+      EXTRACT(YEAR FROM DATE(l.published_at, 'UTC')) AS listing_year,
+      EXTRACT(HOUR FROM DATETIME(l.published_at, 'UTC')) AS publication_hour,
+      'UTC' AS publication_timezone,
+      COALESCE(l.country_code, 'unknown') AS country_code,
+      COALESCE(l.region, 'unknown') AS region,
+      COALESCE(l.city, 'unknown') AS city,
+      COALESCE(l.postal_code, 'unknown') AS postal_code,
+      COALESCE(l.market_id, 'unknown') AS market_id,
+      COALESCE(l.latitude_band, 'unknown') AS latitude_band,
+      COALESCE(l.longitude_band, 'unknown') AS longitude_band,
+      COALESCE(l.property_type, 'unknown') AS property_type,
+      COALESCE(l.property_subtype, 'unknown') AS property_subtype,
+      COALESCE(l.listing_type, 'unknown') AS listing_type,
+      COALESCE(l.tenure_type, 'unknown') AS tenure_type,
+      COALESCE(CAST(l.bedroom_count AS STRING), 'unknown') AS bedroom_count,
+      COALESCE(CAST(l.bathroom_count AS STRING), 'unknown') AS bathroom_count,
+      COALESCE(CAST(l.parking_space_count AS STRING), 'unknown') AS parking_space_count,
+      COALESCE(l.floor_area_band, 'unknown') AS floor_area_band,
+      COALESCE(l.lot_area_band, 'unknown') AS lot_area_band,
+      COALESCE(l.price_band, 'unknown') AS price_band,
+      COALESCE(l.price_currency, 'unknown') AS price_currency,
+      COALESCE(l.furnished_status, 'unknown') AS furnished_status,
+      COALESCE(CAST(l.is_new_build AS STRING), 'unknown') AS new_build_flag,
+      COALESCE(l.energy_rating, 'unknown') AS energy_rating,
+      COALESCE(
+        CAST(l.event_seller_account_id AS STRING),
+        CAST(l.listing_seller_account_id AS STRING),
+        'unknown'
+      ) AS seller_account_id,
+      COALESCE(crm.seller_type, 'unknown') AS seller_type,
+      COALESCE(CAST(l.agent_id AS STRING), 'unknown') AS agent_id,
+      COALESCE(CAST(crm.agency_id AS STRING), 'unknown') AS agency_id,
+      COALESCE(CAST(crm.office_id AS STRING), 'unknown') AS office_id,
+      COALESCE(crm.crm_segment, 'unknown') AS crm_segment,
+      COALESCE(crm.subscription_plan, 'unknown') AS subscription_plan,
+      COALESCE(acct.country_code, 'unknown') AS account_country_code,
+      COALESCE(acct.account_status, 'unknown') AS account_status,
+      COALESCE(l.acquisition_channel, 'unknown') AS acquisition_channel,
+      COALESCE(l.acquisition_source, 'unknown') AS acquisition_source,
+      COALESCE(l.acquisition_medium, 'unknown') AS acquisition_medium,
+      COALESCE(l.acquisition_campaign, 'unknown') AS acquisition_campaign,
+      COALESCE(l.acquisition_content, 'unknown') AS acquisition_content,
+      COALESCE(l.acquisition_term, 'unknown') AS acquisition_term,
+      COALESCE(l.publication_source, 'unknown') AS publication_source,
+      COALESCE(l.platform, 'unknown') AS platform,
+      COALESCE(l.device_category, 'unknown') AS device_category,
+      COALESCE(l.app_version, 'unknown') AS app_version,
+      COALESCE(l.moderation_decision, 'unknown') AS moderation_decision,
+      COALESCE(l.moderation_reason_code, 'none') AS moderation_reason_code
+    FROM listing_as_of_publication AS l
+    LEFT JOIN seller_accounts AS crm
+      ON COALESCE(l.event_seller_account_id, l.listing_seller_account_id) = crm.seller_account_id
+    LEFT JOIN identity_accounts AS acct
+      ON COALESCE(l.event_seller_account_id, l.listing_seller_account_id) = acct.account_id
+  )
+  SELECT
+    listing_date,
+    listing_week_start,
+    listing_month,
+    listing_quarter,
+    listing_year,
+    publication_hour,
+    publication_timezone,
+    country_code,
+    region,
+    city,
+    postal_code,
+    market_id,
+    latitude_band,
+    longitude_band,
+    property_type,
+    property_subtype,
+    listing_type,
+    tenure_type,
+    bedroom_count,
+    bathroom_count,
+    parking_space_count,
+    floor_area_band,
+    lot_area_band,
+    price_band,
+    price_currency,
+    furnished_status,
+    new_build_flag,
+    energy_rating,
+    seller_account_id,
+    seller_type,
+    agent_id,
+    agency_id,
+    office_id,
+    crm_segment,
+    subscription_plan,
+    account_country_code,
+    account_status,
+    acquisition_channel,
+    acquisition_source,
+    acquisition_medium,
+    acquisition_campaign,
+    acquisition_content,
+    acquisition_term,
+    publication_source,
+    platform,
+    device_category,
+    app_version,
+    moderation_decision,
+    moderation_reason_code,
+    COUNT(DISTINCT property_listing_id) AS new_property_listing_count
+  FROM listing_dimensions
+  GROUP BY
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+    31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+    41, 42, 43, 44, 45, 46, 47, 48, 49;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH publication_event_versions AS (
+    SELECT
+      event_id,
+      property_listing_id,
+      seller_account_id,
+      publication_status,
+      publication_source,
+      platform,
+      device_category,
+      app_version,
+      published_at,
+      ingested_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY event_id
+        ORDER BY
+          CASE WHEN ingested_at IS NULL THEN 1 ELSE 0 END,
+          ingested_at DESC,
+          published_at DESC
+      ) AS version_rank
+    FROM aep_backend_dataset.listing_publication_events
+    WHERE event_id IS NOT NULL
+      AND property_listing_id IS NOT NULL
+  ),
+  published_events AS (
+    SELECT
+      event_id,
+      property_listing_id,
+      seller_account_id,
+      publication_source,
+      platform,
+      device_category,
+      app_version,
+      published_at
+    FROM publication_event_versions
+    WHERE version_rank = 1
+      AND LOWER(TRIM(publication_status)) = 'published'
+      AND published_at IS NOT NULL
+  ),
+  ranked_publications AS (
+    SELECT
+      published_events.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY property_listing_id
+        ORDER BY published_at, event_id
+      ) AS publication_rank
+    FROM published_events
+  ),
+  first_publication AS (
+    SELECT
+      event_id,
+      property_listing_id,
+      seller_account_id,
+      publication_source,
+      platform,
+      device_category,
+      app_version,
+      published_at
+    FROM ranked_publications
+    WHERE publication_rank = 1
+  ),
+  moderation_decision_versions AS (
+    SELECT
+      decision_id,
+      property_listing_id,
+      decision,
+      reason_code,
+      decided_at,
+      ingested_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY decision_id
+        ORDER BY
+          CASE WHEN ingested_at IS NULL THEN 1 ELSE 0 END,
+          ingested_at DESC,
+          decided_at DESC
+      ) AS version_rank
+    FROM aep_backend_dataset.listing_moderation_decisions
+    WHERE decision_id IS NOT NULL
+      AND property_listing_id IS NOT NULL
+  ),
+  ranked_moderation AS (
+    SELECT
+      fp.event_id,
+      fp.property_listing_id,
+      fp.seller_account_id,
+      fp.publication_source,
+      fp.platform,
+      fp.device_category,
+      fp.app_version,
+      fp.published_at,
+      md.decision AS moderation_decision,
+      md.reason_code AS moderation_reason_code,
+      ROW_NUMBER() OVER (
+        PARTITION BY fp.property_listing_id
+        ORDER BY
+          CASE WHEN md.decided_at IS NULL THEN 1 ELSE 0 END,
+          md.decided_at DESC,
+          md.decision_id DESC
+      ) AS moderation_rank
+    FROM first_publication AS fp
+    LEFT JOIN moderation_decision_versions AS md
+      ON fp.property_listing_id = md.property_listing_id
+     AND md.version_rank = 1
+     AND md.decided_at <= fp.published_at
+  ),
+  qualified_new_listings AS (
+    SELECT
+      event_id,
+      property_listing_id,
+      seller_account_id,
+      publication_source,
+      platform,
+      device_category,
+      app_version,
+      published_at,
+      moderation_decision,
+      moderation_reason_code
+    FROM ranked_moderation
+    WHERE moderation_rank = 1
+      AND LOWER(TRIM(moderation_decision)) = 'approved'
+      AND CAST(published_at AS DATE) BETWEEN CAST('${start_date}' AS DATE) AND CAST('${end_date}' AS DATE)
+  ),
+  ranked_listing_candidates AS (
+    SELECT
+      q.property_listing_id,
+      q.seller_account_id AS event_seller_account_id,
+      q.publication_source,
+      q.platform,
+      q.device_category,
+      q.app_version,
+      q.published_at,
+      q.moderation_decision,
+      q.moderation_reason_code,
+      l.country_code,
+      l.region,
+      l.city,
+      l.postal_code,
+      l.market_id,
+      l.latitude_band,
+      l.longitude_band,
+      l.property_type,
+      l.property_subtype,
+      l.listing_type,
+      l.tenure_type,
+      l.bedroom_count,
+      l.bathroom_count,
+      l.parking_space_count,
+      l.floor_area_band,
+      l.lot_area_band,
+      l.price_band,
+      l.price_currency,
+      l.furnished_status,
+      l.is_new_build,
+      l.energy_rating,
+      l.seller_account_id AS listing_seller_account_id,
+      l.agent_id,
+      l.acquisition_channel,
+      l.acquisition_source,
+      l.acquisition_medium,
+      l.acquisition_campaign,
+      l.acquisition_content,
+      l.acquisition_term,
+      ROW_NUMBER() OVER (
+        PARTITION BY q.property_listing_id
+        ORDER BY l.created_at DESC
+      ) AS listing_rank
+    FROM qualified_new_listings AS q
+    INNER JOIN aep_backend_dataset.property_listings AS l
+      ON q.property_listing_id = l.property_listing_id
+     AND l.created_at <= q.published_at
+     AND COALESCE(l.is_test_listing, FALSE) = FALSE
+  ),
+  listing_as_of_publication AS (
+    SELECT
+      property_listing_id,
+      event_seller_account_id,
+      publication_source,
+      platform,
+      device_category,
+      app_version,
+      published_at,
+      moderation_decision,
+      moderation_reason_code,
+      country_code,
+      region,
+      city,
+      postal_code,
+      market_id,
+      latitude_band,
+      longitude_band,
+      property_type,
+      property_subtype,
+      listing_type,
+      tenure_type,
+      bedroom_count,
+      bathroom_count,
+      parking_space_count,
+      floor_area_band,
+      lot_area_band,
+      price_band,
+      price_currency,
+      furnished_status,
+      is_new_build,
+      energy_rating,
+      listing_seller_account_id,
+      agent_id,
+      acquisition_channel,
+      acquisition_source,
+      acquisition_medium,
+      acquisition_campaign,
+      acquisition_content,
+      acquisition_term
+    FROM ranked_listing_candidates
+    WHERE listing_rank = 1
+  ),
+  seller_accounts AS (
+    SELECT
+      seller_account_id,
+      MAX(seller_type) AS seller_type,
+      MAX(agency_id) AS agency_id,
+      MAX(office_id) AS office_id,
+      MAX(crm_segment) AS crm_segment,
+      MAX(subscription_plan) AS subscription_plan
+    FROM aep_backend_dataset.seller_accounts
+    WHERE seller_account_id IS NOT NULL
+    GROUP BY seller_account_id
+  ),
+  identity_accounts AS (
+    SELECT
+      account_id,
+      MAX(country_code) AS country_code,
+      MAX(account_status) AS account_status
+    FROM aep_backend_dataset.identity_accounts
+    WHERE account_id IS NOT NULL
+    GROUP BY account_id
+  ),
+  listing_dimensions AS (
+    SELECT
+      l.property_listing_id,
+      CAST(l.published_at AS DATE) AS listing_date,
+      CAST(DATE_TRUNC('week', l.published_at) AS DATE) AS listing_week_start,
+      CAST(DATE_TRUNC('month', l.published_at) AS DATE) AS listing_month,
+      CAST(DATE_TRUNC('quarter', l.published_at) AS DATE) AS listing_quarter,
+      EXTRACT(YEAR FROM l.published_at) AS listing_year,
+      EXTRACT(HOUR FROM l.published_at) AS publication_hour,
+      'UTC' AS publication_timezone,
+      COALESCE(l.country_code, 'unknown') AS country_code,
+      COALESCE(l.region, 'unknown') AS region,
+      COALESCE(l.city, 'unknown') AS city,
+      COALESCE(l.postal_code, 'unknown') AS postal_code,
+      COALESCE(l.market_id, 'unknown') AS market_id,
+      COALESCE(l.latitude_band, 'unknown') AS latitude_band,
+      COALESCE(l.longitude_band, 'unknown') AS longitude_band,
+      COALESCE(l.property_type, 'unknown') AS property_type,
+      COALESCE(l.property_subtype, 'unknown') AS property_subtype,
+      COALESCE(l.listing_type, 'unknown') AS listing_type,
+      COALESCE(l.tenure_type, 'unknown') AS tenure_type,
+      COALESCE(CAST(l.bedroom_count AS VARCHAR), 'unknown') AS bedroom_count,
+      COALESCE(CAST(l.bathroom_count AS VARCHAR), 'unknown') AS bathroom_count,
+      COALESCE(CAST(l.parking_space_count AS VARCHAR), 'unknown') AS parking_space_count,
+      COALESCE(l.floor_area_band, 'unknown') AS floor_area_band,
+      COALESCE(l.lot_area_band, 'unknown') AS lot_area_band,
+      COALESCE(l.price_band, 'unknown') AS price_band,
+      COALESCE(l.price_currency, 'unknown') AS price_currency,
+      COALESCE(l.furnished_status, 'unknown') AS furnished_status,
+      COALESCE(CAST(l.is_new_build AS VARCHAR), 'unknown') AS new_build_flag,
+      COALESCE(l.energy_rating, 'unknown') AS energy_rating,
+      COALESCE(
+        CAST(l.event_seller_account_id AS VARCHAR),
+        CAST(l.listing_seller_account_id AS VARCHAR),
+        'unknown'
+      ) AS seller_account_id,
+      COALESCE(crm.seller_type, 'unknown') AS seller_type,
+      COALESCE(CAST(l.agent_id AS VARCHAR), 'unknown') AS agent_id,
+      COALESCE(CAST(crm.agency_id AS VARCHAR), 'unknown') AS agency_id,
+      COALESCE(CAST(crm.office_id AS VARCHAR), 'unknown') AS office_id,
+      COALESCE(crm.crm_segment, 'unknown') AS crm_segment,
+      COALESCE(crm.subscription_plan, 'unknown') AS subscription_plan,
+      COALESCE(acct.country_code, 'unknown') AS account_country_code,
+      COALESCE(acct.account_status, 'unknown') AS account_status,
+      COALESCE(l.acquisition_channel, 'unknown') AS acquisition_channel,
+      COALESCE(l.acquisition_source, 'unknown') AS acquisition_source,
+      COALESCE(l.acquisition_medium, 'unknown') AS acquisition_medium,
+      COALESCE(l.acquisition_campaign, 'unknown') AS acquisition_campaign,
+      COALESCE(l.acquisition_content, 'unknown') AS acquisition_content,
+      COALESCE(l.acquisition_term, 'unknown') AS acquisition_term,
+      COALESCE(l.publication_source, 'unknown') AS publication_source,
+      COALESCE(l.platform, 'unknown') AS platform,
+      COALESCE(l.device_category, 'unknown') AS device_category,
+      COALESCE(l.app_version, 'unknown') AS app_version,
+      COALESCE(l.moderation_decision, 'unknown') AS moderation_decision,
+      COALESCE(l.moderation_reason_code, 'none') AS moderation_reason_code
+    FROM listing_as_of_publication AS l
+    LEFT JOIN seller_accounts AS crm
+      ON COALESCE(l.event_seller_account_id, l.listing_seller_account_id) = crm.seller_account_id
+    LEFT JOIN identity_accounts AS acct
+      ON COALESCE(l.event_seller_account_id, l.listing_seller_account_id) = acct.account_id
+  )
+  SELECT
+    listing_date,
+    listing_week_start,
+    listing_month,
+    listing_quarter,
+    listing_year,
+    publication_hour,
+    publication_timezone,
+    country_code,
+    region,
+    city,
+    postal_code,
+    market_id,
+    latitude_band,
+    longitude_band,
+    property_type,
+    property_subtype,
+    listing_type,
+    tenure_type,
+    bedroom_count,
+    bathroom_count,
+    parking_space_count,
+    floor_area_band,
+    lot_area_band,
+    price_band,
+    price_currency,
+    furnished_status,
+    new_build_flag,
+    energy_rating,
+    seller_account_id,
+    seller_type,
+    agent_id,
+    agency_id,
+    office_id,
+    crm_segment,
+    subscription_plan,
+    account_country_code,
+    account_status,
+    acquisition_channel,
+    acquisition_source,
+    acquisition_medium,
+    acquisition_campaign,
+    acquisition_content,
+    acquisition_term,
+    publication_source,
+    platform,
+    device_category,
+    app_version,
+    moderation_decision,
+    moderation_reason_code,
+    COUNT(DISTINCT property_listing_id) AS new_property_listing_count
+  FROM listing_dimensions
+  GROUP BY
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+    31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+    41, 42, 43, 44, 45, 46, 47, 48, 49;
+
+Calculation Notes: |
+  Count each property_listing_id once at its earliest timestamp when it is both approved and publicly discoverable. Use the half-open reporting interval [window_start, window_end), store source timestamps in UTC, and assign reporting periods using the governed market timezone. Exclude null IDs, tests, previews, internal-only inventory, fraud or policy blocks, unresolved technical duplicates, rejected listings, event retries, and publication events that never produced external visibility. Edits, renewals, reactivations, price changes, temporary suspensions, expirations, withdrawals, and republications do not create another new listing count. A genuinely new commercial mandate is countable only when marketplace policy assigns it a new valid listing lifecycle and property_listing_id. Resolve duplicate IDs to the surviving canonical listing before finalized reporting, retain unknown optional dimensions as 'Unknown', and restate affected periods for approved late moderation, fraud, or duplicate-resolution updates.
+
+Business Use Case: |
+  Marketplace executives monitor this metric by market, seller type, acquisition channel, property type, and publication route to identify declines in customer-visible supply. When volume falls in a priority market, Product and Marketing can determine whether the cause is weaker seller acquisition, onboarding abandonment, moderation rejection, or publication failure, then adjust campaigns, listing flows, review capacity, or platform reliability while monitoring downstream views, inquiries, seller retention, billing, and lifetime value.
+
+
+Source Data: Listing Management Platform and server-side publication events, stitched with moderation services, seller CRM, identity and account services, and digital analytics through property_listing_id and seller_account_id
+
+Report Attributes: |
+  ["Publication Date","Publication Hour","Market","Country","Region","City","Property Type","Property Subtype","Listing Purpose","Price Band","Seller Type","Seller Tenure","Acquisition Channel","Publication Source","Submission Platform","Device Category","Moderation Route","Listing Quality Band"]
+
+Dashboard Usage: [Marketplace Supply Executive Dashboard, Seller Acquisition and Onboarding Funnel, Property Inventory Growth Dashboard, Listing Moderation Operations Dashboard, Buyer Discovery Health Dashboard, Market Expansion Scorecard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Property Listing Submission Count, Listing Approval Count, Rejected Property Listing Count, Active Property Listing Count, Unique Property Count, New Seller Count, Listing View Count, Listing Inquiry Count, Listing Deactivation Count]
+
+Derived KPIs: [Listing Submission-to-Publish Conversion Rate, New Listing Approval Rate, New Listings per Active Seller, New Listings per New Seller, Median Listing Time to Publish, New Listing View Rate, New Listing Inquiry Conversion Rate, Net Listing Inventory Growth, Cost per New Published Listing]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-04T14:30:22.381968+00:00
+
+Last Modified By: devyendarm
+
+
