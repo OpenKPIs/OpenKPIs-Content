@@ -1,0 +1,477 @@
+# Dimension: Traveler Loyalty Tier
+# Generated: 2026-09-09T23:30:48.277Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Traveler Loyalty Tier
+
+Description: |
+  Identifies the travel loyalty program status level effective for a traveler when a digital interaction occurs, based on the latest authoritative tier available through the digital loyalty profile service. It enables comparison of acquisition, engagement, booking conversion, ancillary adoption, and retention behavior across standardized membership levels without exposing the traveler’s identity.
+
+Category: Retention
+
+Tags: [dimension]
+
+Industry: Travel & Hospitality
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  traveler_loyalty_tier
+
+Adobe Event: |
+  s.t() / s.tl()
+
+W3 Data Layer: |
+  {"digitalData":{"user":[{"profile":[{"attributes":{"travelerLoyaltyTier":"standardized_tier_value"}}]}]}}
+
+GA4 Data Layer: |
+  {"user_properties":{"traveler_loyalty_tier":"standardized_tier_value"},"traveler_loyalty_tier":"standardized_tier_value"}
+
+Adobe Client Data Layer: |
+  {"data":{"traveler":{"loyalty":{"tier":"standardized_tier_value"}}}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"standardized_tier_value"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH raw_events AS (
+    SELECT
+      user_id AS traveler_id,
+      user_pseudo_id,
+      COALESCE(NULLIF(user_id, ''), NULLIF(user_pseudo_id, '')) AS traveler_identifier,
+      event_name,
+      PARSE_DATE('%Y%m%d', event_date) AS source_event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS source_event_ts,
+      stream_id,
+      platform,
+      device.category AS device_category,
+      device.operating_system,
+      device.web_info.browser AS browser,
+      device.language,
+      geo.country,
+      geo.region,
+      geo.city,
+      COALESCE(
+        (
+          SELECT COALESCE(
+            NULLIF(up.value.string_value, ''),
+            CAST(up.value.int_value AS STRING),
+            CAST(up.value.double_value AS STRING),
+            CAST(up.value.float_value AS STRING)
+          )
+          FROM UNNEST(user_properties) AS up
+          WHERE up.key = 'traveler_loyalty_tier'
+          LIMIT 1
+        ),
+        (
+          SELECT COALESCE(
+            NULLIF(ep.value.string_value, ''),
+            CAST(ep.value.int_value AS STRING),
+            CAST(ep.value.double_value AS STRING),
+            CAST(ep.value.float_value AS STRING)
+          )
+          FROM UNNEST(event_params) AS ep
+          WHERE ep.key = 'traveler_loyalty_tier'
+          LIMIT 1
+        )
+      ) AS raw_tier_value,
+      CASE
+        WHEN EXISTS (
+          SELECT 1
+          FROM UNNEST(user_properties) AS up
+          WHERE up.key = 'traveler_loyalty_tier'
+            AND COALESCE(
+              NULLIF(up.value.string_value, ''),
+              CAST(up.value.int_value AS STRING),
+              CAST(up.value.double_value AS STRING),
+              CAST(up.value.float_value AS STRING)
+            ) IS NOT NULL
+        ) THEN 'user_property'
+        ELSE 'event_parameter'
+      END AS extraction_method,
+      (
+        SELECT CAST(ep.value.int_value AS STRING)
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key = 'ga_session_id'
+        LIMIT 1
+      ) AS session_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE COALESCE(NULLIF(user_id, ''), NULLIF(user_pseudo_id, '')) IS NOT NULL
+  ),
+  normalized_events AS (
+    SELECT
+      *,
+      REGEXP_REPLACE(
+        REGEXP_REPLACE(LOWER(TRIM(raw_tier_value)), r'[^a-z0-9]+', '_'),
+        r'^_+|_+$',
+        ''
+      ) AS normalized_tier_value
+    FROM raw_events
+    WHERE raw_tier_value IS NOT NULL
+      AND LOWER(TRIM(raw_tier_value)) NOT IN ('', 'null', 'undefined', 'unknown', 'n/a', 'na')
+  ),
+  tier_observations AS (
+    SELECT
+      *,
+      CASE normalized_tier_value
+        WHEN 'non_member' THEN 'NON_MEMBER'
+        WHEN 'none' THEN 'NON_MEMBER'
+        WHEN 'guest' THEN 'NON_MEMBER'
+        WHEN 'member' THEN 'MEMBER'
+        WHEN 'base' THEN 'MEMBER'
+        WHEN 'basic' THEN 'MEMBER'
+        WHEN 'standard' THEN 'STANDARD'
+        WHEN 'silver' THEN 'SILVER'
+        WHEN 'gold' THEN 'GOLD'
+        WHEN 'platinum' THEN 'PLATINUM'
+        WHEN 'diamond' THEN 'DIAMOND'
+        WHEN 'elite' THEN 'ELITE'
+        ELSE UPPER(normalized_tier_value)
+      END AS loyalty_tier_code,
+      ROW_NUMBER() OVER (
+        PARTITION BY traveler_identifier
+        ORDER BY source_event_ts DESC, event_name DESC
+      ) AS traveler_recency_rank
+    FROM normalized_events
+  ),
+  tier_statistics AS (
+    SELECT
+      traveler_identifier,
+      normalized_tier_value,
+      MIN(source_event_ts) AS first_observed_ts,
+      MAX(source_event_ts) AS last_observed_ts,
+      COUNT(*) AS observation_count,
+      COUNT(DISTINCT session_id) AS session_count
+    FROM tier_observations
+    GROUP BY traveler_identifier, normalized_tier_value
+  ),
+  current_tier AS (
+    SELECT *
+    FROM tier_observations
+    WHERE traveler_recency_rank = 1
+  )
+  SELECT
+    TO_HEX(SHA256(current_tier.traveler_identifier)) AS traveler_key,
+    current_tier.traveler_id,
+    current_tier.user_pseudo_id,
+    TO_HEX(SHA256(current_tier.loyalty_tier_code)) AS loyalty_tier_key,
+    current_tier.loyalty_tier_code,
+    CASE current_tier.loyalty_tier_code
+      WHEN 'NON_MEMBER' THEN 'Non-member'
+      WHEN 'MEMBER' THEN 'Member'
+      WHEN 'STANDARD' THEN 'Standard'
+      WHEN 'SILVER' THEN 'Silver'
+      WHEN 'GOLD' THEN 'Gold'
+      WHEN 'PLATINUM' THEN 'Platinum'
+      WHEN 'DIAMOND' THEN 'Diamond'
+      WHEN 'ELITE' THEN 'Elite'
+      ELSE INITCAP(REPLACE(current_tier.normalized_tier_value, '_', ' '))
+    END AS loyalty_tier_name,
+    CASE current_tier.loyalty_tier_code
+      WHEN 'NON_MEMBER' THEN 0
+      WHEN 'MEMBER' THEN 1
+      WHEN 'STANDARD' THEN 1
+      WHEN 'SILVER' THEN 2
+      WHEN 'GOLD' THEN 3
+      WHEN 'PLATINUM' THEN 4
+      WHEN 'DIAMOND' THEN 5
+      WHEN 'ELITE' THEN 6
+      ELSE 99
+    END AS loyalty_tier_rank,
+    CASE
+      WHEN current_tier.loyalty_tier_code = 'NON_MEMBER' THEN 'NON_MEMBER'
+      WHEN current_tier.loyalty_tier_code IN ('PLATINUM', 'DIAMOND', 'ELITE') THEN 'ELITE'
+      WHEN current_tier.loyalty_tier_code IN ('SILVER', 'GOLD') THEN 'PREMIUM'
+      WHEN current_tier.loyalty_tier_code IN ('MEMBER', 'STANDARD') THEN 'BASE'
+      ELSE 'OTHER'
+    END AS loyalty_tier_group,
+    CASE WHEN current_tier.loyalty_tier_code = 'NON_MEMBER' THEN 'INACTIVE' ELSE 'ACTIVE' END AS loyalty_tier_status,
+    current_tier.loyalty_tier_code <> 'NON_MEMBER' AS is_loyalty_member,
+    current_tier.loyalty_tier_code IN ('PLATINUM', 'DIAMOND', 'ELITE') AS is_elite_tier,
+    current_tier.raw_tier_value,
+    current_tier.normalized_tier_value,
+    'Digital Loyalty Profile API + Digital Analytics' AS source_system,
+    'GA4' AS source_platform,
+    'your-project.analytics_123456789.events_*' AS source_dataset,
+    current_tier.event_name AS source_event_name,
+    current_tier.source_event_date,
+    current_tier.source_event_ts,
+    tier_statistics.first_observed_ts,
+    tier_statistics.last_observed_ts,
+    DATE(tier_statistics.first_observed_ts) AS first_observed_date,
+    DATE(tier_statistics.last_observed_ts) AS last_observed_date,
+    tier_statistics.observation_count,
+    tier_statistics.session_count,
+    current_tier.device_category,
+    current_tier.operating_system,
+    current_tier.browser,
+    current_tier.country,
+    current_tier.region,
+    current_tier.city,
+    current_tier.language,
+    current_tier.stream_id,
+    current_tier.platform,
+    '123456789' AS property_id,
+    'DIGITAL' AS collection_channel,
+    current_tier.extraction_method,
+    CASE current_tier.extraction_method WHEN 'user_property' THEN 1 ELSE 2 END AS source_precedence,
+    'GA4_EVENT_EXPORT' AS record_source,
+    tier_statistics.first_observed_ts AS effective_start_ts,
+    CAST(NULL AS TIMESTAMP) AS effective_end_ts,
+    TRUE AS is_current,
+    FALSE AS is_inferred,
+    TRUE AS is_valid,
+    CASE
+      WHEN current_tier.loyalty_tier_code IN ('NON_MEMBER', 'MEMBER', 'STANDARD', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND', 'ELITE')
+        THEN 'VALID_STANDARD_TIER'
+      ELSE 'VALID_UNMAPPED_TIER'
+    END AS validation_status,
+    CASE
+      WHEN current_tier.traveler_id IS NOT NULL
+        AND current_tier.loyalty_tier_code IN ('NON_MEMBER', 'MEMBER', 'STANDARD', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND', 'ELITE') THEN 1.00
+      WHEN current_tier.loyalty_tier_code IN ('NON_MEMBER', 'MEMBER', 'STANDARD', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND', 'ELITE') THEN 0.90
+      ELSE 0.75
+    END AS data_quality_score,
+    CURRENT_TIMESTAMP() AS created_ts,
+    CURRENT_TIMESTAMP() AS updated_ts,
+    TO_HEX(SHA256(CONCAT(
+      current_tier.traveler_identifier, '|',
+      current_tier.loyalty_tier_code, '|',
+      CAST(current_tier.source_event_ts AS STRING)
+    ))) AS record_hash
+  FROM current_tier
+  JOIN tier_statistics
+    ON current_tier.traveler_identifier = tier_statistics.traveler_identifier
+   AND current_tier.normalized_tier_value = tier_statistics.normalized_tier_value;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH raw_events AS (
+    SELECT
+      COALESCE(
+        identityMap['travelerId'][0].id,
+        identityMap['CRMID'][0].id
+      ) AS traveler_id,
+      identityMap['ECID'][0].id AS user_pseudo_id,
+      COALESCE(
+        identityMap['travelerId'][0].id,
+        identityMap['CRMID'][0].id,
+        identityMap['ECID'][0].id
+      ) AS traveler_identifier,
+      eventType AS event_name,
+      CAST(timestamp AS DATE) AS source_event_date,
+      timestamp AS source_event_ts,
+      _experience.analytics.customDimensions.eVars.eVar1 AS raw_tier_value,
+      'xdm_evar1' AS extraction_method,
+      identityMap['sessionId'][0].id AS session_id,
+      device.type AS device_category,
+      environment.operatingSystem AS operating_system,
+      environment.browserDetails.name AS browser,
+      environment._dc.language AS language,
+      placeContext.geo.countryCode AS country,
+      placeContext.geo.stateProvince AS region,
+      placeContext.geo.city AS city,
+      dataSource._id AS stream_id,
+      environment.type AS platform
+    FROM your_aep_analytics_dataset
+    WHERE COALESCE(
+        identityMap['travelerId'][0].id,
+        identityMap['CRMID'][0].id,
+        identityMap['ECID'][0].id
+      ) IS NOT NULL
+      AND _experience.analytics.customDimensions.eVars.eVar1 IS NOT NULL
+  ),
+  normalized_events AS (
+    SELECT
+      *,
+      regexp_replace(
+        regexp_replace(lower(trim(raw_tier_value)), '[^a-z0-9]+', '_'),
+        '^_+|_+$',
+        ''
+      ) AS normalized_tier_value
+    FROM raw_events
+    WHERE lower(trim(raw_tier_value)) NOT IN ('', 'null', 'undefined', 'unknown', 'n/a', 'na')
+  ),
+  tier_observations AS (
+    SELECT
+      *,
+      CASE normalized_tier_value
+        WHEN 'non_member' THEN 'NON_MEMBER'
+        WHEN 'none' THEN 'NON_MEMBER'
+        WHEN 'guest' THEN 'NON_MEMBER'
+        WHEN 'member' THEN 'MEMBER'
+        WHEN 'base' THEN 'MEMBER'
+        WHEN 'basic' THEN 'MEMBER'
+        WHEN 'standard' THEN 'STANDARD'
+        WHEN 'silver' THEN 'SILVER'
+        WHEN 'gold' THEN 'GOLD'
+        WHEN 'platinum' THEN 'PLATINUM'
+        WHEN 'diamond' THEN 'DIAMOND'
+        WHEN 'elite' THEN 'ELITE'
+        ELSE upper(normalized_tier_value)
+      END AS loyalty_tier_code,
+      ROW_NUMBER() OVER (
+        PARTITION BY traveler_identifier
+        ORDER BY source_event_ts DESC, event_name DESC
+      ) AS traveler_recency_rank
+    FROM normalized_events
+  ),
+  tier_statistics AS (
+    SELECT
+      traveler_identifier,
+      normalized_tier_value,
+      MIN(source_event_ts) AS first_observed_ts,
+      MAX(source_event_ts) AS last_observed_ts,
+      COUNT(*) AS observation_count,
+      COUNT(DISTINCT session_id) AS session_count
+    FROM tier_observations
+    GROUP BY traveler_identifier, normalized_tier_value
+  ),
+  current_tier AS (
+    SELECT *
+    FROM tier_observations
+    WHERE traveler_recency_rank = 1
+  )
+  SELECT
+    sha2(current_tier.traveler_identifier, 256) AS traveler_key,
+    current_tier.traveler_id,
+    current_tier.user_pseudo_id,
+    sha2(current_tier.loyalty_tier_code, 256) AS loyalty_tier_key,
+    current_tier.loyalty_tier_code,
+    CASE current_tier.loyalty_tier_code
+      WHEN 'NON_MEMBER' THEN 'Non-member'
+      WHEN 'MEMBER' THEN 'Member'
+      WHEN 'STANDARD' THEN 'Standard'
+      WHEN 'SILVER' THEN 'Silver'
+      WHEN 'GOLD' THEN 'Gold'
+      WHEN 'PLATINUM' THEN 'Platinum'
+      WHEN 'DIAMOND' THEN 'Diamond'
+      WHEN 'ELITE' THEN 'Elite'
+      ELSE initcap(replace(current_tier.normalized_tier_value, '_', ' '))
+    END AS loyalty_tier_name,
+    CASE current_tier.loyalty_tier_code
+      WHEN 'NON_MEMBER' THEN 0
+      WHEN 'MEMBER' THEN 1
+      WHEN 'STANDARD' THEN 1
+      WHEN 'SILVER' THEN 2
+      WHEN 'GOLD' THEN 3
+      WHEN 'PLATINUM' THEN 4
+      WHEN 'DIAMOND' THEN 5
+      WHEN 'ELITE' THEN 6
+      ELSE 99
+    END AS loyalty_tier_rank,
+    CASE
+      WHEN current_tier.loyalty_tier_code = 'NON_MEMBER' THEN 'NON_MEMBER'
+      WHEN current_tier.loyalty_tier_code IN ('PLATINUM', 'DIAMOND', 'ELITE') THEN 'ELITE'
+      WHEN current_tier.loyalty_tier_code IN ('SILVER', 'GOLD') THEN 'PREMIUM'
+      WHEN current_tier.loyalty_tier_code IN ('MEMBER', 'STANDARD') THEN 'BASE'
+      ELSE 'OTHER'
+    END AS loyalty_tier_group,
+    CASE WHEN current_tier.loyalty_tier_code = 'NON_MEMBER' THEN 'INACTIVE' ELSE 'ACTIVE' END AS loyalty_tier_status,
+    CASE WHEN current_tier.loyalty_tier_code <> 'NON_MEMBER' THEN TRUE ELSE FALSE END AS is_loyalty_member,
+    CASE WHEN current_tier.loyalty_tier_code IN ('PLATINUM', 'DIAMOND', 'ELITE') THEN TRUE ELSE FALSE END AS is_elite_tier,
+    current_tier.raw_tier_value,
+    current_tier.normalized_tier_value,
+    'Digital Loyalty Profile API + Digital Analytics' AS source_system,
+    'ADOBE_AEP' AS source_platform,
+    'your_aep_analytics_dataset' AS source_dataset,
+    current_tier.event_name AS source_event_name,
+    current_tier.source_event_date,
+    current_tier.source_event_ts,
+    tier_statistics.first_observed_ts,
+    tier_statistics.last_observed_ts,
+    CAST(tier_statistics.first_observed_ts AS DATE) AS first_observed_date,
+    CAST(tier_statistics.last_observed_ts AS DATE) AS last_observed_date,
+    tier_statistics.observation_count,
+    tier_statistics.session_count,
+    current_tier.device_category,
+    current_tier.operating_system,
+    current_tier.browser,
+    current_tier.country,
+    current_tier.region,
+    current_tier.city,
+    current_tier.language,
+    current_tier.stream_id,
+    current_tier.platform,
+    'AEP_ANALYTICS_PROPERTY' AS property_id,
+    'DIGITAL' AS collection_channel,
+    current_tier.extraction_method,
+    1 AS source_precedence,
+    'AEP_XDM_EXPERIENCE_EVENT' AS record_source,
+    tier_statistics.first_observed_ts AS effective_start_ts,
+    CAST(NULL AS TIMESTAMP) AS effective_end_ts,
+    TRUE AS is_current,
+    FALSE AS is_inferred,
+    TRUE AS is_valid,
+    CASE
+      WHEN current_tier.loyalty_tier_code IN ('NON_MEMBER', 'MEMBER', 'STANDARD', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND', 'ELITE')
+        THEN 'VALID_STANDARD_TIER'
+      ELSE 'VALID_UNMAPPED_TIER'
+    END AS validation_status,
+    CASE
+      WHEN current_tier.traveler_id IS NOT NULL
+        AND current_tier.loyalty_tier_code IN ('NON_MEMBER', 'MEMBER', 'STANDARD', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND', 'ELITE') THEN 1.00
+      WHEN current_tier.loyalty_tier_code IN ('NON_MEMBER', 'MEMBER', 'STANDARD', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND', 'ELITE') THEN 0.90
+      ELSE 0.75
+    END AS data_quality_score,
+    CURRENT_TIMESTAMP() AS created_ts,
+    CURRENT_TIMESTAMP() AS updated_ts,
+    sha2(concat_ws(
+      '|',
+      current_tier.traveler_identifier,
+      current_tier.loyalty_tier_code,
+      CAST(current_tier.source_event_ts AS STRING)
+    ), 256) AS record_hash
+  FROM current_tier
+  JOIN tier_statistics
+    ON current_tier.traveler_identifier = tier_statistics.traveler_identifier
+   AND current_tier.normalized_tier_value = tier_statistics.normalized_tier_value;
+
+Calculation Notes: |
+  Persist the authoritative tier value returned by the digital loyalty profile API as an event-time snapshot rather than applying the traveler’s current tier retroactively to historical activity. Normalize source labels and codes to the enterprise tier taxonomy while retaining program-specific distinctions where tier structures differ; for example, map case, spacing, abbreviations, and legacy codes to one governed value. Assign "Non-Member" only when the digital identity service confirms that the traveler has no loyalty membership, and assign "Unknown" when authentication, identity resolution, consent, profile retrieval, or tier data is unavailable. Anonymous visitors must remain "Unknown" and must not be inferred as "Non-Member." Pending qualification, promotional trial, lifetime status, invitation-only status, grace-period status, and suspended memberships must follow explicit loyalty-program rules and must not be promoted to a standard earned tier unless the authoritative service identifies that tier as currently effective. When multiple memberships are associated with a traveler, use the tier for the loyalty program relevant to the active brand or transaction; if no program context exists, use the designated primary digital membership. Resolve conflicting values by effective timestamp and source authority, giving precedence to the loyalty profile service over browser storage, campaign parameters, client-side data layers, or previously cached analytics attributes. Apply tier changes from their effective timestamp, honor downgrade grace periods represented by the source system, and prevent future-dated tiers from appearing early. Reprocess late-arriving profile updates only when event-time effective dating is available; otherwise preserve the originally observed value and document restatement behavior. Exclude test accounts, employee-only tiers, synthetic traffic, bots, monitoring agents, and invalid or deleted loyalty profiles from production reporting. Account merges must retain event-time tier history and must not rewrite prior events solely because digital identities were consolidated.
+
+Business Use Case: |
+  The Chief Loyalty Officer compares authenticated booking conversion, direct-channel adoption, ancillary attachment, and repeat digital engagement by loyalty tier. If mid-tier travelers demonstrate strong trip-search activity but materially lower booking completion than top-tier travelers, the loyalty and product teams can introduce targeted digital benefits, personalized upgrade messaging, or checkout interventions and measure whether the changes improve retention and direct revenue.
+
+
+Source Data: Digital Loyalty Profile API + Digital Analytics
+
+Report Attributes: |
+  ["Loyalty Program","Digital Channel","Device Category","Traveler Authentication Status","Membership Status","Booking Funnel Stage","Booking Conversion Status","Origin Market","Destination Market","Trip Type","Fare or Rate Family","Ancillary Product","Campaign","Brand","Event Date"]
+
+Dashboard Usage: [Digital Loyalty Performance Dashboard, Member Engagement and Retention Dashboard, Direct Booking Conversion Dashboard, Loyalty Tier Migration Dashboard, Digital Ancillary Adoption Dashboard, Executive Customer Value Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Loyalty Program, Loyalty Membership Status, Traveler Authentication Status, Traveler Type, Points Balance Band, Digital Channel, Booking Channel, Trip Purpose, Origin Market, Destination Market]
+
+Derived Dimensions: [Normalized Loyalty Tier, Loyalty Tier Rank, Elite Status Indicator, Loyalty Tier Group, Premium Loyalty Tier Indicator]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T23:30:47.652321+00:00
+
+Last Modified By: devyendarm
+
+
