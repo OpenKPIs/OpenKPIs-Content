@@ -1,0 +1,264 @@
+# Dimension: Order Priority
+# Generated: 2026-09-07T13:30:24.632Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Order Priority
+
+Description: |
+  Order Priority identifies the standardized urgency level assigned to an order for queue sequencing, resource allocation, and fulfillment handling. It records the priority effective at each order lifecycle event so users can compare service performance and backlog across Critical, High, Normal, Low, and Unknown orders.
+
+Category: Performance
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH priority_definition AS (
+    SELECT *
+    FROM UNNEST([
+      STRUCT('P1' AS priority_code, 'Critical' AS priority_name, 1 AS priority_rank),
+      STRUCT('P2' AS priority_code, 'Urgent' AS priority_name, 2 AS priority_rank),
+      STRUCT('P3' AS priority_code, 'High' AS priority_name, 3 AS priority_rank),
+      STRUCT('P4' AS priority_code, 'Normal' AS priority_name, 4 AS priority_rank),
+      STRUCT('P5' AS priority_code, 'Low' AS priority_name, 5 AS priority_rank),
+      STRUCT('UNK' AS priority_code, 'Unknown' AS priority_name, 999 AS priority_rank)
+    ])
+  ),
+  normalized_orders AS (
+    SELECT
+      order_id,
+      CASE
+        WHEN UPPER(TRIM(CAST(order_priority_code AS STRING))) IN ('P1', '1', 'CRITICAL', 'EMERGENCY') THEN 'P1'
+        WHEN UPPER(TRIM(CAST(order_priority_code AS STRING))) IN ('P2', '2', 'URGENT', 'RUSH') THEN 'P2'
+        WHEN UPPER(TRIM(CAST(order_priority_code AS STRING))) IN ('P3', '3', 'HIGH', 'EXPEDITED') THEN 'P3'
+        WHEN UPPER(TRIM(CAST(order_priority_code AS STRING))) IN ('P4', '4', 'NORMAL', 'STANDARD', 'MEDIUM') THEN 'P4'
+        WHEN UPPER(TRIM(CAST(order_priority_code AS STRING))) IN ('P5', '5', 'LOW', 'DEFERRED') THEN 'P5'
+        ELSE 'UNK'
+      END AS priority_code,
+      CAST(created_timestamp AS TIMESTAMP) AS created_timestamp,
+      CAST(COALESCE(updated_timestamp, created_timestamp) AS TIMESTAMP) AS updated_timestamp
+    FROM `your-project.erp.sales_order_headers`
+  ),
+  priority_usage AS (
+    SELECT
+      priority_code,
+      COUNT(DISTINCT order_id) AS order_count,
+      MIN(created_timestamp) AS first_seen_timestamp,
+      MAX(updated_timestamp) AS last_seen_timestamp
+    FROM normalized_orders
+    GROUP BY priority_code
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT('ERP|ORDER_PRIORITY|', d.priority_code))) AS order_priority_key,
+    'ERP' AS source_system,
+    d.priority_code AS source_priority_code,
+    d.priority_name AS source_priority_name,
+    d.priority_code AS order_priority_code,
+    d.priority_name AS order_priority_name,
+    CASE d.priority_code
+      WHEN 'P1' THEN 'Critical orders requiring immediate fulfillment and shipment.'
+      WHEN 'P2' THEN 'Urgent orders requiring accelerated fulfillment and shipment.'
+      WHEN 'P3' THEN 'High-priority orders handled ahead of standard orders.'
+      WHEN 'P4' THEN 'Normal-priority orders processed using standard service levels.'
+      WHEN 'P5' THEN 'Low-priority orders that may be deferred behind standard demand.'
+      ELSE 'Orders without a recognized ERP priority value.'
+    END AS order_priority_description,
+    d.priority_rank,
+    CASE WHEN d.priority_rank <= 2 THEN 'Tier 1' WHEN d.priority_rank = 3 THEN 'Tier 2' WHEN d.priority_rank <= 5 THEN 'Tier 3' ELSE 'Unclassified' END AS priority_tier,
+    CASE WHEN d.priority_rank <= 2 THEN 'Exception' WHEN d.priority_rank = 3 THEN 'Priority' WHEN d.priority_rank <= 5 THEN 'Standard' ELSE 'Unknown' END AS priority_group,
+    CASE d.priority_code WHEN 'P1' THEN 5 WHEN 'P2' THEN 4 WHEN 'P3' THEN 3 WHEN 'P4' THEN 2 WHEN 'P5' THEN 1 ELSE 0 END AS urgency_level,
+    d.priority_code IN ('P1', 'P2', 'P3') AS is_priority_order,
+    d.priority_code IN ('P1', 'P2', 'P3') AS is_expedited,
+    d.priority_code IN ('P1', 'P2') AS is_rush,
+    d.priority_code = 'P1' AS is_emergency,
+    d.priority_code IN ('P1', 'UNK') AS requires_manual_review,
+    d.priority_code = 'P1' AS requires_manager_approval,
+    d.priority_code IN ('P1', 'P2', 'P3') AS requires_special_handling,
+    CASE d.priority_code WHEN 'P1' THEN 2 WHEN 'P2' THEN 4 WHEN 'P3' THEN 8 WHEN 'P4' THEN 24 WHEN 'P5' THEN 72 ELSE 24 END AS sla_hours,
+    CASE d.priority_code WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 4 WHEN 'P4' THEN 16 WHEN 'P5' THEN 48 ELSE 16 END AS fulfillment_sla_hours,
+    CASE d.priority_code WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 4 WHEN 'P4' THEN 8 WHEN 'P5' THEN 24 ELSE 8 END AS shipping_sla_hours,
+    CASE d.priority_code WHEN 'P1' THEN 0 WHEN 'P2' THEN 1 WHEN 'P3' THEN 1 WHEN 'P4' THEN 3 WHEN 'P5' THEN 5 ELSE 3 END AS promised_lead_time_days,
+    CASE WHEN d.priority_code IN ('P1', 'P2') THEN 'AIR' WHEN d.priority_code = 'P3' THEN 'EXPRESS' WHEN d.priority_code IN ('P4', 'P5') THEN 'GROUND' ELSE 'STANDARD' END AS default_ship_method,
+    CASE d.priority_code WHEN 'P1' THEN 'SAME_DAY' WHEN 'P2' THEN 'NEXT_DAY' WHEN 'P3' THEN 'TWO_DAY' ELSE 'STANDARD' END AS default_carrier_service,
+    d.priority_rank AS allocation_sequence,
+    d.priority_rank AS pick_sequence,
+    d.priority_rank AS pack_sequence,
+    d.priority_rank AS ship_sequence,
+    d.priority_rank AS backorder_priority_rank,
+    d.priority_rank AS inventory_reservation_rank,
+    d.priority_rank AS customer_service_queue_rank,
+    d.priority_rank AS warehouse_queue_rank,
+    CASE WHEN d.priority_code IN ('P1', 'P2') THEN TIME '18:00:00' ELSE TIME '14:00:00' END AS cutoff_time_local,
+    'UTC' AS cutoff_timezone,
+    d.priority_code IN ('P1', 'P2', 'P3') AS weekend_processing_allowed,
+    d.priority_code IN ('P1', 'P2') AS holiday_processing_allowed,
+    COALESCE(u.first_seen_timestamp, TIMESTAMP '1970-01-01 00:00:00+00') AS effective_start_timestamp,
+    TIMESTAMP '9999-12-31 23:59:59+00' AS effective_end_timestamp,
+    TRUE AS is_current,
+    COALESCE(u.order_count, 0) > 0 AS is_active,
+    u.first_seen_timestamp AS source_created_timestamp,
+    u.last_seen_timestamp AS source_updated_timestamp,
+    CURRENT_TIMESTAMP() AS dw_created_timestamp,
+    CURRENT_TIMESTAMP() AS dw_updated_timestamp,
+    'erp.sales_order_headers' AS record_source,
+    CONCAT('ERP_ORDER_PRIORITY_', d.priority_code) AS source_record_id,
+    COALESCE(u.order_count, 0) AS order_count,
+    u.first_seen_timestamp,
+    u.last_seen_timestamp
+  FROM priority_definition AS d
+  LEFT JOIN priority_usage AS u
+    USING (priority_code);
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH priority_definition (priority_code, priority_name, priority_rank) AS (
+    VALUES
+      ('P1', 'Critical', 1),
+      ('P2', 'Urgent', 2),
+      ('P3', 'High', 3),
+      ('P4', 'Normal', 4),
+      ('P5', 'Low', 5),
+      ('UNK', 'Unknown', 999)
+  ),
+  normalized_orders AS (
+    SELECT
+      order_id,
+      CASE
+        WHEN UPPER(TRIM(CAST(order_priority_code AS VARCHAR))) IN ('P1', '1', 'CRITICAL', 'EMERGENCY') THEN 'P1'
+        WHEN UPPER(TRIM(CAST(order_priority_code AS VARCHAR))) IN ('P2', '2', 'URGENT', 'RUSH') THEN 'P2'
+        WHEN UPPER(TRIM(CAST(order_priority_code AS VARCHAR))) IN ('P3', '3', 'HIGH', 'EXPEDITED') THEN 'P3'
+        WHEN UPPER(TRIM(CAST(order_priority_code AS VARCHAR))) IN ('P4', '4', 'NORMAL', 'STANDARD', 'MEDIUM') THEN 'P4'
+        WHEN UPPER(TRIM(CAST(order_priority_code AS VARCHAR))) IN ('P5', '5', 'LOW', 'DEFERRED') THEN 'P5'
+        ELSE 'UNK'
+      END AS priority_code,
+      CAST(created_timestamp AS TIMESTAMP) AS created_timestamp,
+      CAST(COALESCE(updated_timestamp, created_timestamp) AS TIMESTAMP) AS updated_timestamp
+    FROM erp_sales_order_headers
+  ),
+  priority_usage AS (
+    SELECT
+      priority_code,
+      COUNT(DISTINCT order_id) AS order_count,
+      MIN(created_timestamp) AS first_seen_timestamp,
+      MAX(updated_timestamp) AS last_seen_timestamp
+    FROM normalized_orders
+    GROUP BY priority_code
+  )
+  SELECT
+    MD5('ERP|ORDER_PRIORITY|' || d.priority_code) AS order_priority_key,
+    'ERP' AS source_system,
+    d.priority_code AS source_priority_code,
+    d.priority_name AS source_priority_name,
+    d.priority_code AS order_priority_code,
+    d.priority_name AS order_priority_name,
+    CASE d.priority_code
+      WHEN 'P1' THEN 'Critical orders requiring immediate fulfillment and shipment.'
+      WHEN 'P2' THEN 'Urgent orders requiring accelerated fulfillment and shipment.'
+      WHEN 'P3' THEN 'High-priority orders handled ahead of standard orders.'
+      WHEN 'P4' THEN 'Normal-priority orders processed using standard service levels.'
+      WHEN 'P5' THEN 'Low-priority orders that may be deferred behind standard demand.'
+      ELSE 'Orders without a recognized ERP priority value.'
+    END AS order_priority_description,
+    d.priority_rank,
+    CASE WHEN d.priority_rank <= 2 THEN 'Tier 1' WHEN d.priority_rank = 3 THEN 'Tier 2' WHEN d.priority_rank <= 5 THEN 'Tier 3' ELSE 'Unclassified' END AS priority_tier,
+    CASE WHEN d.priority_rank <= 2 THEN 'Exception' WHEN d.priority_rank = 3 THEN 'Priority' WHEN d.priority_rank <= 5 THEN 'Standard' ELSE 'Unknown' END AS priority_group,
+    CASE d.priority_code WHEN 'P1' THEN 5 WHEN 'P2' THEN 4 WHEN 'P3' THEN 3 WHEN 'P4' THEN 2 WHEN 'P5' THEN 1 ELSE 0 END AS urgency_level,
+    CASE WHEN d.priority_code IN ('P1', 'P2', 'P3') THEN TRUE ELSE FALSE END AS is_priority_order,
+    CASE WHEN d.priority_code IN ('P1', 'P2', 'P3') THEN TRUE ELSE FALSE END AS is_expedited,
+    CASE WHEN d.priority_code IN ('P1', 'P2') THEN TRUE ELSE FALSE END AS is_rush,
+    CASE WHEN d.priority_code = 'P1' THEN TRUE ELSE FALSE END AS is_emergency,
+    CASE WHEN d.priority_code IN ('P1', 'UNK') THEN TRUE ELSE FALSE END AS requires_manual_review,
+    CASE WHEN d.priority_code = 'P1' THEN TRUE ELSE FALSE END AS requires_manager_approval,
+    CASE WHEN d.priority_code IN ('P1', 'P2', 'P3') THEN TRUE ELSE FALSE END AS requires_special_handling,
+    CASE d.priority_code WHEN 'P1' THEN 2 WHEN 'P2' THEN 4 WHEN 'P3' THEN 8 WHEN 'P4' THEN 24 WHEN 'P5' THEN 72 ELSE 24 END AS sla_hours,
+    CASE d.priority_code WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 4 WHEN 'P4' THEN 16 WHEN 'P5' THEN 48 ELSE 16 END AS fulfillment_sla_hours,
+    CASE d.priority_code WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 4 WHEN 'P4' THEN 8 WHEN 'P5' THEN 24 ELSE 8 END AS shipping_sla_hours,
+    CASE d.priority_code WHEN 'P1' THEN 0 WHEN 'P2' THEN 1 WHEN 'P3' THEN 1 WHEN 'P4' THEN 3 WHEN 'P5' THEN 5 ELSE 3 END AS promised_lead_time_days,
+    CASE WHEN d.priority_code IN ('P1', 'P2') THEN 'AIR' WHEN d.priority_code = 'P3' THEN 'EXPRESS' WHEN d.priority_code IN ('P4', 'P5') THEN 'GROUND' ELSE 'STANDARD' END AS default_ship_method,
+    CASE d.priority_code WHEN 'P1' THEN 'SAME_DAY' WHEN 'P2' THEN 'NEXT_DAY' WHEN 'P3' THEN 'TWO_DAY' ELSE 'STANDARD' END AS default_carrier_service,
+    d.priority_rank AS allocation_sequence,
+    d.priority_rank AS pick_sequence,
+    d.priority_rank AS pack_sequence,
+    d.priority_rank AS ship_sequence,
+    d.priority_rank AS backorder_priority_rank,
+    d.priority_rank AS inventory_reservation_rank,
+    d.priority_rank AS customer_service_queue_rank,
+    d.priority_rank AS warehouse_queue_rank,
+    CASE WHEN d.priority_code IN ('P1', 'P2') THEN TIME '18:00:00' ELSE TIME '14:00:00' END AS cutoff_time_local,
+    'UTC' AS cutoff_timezone,
+    CASE WHEN d.priority_code IN ('P1', 'P2', 'P3') THEN TRUE ELSE FALSE END AS weekend_processing_allowed,
+    CASE WHEN d.priority_code IN ('P1', 'P2') THEN TRUE ELSE FALSE END AS holiday_processing_allowed,
+    COALESCE(u.first_seen_timestamp, TIMESTAMP '1970-01-01 00:00:00') AS effective_start_timestamp,
+    TIMESTAMP '9999-12-31 23:59:59' AS effective_end_timestamp,
+    TRUE AS is_current,
+    CASE WHEN COALESCE(u.order_count, 0) > 0 THEN TRUE ELSE FALSE END AS is_active,
+    u.first_seen_timestamp AS source_created_timestamp,
+    u.last_seen_timestamp AS source_updated_timestamp,
+    CURRENT_TIMESTAMP AS dw_created_timestamp,
+    CURRENT_TIMESTAMP AS dw_updated_timestamp,
+    'erp_sales_order_headers' AS record_source,
+    'ERP_ORDER_PRIORITY_' || d.priority_code AS source_record_id,
+    COALESCE(u.order_count, 0) AS order_count,
+    u.first_seen_timestamp,
+    u.last_seen_timestamp
+  FROM priority_definition d
+  LEFT JOIN priority_usage u
+    ON d.priority_code = u.priority_code;
+
+Calculation Notes: |
+  Standardize source priority codes through the approved priority mapping reference and retain the value effective when each lifecycle event occurred. Do not infer priority from shipping service, delivery promise, customer tier, order value, or fulfillment speed unless an approved business rule explicitly assigns the priority. When source systems conflict, use an authorized manual override first, the order management system assignment second, and the warehouse execution value third. Split orders inherit the parent order priority unless an approved line- or shipment-level override exists; backordered orders retain their assigned priority until an explicit change is received. Map null, blank, inactive, or unmapped source values to Unknown rather than Normal. Canceled, test, fraudulent, and duplicate orders retain a priority value for auditability but must be excluded through explicit report filters when operational performance is assessed. Late-arriving changes must preserve both the business-effective timestamp and ingestion timestamp and must not overwrite historical event-level priority.
+
+Business Use Case: |
+  The Supply Chain Operations executive reviews backlog, on-time fulfillment, and exception volume by Order Priority each day. If Critical or High orders show increasing aging or missed dispatch cutoffs at a warehouse, the team can reallocate labor, reserve carrier capacity, expedite inventory transfers, or correct priority mapping and override practices before customer commitments are missed.
+
+
+Source Data: ERP / Order Management System (OMS)
+
+Report Attributes: |
+  ["Order Status","Order Type","Warehouse","Fulfillment Channel","Shipping Service Level","Carrier","Destination Region","Customer Service Tier","Backorder Status","Exception Type","Order Created Date","Promised Delivery Date"]
+
+Dashboard Usage: [Executive Fulfillment Performance, Priority Order Control Tower, Warehouse Operations, Order Backlog and Aging, On-Time Dispatch Performance, Fulfillment Exceptions, Carrier Capacity and Expedite Management]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Order Status, Order Type, Fulfillment Channel, Shipping Service Level, Customer Service Tier, Warehouse, Carrier, Destination Region, Backorder Status, Exception Type]
+
+Derived Dimensions: [Priority Rank, Priority Band, Expedite Indicator, Priority Override Indicator, Critical Order Indicator]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-07T13:30:18.366056+00:00
+
+Last Modified By: devyendarm
+
+
