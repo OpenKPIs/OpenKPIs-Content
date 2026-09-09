@@ -1,0 +1,262 @@
+# Dimension: Transaction Type
+# Generated: 2026-09-04T12:30:26.086Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Transaction Type
+
+Description: |
+  Classifies each real estate transaction by its principal commercial or legal purpose, such as sale, lease, rental, refinance, or non-sale ownership transfer. It enables consistent comparison of transaction volume, conversion, revenue, cycle time, and operational performance across transaction classes.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Technology
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH source_values AS (
+    SELECT
+      TRIM(
+        REGEXP_REPLACE(
+          LOWER(
+            CONCAT(
+              COALESCE(CAST(transaction_type AS STRING), ''), ' ',
+              COALESCE(CAST(deal_type AS STRING), ''), ' ',
+              COALESCE(CAST(listing_type AS STRING), '')
+            )
+          ),
+          r'[^a-z0-9]+',
+          ' '
+        )
+      ) AS raw_descriptor
+    FROM `your-project.enterprise_backend.transaction_records`
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+  ),
+  normalized_values AS (
+    SELECT
+      raw_descriptor,
+      CONCAT(' ', raw_descriptor, ' ') AS padded_descriptor
+    FROM source_values
+  ),
+  classified AS (
+    SELECT
+      CASE
+        WHEN raw_descriptor = '' THEN 'UNKNOWN'
+        WHEN padded_descriptor LIKE '% refinance %'
+          OR padded_descriptor LIKE '% refinancing %'
+          OR padded_descriptor LIKE '% refinanced %'
+          OR padded_descriptor LIKE '% refi %' THEN 'REFINANCE'
+        WHEN padded_descriptor LIKE '% exchange %'
+          OR padded_descriptor LIKE '% 1031 %' THEN 'EXCHANGE'
+        WHEN padded_descriptor LIKE '% lease %'
+          OR padded_descriptor LIKE '% leased %'
+          OR padded_descriptor LIKE '% leasing %'
+          OR padded_descriptor LIKE '% rent %'
+          OR padded_descriptor LIKE '% rented %'
+          OR padded_descriptor LIKE '% rental %' THEN 'LEASE'
+        WHEN padded_descriptor LIKE '% purchase %'
+          OR padded_descriptor LIKE '% purchased %'
+          OR padded_descriptor LIKE '% acquisition %'
+          OR padded_descriptor LIKE '% buyer %'
+          OR padded_descriptor LIKE '% buy %'
+          OR padded_descriptor LIKE '% buying %'
+          OR padded_descriptor LIKE '% new construction %' THEN 'PURCHASE'
+        WHEN padded_descriptor LIKE '% sale %'
+          OR padded_descriptor LIKE '% resale %'
+          OR padded_descriptor LIKE '% seller %'
+          OR padded_descriptor LIKE '% sell %'
+          OR padded_descriptor LIKE '% selling %'
+          OR padded_descriptor LIKE '% sold %'
+          OR padded_descriptor LIKE '% listing %' THEN 'SALE'
+        ELSE 'OTHER'
+      END AS transaction_type_code
+    FROM normalized_values
+  ),
+  observed_codes AS (
+    SELECT DISTINCT transaction_type_code
+    FROM classified
+  ),
+  canonical_codes AS (
+    SELECT 'SALE' AS transaction_type_code, 'Sale' AS transaction_type_name, FALSE AS is_unknown, 1 AS display_order
+    UNION ALL
+    SELECT 'PURCHASE', 'Purchase', FALSE, 2
+    UNION ALL
+    SELECT 'LEASE', 'Lease', FALSE, 3
+    UNION ALL
+    SELECT 'REFINANCE', 'Refinance', FALSE, 4
+    UNION ALL
+    SELECT 'EXCHANGE', 'Exchange', FALSE, 5
+    UNION ALL
+    SELECT 'OTHER', 'Other', FALSE, 98
+    UNION ALL
+    SELECT 'UNKNOWN', 'Unknown', TRUE, 99
+  ),
+  dimension_codes AS (
+    SELECT
+      canonical.transaction_type_code,
+      canonical.transaction_type_name,
+      canonical.is_unknown,
+      canonical.display_order
+    FROM canonical_codes AS canonical
+    LEFT JOIN observed_codes AS observed
+      ON canonical.transaction_type_code = observed.transaction_type_code
+  )
+  SELECT
+    LOWER(TO_HEX(MD5(transaction_type_code))) AS transaction_type_key,
+    transaction_type_code,
+    transaction_type_name,
+    is_unknown
+  FROM dimension_codes
+  ORDER BY display_order;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH source_values AS (
+    SELECT
+      TRIM(
+        REGEXP_REPLACE(
+          LOWER(
+            COALESCE(CAST(transaction_type AS VARCHAR), '') || ' ' ||
+            COALESCE(CAST(deal_type AS VARCHAR), '') || ' ' ||
+            COALESCE(CAST(listing_type AS VARCHAR), '')
+          ),
+          '[^a-z0-9]+',
+          ' '
+        )
+      ) AS raw_descriptor
+    FROM backend_transaction_dataset
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+  ),
+  normalized_values AS (
+    SELECT
+      raw_descriptor,
+      ' ' || raw_descriptor || ' ' AS padded_descriptor
+    FROM source_values
+  ),
+  classified AS (
+    SELECT
+      CASE
+        WHEN raw_descriptor = '' THEN 'UNKNOWN'
+        WHEN padded_descriptor LIKE '% refinance %'
+          OR padded_descriptor LIKE '% refinancing %'
+          OR padded_descriptor LIKE '% refinanced %'
+          OR padded_descriptor LIKE '% refi %' THEN 'REFINANCE'
+        WHEN padded_descriptor LIKE '% exchange %'
+          OR padded_descriptor LIKE '% 1031 %' THEN 'EXCHANGE'
+        WHEN padded_descriptor LIKE '% lease %'
+          OR padded_descriptor LIKE '% leased %'
+          OR padded_descriptor LIKE '% leasing %'
+          OR padded_descriptor LIKE '% rent %'
+          OR padded_descriptor LIKE '% rented %'
+          OR padded_descriptor LIKE '% rental %' THEN 'LEASE'
+        WHEN padded_descriptor LIKE '% purchase %'
+          OR padded_descriptor LIKE '% purchased %'
+          OR padded_descriptor LIKE '% acquisition %'
+          OR padded_descriptor LIKE '% buyer %'
+          OR padded_descriptor LIKE '% buy %'
+          OR padded_descriptor LIKE '% buying %'
+          OR padded_descriptor LIKE '% new construction %' THEN 'PURCHASE'
+        WHEN padded_descriptor LIKE '% sale %'
+          OR padded_descriptor LIKE '% resale %'
+          OR padded_descriptor LIKE '% seller %'
+          OR padded_descriptor LIKE '% sell %'
+          OR padded_descriptor LIKE '% selling %'
+          OR padded_descriptor LIKE '% sold %'
+          OR padded_descriptor LIKE '% listing %' THEN 'SALE'
+        ELSE 'OTHER'
+      END AS transaction_type_code
+    FROM normalized_values
+  ),
+  observed_codes AS (
+    SELECT DISTINCT transaction_type_code
+    FROM classified
+  ),
+  canonical_codes AS (
+    SELECT 'SALE' AS transaction_type_code, 'Sale' AS transaction_type_name, FALSE AS is_unknown, 1 AS display_order
+    UNION ALL
+    SELECT 'PURCHASE', 'Purchase', FALSE, 2
+    UNION ALL
+    SELECT 'LEASE', 'Lease', FALSE, 3
+    UNION ALL
+    SELECT 'REFINANCE', 'Refinance', FALSE, 4
+    UNION ALL
+    SELECT 'EXCHANGE', 'Exchange', FALSE, 5
+    UNION ALL
+    SELECT 'OTHER', 'Other', FALSE, 98
+    UNION ALL
+    SELECT 'UNKNOWN', 'Unknown', TRUE, 99
+  ),
+  dimension_codes AS (
+    SELECT
+      canonical.transaction_type_code,
+      canonical.transaction_type_name,
+      canonical.is_unknown,
+      canonical.display_order
+    FROM canonical_codes canonical
+    LEFT JOIN observed_codes observed
+      ON canonical.transaction_type_code = observed.transaction_type_code
+  )
+  SELECT
+    LOWER(MD5(CAST(transaction_type_code AS VARCHAR))) AS transaction_type_key,
+    transaction_type_code,
+    transaction_type_name,
+    is_unknown
+  FROM dimension_codes
+  ORDER BY display_order;
+
+Calculation Notes: |
+  Assign the canonical type effective at the event timestamp using the executed agreement or closing record first, followed by the governed transaction-management value and approved source-code mappings. Classify purchases, resales, new-construction sales, auction sales, and commercial property sales as sale; fixed-term leases, subleases, and renewals as lease; source-designated short-term, vacation, or recurring occupancy arrangements as rental; debt replacement or restructuring without an ownership sale as refinance; and non-sale title changes as transfer. Transaction side, customer role, property type, status, page labels, and event names must not determine the type. Preserve the type for cancelled, expired, withdrawn, and failed transactions, but exclude test, training, sandbox, duplicate, and deleted records from production reporting. Map missing, blank, contradictory, placeholder, or unresolved values to unknown; use other only for a populated source value that governance has confirmed falls outside the canonical taxonomy. Process late records using the classification and mapping effective at the original event timestamp; historical restatement requires an approved, auditable backfill. Session timeout rules do not apply.
+
+Business Use Case: |
+  The Chief Operating Officer compares conversion rate, close cycle, cancellation rate, and commission revenue by Transaction Type and finds that lease transactions have materially longer approval times in two markets. Operations responds by revising lease-specific document workflows, staffing, and partner integrations while leaving the sale process unchanged.
+
+
+Source Data: Transaction Management Platform, Closing System, CRM, ERP, and MLS
+
+Report Attributes: |
+  ["Transaction Status","Transaction Stage","Transaction Side","Property Type","Property Use","Market","Office","Agent","Lead Source","Customer Segment","Contract Date","Close Date"]
+
+Dashboard Usage: [Executive Transaction Performance, Real Estate Conversion Funnel, Revenue and Commission Performance, Transaction Operations, Closing Pipeline, Market and Office Performance, Agent Productivity, Transaction Data Quality]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Transaction ID, Transaction Status, Transaction Stage, Transaction Side, Property Type, Property Use, Listing Type, Contract Type, Customer Role, Market, Office, Agent, Lead Source, Contract Date, Close Date]
+
+Derived Dimensions: [Transaction Type Group, Ownership Transfer Indicator, Occupancy Agreement Indicator, Financing-Only Indicator]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-04T12:30:25.687326+00:00
+
+Last Modified By: devyendarm
+
+
