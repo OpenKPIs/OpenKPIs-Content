@@ -1,0 +1,497 @@
+# Dimension: Traveler Lifecycle Stage
+# Generated: 2026-09-09T23:30:40.603Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Traveler Lifecycle Stage
+
+Description: |
+  Classifies each recognized digital traveler into the most advanced currently applicable stage of the travel journey based on observed browsing, planning, booking, trip-date, and post-trip behaviors. The dimension provides a governed, point-in-time state for analyzing progression, abandonment, re-engagement, and repeat travel across first-party digital experiences.
+
+Category: Engagement
+
+Tags: [dimension]
+
+Industry: Travel & Hospitality
+
+Priority: High
+
+Core Area: Generic
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User (evaluated at each event with a daily current-state snapshot)
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  s.t()
+
+W3 Data Layer: |
+  {"digitalData":{"page":{"pageInfo":{"pageName":"booking:confirmation","destinationURL":"https://www.example.com/booking/confirmation"}},"user":[{"profile":[{"profileInfo":{"recognitionStatus":"recognized","travelerLifecycle":{"stage":"booked_pre_trip","stageRank":6,"effectiveAt":"2025-03-08T12:00:00Z","tripEndDate":"2025-04-17","sourceSystem":"first_party_digital_booking_engine","bookingStatus":"confirmed","previousStage":"booking_started","tripStartDate":"2025-04-10","classificationRuleVersion":"1.0"}}}]}],"event":[{"eventInfo":{"eventName":"page_view","timestamp":"2025-03-08T12:00:00Z","eventAction":"view"}}]}}
+
+GA4 Data Layer: |
+  {"event":"page_view","trip_end_date":"2025-04-17","booking_status":"confirmed","trip_start_date":"2025-04-10","traveler_lifecycle_as_of":"2025-03-08T12:00:00Z","traveler_lifecycle_stage":"booked_pre_trip","traveler_lifecycle_source":"first_party_digital_booking_engine","traveler_recognition_status":"recognized","traveler_lifecycle_prev_stage":"booking_started","traveler_lifecycle_stage_rank":6,"traveler_lifecycle_rule_version":"1.0"}
+
+Adobe Client Data Layer: |
+  {"user":{"recognitionStatus":"recognized","travelerLifecycle":{"stage":"booked_pre_trip","stageRank":6,"effectiveAt":"2025-03-08T12:00:00Z","tripEndDate":"2025-04-17","sourceSystem":"first_party_digital_booking_engine","bookingStatus":"confirmed","previousStage":"booking_started","tripStartDate":"2025-04-10","classificationRuleVersion":"1.0"}},"event":"page_view","eventInfo":{"eventName":"page_view","timestamp":"2025-03-08T12:00:00Z","eventAction":"view"}}
+
+XDM Mapping: |
+  {"web":{"webPageDetails":{"URL":"https://www.example.com/booking/confirmation","name":"booking:confirmation","pageViews":{"value":1}}},"_travel":{"recognitionStatus":"recognized","travelerLifecycle":{"stage":"booked_pre_trip","stageRank":6,"effectiveAt":"2025-03-08T12:00:00Z","tripEndDate":"2025-04-17","sourceSystem":"first_party_digital_booking_engine","bookingStatus":"confirmed","previousStage":"booking_started","tripStartDate":"2025-04-10","classificationRuleVersion":"1.0"}},"eventType":"web.webpagedetails.pageViews","timestamp":"2025-03-08T12:00:00Z"}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH event_base AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS event_timestamp,
+      event_name,
+      COALESCE(
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'event_action'),
+        CASE
+          WHEN event_name IN ('page_view', 'view_item', 'view_item_list') THEN 'view'
+          WHEN event_name = 'search' THEN 'search'
+          WHEN event_name = 'add_to_cart' THEN 'add'
+          WHEN event_name = 'begin_checkout' THEN 'start'
+          WHEN event_name = 'purchase' THEN 'complete'
+          WHEN event_name = 'refund' THEN 'refund'
+          ELSE 'interact'
+        END
+      ) AS event_action,
+      platform,
+      CAST(stream_id AS STRING) AS stream_id,
+      user_pseudo_id,
+      COALESCE(
+        user_id,
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'traveler_id'),
+        user_pseudo_id
+      ) AS traveler_id,
+      COALESCE(
+        (SELECT ANY_VALUE(value.int_value) FROM UNNEST(event_params) WHERE key = 'ga_session_id'),
+        0
+      ) AS session_id,
+      COALESCE(
+        (SELECT ANY_VALUE(value.int_value) FROM UNNEST(event_params) WHERE key = 'ga_session_number'),
+        0
+      ) AS session_number,
+      LOWER(COALESCE(
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'traveler_recognition_status'),
+        IF(user_id IS NOT NULL, 'recognized', 'anonymous')
+      )) AS recognition_status,
+      COALESCE(
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'page_name'),
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'page_title')
+      ) AS page_name,
+      (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'page_location') AS page_url,
+      COALESCE(
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'transaction_id'),
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'booking_id')
+      ) AS transaction_id,
+      COALESCE(
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'booking_id'),
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'transaction_id')
+      ) AS booking_id,
+      LOWER(COALESCE(
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'booking_status'),
+        IF(event_name = 'purchase', 'confirmed', NULL)
+      )) AS booking_status,
+      SAFE_CAST((SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'trip_start_date') AS DATE) AS trip_start_date,
+      SAFE_CAST((SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'trip_end_date') AS DATE) AS trip_end_date,
+      REGEXP_REPLACE(LOWER((SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'traveler_lifecycle_stage')), r'[ -]+', '_') AS reported_stage,
+      SAFE_CAST(COALESCE(
+        (SELECT ANY_VALUE(value.int_value) FROM UNNEST(event_params) WHERE key = 'traveler_lifecycle_stage_rank'),
+        SAFE_CAST((SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'traveler_lifecycle_stage_rank') AS INT64)
+      ) AS INT64) AS reported_stage_rank,
+      REGEXP_REPLACE(LOWER((SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'traveler_lifecycle_prev_stage')), r'[ -]+', '_') AS reported_previous_stage,
+      COALESCE(
+        SAFE_CAST((SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'traveler_lifecycle_as_of') AS TIMESTAMP),
+        TIMESTAMP_MICROS(event_timestamp)
+      ) AS effective_at,
+      COALESCE(
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'traveler_lifecycle_rule_version'),
+        '1.0'
+      ) AS rule_version,
+      (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'traveler_lifecycle_source') AS reported_source_system,
+      COALESCE(
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'currency'),
+        ecommerce.currency
+      ) AS currency,
+      COALESCE(
+        (SELECT ANY_VALUE(COALESCE(value.double_value, value.float_value, CAST(value.int_value AS FLOAT64))) FROM UNNEST(event_params) WHERE key = 'value'),
+        ecommerce.purchase_revenue,
+        event_value_in_usd
+      ) AS booking_value,
+      (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'destination') AS destination,
+      (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'origin') AS origin,
+      COALESCE(
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'travel_product_type'),
+        (SELECT ANY_VALUE(value.string_value) FROM UNNEST(event_params) WHERE key = 'item_category')
+      ) AS travel_product_type,
+      device.category AS device_category,
+      device.operating_system AS device_os,
+      device.web_info.browser AS browser,
+      geo.country AS country,
+      geo.region AS region,
+      geo.city AS city,
+      COALESCE(collected_traffic_source.manual_source, traffic_source.source, '(direct)') AS traffic_source,
+      COALESCE(collected_traffic_source.manual_medium, traffic_source.medium, '(none)') AS traffic_medium,
+      COALESCE(collected_traffic_source.manual_campaign_name, traffic_source.name, '(not set)') AS traffic_campaign
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date)
+                            AND FORMAT_DATE('%Y%m%d', @end_date)
+  ),
+  classified AS (
+    SELECT
+      event_base.*,
+      CASE
+        WHEN reported_stage IN (
+          'anonymous_visitor', 'recognized_visitor', 'trip_research',
+          'trip_planning', 'booking_started', 'booked_pre_trip',
+          'in_trip', 'post_trip'
+        ) THEN reported_stage
+        WHEN trip_start_date IS NOT NULL
+         AND trip_end_date IS NOT NULL
+         AND event_date BETWEEN trip_start_date AND trip_end_date THEN 'in_trip'
+        WHEN trip_end_date IS NOT NULL AND event_date > trip_end_date THEN 'post_trip'
+        WHEN booking_status IN ('confirmed', 'booked', 'ticketed', 'completed')
+         AND (trip_start_date IS NULL OR event_date < trip_start_date) THEN 'booked_pre_trip'
+        WHEN event_name = 'purchase'
+         AND (trip_start_date IS NULL OR event_date < trip_start_date) THEN 'booked_pre_trip'
+        WHEN event_name = 'begin_checkout' THEN 'booking_started'
+        WHEN event_name = 'add_to_cart' THEN 'trip_planning'
+        WHEN event_name IN ('search', 'view_item', 'view_item_list', 'select_item') THEN 'trip_research'
+        WHEN recognition_status IN ('recognized', 'authenticated', 'logged_in', 'known') THEN 'recognized_visitor'
+        ELSE 'anonymous_visitor'
+      END AS lifecycle_stage
+    FROM event_base
+  ),
+  ranked AS (
+    SELECT
+      classified.*,
+      CASE lifecycle_stage
+        WHEN 'anonymous_visitor' THEN 1
+        WHEN 'recognized_visitor' THEN 2
+        WHEN 'trip_research' THEN 3
+        WHEN 'trip_planning' THEN 4
+        WHEN 'booking_started' THEN 5
+        WHEN 'booked_pre_trip' THEN 6
+        WHEN 'in_trip' THEN 7
+        WHEN 'post_trip' THEN 8
+      END AS derived_stage_rank
+    FROM classified
+  ),
+  with_history AS (
+    SELECT
+      ranked.*,
+      LAG(lifecycle_stage) OVER (
+        PARTITION BY traveler_id
+        ORDER BY event_timestamp, event_name, COALESCE(transaction_id, '')
+      ) AS prior_observed_stage
+    FROM ranked
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    event_name,
+    event_action,
+    platform,
+    stream_id,
+    user_pseudo_id,
+    traveler_id,
+    session_id,
+    session_number,
+    recognition_status,
+    page_name,
+    page_url,
+    transaction_id,
+    booking_id,
+    booking_status,
+    trip_start_date,
+    trip_end_date,
+    CASE
+      WHEN trip_start_date > event_date THEN DATE_DIFF(trip_start_date, event_date, DAY)
+    END AS days_until_trip,
+    CASE
+      WHEN trip_end_date < event_date THEN DATE_DIFF(event_date, trip_end_date, DAY)
+    END AS days_since_trip,
+    lifecycle_stage,
+    COALESCE(reported_stage_rank, derived_stage_rank) AS lifecycle_stage_rank,
+    COALESCE(reported_previous_stage, prior_observed_stage) AS previous_stage,
+    effective_at,
+    rule_version,
+    COALESCE(reported_source_system, 'digital_behavior_rules') AS source_system,
+    IF(reported_stage IS NOT NULL, 'declared', 'inferred') AS derivation_method,
+    CASE
+      WHEN reported_stage IS NOT NULL THEN 1.00
+      WHEN trip_start_date IS NOT NULL OR trip_end_date IS NOT NULL THEN 0.95
+      WHEN booking_status IS NOT NULL OR event_name IN ('purchase', 'begin_checkout') THEN 0.90
+      WHEN event_name IN ('add_to_cart', 'search', 'view_item', 'view_item_list', 'select_item') THEN 0.80
+      ELSE 0.65
+    END AS classification_confidence,
+    COALESCE(reported_previous_stage, prior_observed_stage) IS NOT NULL
+      AND COALESCE(reported_previous_stage, prior_observed_stage) <> lifecycle_stage AS is_stage_transition,
+    lifecycle_stage IN ('booked_pre_trip', 'in_trip', 'post_trip') AS is_booked,
+    lifecycle_stage = 'booked_pre_trip' AS is_pre_trip,
+    lifecycle_stage = 'in_trip' AS is_in_trip,
+    lifecycle_stage = 'post_trip' AS is_post_trip,
+    CASE
+      WHEN lifecycle_stage IN ('trip_research', 'trip_planning', 'booking_started', 'booked_pre_trip') THEN 'pre_trip'
+      WHEN lifecycle_stage = 'in_trip' THEN 'in_trip'
+      WHEN lifecycle_stage = 'post_trip' THEN 'post_trip'
+      ELSE 'unbooked'
+    END AS trip_phase,
+    CASE
+      WHEN trip_start_date IS NOT NULL AND trip_end_date >= trip_start_date
+        THEN DATE_DIFF(trip_end_date, trip_start_date, DAY) + 1
+    END AS trip_duration_days,
+    currency,
+    booking_value,
+    destination,
+    origin,
+    travel_product_type,
+    device_category,
+    device_os,
+    browser,
+    country,
+    region,
+    city,
+    traffic_source,
+    traffic_medium,
+    traffic_campaign
+  FROM with_history;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH event_base AS (
+    SELECT
+      CAST(timestamp AS DATE) AS event_date,
+      timestamp AS event_timestamp,
+      CASE
+        WHEN eventType = 'web.webpagedetails.pageViews' THEN 'page_view'
+        WHEN eventType = 'commerce.productViews' THEN 'view_item'
+        WHEN eventType = 'commerce.productListViews' THEN 'view_item_list'
+        WHEN eventType = 'commerce.productListAdds' THEN 'add_to_cart'
+        WHEN eventType = 'commerce.checkouts' THEN 'begin_checkout'
+        WHEN eventType = 'commerce.purchases' THEN 'purchase'
+        WHEN eventType = 'commerce.refunds' THEN 'refund'
+        ELSE eventType
+      END AS event_name,
+      CASE
+        WHEN eventType IN ('web.webpagedetails.pageViews', 'commerce.productViews', 'commerce.productListViews') THEN 'view'
+        WHEN eventType = 'commerce.productListAdds' THEN 'add'
+        WHEN eventType = 'commerce.checkouts' THEN 'start'
+        WHEN eventType = 'commerce.purchases' THEN 'complete'
+        WHEN eventType = 'commerce.refunds' THEN 'refund'
+        ELSE 'interact'
+      END AS event_action,
+      'web' AS platform,
+      CAST(NULL AS STRING) AS stream_id,
+      identityMap['ECID'][0].id AS user_pseudo_id,
+      identityMap['ECID'][0].id AS traveler_id,
+      CAST(NULL AS BIGINT) AS session_id,
+      CAST(NULL AS BIGINT) AS session_number,
+      LOWER(COALESCE(_travel.recognitionStatus, 'anonymous')) AS recognition_status,
+      web.webPageDetails.name AS page_name,
+      web.webPageDetails.URL AS page_url,
+      commerce.order.purchaseID AS transaction_id,
+      commerce.order.purchaseID AS booking_id,
+      LOWER(COALESCE(
+        _travel.travelerLifecycle.bookingStatus,
+        CASE WHEN eventType = 'commerce.purchases' THEN 'confirmed' END
+      )) AS booking_status,
+      TO_DATE(_travel.travelerLifecycle.tripStartDate) AS trip_start_date,
+      TO_DATE(_travel.travelerLifecycle.tripEndDate) AS trip_end_date,
+      REGEXP_REPLACE(LOWER(_travel.travelerLifecycle.stage), '[ -]+', '_') AS reported_stage,
+      CAST(_travel.travelerLifecycle.stageRank AS BIGINT) AS reported_stage_rank,
+      REGEXP_REPLACE(LOWER(_travel.travelerLifecycle.previousStage), '[ -]+', '_') AS reported_previous_stage,
+      COALESCE(TO_TIMESTAMP(_travel.travelerLifecycle.effectiveAt), timestamp) AS effective_at,
+      COALESCE(_travel.travelerLifecycle.classificationRuleVersion, '1.0') AS rule_version,
+      _travel.travelerLifecycle.sourceSystem AS reported_source_system,
+      commerce.order.currencyCode AS currency,
+      CAST(commerce.order.priceTotal AS DOUBLE) AS booking_value,
+      CAST(NULL AS STRING) AS destination,
+      CAST(NULL AS STRING) AS origin,
+      CAST(NULL AS STRING) AS travel_product_type,
+      device.type AS device_category,
+      environment.operatingSystem AS device_os,
+      environment.browserDetails.name AS browser,
+      placeContext.geo.countryCode AS country,
+      placeContext.geo.stateProvince AS region,
+      placeContext.geo.city AS city,
+      CAST(NULL AS STRING) AS traffic_source,
+      CAST(NULL AS STRING) AS traffic_medium,
+      marketing.trackingCode AS traffic_campaign
+    FROM your_aep_dataset
+    WHERE timestamp >= CAST('${START_TIMESTAMP}' AS TIMESTAMP)
+      AND timestamp < CAST('${END_TIMESTAMP}' AS TIMESTAMP)
+  ),
+  classified AS (
+    SELECT
+      event_base.*,
+      CASE
+        WHEN reported_stage IN (
+          'anonymous_visitor', 'recognized_visitor', 'trip_research',
+          'trip_planning', 'booking_started', 'booked_pre_trip',
+          'in_trip', 'post_trip'
+        ) THEN reported_stage
+        WHEN trip_start_date IS NOT NULL
+         AND trip_end_date IS NOT NULL
+         AND event_date BETWEEN trip_start_date AND trip_end_date THEN 'in_trip'
+        WHEN trip_end_date IS NOT NULL AND event_date > trip_end_date THEN 'post_trip'
+        WHEN booking_status IN ('confirmed', 'booked', 'ticketed', 'completed')
+         AND (trip_start_date IS NULL OR event_date < trip_start_date) THEN 'booked_pre_trip'
+        WHEN event_name = 'purchase'
+         AND (trip_start_date IS NULL OR event_date < trip_start_date) THEN 'booked_pre_trip'
+        WHEN event_name = 'begin_checkout' THEN 'booking_started'
+        WHEN event_name = 'add_to_cart' THEN 'trip_planning'
+        WHEN event_name IN ('search', 'view_item', 'view_item_list', 'select_item') THEN 'trip_research'
+        WHEN recognition_status IN ('recognized', 'authenticated', 'logged_in', 'known') THEN 'recognized_visitor'
+        ELSE 'anonymous_visitor'
+      END AS lifecycle_stage
+    FROM event_base
+  ),
+  ranked AS (
+    SELECT
+      classified.*,
+      CASE lifecycle_stage
+        WHEN 'anonymous_visitor' THEN 1
+        WHEN 'recognized_visitor' THEN 2
+        WHEN 'trip_research' THEN 3
+        WHEN 'trip_planning' THEN 4
+        WHEN 'booking_started' THEN 5
+        WHEN 'booked_pre_trip' THEN 6
+        WHEN 'in_trip' THEN 7
+        WHEN 'post_trip' THEN 8
+      END AS derived_stage_rank
+    FROM classified
+  ),
+  with_history AS (
+    SELECT
+      ranked.*,
+      LAG(lifecycle_stage) OVER (
+        PARTITION BY traveler_id
+        ORDER BY event_timestamp, event_name, COALESCE(transaction_id, '')
+      ) AS prior_observed_stage
+    FROM ranked
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    event_name,
+    event_action,
+    platform,
+    stream_id,
+    user_pseudo_id,
+    traveler_id,
+    session_id,
+    session_number,
+    recognition_status,
+    page_name,
+    page_url,
+    transaction_id,
+    booking_id,
+    booking_status,
+    trip_start_date,
+    trip_end_date,
+    CASE
+      WHEN trip_start_date > event_date THEN DATEDIFF(trip_start_date, event_date)
+    END AS days_until_trip,
+    CASE
+      WHEN trip_end_date < event_date THEN DATEDIFF(event_date, trip_end_date)
+    END AS days_since_trip,
+    lifecycle_stage,
+    COALESCE(reported_stage_rank, derived_stage_rank) AS lifecycle_stage_rank,
+    COALESCE(reported_previous_stage, prior_observed_stage) AS previous_stage,
+    effective_at,
+    rule_version,
+    COALESCE(reported_source_system, 'digital_behavior_rules') AS source_system,
+    CASE WHEN reported_stage IS NOT NULL THEN 'declared' ELSE 'inferred' END AS derivation_method,
+    CASE
+      WHEN reported_stage IS NOT NULL THEN 1.00
+      WHEN trip_start_date IS NOT NULL OR trip_end_date IS NOT NULL THEN 0.95
+      WHEN booking_status IS NOT NULL OR event_name IN ('purchase', 'begin_checkout') THEN 0.90
+      WHEN event_name IN ('add_to_cart', 'search', 'view_item', 'view_item_list', 'select_item') THEN 0.80
+      ELSE 0.65
+    END AS classification_confidence,
+    CASE
+      WHEN COALESCE(reported_previous_stage, prior_observed_stage) IS NOT NULL
+       AND COALESCE(reported_previous_stage, prior_observed_stage) <> lifecycle_stage THEN TRUE
+      ELSE FALSE
+    END AS is_stage_transition,
+    CASE WHEN lifecycle_stage IN ('booked_pre_trip', 'in_trip', 'post_trip') THEN TRUE ELSE FALSE END AS is_booked,
+    CASE WHEN lifecycle_stage = 'booked_pre_trip' THEN TRUE ELSE FALSE END AS is_pre_trip,
+    CASE WHEN lifecycle_stage = 'in_trip' THEN TRUE ELSE FALSE END AS is_in_trip,
+    CASE WHEN lifecycle_stage = 'post_trip' THEN TRUE ELSE FALSE END AS is_post_trip,
+    CASE
+      WHEN lifecycle_stage IN ('trip_research', 'trip_planning', 'booking_started', 'booked_pre_trip') THEN 'pre_trip'
+      WHEN lifecycle_stage = 'in_trip' THEN 'in_trip'
+      WHEN lifecycle_stage = 'post_trip' THEN 'post_trip'
+      ELSE 'unbooked'
+    END AS trip_phase,
+    CASE
+      WHEN trip_start_date IS NOT NULL AND trip_end_date >= trip_start_date
+        THEN DATEDIFF(trip_end_date, trip_start_date) + 1
+    END AS trip_duration_days,
+    currency,
+    booking_value,
+    destination,
+    origin,
+    travel_product_type,
+    device_category,
+    device_os,
+    browser,
+    country,
+    region,
+    city,
+    traffic_source,
+    traffic_medium,
+    traffic_campaign
+  FROM with_history;
+
+Calculation Notes: |
+  1️⃣ Use the governed stage taxonomy: Anonymous Visitor, Known Visitor, Engaged Explorer, Active Planner, Booker, Pre-Trip Traveler, In-Trip Traveler, Post-Trip Traveler, Repeat Traveler, and Lapsed Traveler.
+  2️⃣ Resolve one stage per traveler at evaluation time using precedence: In-Trip, Pre-Trip, Booker, Post-Trip, Repeat Traveler, Active Planner, Engaged Explorer, Known Visitor, Anonymous Visitor, then Lapsed Traveler where inactivity rules apply.
+  3️⃣ Assign booking-dependent stages only from confirmed first-party digital bookings; exclude searches, held itineraries, payment failures, cancellations, test bookings, employee bookings, and suspected bot activity.
+  4️⃣ Evaluate Pre-Trip and In-Trip stages using destination-local service dates; return canceled travelers to the highest qualifying non-booking stage unless another active booking exists.
+  5️⃣ Classify Repeat Traveler only after at least two completed digitally attributable trips under the same resolved traveler identity; do not infer repetition from multiple sessions or devices alone.
+  6️⃣ Apply identity stitching prospectively and restate historical stages only when governance-approved deterministic identifiers connect previously separate digital profiles.
+  7️⃣ Use a configurable inactivity threshold, defaulting to 365 days after the latest qualifying digital interaction or completed trip, for Lapsed Traveler classification; preserve point-in-time stage history for transition analysis.
+
+Business Use Case: |
+  The Chief Marketing Officer uses stage distribution and transition reporting to identify a high-volume Active Planner population that is not progressing to Booker, then directs product and lifecycle marketing teams to deploy destination-specific price alerts, itinerary recovery, and booking-friction experiments for that segment. Revenue Management separately activates Pre-Trip and Repeat Traveler audiences for ancillary offers while suppressing In-Trip travelers from acquisition campaigns.
+
+
+Source Data: Digital Analytics (GA4 or Adobe Analytics) + First-Party Digital Booking Engine
+
+Report Attributes: |
+  ["Event Date","Digital Channel","Device Category","Traveler Identity Status","New or Returning Visitor","Market","Country","Destination","Origin","Trip Purpose","Travel Product Type","Booking Status","Booking Channel","Days to Departure Band","Digital Engagement Recency","Loyalty Membership Status","Campaign","Traffic Source","Previous Traveler Lifecycle Stage","Traveler Lifecycle Transition Type"]
+
+Dashboard Usage: [Digital Traveler Lifecycle Executive Overview, Traveler Journey Progression and Drop-Off, Digital Booking Funnel Performance, Trip Planning and Conversion, Pre-Trip and In-Trip Engagement, Post-Trip Retention and Repeat Travel, Lifecycle Marketing Audience Health, Traveler Identity and Profile Coverage]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Traveler Identity Status, Traveler Type, Trip Purpose, Booking Status, Booking Channel, Destination, Departure Date, Return Date, Days to Departure, Digital Engagement Recency, Travel Product Type, Loyalty Membership Status]
+
+Derived Dimensions: [Traveler Lifecycle Stage Group, Traveler Lifecycle Stage Rank, Traveler Lifecycle Stage Entry Date, Days in Traveler Lifecycle Stage, Traveler Lifecycle Transition Type, Previous Traveler Lifecycle Stage, Traveler Lifecycle Progression Status, Traveler Lifecycle Stage Recency Band]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T23:30:39.463573+00:00
+
+Last Modified By: devyendarm
+
+
