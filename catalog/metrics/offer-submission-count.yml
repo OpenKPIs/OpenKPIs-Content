@@ -1,0 +1,275 @@
+# Metric: Offer Submission Count
+# Generated: 2026-09-04T14:30:26.345Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Offer Submission Count
+Formula: COUNT(DISTINCT CASE WHEN event_name = 'offer_submitted' AND submission_status = 'submitted' AND platform_acknowledged = TRUE AND offer_submission_id IS NOT NULL AND listing_id IS NOT NULL AND is_test = FALSE AND is_bot = FALSE THEN offer_submission_id END)
+
+Description: |
+  Counts unique purchase or rental offers that the platform successfully persists and acknowledges during the reporting period across approved web, mobile app, agent-assisted digital, partner, and API journeys. It measures completed offer-submission conversions, excluding attempts, drafts, failures, duplicates, test activity, bots, and downstream offer outcomes.
+
+Category: Conversion
+
+Tags: [metric]
+
+Industry: Technology
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Measure Type: count
+
+Aggregation Window: Time based - Hourly/Daily/Monthly/Yearly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH normalized_submissions AS (
+    SELECT
+      DATE(submitted_at) AS event_date,
+      submitted_at AS event_timestamp,
+      'generate_lead' AS event_name,
+      NULLIF(TRIM(CAST(source_event_id AS STRING)), '') AS event_id,
+      NULLIF(TRIM(CAST(offer_submission_id AS STRING)), '') AS offer_submission_id,
+      NULLIF(TRIM(CAST(offer_id AS STRING)), '') AS offer_id,
+      NULLIF(TRIM(CAST(listing_id AS STRING)), '') AS listing_id,
+      NULLIF(TRIM(CAST(property_id AS STRING)), '') AS property_id,
+      NULLIF(TRIM(CAST(offer_type AS STRING)), '') AS offer_type,
+      LOWER(NULLIF(TRIM(CAST(submission_status AS STRING)), '')) AS submission_status,
+      NULLIF(TRIM(CAST(submission_channel AS STRING)), '') AS submission_channel,
+      NULLIF(TRIM(CAST(submission_method AS STRING)), '') AS submission_method,
+      CASE
+        WHEN LOWER(TRIM(CAST(platform_acknowledged AS STRING))) IN ('true', '1', 'yes', 'y') THEN TRUE
+        ELSE FALSE
+      END AS platform_acknowledged,
+      CASE
+        WHEN LOWER(TRIM(CAST(is_test AS STRING))) IN ('true', '1', 'yes', 'y') THEN TRUE
+        ELSE FALSE
+      END AS is_test,
+      CASE
+        WHEN LOWER(TRIM(CAST(is_bot AS STRING))) IN ('true', '1', 'yes', 'y') THEN TRUE
+        ELSE FALSE
+      END AS is_bot,
+      NULLIF(TRIM(CAST(user_pseudo_id AS STRING)), '') AS user_pseudo_id,
+      NULLIF(TRIM(CAST(crm_contact_id AS STRING)), '') AS crm_contact_id,
+      NULLIF(TRIM(CAST(agent_id AS STRING)), '') AS agent_id,
+      NULLIF(TRIM(CAST(partner_id AS STRING)), '') AS partner_id,
+      NULLIF(TRIM(CAST(platform AS STRING)), '') AS platform,
+      NULLIF(TRIM(CAST(device_category AS STRING)), '') AS device_category,
+      NULLIF(TRIM(CAST(market_id AS STRING)), '') AS market_id,
+      NULLIF(TRIM(CAST(country AS STRING)), '') AS country,
+      NULLIF(TRIM(CAST(region AS STRING)), '') AS region,
+      NULLIF(TRIM(CAST(city AS STRING)), '') AS city,
+      NULLIF(TRIM(CAST(postal_code AS STRING)), '') AS postal_code,
+      UPPER(NULLIF(TRIM(CAST(currency AS STRING)), '')) AS currency,
+      SAFE_CAST(offer_amount AS NUMERIC) AS offer_amount,
+      NULLIF(TRIM(CAST(source_system AS STRING)), '') AS source_system
+    FROM `your-project.offer_transaction_service.offer_submission_events`
+    WHERE submitted_at >= @start_timestamp
+      AND submitted_at < @end_timestamp
+  ),
+  eligible_submissions AS (
+    SELECT *
+    FROM normalized_submissions
+    WHERE submission_status = 'submitted'
+      AND platform_acknowledged = TRUE
+      AND is_test = FALSE
+      AND is_bot = FALSE
+      AND offer_submission_id IS NOT NULL
+      AND listing_id IS NOT NULL
+  ),
+  ranked_submissions AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY offer_submission_id
+        ORDER BY
+          event_timestamp DESC,
+          event_id DESC
+      ) AS deduplication_rank
+    FROM eligible_submissions
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    event_name,
+    event_id,
+    offer_submission_id,
+    offer_submission_id AS submission_deduplication_id,
+    offer_id,
+    listing_id,
+    property_id,
+    offer_type,
+    submission_status,
+    submission_channel,
+    submission_method,
+    platform_acknowledged,
+    is_test,
+    is_bot,
+    user_pseudo_id,
+    crm_contact_id,
+    agent_id,
+    partner_id,
+    platform,
+    device_category,
+    market_id,
+    country,
+    region,
+    city,
+    postal_code,
+    currency,
+    offer_amount,
+    source_system,
+    CAST(1 AS INT64) AS offer_submission_count
+  FROM ranked_submissions
+  WHERE deduplication_rank = 1;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH normalized_submissions AS (
+    SELECT
+      CAST(submitted_at AS DATE) AS event_date,
+      submitted_at AS event_timestamp,
+      'generate_lead' AS event_name,
+      NULLIF(TRIM(CAST(source_event_id AS VARCHAR)), '') AS event_id,
+      NULLIF(TRIM(CAST(offer_submission_id AS VARCHAR)), '') AS offer_submission_id,
+      NULLIF(TRIM(CAST(offer_id AS VARCHAR)), '') AS offer_id,
+      NULLIF(TRIM(CAST(listing_id AS VARCHAR)), '') AS listing_id,
+      NULLIF(TRIM(CAST(property_id AS VARCHAR)), '') AS property_id,
+      NULLIF(TRIM(CAST(offer_type AS VARCHAR)), '') AS offer_type,
+      LOWER(NULLIF(TRIM(CAST(submission_status AS VARCHAR)), '')) AS submission_status,
+      NULLIF(TRIM(CAST(submission_channel AS VARCHAR)), '') AS submission_channel,
+      NULLIF(TRIM(CAST(submission_method AS VARCHAR)), '') AS submission_method,
+      CASE
+        WHEN LOWER(TRIM(CAST(platform_acknowledged AS VARCHAR))) IN ('true', '1', 'yes', 'y') THEN TRUE
+        ELSE FALSE
+      END AS platform_acknowledged,
+      CASE
+        WHEN LOWER(TRIM(CAST(is_test AS VARCHAR))) IN ('true', '1', 'yes', 'y') THEN TRUE
+        ELSE FALSE
+      END AS is_test,
+      CASE
+        WHEN LOWER(TRIM(CAST(is_bot AS VARCHAR))) IN ('true', '1', 'yes', 'y') THEN TRUE
+        ELSE FALSE
+      END AS is_bot,
+      NULLIF(TRIM(CAST(user_pseudo_id AS VARCHAR)), '') AS user_pseudo_id,
+      NULLIF(TRIM(CAST(crm_contact_id AS VARCHAR)), '') AS crm_contact_id,
+      NULLIF(TRIM(CAST(agent_id AS VARCHAR)), '') AS agent_id,
+      NULLIF(TRIM(CAST(partner_id AS VARCHAR)), '') AS partner_id,
+      NULLIF(TRIM(CAST(platform AS VARCHAR)), '') AS platform,
+      NULLIF(TRIM(CAST(device_category AS VARCHAR)), '') AS device_category,
+      NULLIF(TRIM(CAST(market_id AS VARCHAR)), '') AS market_id,
+      NULLIF(TRIM(CAST(country AS VARCHAR)), '') AS country,
+      NULLIF(TRIM(CAST(region AS VARCHAR)), '') AS region,
+      NULLIF(TRIM(CAST(city AS VARCHAR)), '') AS city,
+      NULLIF(TRIM(CAST(postal_code AS VARCHAR)), '') AS postal_code,
+      UPPER(NULLIF(TRIM(CAST(currency AS VARCHAR)), '')) AS currency,
+      CAST(offer_amount AS DECIMAL(38,2)) AS offer_amount,
+      NULLIF(TRIM(CAST(source_system AS VARCHAR)), '') AS source_system
+    FROM offer_transaction_service_backend_dataset
+    WHERE submitted_at >= CAST('${start_timestamp}' AS TIMESTAMP)
+      AND submitted_at < CAST('${end_timestamp}' AS TIMESTAMP)
+  ),
+  eligible_submissions AS (
+    SELECT *
+    FROM normalized_submissions
+    WHERE submission_status = 'submitted'
+      AND platform_acknowledged = TRUE
+      AND is_test = FALSE
+      AND is_bot = FALSE
+      AND offer_submission_id IS NOT NULL
+      AND listing_id IS NOT NULL
+  ),
+  ranked_submissions AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY offer_submission_id
+        ORDER BY
+          event_timestamp DESC,
+          event_id DESC
+      ) AS deduplication_rank
+    FROM eligible_submissions
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    event_name,
+    event_id,
+    offer_submission_id,
+    offer_submission_id AS submission_deduplication_id,
+    offer_id,
+    listing_id,
+    property_id,
+    offer_type,
+    submission_status,
+    submission_channel,
+    submission_method,
+    platform_acknowledged,
+    is_test,
+    is_bot,
+    user_pseudo_id,
+    crm_contact_id,
+    agent_id,
+    partner_id,
+    platform,
+    device_category,
+    market_id,
+    country,
+    region,
+    city,
+    postal_code,
+    currency,
+    offer_amount,
+    source_system,
+    CAST(1 AS BIGINT) AS offer_submission_count
+  FROM ranked_submissions
+  WHERE deduplication_rank = 1;
+
+Calculation Notes: |
+  Use the server-confirmed submitted_at timestamp from the Offer Transaction Service, not the client click timestamp. Include only offer_submitted records with submission_status = 'submitted', platform_acknowledged = TRUE, a non-null offer_submission_id, and a non-null listing_id. Deduplicate exclusively by offer_submission_id across service, digital analytics, CRM, partner API, and webhook records; event_id, offer_id, customer identifiers, and synthetic hashes must not replace the submission identifier. Exclude drafts, saved forms, unacknowledged attempts, validation or transmission failures, test records, employee QA, bots, synthetic monitoring, and historical imports without verified submission evidence. Retries, page refreshes, mirrored records, and webhook replays do not add counts. An edit or counteroffer counts again only when the platform creates and acknowledges a new offer_submission_id. Later acceptance, rejection, withdrawal, expiration, or supersession does not remove the original submission. Session boundaries do not affect the count; late or corrected records may restate the original submission period under the governed backfill policy.
+
+Business Use Case: |
+  Product and Sales leaders compare acknowledged offer submissions with listing views, offer-form starts, and submission failures by market, channel, platform, and device. If high-intent engagement remains stable while submissions decline, teams can identify the affected journey, prioritize form, authentication, partner integration, or offer-service remediation, and measure whether conversion recovers.
+
+
+Source Data: Offer Transaction Service stitched with Digital Analytics (GA4 and Adobe Experience Platform), CRM, listing catalog, identity graph, agent-assisted digital workflows, and approved partner API data
+
+Report Attributes: |
+  ["Submission Date","Submission Hour","Market","Region","Property Type","Transaction Type","Listing ID","Listing Price Band","Offer Amount Band","Acquisition Channel","Submission Channel","Submission Method","Device Type","Platform","Customer Type","Financing Status","Agent-Assisted Flag","Partner","Experiment Variant"]
+
+Dashboard Usage: [Executive Conversion Funnel, Buyer and Renter Journey Performance, Offer Funnel Operations, Marketplace Liquidity, Listing Engagement and Conversion, Acquisition Channel Quality, Web and Mobile Checkout Performance, Offer Service Reliability]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Offer Form Start Count, Offer Form Completion Count, Offer Submission Failure Count, Unique Offer Submitters, Offer Acceptance Count, Offer Rejection Count, Offer Withdrawal Count, Listing Detail View Count]
+
+Derived KPIs: [Offer Submission Conversion Rate, Listing View-to-Offer Rate, Offer Form Completion Rate, Offer Submission Failure Rate, Offer Acceptance Rate, Offers per Active Customer, Offers per Listing, Submitted Offer-to-Closed Transaction Rate]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-04T14:30:25.969379+00:00
+
+Last Modified By: devyendarm
+
+
