@@ -1,0 +1,79 @@
+# Event: Delivery Rescheduling
+# Generated: 2026-09-10T19:30:54.213Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Delivery Rescheduling
+Event Serialization: always
+
+Description: |
+  Delivery Rescheduling records each customer, carrier, or operations request to move a shipment's promised delivery date or time window, including whether the requested change was confirmed, rejected, failed, or remained pending. It measures the volume, timing, reasons, channels, fees, and operational outcomes of rescheduling activity at the delivery level.
+
+Category: Efficiency
+
+Tags: [event]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+
+Event Type: custom
+
+Aggregation Window: Event and Time based - Hourly/Daily/Weekly/Monthly
+
+
+
+
+
+
+
+Parameters: |
+  {"event_id":"string - globally unique identifier for the event activation, used to detect technical duplicates","order_id":"string - unique identifier for the customer order associated with the shipment","route_id":"string - identifier for the delivery route assigned when the request was processed","driver_id":"string - pseudonymous identifier for the assigned driver when available","carrier_id":"string - governed identifier for the carrier responsible for the delivery","fee_amount":"number - monetary fee assessed for the rescheduling request in the specified currency","request_id":"string - unique identifier for the business rescheduling request across all processing systems","customer_id":"string - pseudonymous identifier for the customer associated with the delivery","delivery_id":"string - unique identifier for the last-mile delivery assignment","shipment_id":"string - unique identifier for the shipment whose delivery schedule is being changed","fee_currency":"string - ISO 4217 currency code for the assessed fee","package_count":"integer - number of packages included in the rescheduled delivery","source_system":"string - authoritative application or integration that produced the event","correlation_id":"string - trace identifier linking the request across customer, order, transportation, carrier, and notification systems","request_status":"string - current governed outcome of the request, such as confirmed, pending, rejected, cancelled, expired, or failed","approval_status":"string - approval result when authorization is required, such as not_required, pending, approved, or denied","event_timestamp":"datetime - UTC timestamp when the rescheduling request was recorded by the authoritative source","origin_timezone":"string - IANA time-zone identifier used by the source location or scheduling operation","request_channel":"string - channel where the request originated, such as customer_portal, mobile_app, call_center, carrier_api, driver_app, or operations_console","tracking_number":"string - carrier or logistics network tracking reference for the shipment","prior_window_end":"datetime - end of the committed delivery window immediately before the request, represented in UTC","request_actor_id":"string - pseudonymous customer, employee, driver, partner, or system identifier that initiated the request","requested_by_type":"string - actor classification initiating the request, such as customer, recipient, shipper, carrier, driver, operations_agent, or automated_system","feasibility_result":"string - operational scheduling result, such as feasible, capacity_unavailable, cutoff_missed, service_unavailable, or not_evaluated","prior_window_start":"datetime - start of the committed delivery window immediately before the request, represented in UTC","shipment_weight_kg":"number - total shipment weight in kilograms at the time of the request","waiver_reason_code":"string - governed reason a normally applicable rescheduling fee was waived","delivery_station_id":"string - identifier for the last-mile station responsible for the delivery","failure_reason_code":"string - governed technical or business reason for a rejected, expired, or failed request","is_first_reschedule":"boolean - indicates whether this is the first valid rescheduling request for the delivery","prior_attempt_count":"integer - number of completed delivery attempts recorded before the request","prior_promised_date":"date - committed delivery date immediately before the rescheduling request","confirmed_window_end":"datetime - end of the confirmed replacement delivery window in UTC; null when not confirmed","destination_timezone":"string - IANA time-zone identifier used to interpret delivery dates and windows at the destination","requested_window_end":"datetime - end of the requested replacement delivery window in UTC","carrier_service_level":"string - contracted delivery service level, such as same_day, next_day, standard, scheduled, or white_glove","fulfillment_center_id":"string - identifier for the facility that fulfilled or dispatched the shipment","is_customer_initiated":"boolean - indicates whether the customer or recipient initiated the request","confirmed_window_start":"datetime - start of the confirmed replacement delivery window in UTC; null when not confirmed","requested_window_start":"datetime - start of the requested replacement delivery window in UTC","reschedule_reason_code":"string - governed reason code explaining why the delivery schedule change was requested","reschedule_reason_text":"string - optional sanitized explanatory text captured when a governed reason code is insufficient","confirmed_delivery_date":"date - replacement delivery date committed by the carrier or logistics operator; null when not confirmed","destination_region_code":"string - governed state, province, territory, or operational region code for the destination","requested_delivery_date":"date - delivery date requested by the initiating actor","cutoff_minutes_remaining":"integer - minutes remaining until the applicable rescheduling cutoff when the request was submitted; negative when submitted after cutoff","destination_country_code":"string - ISO 3166-1 alpha-2 country code for the delivery destination","reschedule_sequence_number":"integer - chronological number of the rescheduling request for the delivery, beginning with one","destination_postal_code_prefix":"string - privacy-reduced postal code prefix used for geographic and capacity analysis"}
+
+Calculation Notes: |
+  1️⃣ Emit events for all valid rescheduling requests, including automated ones due to disruptions.  
+  2️⃣ Remove technical replays with the same event_id; requests with the same request_id are one business request.  
+  3️⃣ Use delivery_id as the primary key; shipment_id only when delivery_id is unavailable.  
+  4️⃣ Confirm requests only when request_status is confirmed and the date/window is committed.  
+  5️⃣ Exclude test shipments, training transactions, and records from non-production systems.  
+  6️⃣ Interpret scheduling dates in destination_timezone; use UTC for elapsed-time analysis.  
+  7️⃣ Sanitize free-text reasons for personal data and map to governed reason codes where applicable.
+
+Business Use Case: |
+  The Head of Last Mile Operations reviews rescheduling success and repeat-request rates by carrier, delivery station, reason, channel, and cutoff status. If a station shows high customer-initiated rescheduling and low first-request confirmation because replacement windows lack capacity, operations can add route capacity, modify cutoff rules, expose alternative slots earlier, or renegotiate carrier service-level commitments.
+
+
+Source Data: Transportation Management System (TMS), Order Management System (OMS), Carrier APIs, Customer Delivery Portal, Driver Application, CRM, and Last-Mile Operations Platform
+
+    Report Attributes: |
+  ["Request Date","Request Channel","Requested By Type","Request Status","Approval Status","Feasibility Result","Reschedule Reason","Failure Reason","Carrier","Carrier Service Level","Fulfillment Center","Delivery Station","Destination Country","Destination Region","Reschedule Sequence Band","Reschedule Lead-Time Band","Before-or-After-Cutoff Status","Fee Assessment Status"]
+
+    Dashboard Usage: [Last Mile Delivery Operations, Delivery Promise Performance, Carrier Service Quality, Delivery Exception Management, Customer Delivery Experience, Route Capacity and Scheduling, Rescheduling Fees and Waivers]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [Reschedule Request Status, Reschedule Reason, Reschedule Request Channel, Requested By Type, Carrier, Carrier Service Level, Fulfillment Center, Delivery Station, Delivery Route, Destination Country, Destination Region, Destination Postal Area, Prior Promised Delivery Date, Requested Delivery Date, Confirmed Delivery Date, Customer, Shipment, Order, Delivery]
+
+    Derived Dimensions: [Reschedule Outcome Group, Reschedule Lead-Time Band, Delivery Date Shift Direction, Delivery Date Shift Band, Before-or-After-Cutoff Status, Reschedule Sequence Band, Prior Delivery Attempt Band, Fee Assessment Status, Customer-versus-Operations Initiation, Delivery Schedule Volatility Band]
+
+    Derived Metrics: [Delivery Rescheduling Requests, Unique Deliveries with Rescheduling Requests, Confirmed Rescheduling Requests, Rejected Rescheduling Requests, Failed Rescheduling Requests, Pending Rescheduling Requests, Customer-Initiated Rescheduling Requests, Repeat Rescheduling Requests, Rescheduling Fees Assessed, Rescheduling Fees Waived, Average Rescheduling Lead Time, Average Delivery Date Shift, Average Reschedules per Affected Delivery]
+
+    Derived KPIs: [Rescheduling Success Rate, First-Request Confirmation Rate, Repeat Rescheduling Rate, Customer-Initiated Reschedule Share, Post-Cutoff Request Rate, Rescheduling Failure Rate, Fee Waiver Rate, On-Time Delivery Rate After Reschedule, Delivery Completion Rate After Reschedule, Reschedule-Induced Delay Rate]
+
+    Data Sensitivity: restricted
+
+    Contains PII: Yes
+
+    Status: draft
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-10T19:30:52.24279+00:00
+
+    Last Modified By: devyendarm
+
+    
