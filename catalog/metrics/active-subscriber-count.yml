@@ -1,0 +1,732 @@
+# Metric: Active Subscriber Count
+# Generated: 2026-09-10T18:31:09.479Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Active Subscriber Count
+Formula: COUNT(DISTINCT canonical_subscriber_id) WHERE EXISTS(subscription_product_flag = TRUE AND entitlement_start_at <= snapshot_at AND (entitlement_end_at IS NULL OR entitlement_end_at > snapshot_at) AND (entitlement_revoked_at IS NULL OR entitlement_revoked_at > snapshot_at) AND access_entitled_flag = TRUE AND record_valid_flag = TRUE AND exclusion_flag = FALSE)
+
+Description: |
+  Counts distinct canonical digital subscribers with at least one valid subscription entitlement granting content access at the specified snapshot timestamp. Each subscriber contributes one unit regardless of the number of concurrent subscriptions, plans, profiles, devices, or billing providers.
+
+Category: Retention
+
+Tags: [metric]
+
+Industry: Media
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: User
+
+Measure Type: count
+
+Aggregation Window: Time based - Daily
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT
+      DATE_SUB(CURRENT_DATE('UTC'), INTERVAL 1 DAY) AS metric_date,
+      TIMESTAMP(CURRENT_DATE('UTC'), 'UTC') AS as_of_timestamp
+  ),
+  entitlement_ranked AS (
+    SELECT
+      p.metric_date,
+      p.as_of_timestamp,
+      e.*,
+      COUNT(*) OVER (
+        PARTITION BY e.entitlement_id
+      ) AS source_version_count,
+      ROW_NUMBER() OVER (
+        PARTITION BY e.entitlement_id
+        ORDER BY
+          e.effective_at DESC,
+          e.source_updated_at DESC,
+          e.ingested_at DESC
+      ) AS version_rank
+    FROM `your-project.subscription_platform.entitlement_history` AS e
+    CROSS JOIN parameters AS p
+    WHERE e.effective_at < p.as_of_timestamp
+  ),
+  entitlement_as_of AS (
+    SELECT * EXCEPT (version_rank)
+    FROM entitlement_ranked
+    WHERE version_rank = 1
+  ),
+  billing_ranked AS (
+    SELECT
+      b.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY b.subscription_id
+        ORDER BY
+          b.effective_at DESC,
+          b.source_updated_at DESC,
+          b.ingested_at DESC
+      ) AS version_rank
+    FROM `your-project.digital_billing.subscription_history` AS b
+    CROSS JOIN parameters AS p
+    WHERE b.effective_at < p.as_of_timestamp
+  ),
+  billing_as_of AS (
+    SELECT * EXCEPT (version_rank)
+    FROM billing_ranked
+    WHERE version_rank = 1
+  ),
+  store_notification_ranked AS (
+    SELECT
+      n.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY n.subscription_id
+        ORDER BY
+          n.notification_at DESC,
+          n.ingested_at DESC
+      ) AS notification_rank
+    FROM `your-project.app_store.server_notification_history` AS n
+    CROSS JOIN parameters AS p
+    WHERE n.notification_at < p.as_of_timestamp
+  ),
+  store_notification_as_of AS (
+    SELECT * EXCEPT (notification_rank)
+    FROM store_notification_ranked
+    WHERE notification_rank = 1
+  ),
+  active_candidates AS (
+    SELECT
+      e.metric_date,
+      e.as_of_timestamp,
+      e.entitlement_id,
+      e.subscription_id,
+      e.subscriber_id,
+      e.product_id,
+      e.plan_id,
+      e.offer_id,
+      COALESCE(e.subscription_channel, 'unknown') AS subscription_channel,
+      COALESCE(e.platform, 'unknown') AS platform,
+      UPPER(e.entitlement_status) AS entitlement_status,
+      COALESCE(UPPER(b.billing_status), 'NOT_AVAILABLE') AS billing_status,
+      e.country_code,
+      e.region_code,
+      e.market_code,
+      COALESCE(b.currency_code, e.currency_code, 'UNKNOWN') AS currency_code,
+      COALESCE(b.billing_cycle, 'unknown') AS billing_cycle,
+      COALESCE(b.payment_provider, 'unknown') AS payment_provider,
+      COALESCE(n.app_store, 'not_applicable') AS app_store,
+      COALESCE(n.environment, 'not_applicable') AS app_store_environment,
+      COALESCE(e.acquisition_source, 'unknown') AS acquisition_source,
+      COALESCE(e.acquisition_medium, 'unknown') AS acquisition_medium,
+      COALESCE(e.campaign_id, 'unknown') AS campaign_id,
+      COALESCE(e.customer_segment, 'unknown') AS customer_segment,
+      COALESCE(e.subscriber_type, 'unknown') AS subscriber_type,
+      COALESCE(e.device_family, 'unknown') AS device_family,
+      COALESCE(e.operating_system, 'unknown') AS operating_system,
+      COALESCE(e.app_version, 'unknown') AS app_version,
+      (
+        COALESCE(e.is_trial, FALSE)
+        OR UPPER(e.entitlement_status) IN ('TRIAL', 'TRIALING')
+        OR UPPER(COALESCE(b.billing_status, '')) IN ('TRIAL', 'TRIALING')
+      ) AS is_trial,
+      COALESCE(
+        b.auto_renew_enabled,
+        n.auto_renew_enabled,
+        e.auto_renew_enabled,
+        FALSE
+      ) AS is_auto_renew,
+      (
+        UPPER(e.entitlement_status) = 'GRACE_PERIOD'
+        OR UPPER(COALESCE(b.billing_status, '')) = 'GRACE_PERIOD'
+      ) AS is_in_grace_period,
+      (
+        COALESCE(b.cancel_at_period_end, FALSE)
+        OR (
+          e.cancellation_at IS NOT NULL
+          AND e.cancellation_at < e.as_of_timestamp
+        )
+      ) AS is_cancel_at_period_end,
+      e.entitlement_start_at,
+      e.entitlement_end_at,
+      GREATEST(
+        COALESCE(e.source_updated_at, TIMESTAMP '1970-01-01 00:00:00+00'),
+        COALESCE(b.source_updated_at, TIMESTAMP '1970-01-01 00:00:00+00'),
+        COALESCE(n.notification_at, TIMESTAMP '1970-01-01 00:00:00+00')
+      ) AS latest_source_updated_at,
+      COALESCE(b.price_amount, NUMERIC '0') AS price_amount,
+      CASE UPPER(COALESCE(b.billing_cycle, 'MONTH'))
+        WHEN 'YEAR' THEN SAFE_DIVIDE(COALESCE(b.price_amount, NUMERIC '0'), 12)
+        WHEN 'ANNUAL' THEN SAFE_DIVIDE(COALESCE(b.price_amount, NUMERIC '0'), 12)
+        WHEN 'WEEK' THEN SAFE_DIVIDE(COALESCE(b.price_amount, NUMERIC '0') * 52, 12)
+        WHEN 'DAY' THEN SAFE_DIVIDE(COALESCE(b.price_amount, NUMERIC '0') * 365, 12)
+        ELSE COALESCE(b.price_amount, NUMERIC '0')
+      END AS normalized_mrr_amount,
+      e.source_version_count
+    FROM entitlement_as_of AS e
+    LEFT JOIN billing_as_of AS b
+      ON e.subscription_id = b.subscription_id
+    LEFT JOIN store_notification_as_of AS n
+      ON e.subscription_id = n.subscription_id
+    WHERE NULLIF(TRIM(e.subscriber_id), '') IS NOT NULL
+      AND e.entitlement_start_at < e.as_of_timestamp
+      AND COALESCE(
+        e.entitlement_end_at,
+        TIMESTAMP '9999-12-31 00:00:00+00'
+      ) >= e.as_of_timestamp
+      AND COALESCE(
+        e.revoked_at,
+        TIMESTAMP '9999-12-31 00:00:00+00'
+      ) >= e.as_of_timestamp
+      AND UPPER(e.entitlement_status) IN (
+        'ACTIVE',
+        'TRIAL',
+        'TRIALING',
+        'GRACE_PERIOD',
+        'PAST_DUE',
+        'CANCELED',
+        'CANCELLED'
+      )
+      AND (
+        b.subscription_id IS NULL
+        OR (
+          UPPER(b.billing_status) IN (
+            'ACTIVE',
+            'TRIAL',
+            'TRIALING',
+            'GRACE_PERIOD',
+            'PAST_DUE',
+            'CANCELED',
+            'CANCELLED'
+          )
+          AND COALESCE(
+            b.current_period_end_at,
+            TIMESTAMP '9999-12-31 00:00:00+00'
+          ) >= e.as_of_timestamp
+        )
+      )
+      AND COALESCE(
+        n.expiration_at,
+        TIMESTAMP '9999-12-31 00:00:00+00'
+      ) >= e.as_of_timestamp
+      AND COALESCE(
+        n.revocation_at,
+        TIMESTAMP '9999-12-31 00:00:00+00'
+      ) >= e.as_of_timestamp
+  ),
+  subscriber_candidate_summary AS (
+    SELECT
+      metric_date,
+      subscriber_id,
+      COUNT(DISTINCT entitlement_id) AS active_entitlement_count,
+      COUNT(DISTINCT subscription_id) AS active_subscription_count,
+      SUM(source_version_count) AS source_record_count,
+      SUM(GREATEST(source_version_count - 1, 0)) AS superseded_source_version_count,
+      GREATEST(COUNT(*) - 1, 0) AS multiple_active_entitlement_count
+    FROM active_candidates
+    GROUP BY metric_date, subscriber_id
+  ),
+  subscriber_ranked AS (
+    SELECT
+      a.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY a.metric_date, a.subscriber_id
+        ORDER BY
+          a.is_trial ASC,
+          a.is_in_grace_period ASC,
+          COALESCE(
+            a.entitlement_end_at,
+            TIMESTAMP '9999-12-31 00:00:00+00'
+          ) DESC,
+          a.latest_source_updated_at DESC,
+          a.entitlement_id DESC
+      ) AS subscriber_rank
+    FROM active_candidates AS a
+  ),
+  canonical_active_subscribers AS (
+    SELECT
+      s.* EXCEPT (subscriber_rank),
+      c.active_entitlement_count,
+      c.active_subscription_count,
+      c.source_record_count,
+      c.superseded_source_version_count,
+      c.multiple_active_entitlement_count,
+      CASE
+        WHEN s.is_trial THEN 'trial'
+        WHEN s.is_in_grace_period THEN 'grace_period'
+        WHEN s.is_cancel_at_period_end THEN 'cancel_pending'
+        ELSE 'paid_active'
+      END AS lifecycle_status
+    FROM subscriber_ranked AS s
+    INNER JOIN subscriber_candidate_summary AS c
+      ON s.metric_date = c.metric_date
+     AND s.subscriber_id = c.subscriber_id
+    WHERE s.subscriber_rank = 1
+  )
+  SELECT
+    metric_date,
+    'Active Subscriber Count' AS metric_name,
+    COUNT(DISTINCT subscriber_id) AS metric_value,
+    product_id,
+    plan_id,
+    offer_id,
+    subscription_channel,
+    platform,
+    entitlement_status,
+    billing_status,
+    lifecycle_status,
+    country_code,
+    region_code,
+    market_code,
+    currency_code,
+    billing_cycle,
+    payment_provider,
+    app_store,
+    app_store_environment,
+    acquisition_source,
+    acquisition_medium,
+    campaign_id,
+    customer_segment,
+    subscriber_type,
+    device_family,
+    operating_system,
+    app_version,
+    is_trial,
+    is_auto_renew,
+    is_in_grace_period,
+    is_cancel_at_period_end,
+    SUM(active_entitlement_count) AS active_entitlement_count,
+    SUM(active_subscription_count) AS active_subscription_count,
+    COUNT(DISTINCT IF(is_trial, subscriber_id, NULL)) AS trial_subscriber_count,
+    COUNT(DISTINCT IF(is_in_grace_period, subscriber_id, NULL)) AS grace_subscriber_count,
+    COUNT(DISTINCT IF(NOT is_trial, subscriber_id, NULL)) AS paid_subscriber_count,
+    COUNT(DISTINCT IF(is_auto_renew, subscriber_id, NULL)) AS auto_renew_subscriber_count,
+    COUNT(DISTINCT IF(is_cancel_at_period_end, subscriber_id, NULL)) AS cancel_pending_subscriber_count,
+    SUM(price_amount) AS gross_recurring_revenue,
+    SUM(normalized_mrr_amount) AS normalized_mrr,
+    MIN(entitlement_start_at) AS earliest_entitlement_start_at,
+    MAX(entitlement_end_at) AS latest_entitlement_end_at,
+    MAX(latest_source_updated_at) AS latest_source_updated_at,
+    SUM(source_record_count) AS source_record_count,
+    SUM(superseded_source_version_count) AS superseded_source_version_count,
+    SUM(multiple_active_entitlement_count) AS multiple_active_entitlement_count,
+    'UTC' AS metric_timezone,
+    MAX(as_of_timestamp) AS as_of_timestamp,
+    '2.0.0' AS calculation_version,
+    'subscription_entitlement_billing_app_store' AS source_system,
+    CURRENT_TIMESTAMP() AS load_timestamp
+  FROM canonical_active_subscribers
+  GROUP BY
+    metric_date,
+    product_id,
+    plan_id,
+    offer_id,
+    subscription_channel,
+    platform,
+    entitlement_status,
+    billing_status,
+    lifecycle_status,
+    country_code,
+    region_code,
+    market_code,
+    currency_code,
+    billing_cycle,
+    payment_provider,
+    app_store,
+    app_store_environment,
+    acquisition_source,
+    acquisition_medium,
+    campaign_id,
+    customer_segment,
+    subscriber_type,
+    device_family,
+    operating_system,
+    app_version,
+    is_trial,
+    is_auto_renew,
+    is_in_grace_period,
+    is_cancel_at_period_end;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT
+      CAST(CURRENT_DATE - INTERVAL '1' DAY AS DATE) AS metric_date,
+      CAST(CURRENT_DATE AS TIMESTAMP) AS as_of_timestamp
+  ),
+  entitlement_ranked AS (
+    SELECT
+      p.metric_date,
+      p.as_of_timestamp,
+      e.*,
+      COUNT(*) OVER (
+        PARTITION BY e.entitlement_id
+      ) AS source_version_count,
+      ROW_NUMBER() OVER (
+        PARTITION BY e.entitlement_id
+        ORDER BY
+          e.effective_at DESC,
+          e.source_updated_at DESC,
+          e.ingested_at DESC
+      ) AS version_rank
+    FROM subscription_entitlement_dataset AS e
+    CROSS JOIN parameters AS p
+    WHERE e.effective_at < p.as_of_timestamp
+  ),
+  entitlement_as_of AS (
+    SELECT *
+    FROM entitlement_ranked
+    WHERE version_rank = 1
+  ),
+  billing_ranked AS (
+    SELECT
+      b.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY b.subscription_id
+        ORDER BY
+          b.effective_at DESC,
+          b.source_updated_at DESC,
+          b.ingested_at DESC
+      ) AS version_rank
+    FROM digital_billing_subscription_dataset AS b
+    CROSS JOIN parameters AS p
+    WHERE b.effective_at < p.as_of_timestamp
+  ),
+  billing_as_of AS (
+    SELECT *
+    FROM billing_ranked
+    WHERE version_rank = 1
+  ),
+  store_notification_ranked AS (
+    SELECT
+      n.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY n.subscription_id
+        ORDER BY
+          n.notification_at DESC,
+          n.ingested_at DESC
+      ) AS notification_rank
+    FROM app_store_server_notification_dataset AS n
+    CROSS JOIN parameters AS p
+    WHERE n.notification_at < p.as_of_timestamp
+  ),
+  store_notification_as_of AS (
+    SELECT *
+    FROM store_notification_ranked
+    WHERE notification_rank = 1
+  ),
+  active_candidates AS (
+    SELECT
+      e.metric_date,
+      e.as_of_timestamp,
+      e.entitlement_id,
+      e.subscription_id,
+      e.subscriber_id,
+      e.product_id,
+      e.plan_id,
+      e.offer_id,
+      COALESCE(e.subscription_channel, 'unknown') AS subscription_channel,
+      COALESCE(e.platform, 'unknown') AS platform,
+      UPPER(e.entitlement_status) AS entitlement_status,
+      COALESCE(UPPER(b.billing_status), 'NOT_AVAILABLE') AS billing_status,
+      e.country_code,
+      e.region_code,
+      e.market_code,
+      COALESCE(b.currency_code, e.currency_code, 'UNKNOWN') AS currency_code,
+      COALESCE(b.billing_cycle, 'unknown') AS billing_cycle,
+      COALESCE(b.payment_provider, 'unknown') AS payment_provider,
+      COALESCE(n.app_store, 'not_applicable') AS app_store,
+      COALESCE(n.environment, 'not_applicable') AS app_store_environment,
+      COALESCE(e.acquisition_source, 'unknown') AS acquisition_source,
+      COALESCE(e.acquisition_medium, 'unknown') AS acquisition_medium,
+      COALESCE(e.campaign_id, 'unknown') AS campaign_id,
+      COALESCE(e.customer_segment, 'unknown') AS customer_segment,
+      COALESCE(e.subscriber_type, 'unknown') AS subscriber_type,
+      COALESCE(e.device_family, 'unknown') AS device_family,
+      COALESCE(e.operating_system, 'unknown') AS operating_system,
+      COALESCE(e.app_version, 'unknown') AS app_version,
+      CASE
+        WHEN COALESCE(e.is_trial, FALSE) = TRUE
+          OR UPPER(e.entitlement_status) IN ('TRIAL', 'TRIALING')
+          OR UPPER(COALESCE(b.billing_status, '')) IN ('TRIAL', 'TRIALING')
+        THEN TRUE ELSE FALSE
+      END AS is_trial,
+      COALESCE(
+        b.auto_renew_enabled,
+        n.auto_renew_enabled,
+        e.auto_renew_enabled,
+        FALSE
+      ) AS is_auto_renew,
+      CASE
+        WHEN UPPER(e.entitlement_status) = 'GRACE_PERIOD'
+          OR UPPER(COALESCE(b.billing_status, '')) = 'GRACE_PERIOD'
+        THEN TRUE ELSE FALSE
+      END AS is_in_grace_period,
+      CASE
+        WHEN COALESCE(b.cancel_at_period_end, FALSE) = TRUE
+          OR (
+            e.cancellation_at IS NOT NULL
+            AND e.cancellation_at < e.as_of_timestamp
+          )
+        THEN TRUE ELSE FALSE
+      END AS is_cancel_at_period_end,
+      e.entitlement_start_at,
+      e.entitlement_end_at,
+      CASE
+        WHEN COALESCE(e.source_updated_at, TIMESTAMP '1970-01-01 00:00:00') >= COALESCE(b.source_updated_at, TIMESTAMP '1970-01-01 00:00:00')
+         AND COALESCE(e.source_updated_at, TIMESTAMP '1970-01-01 00:00:00') >= COALESCE(n.notification_at, TIMESTAMP '1970-01-01 00:00:00')
+        THEN COALESCE(e.source_updated_at, TIMESTAMP '1970-01-01 00:00:00')
+        WHEN COALESCE(b.source_updated_at, TIMESTAMP '1970-01-01 00:00:00') >= COALESCE(n.notification_at, TIMESTAMP '1970-01-01 00:00:00')
+        THEN COALESCE(b.source_updated_at, TIMESTAMP '1970-01-01 00:00:00')
+        ELSE COALESCE(n.notification_at, TIMESTAMP '1970-01-01 00:00:00')
+      END AS latest_source_updated_at,
+      COALESCE(b.price_amount, CAST(0 AS DECIMAL(18,2))) AS price_amount,
+      CASE UPPER(COALESCE(b.billing_cycle, 'MONTH'))
+        WHEN 'YEAR' THEN COALESCE(b.price_amount, CAST(0 AS DECIMAL(18,2))) / 12
+        WHEN 'ANNUAL' THEN COALESCE(b.price_amount, CAST(0 AS DECIMAL(18,2))) / 12
+        WHEN 'WEEK' THEN COALESCE(b.price_amount, CAST(0 AS DECIMAL(18,2))) * 52 / 12
+        WHEN 'DAY' THEN COALESCE(b.price_amount, CAST(0 AS DECIMAL(18,2))) * 365 / 12
+        ELSE COALESCE(b.price_amount, CAST(0 AS DECIMAL(18,2)))
+      END AS normalized_mrr_amount,
+      e.source_version_count
+    FROM entitlement_as_of AS e
+    LEFT JOIN billing_as_of AS b
+      ON e.subscription_id = b.subscription_id
+    LEFT JOIN store_notification_as_of AS n
+      ON e.subscription_id = n.subscription_id
+    WHERE e.subscriber_id IS NOT NULL
+      AND TRIM(e.subscriber_id) <> ''
+      AND e.entitlement_start_at < e.as_of_timestamp
+      AND COALESCE(
+        e.entitlement_end_at,
+        TIMESTAMP '9999-12-31 00:00:00'
+      ) >= e.as_of_timestamp
+      AND COALESCE(
+        e.revoked_at,
+        TIMESTAMP '9999-12-31 00:00:00'
+      ) >= e.as_of_timestamp
+      AND UPPER(e.entitlement_status) IN (
+        'ACTIVE',
+        'TRIAL',
+        'TRIALING',
+        'GRACE_PERIOD',
+        'PAST_DUE',
+        'CANCELED',
+        'CANCELLED'
+      )
+      AND (
+        b.subscription_id IS NULL
+        OR (
+          UPPER(b.billing_status) IN (
+            'ACTIVE',
+            'TRIAL',
+            'TRIALING',
+            'GRACE_PERIOD',
+            'PAST_DUE',
+            'CANCELED',
+            'CANCELLED'
+          )
+          AND COALESCE(
+            b.current_period_end_at,
+            TIMESTAMP '9999-12-31 00:00:00'
+          ) >= e.as_of_timestamp
+        )
+      )
+      AND COALESCE(
+        n.expiration_at,
+        TIMESTAMP '9999-12-31 00:00:00'
+      ) >= e.as_of_timestamp
+      AND COALESCE(
+        n.revocation_at,
+        TIMESTAMP '9999-12-31 00:00:00'
+      ) >= e.as_of_timestamp
+  ),
+  subscriber_candidate_summary AS (
+    SELECT
+      metric_date,
+      subscriber_id,
+      COUNT(DISTINCT entitlement_id) AS active_entitlement_count,
+      COUNT(DISTINCT subscription_id) AS active_subscription_count,
+      SUM(source_version_count) AS source_record_count,
+      SUM(
+        CASE
+          WHEN source_version_count > 1 THEN source_version_count - 1
+          ELSE 0
+        END
+      ) AS superseded_source_version_count,
+      CASE
+        WHEN COUNT(*) > 1 THEN COUNT(*) - 1
+        ELSE 0
+      END AS multiple_active_entitlement_count
+    FROM active_candidates
+    GROUP BY metric_date, subscriber_id
+  ),
+  subscriber_ranked AS (
+    SELECT
+      a.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY a.metric_date, a.subscriber_id
+        ORDER BY
+          a.is_trial ASC,
+          a.is_in_grace_period ASC,
+          COALESCE(
+            a.entitlement_end_at,
+            TIMESTAMP '9999-12-31 00:00:00'
+          ) DESC,
+          a.latest_source_updated_at DESC,
+          a.entitlement_id DESC
+      ) AS subscriber_rank
+    FROM active_candidates AS a
+  ),
+  canonical_active_subscribers AS (
+    SELECT
+      s.*,
+      c.active_entitlement_count,
+      c.active_subscription_count,
+      c.source_record_count,
+      c.superseded_source_version_count,
+      c.multiple_active_entitlement_count,
+      CASE
+        WHEN s.is_trial = TRUE THEN 'trial'
+        WHEN s.is_in_grace_period = TRUE THEN 'grace_period'
+        WHEN s.is_cancel_at_period_end = TRUE THEN 'cancel_pending'
+        ELSE 'paid_active'
+      END AS lifecycle_status
+    FROM subscriber_ranked AS s
+    INNER JOIN subscriber_candidate_summary AS c
+      ON s.metric_date = c.metric_date
+     AND s.subscriber_id = c.subscriber_id
+    WHERE s.subscriber_rank = 1
+  )
+  SELECT
+    metric_date,
+    'Active Subscriber Count' AS metric_name,
+    COUNT(DISTINCT subscriber_id) AS metric_value,
+    product_id,
+    plan_id,
+    offer_id,
+    subscription_channel,
+    platform,
+    entitlement_status,
+    billing_status,
+    lifecycle_status,
+    country_code,
+    region_code,
+    market_code,
+    currency_code,
+    billing_cycle,
+    payment_provider,
+    app_store,
+    app_store_environment,
+    acquisition_source,
+    acquisition_medium,
+    campaign_id,
+    customer_segment,
+    subscriber_type,
+    device_family,
+    operating_system,
+    app_version,
+    is_trial,
+    is_auto_renew,
+    is_in_grace_period,
+    is_cancel_at_period_end,
+    SUM(active_entitlement_count) AS active_entitlement_count,
+    SUM(active_subscription_count) AS active_subscription_count,
+    COUNT(DISTINCT CASE WHEN is_trial = TRUE THEN subscriber_id END) AS trial_subscriber_count,
+    COUNT(DISTINCT CASE WHEN is_in_grace_period = TRUE THEN subscriber_id END) AS grace_subscriber_count,
+    COUNT(DISTINCT CASE WHEN is_trial = FALSE THEN subscriber_id END) AS paid_subscriber_count,
+    COUNT(DISTINCT CASE WHEN is_auto_renew = TRUE THEN subscriber_id END) AS auto_renew_subscriber_count,
+    COUNT(DISTINCT CASE WHEN is_cancel_at_period_end = TRUE THEN subscriber_id END) AS cancel_pending_subscriber_count,
+    SUM(price_amount) AS gross_recurring_revenue,
+    SUM(normalized_mrr_amount) AS normalized_mrr,
+    MIN(entitlement_start_at) AS earliest_entitlement_start_at,
+    MAX(entitlement_end_at) AS latest_entitlement_end_at,
+    MAX(latest_source_updated_at) AS latest_source_updated_at,
+    SUM(source_record_count) AS source_record_count,
+    SUM(superseded_source_version_count) AS superseded_source_version_count,
+    SUM(multiple_active_entitlement_count) AS multiple_active_entitlement_count,
+    'UTC' AS metric_timezone,
+    MAX(as_of_timestamp) AS as_of_timestamp,
+    '2.0.0' AS calculation_version,
+    'subscription_entitlement_billing_app_store' AS source_system,
+    CURRENT_TIMESTAMP() AS load_timestamp
+  FROM canonical_active_subscribers
+  GROUP BY
+    metric_date,
+    product_id,
+    plan_id,
+    offer_id,
+    subscription_channel,
+    platform,
+    entitlement_status,
+    billing_status,
+    lifecycle_status,
+    country_code,
+    region_code,
+    market_code,
+    currency_code,
+    billing_cycle,
+    payment_provider,
+    app_store,
+    app_store_environment,
+    acquisition_source,
+    acquisition_medium,
+    campaign_id,
+    customer_segment,
+    subscriber_type,
+    device_family,
+    operating_system,
+    app_version,
+    is_trial,
+    is_auto_renew,
+    is_in_grace_period,
+    is_cancel_at_period_end;
+
+Calculation Notes: |
+  1️⃣ Evaluate the certified daily population at 23:59:59 UTC; intraday results must identify the exact snapshot timestamp.
+  2️⃣ Treat entitlement intervals as start-inclusive and end-exclusive; exclude access from the effective timestamp of expiration or revocation.
+  3️⃣ Count each governed canonical subscriber once, including subscribers with multiple qualifying subscriptions, plans, profiles, devices, or provider records.
+  4️⃣ Include trial, paid, promotional, grace-period, past-due, and cancellation-pending states only while the entitlement continues to grant access.
+  5️⃣ Exclude non-subscription products, expired or revoked access, invalid transactions, confirmed fraud, and test, synthetic, QA, or designated employee accounts.
+  6️⃣ Use the governed primary-entitlement rule only for dimensional attribution; it must not change subscriber eligibility or the unsegmented total.
+  7️⃣ Restate affected daily snapshots for late entitlement, billing, app-store, revocation, refund, chargeback, or identity updates received within the approved correction window.
+
+Business Use Case: |
+  Revenue Management monitors the certified daily subscriber base by lifecycle status, plan, acquisition channel, and billing provider. If the count declines abnormally within a provider or renewal cohort, the team initiates payment-recovery analysis, entitlement-service investigation, provider escalation, or targeted retention treatment.
+
+
+Source Data: Digital Entitlement + Digital Subscriber Identity + Digital Subscription Billing + App-Store Server Notifications
+
+Report Attributes: |
+  ["Snapshot Date","Primary Subscription Product","Primary Subscription Plan","Subscription Tier","Lifecycle Status","Paid versus Trial Status","Auto-Renew Status","Grace-Period Status","Cancellation-Pending Status","Billing Cycle","Billing Provider","Promotional Offer","Acquisition Channel","Acquisition Campaign","Subscription Platform","Subscriber Country","Subscriber Region","Subscriber Tenure Band"]
+
+Dashboard Usage: [Executive Subscription Health Dashboard, Daily Subscriber Operations Dashboard, Subscriber Growth and Retention Dashboard, Digital Monetization Dashboard, Billing and Entitlement Reliability Dashboard, Board Subscription Performance Scorecard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Paid Active Subscriber Count, Trial Subscriber Count, Active Subscription Count, New Subscriber Count, Reactivated Subscriber Count, Churned Subscriber Count, Subscription Cancellation Count, Monthly Recurring Revenue]
+
+Derived KPIs: [Net Subscriber Adds, Subscriber Growth Rate, Subscriber Churn Rate, Subscriber Retention Rate, Trial-to-Paid Conversion Rate, Paid Subscriber Mix, Average Revenue per Active Subscriber]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-10T18:31:08.777336+00:00
+
+Last Modified By: devyendarm
+
+
