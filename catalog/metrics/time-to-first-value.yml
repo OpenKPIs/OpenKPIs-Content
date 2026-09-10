@@ -1,0 +1,173 @@
+# Metric: Time to First Value
+# Generated: 2026-09-10T07:48:45.029Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Time to First Value
+Formula: MEDIAN(first_value_event_timestamp − sign_up_timestamp) in hours, per account cohort
+
+Description: |
+  Elapsed time between an account's sign-up and the first completion of the product's defining value action, such as the first report generated, first integration connected or first workflow published. It is the core building block for activation KPIs and shows how quickly onboarding turns a new account into a working one.
+
+Category: Engagement
+
+Tags: [metric, SaaS: Product-Led Growth, Activation & Expansion]
+
+Industry: SaaS
+
+Priority: High
+
+Core Area: Onboarding
+
+Scope: User
+
+Measure Type: Average
+
+Aggregation Window: Time based - Weekly/Monthly (by sign-up cohort)
+
+GA4 Event: |
+  tutorial_complete
+
+Adobe Event: |
+  First Value Achieved
+
+W3 Data Layer: |
+  {"digitalData":{"user":[{"profile":[{"profileInfo":{"profileID":"<account_id>","signupDate":"<sign_up_timestamp>"},"attributes":{"planTier":"<plan_tier>","activationStatus":"activated"}}]}],"event":[{"eventInfo":{"eventName":"first_value_achieved","timeStamp":"<event_timestamp>"},"attributes":{"valueAction":"<value_action_name>","hoursSinceSignup":"<hours_since_signup>"}}]}}
+
+GA4 Data Layer: |
+  {"event":"tutorial_complete","user_id":"<account_id>","value_action":"<value_action_name>","hours_since_signup":"<hours_since_signup>","plan_tier":"<plan_tier>","sign_up_cohort":"<yyyy-ww>"}
+
+Adobe Client Data Layer: |
+  {"event":"first_value_achieved","eventInfo":{"eventName":"First Value Achieved"},"user":{"accountId":"<account_id>","planTier":"<plan_tier>","signUpCohort":"<yyyy-ww>"},"activation":{"valueAction":"<value_action_name>","hoursSinceSignup":"<hours_since_signup>"}}
+
+XDM Mapping: |
+  {"eventType":"application.milestone","identityMap":{"accountId":[{"id":"<account_id>","primary":true}]},"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar20":"<value_action_name>","eVar21":"<sign_up_cohort>"}},"event1to100":{"event30":{"value":1}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH signups AS (
+    SELECT
+      user_id AS account_id,
+      MIN(TIMESTAMP_MICROS(event_timestamp)) AS sign_up_ts
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE event_name = 'sign_up'
+      AND user_id IS NOT NULL
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @cohort_start) AND FORMAT_DATE('%Y%m%d', @cohort_end)
+    GROUP BY user_id
+  ),
+  first_value AS (
+    SELECT
+      e.user_id AS account_id,
+      MIN(TIMESTAMP_MICROS(e.event_timestamp)) AS first_value_ts
+    FROM `your-project.analytics_123456789.events_*` e
+    JOIN signups s ON s.account_id = e.user_id
+    WHERE e.event_name = 'tutorial_complete'
+      AND (SELECT value.string_value FROM UNNEST(e.event_params) WHERE key = 'value_action') IS NOT NULL
+      AND TIMESTAMP_MICROS(e.event_timestamp) >= s.sign_up_ts
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @cohort_start) AND FORMAT_DATE('%Y%m%d', DATE_ADD(@cohort_end, INTERVAL 14 DAY))
+    GROUP BY e.user_id
+  ),
+  per_account AS (
+    SELECT
+      s.account_id,
+      DATE_TRUNC(DATE(s.sign_up_ts), WEEK(MONDAY)) AS sign_up_cohort_week,
+      TIMESTAMP_DIFF(f.first_value_ts, s.sign_up_ts, MINUTE) / 60.0 AS hours_to_first_value
+    FROM signups s
+    JOIN first_value f USING (account_id)
+  )
+  SELECT
+    sign_up_cohort_week,
+    COUNT(*) AS activated_accounts,
+    APPROX_QUANTILES(hours_to_first_value, 100)[OFFSET(50)] AS median_hours_to_first_value,
+    APPROX_QUANTILES(hours_to_first_value, 100)[OFFSET(75)] AS p75_hours_to_first_value
+  FROM per_account
+  GROUP BY sign_up_cohort_week
+  ORDER BY sign_up_cohort_week;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH signups AS (
+    SELECT
+      identityMap['accountId'][0].id AS account_id,
+      MIN(timestamp) AS sign_up_ts
+    FROM product_experience_events
+    WHERE eventType = 'userAccount.createProfile'
+      AND timestamp BETWEEN CAST(@cohort_start AS TIMESTAMP) AND CAST(@cohort_end AS TIMESTAMP)
+    GROUP BY 1
+  ),
+  first_value AS (
+    SELECT
+      e.identityMap['accountId'][0].id AS account_id,
+      MIN(e.timestamp) AS first_value_ts
+    FROM product_experience_events e
+    JOIN signups s ON s.account_id = e.identityMap['accountId'][0].id
+    WHERE e.eventType = 'application.milestone'
+      AND e._experience.analytics.customDimensions.eVars.eVar20 IS NOT NULL
+      AND e.timestamp >= s.sign_up_ts
+      AND e.timestamp < DATE_ADD(CAST(@cohort_end AS TIMESTAMP), INTERVAL 14 DAY)
+    GROUP BY 1
+  ),
+  per_account AS (
+    SELECT
+      s.account_id,
+      DATE_TRUNC('week', s.sign_up_ts) AS sign_up_cohort_week,
+      (UNIX_TIMESTAMP(f.first_value_ts) - UNIX_TIMESTAMP(s.sign_up_ts)) / 3600.0 AS hours_to_first_value
+    FROM signups s
+    JOIN first_value f ON f.account_id = s.account_id
+  )
+  SELECT
+    sign_up_cohort_week,
+    COUNT(*) AS activated_accounts,
+    PERCENTILE_APPROX(hours_to_first_value, 0.5) AS median_hours_to_first_value,
+    PERCENTILE_APPROX(hours_to_first_value, 0.75) AS p75_hours_to_first_value
+  FROM per_account
+  GROUP BY 1
+  ORDER BY 1;
+
+Calculation Notes: |
+  1️⃣ The clock starts at the sign_up event of the account owner and stops at the first value event for that account (any seat), defined per product in the activation configuration (for example generate_report, integration_connected or workflow_published).
+  2️⃣ Report the median, not the mean; the distribution is heavily right-skewed by accounts that never activate.
+  3️⃣ Accounts that have not yet reached the value event are excluded from the median but counted in the companion Activated Trial Accounts metric, so the two are read together.
+  4️⃣ Use the sign-up cohort week or month as the reporting grain; only cohorts old enough for the observation window (14 days for trials) are final.
+  5️⃣ Exclude internal, demo and test workspaces and accounts created by sales on behalf of prospects.
+  6️⃣ Time zones are normalized to UTC before the difference is computed; sessions and the 30-minute session timeout do not affect this metric.
+
+Business Use Case: |
+  The Head of Product reviews Time to First Value by sign-up cohort after every onboarding release; when the median rises, the growth team reorders or removes onboarding steps and adds in-product guidance at the step where accounts stall, and customer success uses the per-account value to prioritize outreach to trials that have not activated within 48 hours.
+
+Dependencies:
+  Events: [sign-up, first-value-event]
+  Dimensions: [account-id, sign-up-cohort, plan-tier, acquisition-channel]
+
+Source Data: Digital Analytics (GA4 / product events) + Billing (Stripe) for account status
+
+Report Attributes: |
+  Sign-up Cohort; Plan Tier; Acquisition Channel; Company Size; Onboarding Variant; Device Category; Country
+
+Dashboard Usage: [Product Activation Dashboard, Onboarding Funnel Dashboard, Executive Growth Dashboard, Customer Success Trial Health]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [activated-trial-accounts, onboarding-step-completion, weekly-active-accounts, sessions-to-first-value]
+
+Derived KPIs: [trial-activation-rate, trial-to-paid-conversion-rate, onboarding-completion-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-10T07:47:45.311+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-10T07:48:44.692+00:00
+
