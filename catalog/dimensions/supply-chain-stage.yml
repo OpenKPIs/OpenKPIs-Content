@@ -1,0 +1,519 @@
+# Dimension: Supply Chain Stage
+# Generated: 2026-09-10T21:30:14.294Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Supply Chain Stage
+
+Description: |
+  Supply Chain Stage identifies the standardized operational phase in which a supply chain event occurs, from planning and sourcing through delivery, return, and closure. Each qualifying event is assigned exactly one stage based on the event type, process context, and event timestamp.
+
+Category: Performance
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH ranked_source AS (
+    SELECT
+      e.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY source_system, source_record_type, source_record_id
+        ORDER BY ingested_at DESC
+      ) AS row_num
+    FROM `your-project.supply_chain.backend_operational_events` AS e
+    WHERE UPPER(source_system) IN (
+      'TMS',
+      'WMS',
+      'OMS',
+      'ERP',
+      'PROCUREMENT',
+      'MES',
+      'SUPPLIER_EDI',
+      'CARRIER_EVENT_FEED'
+    )
+      AND source_record_id IS NOT NULL
+  ),
+  normalized AS (
+    SELECT
+      * EXCEPT (row_num),
+      COALESCE(
+        NULLIF(UPPER(REPLACE(TRIM(process_area), ' ', '_')), ''),
+        'UNKNOWN'
+      ) AS process_area_code,
+      COALESCE(
+        NULLIF(UPPER(REPLACE(TRIM(stage_status), ' ', '_')), ''),
+        'UNKNOWN'
+      ) AS status_code,
+      COALESCE(
+        NULLIF(UPPER(REPLACE(TRIM(canonical_event_type), ' ', '_')), ''),
+        'UNKNOWN'
+      ) AS event_type_code
+    FROM ranked_source
+    WHERE row_num = 1
+  ),
+  stage_classification AS (
+    SELECT
+      normalized.*,
+      CASE
+        WHEN process_area_code LIKE '%DEMAND%' OR process_area_code LIKE '%PLANNING%' THEN 'DEMAND_PLANNING'
+        WHEN process_area_code LIKE '%SOURCE%' OR process_area_code LIKE '%SUPPLIER_SELECTION%' THEN 'SOURCING'
+        WHEN process_area_code LIKE '%PROCURE%' OR process_area_code LIKE '%PURCHAS%' THEN 'PROCUREMENT'
+        WHEN process_area_code LIKE '%MANUFACTUR%' OR process_area_code LIKE '%PRODUCTION%' THEN 'PRODUCTION'
+        WHEN process_area_code LIKE '%INBOUND%' OR process_area_code LIKE '%SUPPLIER_TRANSPORT%' THEN 'INBOUND_TRANSPORTATION'
+        WHEN process_area_code LIKE '%RECEIV%' OR process_area_code LIKE '%PUTAWAY%' THEN 'RECEIVING'
+        WHEN process_area_code LIKE '%INVENTORY%' OR process_area_code LIKE '%STORAGE%' THEN 'STORAGE_INVENTORY'
+        WHEN process_area_code LIKE '%FULFILL%' OR process_area_code LIKE '%PICK%' OR process_area_code LIKE '%PACK%' THEN 'ORDER_FULFILLMENT'
+        WHEN process_area_code LIKE '%OUTBOUND%' OR process_area_code LIKE '%LINEHAUL%' THEN 'OUTBOUND_TRANSPORTATION'
+        WHEN process_area_code LIKE '%DELIVER%' OR process_area_code LIKE '%LAST_MILE%' THEN 'LAST_MILE_DELIVERY'
+        WHEN process_area_code LIKE '%RETURN%' OR process_area_code LIKE '%REVERSE%' THEN 'REVERSE_LOGISTICS'
+        WHEN UPPER(source_system) = 'PROCUREMENT' THEN 'PROCUREMENT'
+        WHEN UPPER(source_system) = 'MES' THEN 'PRODUCTION'
+        WHEN UPPER(source_system) = 'WMS' THEN 'STORAGE_INVENTORY'
+        WHEN UPPER(source_system) IN ('TMS', 'CARRIER_EVENT_FEED') THEN 'OUTBOUND_TRANSPORTATION'
+        WHEN UPPER(source_system) = 'SUPPLIER_EDI' THEN 'INBOUND_TRANSPORTATION'
+        WHEN UPPER(source_system) = 'OMS' THEN 'ORDER_FULFILLMENT'
+        ELSE 'OTHER'
+      END AS supply_chain_stage_code
+    FROM normalized
+  ),
+  enriched AS (
+    SELECT
+      stage_classification.*,
+      CASE supply_chain_stage_code
+        WHEN 'DEMAND_PLANNING' THEN 'Demand Planning'
+        WHEN 'SOURCING' THEN 'Sourcing'
+        WHEN 'PROCUREMENT' THEN 'Procurement'
+        WHEN 'PRODUCTION' THEN 'Production'
+        WHEN 'INBOUND_TRANSPORTATION' THEN 'Inbound Transportation'
+        WHEN 'RECEIVING' THEN 'Receiving and Putaway'
+        WHEN 'STORAGE_INVENTORY' THEN 'Storage and Inventory'
+        WHEN 'ORDER_FULFILLMENT' THEN 'Order Fulfillment'
+        WHEN 'OUTBOUND_TRANSPORTATION' THEN 'Outbound Transportation'
+        WHEN 'LAST_MILE_DELIVERY' THEN 'Last-Mile Delivery'
+        WHEN 'REVERSE_LOGISTICS' THEN 'Reverse Logistics'
+        ELSE 'Other'
+      END AS supply_chain_stage_name,
+      CASE supply_chain_stage_code
+        WHEN 'DEMAND_PLANNING' THEN 'PLAN'
+        WHEN 'SOURCING' THEN 'SOURCE'
+        WHEN 'PROCUREMENT' THEN 'SOURCE'
+        WHEN 'PRODUCTION' THEN 'MAKE'
+        WHEN 'INBOUND_TRANSPORTATION' THEN 'DELIVER'
+        WHEN 'RECEIVING' THEN 'DELIVER'
+        WHEN 'STORAGE_INVENTORY' THEN 'DELIVER'
+        WHEN 'ORDER_FULFILLMENT' THEN 'DELIVER'
+        WHEN 'OUTBOUND_TRANSPORTATION' THEN 'DELIVER'
+        WHEN 'LAST_MILE_DELIVERY' THEN 'DELIVER'
+        WHEN 'REVERSE_LOGISTICS' THEN 'RETURN'
+        ELSE 'OTHER'
+      END AS stage_group,
+      CASE supply_chain_stage_code
+        WHEN 'DEMAND_PLANNING' THEN 10
+        WHEN 'SOURCING' THEN 20
+        WHEN 'PROCUREMENT' THEN 30
+        WHEN 'PRODUCTION' THEN 40
+        WHEN 'INBOUND_TRANSPORTATION' THEN 50
+        WHEN 'RECEIVING' THEN 60
+        WHEN 'STORAGE_INVENTORY' THEN 70
+        WHEN 'ORDER_FULFILLMENT' THEN 80
+        WHEN 'OUTBOUND_TRANSPORTATION' THEN 90
+        WHEN 'LAST_MILE_DELIVERY' THEN 100
+        WHEN 'REVERSE_LOGISTICS' THEN 110
+        ELSE 999
+      END AS stage_sequence,
+      CASE status_code
+        WHEN 'CREATED' THEN 'PLANNED'
+        WHEN 'PLANNED' THEN 'PLANNED'
+        WHEN 'SCHEDULED' THEN 'PLANNED'
+        WHEN 'OPEN' THEN 'PLANNED'
+        WHEN 'RELEASED' THEN 'IN_PROGRESS'
+        WHEN 'ALLOCATED' THEN 'IN_PROGRESS'
+        WHEN 'IN_PROGRESS' THEN 'IN_PROGRESS'
+        WHEN 'PICKED' THEN 'IN_PROGRESS'
+        WHEN 'PACKED' THEN 'IN_PROGRESS'
+        WHEN 'DISPATCHED' THEN 'IN_PROGRESS'
+        WHEN 'IN_TRANSIT' THEN 'IN_PROGRESS'
+        WHEN 'ARRIVED' THEN 'IN_PROGRESS'
+        WHEN 'RECEIVED' THEN 'COMPLETED'
+        WHEN 'DELIVERED' THEN 'COMPLETED'
+        WHEN 'COMPLETED' THEN 'COMPLETED'
+        WHEN 'CLOSED' THEN 'COMPLETED'
+        WHEN 'CANCELLED' THEN 'CANCELLED'
+        WHEN 'CANCELED' THEN 'CANCELLED'
+        WHEN 'REJECTED' THEN 'CANCELLED'
+        WHEN 'FAILED' THEN 'EXCEPTION'
+        WHEN 'BLOCKED' THEN 'EXCEPTION'
+        WHEN 'DELAYED' THEN 'EXCEPTION'
+        WHEN 'ON_HOLD' THEN 'EXCEPTION'
+        WHEN 'EXCEPTION' THEN 'EXCEPTION'
+        ELSE 'UNKNOWN'
+      END AS stage_status_category
+    FROM stage_classification
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT(
+      COALESCE(CAST(source_system AS STRING), ''), '|',
+      COALESCE(CAST(source_record_type AS STRING), ''), '|',
+      COALESCE(CAST(source_record_id AS STRING), ''), '|',
+      supply_chain_stage_code, '|',
+      COALESCE(CAST(event_timestamp AS STRING), '')
+    ))) AS supply_chain_stage_key,
+    supply_chain_stage_code,
+    supply_chain_stage_name,
+    stage_group,
+    stage_sequence,
+    CONCAT(supply_chain_stage_name, ' stage derived from ', source_system, ' operational activity') AS stage_description,
+    process_area_code AS process_area,
+    source_system,
+    source_record_type,
+    source_record_id,
+    business_object_type,
+    business_object_id,
+    parent_object_id,
+    order_id,
+    order_line_id,
+    purchase_order_id,
+    purchase_order_line_id,
+    shipment_id,
+    load_id,
+    delivery_id,
+    inventory_movement_id,
+    production_order_id,
+    supplier_id,
+    carrier_id,
+    facility_id,
+    warehouse_id,
+    origin_location_id,
+    destination_location_id,
+    transport_mode,
+    incoterm,
+    status_code AS stage_status,
+    stage_status_category,
+    event_type_code AS stage_event_type,
+    event_timestamp,
+    planned_start_timestamp,
+    actual_start_timestamp,
+    planned_end_timestamp,
+    actual_end_timestamp,
+    quantity,
+    quantity_uom,
+    weight,
+    weight_uom,
+    volume,
+    volume_uom,
+    CASE
+      WHEN actual_start_timestamp IS NULL THEN NULL
+      ELSE GREATEST(
+        0,
+        TIMESTAMP_DIFF(
+          COALESCE(actual_end_timestamp, event_timestamp),
+          actual_start_timestamp,
+          MINUTE
+        )
+      )
+    END AS stage_duration_minutes,
+    CASE
+      WHEN planned_end_timestamp IS NULL THEN FALSE
+      WHEN actual_end_timestamp IS NOT NULL THEN actual_end_timestamp > planned_end_timestamp
+      WHEN stage_status_category NOT IN ('COMPLETED', 'CANCELLED') THEN event_timestamp > planned_end_timestamp
+      ELSE FALSE
+    END AS is_delayed,
+    CASE
+      WHEN planned_end_timestamp IS NULL THEN NULL
+      WHEN actual_end_timestamp IS NOT NULL THEN
+        GREATEST(0, TIMESTAMP_DIFF(actual_end_timestamp, planned_end_timestamp, MINUTE))
+      WHEN stage_status_category NOT IN ('COMPLETED', 'CANCELLED') THEN
+        GREATEST(0, TIMESTAMP_DIFF(event_timestamp, planned_end_timestamp, MINUTE))
+      ELSE 0
+    END AS delay_minutes,
+    exception_code,
+    exception_description
+  FROM enriched;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH ranked_source AS (
+    SELECT
+      e.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY source_system, source_record_type, source_record_id
+        ORDER BY ingested_at DESC
+      ) AS row_num
+    FROM aep_backend_dataset AS e
+    WHERE UPPER(source_system) IN (
+      'TMS',
+      'WMS',
+      'OMS',
+      'ERP',
+      'PROCUREMENT',
+      'MES',
+      'SUPPLIER_EDI',
+      'CARRIER_EVENT_FEED'
+    )
+      AND source_record_id IS NOT NULL
+  ),
+  normalized AS (
+    SELECT
+      ranked_source.*,
+      COALESCE(
+        NULLIF(UPPER(REPLACE(TRIM(process_area), ' ', '_')), ''),
+        'UNKNOWN'
+      ) AS process_area_code,
+      COALESCE(
+        NULLIF(UPPER(REPLACE(TRIM(stage_status), ' ', '_')), ''),
+        'UNKNOWN'
+      ) AS status_code,
+      COALESCE(
+        NULLIF(UPPER(REPLACE(TRIM(canonical_event_type), ' ', '_')), ''),
+        'UNKNOWN'
+      ) AS event_type_code
+    FROM ranked_source
+    WHERE row_num = 1
+  ),
+  stage_classification AS (
+    SELECT
+      normalized.*,
+      CASE
+        WHEN process_area_code LIKE '%DEMAND%' OR process_area_code LIKE '%PLANNING%' THEN 'DEMAND_PLANNING'
+        WHEN process_area_code LIKE '%SOURCE%' OR process_area_code LIKE '%SUPPLIER_SELECTION%' THEN 'SOURCING'
+        WHEN process_area_code LIKE '%PROCURE%' OR process_area_code LIKE '%PURCHAS%' THEN 'PROCUREMENT'
+        WHEN process_area_code LIKE '%MANUFACTUR%' OR process_area_code LIKE '%PRODUCTION%' THEN 'PRODUCTION'
+        WHEN process_area_code LIKE '%INBOUND%' OR process_area_code LIKE '%SUPPLIER_TRANSPORT%' THEN 'INBOUND_TRANSPORTATION'
+        WHEN process_area_code LIKE '%RECEIV%' OR process_area_code LIKE '%PUTAWAY%' THEN 'RECEIVING'
+        WHEN process_area_code LIKE '%INVENTORY%' OR process_area_code LIKE '%STORAGE%' THEN 'STORAGE_INVENTORY'
+        WHEN process_area_code LIKE '%FULFILL%' OR process_area_code LIKE '%PICK%' OR process_area_code LIKE '%PACK%' THEN 'ORDER_FULFILLMENT'
+        WHEN process_area_code LIKE '%OUTBOUND%' OR process_area_code LIKE '%LINEHAUL%' THEN 'OUTBOUND_TRANSPORTATION'
+        WHEN process_area_code LIKE '%DELIVER%' OR process_area_code LIKE '%LAST_MILE%' THEN 'LAST_MILE_DELIVERY'
+        WHEN process_area_code LIKE '%RETURN%' OR process_area_code LIKE '%REVERSE%' THEN 'REVERSE_LOGISTICS'
+        WHEN UPPER(source_system) = 'PROCUREMENT' THEN 'PROCUREMENT'
+        WHEN UPPER(source_system) = 'MES' THEN 'PRODUCTION'
+        WHEN UPPER(source_system) = 'WMS' THEN 'STORAGE_INVENTORY'
+        WHEN UPPER(source_system) IN ('TMS', 'CARRIER_EVENT_FEED') THEN 'OUTBOUND_TRANSPORTATION'
+        WHEN UPPER(source_system) = 'SUPPLIER_EDI' THEN 'INBOUND_TRANSPORTATION'
+        WHEN UPPER(source_system) = 'OMS' THEN 'ORDER_FULFILLMENT'
+        ELSE 'OTHER'
+      END AS supply_chain_stage_code
+    FROM normalized
+  ),
+  enriched AS (
+    SELECT
+      stage_classification.*,
+      CASE supply_chain_stage_code
+        WHEN 'DEMAND_PLANNING' THEN 'Demand Planning'
+        WHEN 'SOURCING' THEN 'Sourcing'
+        WHEN 'PROCUREMENT' THEN 'Procurement'
+        WHEN 'PRODUCTION' THEN 'Production'
+        WHEN 'INBOUND_TRANSPORTATION' THEN 'Inbound Transportation'
+        WHEN 'RECEIVING' THEN 'Receiving and Putaway'
+        WHEN 'STORAGE_INVENTORY' THEN 'Storage and Inventory'
+        WHEN 'ORDER_FULFILLMENT' THEN 'Order Fulfillment'
+        WHEN 'OUTBOUND_TRANSPORTATION' THEN 'Outbound Transportation'
+        WHEN 'LAST_MILE_DELIVERY' THEN 'Last-Mile Delivery'
+        WHEN 'REVERSE_LOGISTICS' THEN 'Reverse Logistics'
+        ELSE 'Other'
+      END AS supply_chain_stage_name,
+      CASE supply_chain_stage_code
+        WHEN 'DEMAND_PLANNING' THEN 'PLAN'
+        WHEN 'SOURCING' THEN 'SOURCE'
+        WHEN 'PROCUREMENT' THEN 'SOURCE'
+        WHEN 'PRODUCTION' THEN 'MAKE'
+        WHEN 'INBOUND_TRANSPORTATION' THEN 'DELIVER'
+        WHEN 'RECEIVING' THEN 'DELIVER'
+        WHEN 'STORAGE_INVENTORY' THEN 'DELIVER'
+        WHEN 'ORDER_FULFILLMENT' THEN 'DELIVER'
+        WHEN 'OUTBOUND_TRANSPORTATION' THEN 'DELIVER'
+        WHEN 'LAST_MILE_DELIVERY' THEN 'DELIVER'
+        WHEN 'REVERSE_LOGISTICS' THEN 'RETURN'
+        ELSE 'OTHER'
+      END AS stage_group,
+      CASE supply_chain_stage_code
+        WHEN 'DEMAND_PLANNING' THEN 10
+        WHEN 'SOURCING' THEN 20
+        WHEN 'PROCUREMENT' THEN 30
+        WHEN 'PRODUCTION' THEN 40
+        WHEN 'INBOUND_TRANSPORTATION' THEN 50
+        WHEN 'RECEIVING' THEN 60
+        WHEN 'STORAGE_INVENTORY' THEN 70
+        WHEN 'ORDER_FULFILLMENT' THEN 80
+        WHEN 'OUTBOUND_TRANSPORTATION' THEN 90
+        WHEN 'LAST_MILE_DELIVERY' THEN 100
+        WHEN 'REVERSE_LOGISTICS' THEN 110
+        ELSE 999
+      END AS stage_sequence,
+      CASE status_code
+        WHEN 'CREATED' THEN 'PLANNED'
+        WHEN 'PLANNED' THEN 'PLANNED'
+        WHEN 'SCHEDULED' THEN 'PLANNED'
+        WHEN 'OPEN' THEN 'PLANNED'
+        WHEN 'RELEASED' THEN 'IN_PROGRESS'
+        WHEN 'ALLOCATED' THEN 'IN_PROGRESS'
+        WHEN 'IN_PROGRESS' THEN 'IN_PROGRESS'
+        WHEN 'PICKED' THEN 'IN_PROGRESS'
+        WHEN 'PACKED' THEN 'IN_PROGRESS'
+        WHEN 'DISPATCHED' THEN 'IN_PROGRESS'
+        WHEN 'IN_TRANSIT' THEN 'IN_PROGRESS'
+        WHEN 'ARRIVED' THEN 'IN_PROGRESS'
+        WHEN 'RECEIVED' THEN 'COMPLETED'
+        WHEN 'DELIVERED' THEN 'COMPLETED'
+        WHEN 'COMPLETED' THEN 'COMPLETED'
+        WHEN 'CLOSED' THEN 'COMPLETED'
+        WHEN 'CANCELLED' THEN 'CANCELLED'
+        WHEN 'CANCELED' THEN 'CANCELLED'
+        WHEN 'REJECTED' THEN 'CANCELLED'
+        WHEN 'FAILED' THEN 'EXCEPTION'
+        WHEN 'BLOCKED' THEN 'EXCEPTION'
+        WHEN 'DELAYED' THEN 'EXCEPTION'
+        WHEN 'ON_HOLD' THEN 'EXCEPTION'
+        WHEN 'EXCEPTION' THEN 'EXCEPTION'
+        ELSE 'UNKNOWN'
+      END AS stage_status_category
+    FROM stage_classification
+  )
+  SELECT
+    MD5(CONCAT_WS(
+      '|',
+      COALESCE(CAST(source_system AS VARCHAR), ''),
+      COALESCE(CAST(source_record_type AS VARCHAR), ''),
+      COALESCE(CAST(source_record_id AS VARCHAR), ''),
+      supply_chain_stage_code,
+      COALESCE(CAST(event_timestamp AS VARCHAR), '')
+    )) AS supply_chain_stage_key,
+    supply_chain_stage_code,
+    supply_chain_stage_name,
+    stage_group,
+    stage_sequence,
+    CONCAT(supply_chain_stage_name, ' stage derived from ', source_system, ' operational activity') AS stage_description,
+    process_area_code AS process_area,
+    source_system,
+    source_record_type,
+    source_record_id,
+    business_object_type,
+    business_object_id,
+    parent_object_id,
+    order_id,
+    order_line_id,
+    purchase_order_id,
+    purchase_order_line_id,
+    shipment_id,
+    load_id,
+    delivery_id,
+    inventory_movement_id,
+    production_order_id,
+    supplier_id,
+    carrier_id,
+    facility_id,
+    warehouse_id,
+    origin_location_id,
+    destination_location_id,
+    transport_mode,
+    incoterm,
+    status_code AS stage_status,
+    stage_status_category,
+    event_type_code AS stage_event_type,
+    event_timestamp,
+    planned_start_timestamp,
+    actual_start_timestamp,
+    planned_end_timestamp,
+    actual_end_timestamp,
+    quantity,
+    quantity_uom,
+    weight,
+    weight_uom,
+    volume,
+    volume_uom,
+    CASE
+      WHEN actual_start_timestamp IS NULL THEN NULL
+      ELSE GREATEST(
+        0,
+        FLOOR(EXTRACT(EPOCH FROM (
+          COALESCE(actual_end_timestamp, event_timestamp) - actual_start_timestamp
+        )) / 60)
+      )
+    END AS stage_duration_minutes,
+    CASE
+      WHEN planned_end_timestamp IS NULL THEN FALSE
+      WHEN actual_end_timestamp IS NOT NULL THEN actual_end_timestamp > planned_end_timestamp
+      WHEN stage_status_category NOT IN ('COMPLETED', 'CANCELLED') THEN event_timestamp > planned_end_timestamp
+      ELSE FALSE
+    END AS is_delayed,
+    CASE
+      WHEN planned_end_timestamp IS NULL THEN NULL
+      WHEN actual_end_timestamp IS NOT NULL THEN
+        GREATEST(
+          0,
+          FLOOR(EXTRACT(EPOCH FROM (actual_end_timestamp - planned_end_timestamp)) / 60)
+        )
+      WHEN stage_status_category NOT IN ('COMPLETED', 'CANCELLED') THEN
+        GREATEST(
+          0,
+          FLOOR(EXTRACT(EPOCH FROM (event_timestamp - planned_end_timestamp)) / 60)
+        )
+      ELSE 0
+    END AS delay_minutes,
+    exception_code,
+    exception_description
+  FROM enriched;
+
+Calculation Notes: |
+  1️⃣ Use event-time version for event-type-to-stage mapping.  
+  2️⃣ Deduplicate events using source event identifier or composite key.  
+  3️⃣ Apply tie-breakers for simultaneous events: source sequence number, ingestion sequence, governed stage order.  
+  4️⃣ Exclude test, training, deleted, and heartbeat events.  
+  5️⃣ Cancellations remain with the original stage, not as a separate stage.  
+  6️⃣ Map post-delivery reverse-logistics events to Return.  
+  7️⃣ Use Unknown for unmapped qualifying events; Not Applicable for out-of-scope records.
+
+Business Use Case: |
+  The Chief Supply Chain Officer reviews cycle time, backlog, exception volume, and cost by Supply Chain Stage to locate persistent bottlenecks. If the Receive stage shows increasing dwell time at selected facilities, operations can add receiving capacity, revise appointment schedules, or address supplier advanced-shipping-notice compliance.
+
+
+Source Data: Transportation Management System, Warehouse Management System, Order Management System, Enterprise Resource Planning, Procurement Platform, Manufacturing Execution System, Supplier EDI, and Carrier Event Feeds
+
+Report Attributes: |
+  ["Event Date","Supply Chain Process","Event Type","Shipment Status","Order Status","Facility","Origin Location","Destination Location","Supplier","Carrier","Transportation Mode","Product Category","Business Unit","Region","Exception Type"]
+
+Dashboard Usage: [Executive Supply Chain Performance, End-to-End Supply Chain Control Tower, Order Fulfillment Operations, Transportation Performance, Warehouse Flow and Dwell Time, Supplier Performance, Inventory Movement, Returns and Reverse Logistics]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Supply Chain Process, Shipment Status, Order Status, Fulfillment Status, Transportation Mode, Facility, Location, Supplier, Carrier, Product, Order, Shipment, Event Type]
+
+Derived Dimensions: [Current Supply Chain Stage, Previous Supply Chain Stage, Next Supply Chain Stage, Stage Transition, Stage Sequence Group, Stage Entry Date, Stage Exit Date, Stage Exception Flag]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-10T21:30:13.205419+00:00
+
+Last Modified By: devyendarm
+
+
