@@ -1,0 +1,570 @@
+# Dimension: Carrier
+# Generated: 2026-09-10T23:30:29.055Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Carrier
+
+Description: |
+  Carrier identifies the legal or operational transportation provider responsible for moving a shipment, load, parcel, container, or shipment leg at the recorded business event. It enables performance, cost, service, capacity, compliance, and exception analysis by a governed carrier identity rather than inconsistent source-system names or codes.
+
+Category: Performance
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event and shipment lifecycle
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH master_ranked AS (
+    SELECT
+      c.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(c.carrier_id AS STRING)
+        ORDER BY c.updated_at DESC, c.ingested_at DESC
+      ) AS row_num
+    FROM `your-project.tms.carrier_master` AS c
+  ),
+  master AS (
+    SELECT * EXCEPT (row_num)
+    FROM master_ranked
+    WHERE row_num = 1
+  ),
+  erp_ranked AS (
+    SELECT
+      v.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(v.carrier_id AS STRING)
+        ORDER BY v.updated_at DESC, v.ingested_at DESC
+      ) AS row_num
+    FROM `your-project.erp.carrier_vendors` AS v
+    WHERE v.carrier_id IS NOT NULL
+  ),
+  erp AS (
+    SELECT * EXCEPT (row_num)
+    FROM erp_ranked
+    WHERE row_num = 1
+  ),
+  carrier_base AS (
+    SELECT
+      COALESCE(CAST(m.carrier_id AS STRING), CAST(e.carrier_id AS STRING)) AS carrier_id,
+      COALESCE(m.carrier_code, e.vendor_code) AS carrier_code,
+      COALESCE(m.carrier_name, e.vendor_name) AS carrier_name,
+      COALESCE(m.legal_name, e.legal_name, m.carrier_name, e.vendor_name) AS legal_name,
+      COALESCE(m.carrier_type, e.vendor_type) AS carrier_type,
+      COALESCE(m.carrier_status, e.vendor_status) AS carrier_status,
+      COALESCE(m.scac_code, e.scac_code) AS scac_code,
+      COALESCE(m.dot_number, e.dot_number) AS dot_number,
+      COALESCE(m.mc_number, e.mc_number) AS mc_number,
+      COALESCE(m.tax_id, e.tax_id) AS tax_id,
+      COALESCE(m.duns_number, e.duns_number) AS duns_number,
+      COALESCE(CAST(m.parent_carrier_id AS STRING), CAST(e.parent_vendor_id AS STRING)) AS parent_carrier_id,
+      COALESCE(m.parent_carrier_name, e.parent_vendor_name) AS parent_carrier_name,
+      COALESCE(m.ownership_type, e.ownership_type) AS ownership_type,
+      COALESCE(m.primary_mode, e.primary_transportation_mode) AS primary_mode,
+      COALESCE(m.hazmat_certified_flag, e.hazmat_certified_flag, FALSE) AS hazmat_certified_flag,
+      COALESCE(m.temperature_controlled_flag, e.temperature_controlled_flag, FALSE) AS temperature_controlled_flag,
+      COALESCE(m.expedited_service_flag, e.expedited_service_flag, FALSE) AS expedited_service_flag,
+      COALESCE(m.country_code, e.country_code) AS country_code,
+      COALESCE(m.address_line_1, e.address_line_1) AS address_line_1,
+      COALESCE(m.address_line_2, e.address_line_2) AS address_line_2,
+      COALESCE(m.city, e.city) AS city,
+      COALESCE(m.state_province, e.state_province) AS state_province,
+      COALESCE(m.postal_code, e.postal_code) AS postal_code,
+      COALESCE(m.region, e.region) AS region,
+      COALESCE(m.contact_name, e.contact_name) AS contact_name,
+      COALESCE(m.contact_email, e.contact_email) AS contact_email,
+      COALESCE(m.contact_phone, e.contact_phone) AS contact_phone,
+      COALESCE(m.website_url, e.website_url) AS website_url,
+      COALESCE(m.safety_rating, e.safety_rating) AS safety_rating,
+      COALESCE(m.preferred_carrier_flag, e.preferred_vendor_flag, FALSE) AS preferred_carrier_flag,
+      COALESCE(m.source_system, e.source_system, 'TMS_ERP') AS source_system
+    FROM master AS m
+    FULL OUTER JOIN erp AS e
+      ON CAST(m.carrier_id AS STRING) = CAST(e.carrier_id AS STRING)
+  ),
+  capabilities AS (
+    SELECT
+      CAST(carrier_id AS STRING) AS carrier_id,
+      STRING_AGG(DISTINCT transportation_mode, ', ' ORDER BY transportation_mode) AS transportation_modes,
+      STRING_AGG(DISTINCT equipment_type, ', ' ORDER BY equipment_type) AS equipment_types,
+      STRING_AGG(DISTINCT service_level, ', ' ORDER BY service_level) AS service_levels
+    FROM `your-project.tms.carrier_capabilities`
+    WHERE COALESCE(is_active, TRUE)
+    GROUP BY carrier_id
+  ),
+  connectivity_ranked AS (
+    SELECT
+      i.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(i.carrier_id AS STRING)
+        ORDER BY i.updated_at DESC, i.ingested_at DESC
+      ) AS row_num
+    FROM `your-project.integration.carrier_connectivity` AS i
+  ),
+  connectivity AS (
+    SELECT
+      CAST(carrier_id AS STRING) AS carrier_id,
+      COALESCE(edi_enabled_flag, FALSE) AS edi_enabled_flag,
+      edi_identifier,
+      COALESCE(api_enabled_flag, FALSE) AS api_enabled_flag,
+      telematics_provider
+    FROM connectivity_ranked
+    WHERE row_num = 1
+  ),
+  insurance_ranked AS (
+    SELECT
+      i.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(i.carrier_id AS STRING)
+        ORDER BY
+          CASE WHEN i.insurance_expiration_date >= CURRENT_DATE() THEN 0 ELSE 1 END,
+          i.insurance_expiration_date DESC,
+          i.updated_at DESC
+      ) AS row_num
+    FROM `your-project.risk.carrier_insurance` AS i
+    WHERE UPPER(COALESCE(i.policy_status, 'ACTIVE')) <> 'CANCELLED'
+  ),
+  insurance AS (
+    SELECT
+      CAST(carrier_id AS STRING) AS carrier_id,
+      insurance_policy_number,
+      insurance_expiration_date
+    FROM insurance_ranked
+    WHERE row_num = 1
+  ),
+  contract_ranked AS (
+    SELECT
+      c.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(c.carrier_id AS STRING)
+        ORDER BY c.contract_start_date DESC, c.updated_at DESC
+      ) AS row_num
+    FROM `your-project.procurement.carrier_contracts` AS c
+    WHERE UPPER(c.contract_status) = 'ACTIVE'
+      AND c.contract_start_date <= CURRENT_DATE()
+      AND (c.contract_end_date IS NULL OR c.contract_end_date >= CURRENT_DATE())
+  ),
+  active_contract AS (
+    SELECT
+      CAST(carrier_id AS STRING) AS carrier_id,
+      CAST(contract_id AS STRING) AS active_contract_id,
+      contract_start_date,
+      contract_end_date
+    FROM contract_ranked
+    WHERE row_num = 1
+  ),
+  claims_by_shipment AS (
+    SELECT DISTINCT CAST(shipment_id AS STRING) AS shipment_id
+    FROM `your-project.freight_audit.carrier_claims`
+    WHERE claim_created_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 365 DAY)
+      AND UPPER(COALESCE(claim_status, 'OPEN')) NOT IN ('VOID', 'CANCELLED')
+  ),
+  shipment_metrics AS (
+    SELECT
+      CAST(s.carrier_id AS STRING) AS carrier_id,
+      COUNTIF(s.delivered_timestamp IS NOT NULL) AS delivered_shipments,
+      COUNTIF(
+        s.delivered_timestamp IS NOT NULL
+        AND s.promised_delivery_timestamp IS NOT NULL
+      ) AS delivery_commitment_population,
+      COUNTIF(
+        s.delivered_timestamp IS NOT NULL
+        AND s.promised_delivery_timestamp IS NOT NULL
+        AND s.delivered_timestamp <= s.promised_delivery_timestamp
+      ) AS on_time_deliveries,
+      COUNTIF(s.delivered_timestamp IS NOT NULL AND c.shipment_id IS NOT NULL) AS delivered_shipments_with_claims,
+      AVG(
+        CASE
+          WHEN s.actual_pickup_timestamp IS NOT NULL
+           AND s.delivered_timestamp IS NOT NULL
+          THEN TIMESTAMP_DIFF(s.delivered_timestamp, s.actual_pickup_timestamp, SECOND) / 86400.0
+        END
+      ) AS average_transit_days
+    FROM `your-project.tms.shipments` AS s
+    LEFT JOIN claims_by_shipment AS c
+      ON CAST(s.shipment_id AS STRING) = c.shipment_id
+    WHERE DATE(COALESCE(s.delivered_timestamp, s.created_at)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 365 DAY)
+    GROUP BY carrier_id
+  ),
+  tender_metrics AS (
+    SELECT
+      CAST(carrier_id AS STRING) AS carrier_id,
+      COUNT(*) AS total_tenders,
+      COUNTIF(UPPER(tender_status) IN ('ACCEPTED', 'AWARDED')) AS accepted_tenders
+    FROM `your-project.tms.load_tenders`
+    WHERE DATE(tender_created_timestamp) >= DATE_SUB(CURRENT_DATE(), INTERVAL 365 DAY)
+    GROUP BY carrier_id
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT('CARRIER|', b.carrier_id))) AS carrier_key,
+    b.carrier_id,
+    b.carrier_code,
+    b.carrier_name,
+    b.legal_name,
+    b.carrier_type,
+    b.carrier_status,
+    b.scac_code,
+    b.dot_number,
+    b.mc_number,
+    b.tax_id,
+    b.duns_number,
+    b.parent_carrier_id,
+    b.parent_carrier_name,
+    b.ownership_type,
+    b.primary_mode,
+    cp.transportation_modes,
+    cp.equipment_types,
+    cp.service_levels,
+    b.hazmat_certified_flag,
+    b.temperature_controlled_flag,
+    b.expedited_service_flag,
+    b.country_code,
+    b.address_line_1,
+    b.address_line_2,
+    b.city,
+    b.state_province,
+    b.postal_code,
+    b.region,
+    b.contact_name,
+    b.contact_email,
+    b.contact_phone,
+    b.website_url,
+    COALESCE(cn.edi_enabled_flag, FALSE) AS edi_enabled_flag,
+    cn.edi_identifier,
+    COALESCE(cn.api_enabled_flag, FALSE) AS api_enabled_flag,
+    cn.telematics_provider,
+    ins.insurance_policy_number,
+    ins.insurance_expiration_date,
+    b.safety_rating,
+    ROUND(SAFE_DIVIDE(sm.on_time_deliveries, sm.delivery_commitment_population), 6) AS on_time_delivery_rate_365d,
+    ROUND(SAFE_DIVIDE(tm.accepted_tenders, tm.total_tenders), 6) AS tender_acceptance_rate_365d,
+    ROUND(SAFE_DIVIDE(sm.delivered_shipments_with_claims, sm.delivered_shipments), 6) AS claims_rate_365d,
+    ROUND(sm.average_transit_days, 2) AS average_transit_days_365d,
+    ac.active_contract_id,
+    ac.contract_start_date,
+    ac.contract_end_date,
+    b.preferred_carrier_flag,
+    b.source_system
+  FROM carrier_base AS b
+  LEFT JOIN capabilities AS cp USING (carrier_id)
+  LEFT JOIN connectivity AS cn USING (carrier_id)
+  LEFT JOIN insurance AS ins USING (carrier_id)
+  LEFT JOIN active_contract AS ac USING (carrier_id)
+  LEFT JOIN shipment_metrics AS sm USING (carrier_id)
+  LEFT JOIN tender_metrics AS tm USING (carrier_id)
+  WHERE b.carrier_id IS NOT NULL;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH master_ranked AS (
+    SELECT
+      c.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(c.carrier_id AS VARCHAR)
+        ORDER BY c.updated_at DESC, c.ingested_at DESC
+      ) AS row_num
+    FROM tms_carrier_master_backend AS c
+  ),
+  master AS (
+    SELECT *
+    FROM master_ranked
+    WHERE row_num = 1
+  ),
+  erp_ranked AS (
+    SELECT
+      v.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(v.carrier_id AS VARCHAR)
+        ORDER BY v.updated_at DESC, v.ingested_at DESC
+      ) AS row_num
+    FROM erp_carrier_vendors_backend AS v
+    WHERE v.carrier_id IS NOT NULL
+  ),
+  erp AS (
+    SELECT *
+    FROM erp_ranked
+    WHERE row_num = 1
+  ),
+  carrier_base AS (
+    SELECT
+      COALESCE(CAST(m.carrier_id AS VARCHAR), CAST(e.carrier_id AS VARCHAR)) AS carrier_id,
+      COALESCE(m.carrier_code, e.vendor_code) AS carrier_code,
+      COALESCE(m.carrier_name, e.vendor_name) AS carrier_name,
+      COALESCE(m.legal_name, e.legal_name, m.carrier_name, e.vendor_name) AS legal_name,
+      COALESCE(m.carrier_type, e.vendor_type) AS carrier_type,
+      COALESCE(m.carrier_status, e.vendor_status) AS carrier_status,
+      COALESCE(m.scac_code, e.scac_code) AS scac_code,
+      COALESCE(m.dot_number, e.dot_number) AS dot_number,
+      COALESCE(m.mc_number, e.mc_number) AS mc_number,
+      COALESCE(m.tax_id, e.tax_id) AS tax_id,
+      COALESCE(m.duns_number, e.duns_number) AS duns_number,
+      COALESCE(CAST(m.parent_carrier_id AS VARCHAR), CAST(e.parent_vendor_id AS VARCHAR)) AS parent_carrier_id,
+      COALESCE(m.parent_carrier_name, e.parent_vendor_name) AS parent_carrier_name,
+      COALESCE(m.ownership_type, e.ownership_type) AS ownership_type,
+      COALESCE(m.primary_mode, e.primary_transportation_mode) AS primary_mode,
+      COALESCE(m.hazmat_certified_flag, e.hazmat_certified_flag, FALSE) AS hazmat_certified_flag,
+      COALESCE(m.temperature_controlled_flag, e.temperature_controlled_flag, FALSE) AS temperature_controlled_flag,
+      COALESCE(m.expedited_service_flag, e.expedited_service_flag, FALSE) AS expedited_service_flag,
+      COALESCE(m.country_code, e.country_code) AS country_code,
+      COALESCE(m.address_line_1, e.address_line_1) AS address_line_1,
+      COALESCE(m.address_line_2, e.address_line_2) AS address_line_2,
+      COALESCE(m.city, e.city) AS city,
+      COALESCE(m.state_province, e.state_province) AS state_province,
+      COALESCE(m.postal_code, e.postal_code) AS postal_code,
+      COALESCE(m.region, e.region) AS region,
+      COALESCE(m.contact_name, e.contact_name) AS contact_name,
+      COALESCE(m.contact_email, e.contact_email) AS contact_email,
+      COALESCE(m.contact_phone, e.contact_phone) AS contact_phone,
+      COALESCE(m.website_url, e.website_url) AS website_url,
+      COALESCE(m.safety_rating, e.safety_rating) AS safety_rating,
+      COALESCE(m.preferred_carrier_flag, e.preferred_vendor_flag, FALSE) AS preferred_carrier_flag,
+      COALESCE(m.source_system, e.source_system, 'TMS_ERP') AS source_system
+    FROM master AS m
+    FULL OUTER JOIN erp AS e
+      ON CAST(m.carrier_id AS VARCHAR) = CAST(e.carrier_id AS VARCHAR)
+  ),
+  capabilities AS (
+    SELECT
+      CAST(carrier_id AS VARCHAR) AS carrier_id,
+      STRING_AGG(DISTINCT transportation_mode, ', ') AS transportation_modes,
+      STRING_AGG(DISTINCT equipment_type, ', ') AS equipment_types,
+      STRING_AGG(DISTINCT service_level, ', ') AS service_levels
+    FROM tms_carrier_capabilities_backend
+    WHERE COALESCE(is_active, TRUE) = TRUE
+    GROUP BY CAST(carrier_id AS VARCHAR)
+  ),
+  connectivity_ranked AS (
+    SELECT
+      i.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(i.carrier_id AS VARCHAR)
+        ORDER BY i.updated_at DESC, i.ingested_at DESC
+      ) AS row_num
+    FROM carrier_connectivity_backend AS i
+  ),
+  connectivity AS (
+    SELECT
+      CAST(carrier_id AS VARCHAR) AS carrier_id,
+      COALESCE(edi_enabled_flag, FALSE) AS edi_enabled_flag,
+      edi_identifier,
+      COALESCE(api_enabled_flag, FALSE) AS api_enabled_flag,
+      telematics_provider
+    FROM connectivity_ranked
+    WHERE row_num = 1
+  ),
+  insurance_ranked AS (
+    SELECT
+      i.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(i.carrier_id AS VARCHAR)
+        ORDER BY
+          CASE WHEN i.insurance_expiration_date >= CURRENT_DATE THEN 0 ELSE 1 END,
+          i.insurance_expiration_date DESC,
+          i.updated_at DESC
+      ) AS row_num
+    FROM carrier_insurance_backend AS i
+    WHERE UPPER(COALESCE(i.policy_status, 'ACTIVE')) <> 'CANCELLED'
+  ),
+  insurance AS (
+    SELECT
+      CAST(carrier_id AS VARCHAR) AS carrier_id,
+      insurance_policy_number,
+      insurance_expiration_date
+    FROM insurance_ranked
+    WHERE row_num = 1
+  ),
+  contract_ranked AS (
+    SELECT
+      c.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(c.carrier_id AS VARCHAR)
+        ORDER BY c.contract_start_date DESC, c.updated_at DESC
+      ) AS row_num
+    FROM carrier_contracts_backend AS c
+    WHERE UPPER(c.contract_status) = 'ACTIVE'
+      AND c.contract_start_date <= CURRENT_DATE
+      AND (c.contract_end_date IS NULL OR c.contract_end_date >= CURRENT_DATE)
+  ),
+  active_contract AS (
+    SELECT
+      CAST(carrier_id AS VARCHAR) AS carrier_id,
+      CAST(contract_id AS VARCHAR) AS active_contract_id,
+      contract_start_date,
+      contract_end_date
+    FROM contract_ranked
+    WHERE row_num = 1
+  ),
+  claims_by_shipment AS (
+    SELECT DISTINCT CAST(shipment_id AS VARCHAR) AS shipment_id
+    FROM carrier_claims_backend
+    WHERE claim_created_date >= CURRENT_DATE - INTERVAL '365 days'
+      AND UPPER(COALESCE(claim_status, 'OPEN')) NOT IN ('VOID', 'CANCELLED')
+  ),
+  shipment_metrics AS (
+    SELECT
+      CAST(s.carrier_id AS VARCHAR) AS carrier_id,
+      SUM(CASE WHEN s.delivered_timestamp IS NOT NULL THEN 1 ELSE 0 END) AS delivered_shipments,
+      SUM(
+        CASE
+          WHEN s.delivered_timestamp IS NOT NULL
+           AND s.promised_delivery_timestamp IS NOT NULL
+          THEN 1 ELSE 0
+        END
+      ) AS delivery_commitment_population,
+      SUM(
+        CASE
+          WHEN s.delivered_timestamp IS NOT NULL
+           AND s.promised_delivery_timestamp IS NOT NULL
+           AND s.delivered_timestamp <= s.promised_delivery_timestamp
+          THEN 1 ELSE 0
+        END
+      ) AS on_time_deliveries,
+      SUM(
+        CASE
+          WHEN s.delivered_timestamp IS NOT NULL
+           AND c.shipment_id IS NOT NULL
+          THEN 1 ELSE 0
+        END
+      ) AS delivered_shipments_with_claims,
+      AVG(
+        CASE
+          WHEN s.actual_pickup_timestamp IS NOT NULL
+           AND s.delivered_timestamp IS NOT NULL
+          THEN EXTRACT(EPOCH FROM (s.delivered_timestamp - s.actual_pickup_timestamp)) / 86400.0
+        END
+      ) AS average_transit_days
+    FROM tms_shipments_backend AS s
+    LEFT JOIN claims_by_shipment AS c
+      ON CAST(s.shipment_id AS VARCHAR) = c.shipment_id
+    WHERE CAST(COALESCE(s.delivered_timestamp, s.created_at) AS DATE) >= CURRENT_DATE - INTERVAL '365 days'
+    GROUP BY CAST(s.carrier_id AS VARCHAR)
+  ),
+  tender_metrics AS (
+    SELECT
+      CAST(carrier_id AS VARCHAR) AS carrier_id,
+      COUNT(*) AS total_tenders,
+      SUM(CASE WHEN UPPER(tender_status) IN ('ACCEPTED', 'AWARDED') THEN 1 ELSE 0 END) AS accepted_tenders
+    FROM tms_load_tenders_backend
+    WHERE CAST(tender_created_timestamp AS DATE) >= CURRENT_DATE - INTERVAL '365 days'
+    GROUP BY CAST(carrier_id AS VARCHAR)
+  )
+  SELECT
+    MD5('CARRIER|' || b.carrier_id) AS carrier_key,
+    b.carrier_id,
+    b.carrier_code,
+    b.carrier_name,
+    b.legal_name,
+    b.carrier_type,
+    b.carrier_status,
+    b.scac_code,
+    b.dot_number,
+    b.mc_number,
+    b.tax_id,
+    b.duns_number,
+    b.parent_carrier_id,
+    b.parent_carrier_name,
+    b.ownership_type,
+    b.primary_mode,
+    cp.transportation_modes,
+    cp.equipment_types,
+    cp.service_levels,
+    b.hazmat_certified_flag,
+    b.temperature_controlled_flag,
+    b.expedited_service_flag,
+    b.country_code,
+    b.address_line_1,
+    b.address_line_2,
+    b.city,
+    b.state_province,
+    b.postal_code,
+    b.region,
+    b.contact_name,
+    b.contact_email,
+    b.contact_phone,
+    b.website_url,
+    COALESCE(cn.edi_enabled_flag, FALSE) AS edi_enabled_flag,
+    cn.edi_identifier,
+    COALESCE(cn.api_enabled_flag, FALSE) AS api_enabled_flag,
+    cn.telematics_provider,
+    ins.insurance_policy_number,
+    ins.insurance_expiration_date,
+    b.safety_rating,
+    ROUND((1.0 * sm.on_time_deliveries) / NULLIF(sm.delivery_commitment_population, 0), 6) AS on_time_delivery_rate_365d,
+    ROUND((1.0 * tm.accepted_tenders) / NULLIF(tm.total_tenders, 0), 6) AS tender_acceptance_rate_365d,
+    ROUND((1.0 * sm.delivered_shipments_with_claims) / NULLIF(sm.delivered_shipments, 0), 6) AS claims_rate_365d,
+    ROUND(sm.average_transit_days, 2) AS average_transit_days_365d,
+    ac.active_contract_id,
+    ac.contract_start_date,
+    ac.contract_end_date,
+    b.preferred_carrier_flag,
+    b.source_system
+  FROM carrier_base AS b
+  LEFT JOIN capabilities AS cp ON b.carrier_id = cp.carrier_id
+  LEFT JOIN connectivity AS cn ON b.carrier_id = cn.carrier_id
+  LEFT JOIN insurance AS ins ON b.carrier_id = ins.carrier_id
+  LEFT JOIN active_contract AS ac ON b.carrier_id = ac.carrier_id
+  LEFT JOIN shipment_metrics AS sm ON b.carrier_id = sm.carrier_id
+  LEFT JOIN tender_metrics AS tm ON b.carrier_id = tm.carrier_id
+  WHERE b.carrier_id IS NOT NULL;
+
+Calculation Notes: |
+  1️⃣ Resolve carrier using source identifiers in order of reliability.  
+  2️⃣ Store stable enterprise carrier identifier as dimension key; expose governed display name.  
+  3️⃣ Assign operating carrier for each shipment leg in multi-leg or interline shipments.  
+  4️⃣ Evaluate carrier attribution at the effective time of events using slowly changing dimension history.  
+  5️⃣ Use 'Unknown Carrier', 'Unmapped Carrier', and 'Not Applicable' for distinct cases.  
+  6️⃣ Exclude brokers and third-party logistics from operating-carrier value unless they execute movement.  
+  7️⃣ Deduplicate records using legal identifiers and approved master-data survivorship rules.
+
+Business Use Case: |
+  Transportation leadership uses the Carrier dimension to compare on-time pickup, on-time delivery, tender acceptance, claims, damage, freight cost, and exception rates by provider and lane. The sourcing team can shift volume away from underperforming carriers, renegotiate contracts, suspend noncompliant providers, or award additional capacity to carriers that consistently meet service and cost commitments.
+
+
+Source Data: Transportation Management System, Warehouse Management System, ERP, carrier master data, procurement and contract management systems, freight audit and payment platforms, telematics, EDI, and carrier APIs
+
+Report Attributes: |
+  ["Carrier Normalized Name","Carrier Parent Group","Carrier Type","Carrier Role","Transportation Mode","Carrier Service","Service Level","Carrier Contract Status","Carrier Compliance Status","Carrier Risk Tier","Carrier Performance Tier","Origin Country","Destination Country","Origin Region","Destination Region","Lane","Route","Equipment Type","Shipment Status","Exception Reason","Customer","Business Unit","Fiscal Period"]
+
+Dashboard Usage: [Carrier Performance Scorecard, Transportation Executive Dashboard, Freight Cost and Spend Dashboard, On-Time Delivery Dashboard, Tender Acceptance and Capacity Dashboard, Carrier Compliance and Risk Dashboard, Claims and Damage Dashboard, Shipment Exceptions Dashboard, Lane and Route Performance Dashboard, Carrier Procurement and Sourcing Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Shipment, Shipment Leg, Load, Transportation Mode, Carrier Service, Service Level, Origin Location, Destination Location, Route, Lane, Equipment Type, Vehicle, Driver, Customer, Shipper, Consignee, Freight Class, Contract, Tender, Tracking Event, Exception Reason, Currency]
+
+Derived Dimensions: [Carrier Normalized Name, Carrier Parent Group, Carrier Type, Carrier Operating Authority, Carrier Contract Status, Carrier Compliance Status, Carrier Risk Tier, Carrier Performance Tier, Carrier Geographic Coverage, Carrier Primary Transportation Mode, Carrier Ownership Type]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-10T23:30:28.495743+00:00
+
+Last Modified By: devyendarm
+
+
