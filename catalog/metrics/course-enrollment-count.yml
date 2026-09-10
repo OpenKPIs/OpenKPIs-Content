@@ -1,0 +1,248 @@
+# Metric: Course Enrollment Count
+# Generated: 2026-09-10T19:30:43.111Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Course Enrollment Count
+Formula: COUNT(DISTINCT CASE WHEN enrollment_event_type = 'ENROLLMENT_CONFIRMED' AND access_granted = TRUE AND is_test = FALSE AND is_admin_created = FALSE AND is_system_transfer = FALSE THEN CONCAT(institution_id, '|', enrollment_id) END)
+
+Description: |
+  Counts unique digital course enrollments confirmed during the reporting period when a learner is granted access to a valid course offering. It measures gross enrollment creation and retains qualifying enrollments regardless of subsequent completion, cancellation, expiration, or refund activity.
+
+Category: Conversion
+
+Tags: [metric]
+
+Industry: Education
+
+Priority: High
+
+Core Area: Onboarding
+
+Scope: Event
+
+Measure Type: count
+
+Aggregation Window: Time based - Hourly/Daily/Monthly/Yearly
+
+GA4 Event: |
+  sign_up
+
+Adobe Event: |
+  sign_up
+
+W3 Data Layer: |
+  {"event":[{"eventInfo":{"eventName":"sign_up","eventLabel":"course","eventAction":"sign_up"},"attributes":{"courseId":"{{course_id}}","courseName":"{{course_name}}","enrollmentId":"{{enrollment_id}}","courseOfferingId":"{{course_offering_id}}","enrollmentStatus":"confirmed"}}]}
+
+GA4 Data Layer: |
+  {"event":"sign_up","method":"course_enrollment","course_id":"{{course_id}}","course_name":"{{course_name}}","enrollment_id":"{{enrollment_id}}","enrollment_status":"confirmed","course_offering_id":"{{course_offering_id}}"}
+
+Adobe Client Data Layer: |
+  {"data":{"course":{"id":"{{course_id}}","name":"{{course_name}}","offeringId":"{{course_offering_id}}"},"enrollment":{"id":"{{enrollment_id}}","status":"confirmed"}},"event":"sign_up"}
+
+XDM Mapping: |
+  {"_id":"{{enrollment_id}}","eventType":"sign_up","timestamp":"{{enrollment_confirmation_timestamp}}","productListItems":[{"SKU":"{{course_offering_id}}","name":"{{course_name}}","quantity":1}]}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH enrollment_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS enrollment_date,
+      event_timestamp,
+      event_bundle_sequence_id,
+      batch_event_index,
+      (
+        SELECT COALESCE(
+          ANY_VALUE(ep.value.string_value),
+          CAST(ANY_VALUE(ep.value.int_value) AS STRING)
+        )
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key = 'enrollment_id'
+      ) AS enrollment_id,
+      (
+        SELECT COALESCE(
+          ANY_VALUE(ep.value.string_value),
+          CAST(ANY_VALUE(ep.value.int_value) AS STRING)
+        )
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key = 'course_id'
+      ) AS course_id,
+      (
+        SELECT COALESCE(
+          ANY_VALUE(ep.value.string_value),
+          CAST(ANY_VALUE(ep.value.int_value) AS STRING)
+        )
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key = 'course_offering_id'
+      ) AS course_offering_id,
+      (
+        SELECT ANY_VALUE(ep.value.string_value)
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key = 'course_name'
+      ) AS course_name,
+      (
+        SELECT ANY_VALUE(ep.value.string_value)
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key = 'enrollment_status'
+      ) AS enrollment_status,
+      (
+        SELECT ANY_VALUE(ep.value.string_value)
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key = 'method'
+      ) AS enrollment_method
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date)
+                            AND FORMAT_DATE('%Y%m%d', @end_date)
+      AND event_name = 'sign_up'
+  ),
+  validated_enrollment_events AS (
+    SELECT
+      enrollment_date,
+      event_timestamp,
+      event_bundle_sequence_id,
+      batch_event_index,
+      TRIM(enrollment_id) AS enrollment_id,
+      COALESCE(NULLIF(TRIM(course_id), ''), 'unknown') AS course_id,
+      COALESCE(NULLIF(TRIM(course_offering_id), ''), 'unknown') AS course_offering_id,
+      COALESCE(NULLIF(TRIM(course_name), ''), 'unknown') AS course_name,
+      LOWER(TRIM(enrollment_status)) AS enrollment_status,
+      LOWER(TRIM(enrollment_method)) AS enrollment_method
+    FROM enrollment_events
+    WHERE NULLIF(TRIM(enrollment_id), '') IS NOT NULL
+      AND LOWER(TRIM(enrollment_status)) = 'confirmed'
+      AND LOWER(TRIM(enrollment_method)) = 'course_enrollment'
+  ),
+  deduplicated_enrollments AS (
+    SELECT
+      enrollment_date,
+      enrollment_id,
+      course_id,
+      course_offering_id,
+      course_name,
+      enrollment_status,
+      enrollment_method
+    FROM validated_enrollment_events
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY enrollment_id
+      ORDER BY
+        event_timestamp ASC,
+        event_bundle_sequence_id ASC,
+        batch_event_index ASC
+    ) = 1
+  )
+  SELECT
+    enrollment_date,
+    course_id,
+    course_offering_id,
+    course_name,
+    enrollment_status,
+    enrollment_method,
+    COUNT(*) AS course_enrollment_count
+  FROM deduplicated_enrollments
+  GROUP BY
+    enrollment_date,
+    course_id,
+    course_offering_id,
+    course_name,
+    enrollment_status,
+    enrollment_method;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH enrollment_events AS (
+    SELECT
+      CAST(timestamp AS DATE) AS enrollment_date,
+      timestamp AS enrollment_timestamp,
+      TRIM(_id) AS enrollment_id,
+      COALESCE(
+        NULLIF(TRIM(productListItems[0].SKU), ''),
+        'unknown'
+      ) AS course_offering_id,
+      COALESCE(
+        NULLIF(TRIM(productListItems[0].name), ''),
+        'unknown'
+      ) AS course_name
+    FROM digital_learning_experience_events
+    WHERE eventType = 'sign_up'
+      AND CAST(timestamp AS DATE) BETWEEN CAST(:start_date AS DATE)
+                                      AND CAST(:end_date AS DATE)
+      AND NULLIF(TRIM(_id), '') IS NOT NULL
+  ),
+  deduplicated_enrollments AS (
+    SELECT
+      enrollment_date,
+      enrollment_id,
+      course_offering_id,
+      course_name
+    FROM (
+      SELECT
+        enrollment_date,
+        enrollment_timestamp,
+        enrollment_id,
+        course_offering_id,
+        course_name,
+        ROW_NUMBER() OVER (
+          PARTITION BY enrollment_id
+          ORDER BY enrollment_timestamp ASC, course_offering_id ASC
+        ) AS record_rank
+      FROM enrollment_events
+    ) AS ranked_enrollments
+    WHERE record_rank = 1
+  )
+  SELECT
+    enrollment_date,
+    course_offering_id,
+    course_name,
+    'confirmed' AS enrollment_status,
+    'course_enrollment' AS enrollment_method,
+    COUNT(*) AS course_enrollment_count
+  FROM deduplicated_enrollments
+  GROUP BY
+    enrollment_date,
+    course_offering_id,
+    course_name;
+
+Calculation Notes: |
+  1️⃣ Attribute each enrollment to the immutable confirmation timestamp converted to the governed reporting timezone.
+  2️⃣ Deduplicate using institution_id and enrollment_id; transport retries and duplicate confirmation events must not increase the count.
+  3️⃣ Exclude pending, failed, abandoned, waitlisted, test, administrative, and system-transfer records that do not represent a new learner enrollment decision.
+  4️⃣ Require a valid learner, course offering, and successfully granted digital access entitlement; records missing required identifiers are excluded from certified reporting.
+  5️⃣ Count a re-enrollment only when a separately authorized enrollment creates a new valid enrollment_id; reinstatements retaining the original identifier are not new enrollments.
+  6️⃣ Do not subtract later cancellations, expirations, revocations, completions, or refunds; use separate current-state or net-enrollment metrics for those analyses.
+  7️⃣ Assign late-arriving confirmations to their original confirmation date and restate affected aggregates within the governed backfill window.
+
+Business Use Case: |
+  Product leadership monitors enrollment volume by course, device, platform, and acquisition channel after changes to the digital enrollment journey. If mobile course-detail traffic remains stable while confirmed enrollments decline, the product and growth teams prioritize mobile funnel diagnostics, entitlement failures, and enrollment-flow remediation.
+
+
+Source Data: Digital Learning Platform (LMS enrollment confirmation events)
+
+Report Attributes: |
+  ["Enrollment Date","Course","Course Offering","Course Category","Subject Area","Course Delivery Mode","Paid or Free","Enrollment Method","Enrollment Channel","Acquisition Channel","Campaign","Learner Type","New or Returning Learner","Subscription Plan","Device Type","Platform","Country","Region","Language","Enrollment Status"]
+
+Dashboard Usage: [Executive Education Performance Dashboard, Digital Enrollment Funnel Dashboard, Course Portfolio Performance Dashboard, Growth and Acquisition Dashboard, Learner Onboarding Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Unique Enrolled Learners, Paid Course Enrollment Count, Free Course Enrollment Count, Active Enrollment Count, Enrollment Cancellation Count, Course Start Count, Course Completion Count, Course Revenue]
+
+Derived KPIs: [Visitor-to-Enrollment Conversion Rate, Course Detail View-to-Enrollment Conversion Rate, Enrollment Growth Rate, Paid Enrollment Share, Enrollment Cancellation Rate, Course Start Rate, Course Completion Rate, Revenue per Enrollment, Average Enrollments per Learner]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-10T19:30:39.213696+00:00
+
+Last Modified By: devyendarm
+
+
