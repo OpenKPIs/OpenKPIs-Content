@@ -1,0 +1,79 @@
+# Event: Shipment Cancellation
+# Generated: 2026-09-10T22:30:24.648Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Shipment Cancellation
+Event Serialization: once per shipment cancellation lifecycle
+
+Description: |
+  Shipment Cancellation records an accepted transition of a shipment from an active lifecycle status to a terminal cancelled status before successful delivery. It measures when, why, where, and by whom shipment execution was stopped, enabling cancellation trend, operational impact, preventability, and service-quality analysis.
+
+Category: Quality
+
+Tags: [event]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+
+Event Type: custom
+
+Aggregation Window: Event; Time based - Hourly/Daily/Weekly/Monthly/Yearly
+
+
+
+
+
+
+
+Parameters: |
+  {"currency":"string - ISO 4217 currency code for the cancellation fee","event_id":"string - globally unique identifier for the emitted cancellation event","order_id":"string - identifier of the commercial or fulfillment order associated with the shipment","carrier_id":"string - identifier of the carrier assigned when the cancellation became effective","shipment_id":"string - unique identifier of the cancelled shipment","tendered_at":"string - timestamp when the shipment was first tendered to a carrier, if applicable","weight_unit":"string - unit for shipment weight, such as kg or lb","picked_up_at":"string - actual pickup timestamp if pickup occurred before cancellation","event_version":"string - schema version used to produce the event payload","package_count":"integer - number of packages assigned to the shipment at cancellation","source_system":"string - application that accepted or originated the authoritative cancellation transition","correlation_id":"string - identifier used to trace the cancellation across workflow, integration, and message-processing systems","transport_mode":"string - shipment mode such as parcel, road, air, ocean, rail, or multimodal","event_timestamp":"string - UTC timestamp in ISO 8601 format when the event was emitted","shipment_weight":"number - shipment weight at cancellation expressed in the stated weight unit","planned_pickup_at":"string - planned pickup timestamp in ISO 8601 format","origin_facility_id":"string - identifier of the planned shipment origin facility","parent_shipment_id":"string - identifier of the parent shipment when the cancelled shipment is a split, child, return, or replacement shipment","service_level_code":"string - contracted or selected transportation service level","origin_country_code":"string - ISO 3166-1 alpha-2 code for the planned origin country","planned_delivery_at":"string - planned delivery timestamp in ISO 8601 format","preventability_code":"string - governed classification indicating preventable, non-preventable, or undetermined","cancellation_channel":"string - channel through which cancellation was initiated, such as portal, API, EDI, mobile application, operations console, or automated rule","cancellation_sequence":"integer - sequential number distinguishing separate cancellation episodes for a shipment that was reinstated and later cancelled again","responsible_party_type":"string - party type accountable for the condition that caused cancellation","cancellation_fee_amount":"number - fee or penalty recognized directly because of the cancellation, excluding estimated downstream costs","current_shipment_status":"string - terminal status expected to equal cancelled","destination_facility_id":"string - identifier of the planned shipment destination facility","cancellation_reason_code":"string - governed code identifying the specific cancellation reason","destination_country_code":"string - ISO 3166-1 alpha-2 code for the planned destination country","previous_shipment_status":"string - governed shipment status immediately before cancellation","source_record_updated_at":"string - UTC timestamp in ISO 8601 format of the source record update that produced the event","cancellation_effective_at":"string - UTC timestamp in ISO 8601 format when the cancellation became operationally effective","cancellation_initiator_type":"string - party type that initiated the cancellation, such as customer, shipper, carrier, operations, system, or regulatory authority","cancellation_reason_category":"string - standardized reason grouping such as customer, inventory, carrier, capacity, compliance, weather, duplicate, or operational error","shipment_stage_at_cancellation":"string - lifecycle stage when cancellation occurred, such as planned, tendered, accepted, picked up, in transit, or delivery attempted"}
+
+Calculation Notes: |
+  1️⃣ Count only accepted transitions into cancelled status.  
+  2️⃣ Deduplicate retries using event_id; enforce one event per shipment_id and cancellation_sequence.  
+  3️⃣ Exclude test shipments, training records, and rejected or pending cancellations.  
+  4️⃣ Evaluate split shipments at child-shipment grain; cancelling one child does not affect others.  
+  5️⃣ New event generated only with a new cancellation_sequence after reinstatement.  
+  6️⃣ Quarantine cancellations after confirmed delivery as lifecycle violations unless reversed.  
+  7️⃣ Attribute event to cancellation_effective_at; use source-recorded fee and currency without conversion.
+
+Business Use Case: |
+  The Transportation Operations executive reviews weekly cancellation rate by lifecycle stage, carrier, facility, and reason category. If preventable post-tender cancellations increase for a specific origin and carrier, the team can revise tender timing, capacity allocation, carrier routing rules, and facility cutoff controls, then monitor subsequent cancellation cohorts to confirm improvement.
+
+
+Source Data: Transportation Management System, Order Management System, Warehouse Management System, carrier EDI/API messages, and shipment event streaming platform
+
+    Report Attributes: |
+  ["Cancellation Effective Date","Cancellation Reason Category","Cancellation Reason Code","Shipment Stage at Cancellation","Cancellation Initiator Type","Responsible Party Type","Preventability Code","Carrier","Service Level","Transport Mode","Origin Facility","Destination Facility","Origin Country","Destination Country","Customer Account","Cancellation Channel","Pre-Pickup or Post-Pickup Classification"]
+
+    Dashboard Usage: [Shipment Execution Control Tower, Transportation Operations Performance, Shipment Quality and Exceptions, Carrier Performance Scorecard, Fulfillment Reliability, Cancellation Root Cause Analysis, Logistics Cost and Leakage]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [Shipment, Shipment Status, Cancellation Reason, Cancellation Initiator, Responsible Party, Carrier, Customer Account, Order, Service Level, Transport Mode, Origin Facility, Destination Facility, Origin Geography, Destination Geography, Cancellation Channel, Shipment Lifecycle Stage, Event Date, Event Time]
+
+    Derived Dimensions: [Cancellation Lead-Time Band, Shipment Age at Cancellation Band, Cancellation Lifecycle Stage Group, Cancellation Responsibility Group, Cancellation Preventability Group, Pre-Pickup or Post-Pickup Cancellation, Domestic or Cross-Border Shipment, Same-Day Cancellation Flag, Carrier-Assigned-at-Cancellation Flag, Cancellation Fee Band]
+
+    Derived Metrics: [Cancelled Shipment Count, Distinct Orders with Cancelled Shipments, Pre-Pickup Cancellation Count, Post-Pickup Cancellation Count, Preventable Cancellation Count, Carrier-Attributed Cancellation Count, Customer-Initiated Cancellation Count, Cancellation Fee Amount, Average Time from Shipment Creation to Cancellation, Average Time from Tender to Cancellation, Reinstated and Recancelled Shipment Count]
+
+    Derived KPIs: [Shipment Cancellation Rate, Preventable Shipment Cancellation Rate, Post-Pickup Cancellation Rate, Carrier-Attributed Cancellation Rate, Customer-Initiated Cancellation Rate, Cancellation Cost per Cancelled Shipment, On-Time Shipment Preservation Rate, Cancellation Rate by Lifecycle Stage, Cancellation Rate by Carrier, Cancellation Rate by Service Level]
+
+    Data Sensitivity: restricted
+
+    Contains PII: Yes
+
+    Status: draft
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-10T22:30:24.157249+00:00
+
+    Last Modified By: devyendarm
+
+    
