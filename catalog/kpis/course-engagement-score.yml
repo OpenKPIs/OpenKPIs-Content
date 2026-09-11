@@ -1,0 +1,125 @@
+# KPI: Course Engagement Score
+# Generated: 2026-09-11T18:30:24.986Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Course Engagement Score
+Formula: (Total Interactions with Course Content / Total Enrolled Users) × 100
+
+Description: |
+  Measures the level of interaction and participation of users with a course, indicating overall user involvement and interest.
+
+Category: Engagement
+
+Tags: [kpi]
+
+Industry: [EdTech & E-Learning]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Monthly
+
+GA4 Event: |
+  engagement
+
+Adobe Event: |
+  course_engagement
+
+W3 Data Layer: |
+  {"digitalData":{"event":{"eventInfo":{"eventName":"engagement","eventLabel":"course_engagement_score","eventAction":"course_interaction","eventCategory":"user_engagement"},"attributes":{"courseId":"12345","courseName":"Introduction to Data Science","engagementScore":85}}}}
+
+GA4 Data Layer: |
+  {"event":"engagement","eventParams":{"course_id":"12345","course_name":"Introduction to Data Science","event_label":"course_engagement_score","event_action":"course_interaction","event_category":"user_engagement","engagement_score":85}}
+
+Adobe Client Data Layer: |
+  {"event":"course_engagement","course":{"id":"12345","name":"Introduction to Data Science","engagementScore":85}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"event1":{"name":"engagement","label":"course_engagement_score","action":"course_interaction","category":"user_engagement"},"attributes":{"courseId":"12345","courseName":"Introduction to Data Science","engagementScore":85}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT
+    event_date,
+    event_params.value.string_value AS course_id,
+    event_params.value.string_value AS course_name,
+    event_params.value.int_value AS engagement_score
+  FROM
+    `your-project.analytics_123456789.events_*`,
+    UNNEST(event_params) AS event_params
+  WHERE
+    event_name = 'engagement'
+    AND event_params.key IN ('course_id', 'course_name', 'engagement_score')
+  GROUP BY
+    event_date,
+    course_id,
+    course_name,
+    engagement_score
+  ORDER BY
+    event_date DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT
+    xdm:timestamp AS event_date,
+    xdm:course.id AS course_id,
+    xdm:course.name AS course_name,
+    xdm:course.engagementScore AS engagement_score
+  FROM
+    aep_backend_dataset
+  WHERE
+    xdm:event = 'course_engagement'
+  GROUP BY
+    event_date,
+    course_id,
+    course_name,
+    engagement_score
+  ORDER BY
+    event_date DESC;
+
+Calculation Notes: |
+  1️⃣ Exclude users with < 5 minutes of total course time.  
+  2️⃣ Include interactions: video views, quiz attempts, forum posts.  
+  3️⃣ Ensure data accuracy in time tracking.  
+  4️⃣ Analyze user engagement based on interaction types.  
+  5️⃣ Focus on meaningful participation metrics.
+
+Business Use Case: |
+  Used by product managers to identify courses with low engagement and implement strategies to improve content or delivery.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Course ID","User Demographics","Device Type"]
+
+Dashboard Usage: [Course Performance Dashboard, User Engagement Overview]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Completion Rate, Active User Count, Time Spent on Course]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-11T18:30:24.272411+00:00
+
+Last Modified By: devyendarm
+
+
