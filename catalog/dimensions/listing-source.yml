@@ -1,0 +1,440 @@
+# Dimension: Listing Source
+# Generated: 2026-09-11T18:30:28.830Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Listing Source
+
+Description: |
+  Listing Source identifies the canonical origin through which a real estate listing entered the platform's inventory. It supports analysis of listing acquisition, inventory quality, conversion performance, and commercial dependency by source.
+
+Category: Acquisition
+
+Tags: [dimension]
+
+Industry: Real Estate Tech
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Item (effective-dated listing version)
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH source_metadata AS (
+    SELECT
+      r.listing_record_id,
+      COALESCE(
+        NULLIF(TRIM(r.source_id), ''),
+        NULLIF(TRIM(r.integration_id), ''),
+        NULLIF(TRIM(r.feed_id), ''),
+        NULLIF(TRIM(r.mls_id), ''),
+        NULLIF(TRIM(r.partner_id), ''),
+        NULLIF(TRIM(r.broker_id), ''),
+        CONCAT(
+          COALESCE(NULLIF(TRIM(r.source_system), ''), 'UNKNOWN_SYSTEM'), ':',
+          COALESCE(NULLIF(TRIM(r.ingestion_method), ''), 'UNKNOWN_METHOD'), ':',
+          COALESCE(NULLIF(TRIM(r.source_account_id), ''), 'UNKNOWN_ACCOUNT')
+        )
+      ) AS listing_source_natural_key,
+      COALESCE(NULLIF(TRIM(i.source_name), ''), NULLIF(TRIM(r.source_name), ''), 'Unknown listing source') AS source_name,
+      COALESCE(NULLIF(TRIM(i.source_display_name), ''), NULLIF(TRIM(r.source_display_name), ''), NULLIF(TRIM(i.source_name), ''), NULLIF(TRIM(r.source_name), ''), 'Unknown listing source') AS source_display_name,
+      UPPER(COALESCE(NULLIF(TRIM(i.source_type), ''), NULLIF(TRIM(r.source_type), ''), 'UNKNOWN')) AS raw_source_type,
+      COALESCE(NULLIF(TRIM(i.source_system), ''), NULLIF(TRIM(r.source_system), ''), 'UNKNOWN_SYSTEM') AS source_system,
+      COALESCE(NULLIF(TRIM(i.source_platform), ''), NULLIF(TRIM(r.source_platform), ''), 'UNKNOWN_PLATFORM') AS source_platform,
+      COALESCE(NULLIF(TRIM(r.provider_id), ''), NULLIF(TRIM(i.provider_id), '')) AS provider_id,
+      COALESCE(NULLIF(TRIM(r.provider_name), ''), NULLIF(TRIM(i.provider_name), '')) AS provider_name,
+      COALESCE(NULLIF(TRIM(r.partner_id), ''), NULLIF(TRIM(i.partner_id), '')) AS partner_id,
+      COALESCE(NULLIF(TRIM(r.partner_name), ''), NULLIF(TRIM(i.partner_name), '')) AS partner_name,
+      COALESCE(NULLIF(TRIM(r.broker_id), ''), NULLIF(TRIM(i.broker_id), '')) AS broker_id,
+      COALESCE(NULLIF(TRIM(r.broker_name), ''), NULLIF(TRIM(i.broker_name), '')) AS broker_name,
+      COALESCE(NULLIF(TRIM(r.mls_id), ''), NULLIF(TRIM(i.mls_id), '')) AS mls_id,
+      COALESCE(NULLIF(TRIM(r.mls_name), ''), NULLIF(TRIM(i.mls_name), '')) AS mls_name,
+      COALESCE(NULLIF(TRIM(r.reso_organization_id), ''), NULLIF(TRIM(i.reso_organization_id), '')) AS reso_organization_id,
+      COALESCE(NULLIF(TRIM(r.feed_id), ''), NULLIF(TRIM(i.feed_id), '')) AS feed_id,
+      COALESCE(NULLIF(TRIM(r.feed_name), ''), NULLIF(TRIM(i.feed_name), '')) AS feed_name,
+      UPPER(COALESCE(NULLIF(TRIM(r.feed_format), ''), NULLIF(TRIM(i.feed_format), ''), 'UNKNOWN')) AS feed_format,
+      COALESCE(NULLIF(TRIM(r.feed_version), ''), NULLIF(TRIM(i.feed_version), '')) AS feed_version,
+      COALESCE(NULLIF(TRIM(r.integration_id), ''), NULLIF(TRIM(i.integration_id), '')) AS integration_id,
+      UPPER(COALESCE(NULLIF(TRIM(r.integration_type), ''), NULLIF(TRIM(i.integration_type), ''), 'UNKNOWN')) AS integration_type,
+      UPPER(COALESCE(NULLIF(TRIM(r.ingestion_method), ''), NULLIF(TRIM(i.ingestion_method), ''), 'UNKNOWN')) AS ingestion_method,
+      UPPER(COALESCE(NULLIF(TRIM(r.submission_method), ''), NULLIF(TRIM(i.submission_method), ''), 'UNKNOWN')) AS submission_method,
+      UPPER(COALESCE(NULLIF(TRIM(r.uploader_actor_type), ''), 'UNKNOWN')) AS uploader_actor_type,
+      UPPER(COALESCE(NULLIF(TRIM(r.owner_type), ''), NULLIF(TRIM(i.owner_type), ''), 'UNKNOWN')) AS owner_type,
+      COALESCE(NULLIF(TRIM(r.application_name), ''), NULLIF(TRIM(i.application_name), '')) AS application_name,
+      COALESCE(NULLIF(TRIM(r.api_client_id), ''), NULLIF(TRIM(i.api_client_id), '')) AS api_client_id,
+      COALESCE(NULLIF(TRIM(r.source_account_id), ''), NULLIF(TRIM(i.source_account_id), '')) AS source_account_id,
+      COALESCE(NULLIF(TRIM(r.external_source_code), ''), NULLIF(TRIM(i.external_source_code), '')) AS external_source_code,
+      UPPER(COALESCE(NULLIF(TRIM(r.source_country_code), ''), NULLIF(TRIM(i.source_country_code), ''), 'UNKNOWN')) AS source_country_code,
+      UPPER(COALESCE(NULLIF(TRIM(r.source_region_code), ''), NULLIF(TRIM(i.source_region_code), ''), 'UNKNOWN')) AS source_region_code,
+      UPPER(COALESCE(NULLIF(TRIM(r.source_market_code), ''), NULLIF(TRIM(i.source_market_code), ''), 'UNKNOWN')) AS source_market_code,
+      COALESCE(NULLIF(TRIM(r.source_timezone), ''), NULLIF(TRIM(i.source_timezone), ''), 'UTC') AS source_timezone,
+      LOWER(COALESCE(NULLIF(TRIM(r.source_url_host), ''), NULLIF(TRIM(i.source_url_host), ''))) AS source_url_host,
+      UPPER(COALESCE(NULLIF(TRIM(i.source_status), ''), NULLIF(TRIM(r.source_status), ''), 'ACTIVE')) AS source_status,
+      COALESCE(i.is_active, r.is_active, TRUE) AS is_active,
+      COALESCE(i.is_first_party, r.is_first_party, FALSE) AS configured_is_first_party,
+      COALESCE(i.is_paid_source, r.is_paid_source, FALSE) AS is_paid_source,
+      COALESCE(i.source_priority, r.source_priority, 999) AS source_priority,
+      UPPER(COALESCE(NULLIF(TRIM(i.trust_tier), ''), NULLIF(TRIM(r.trust_tier), ''), 'UNRATED')) AS trust_tier,
+      UPPER(COALESCE(NULLIF(TRIM(i.data_quality_tier), ''), NULLIF(TRIM(r.data_quality_tier), ''), 'UNRATED')) AS data_quality_tier,
+      COALESCE(i.effective_start_timestamp, r.first_received_timestamp, r.created_timestamp) AS effective_start_timestamp,
+      COALESCE(i.effective_end_timestamp, TIMESTAMP('9999-12-31 23:59:59+00')) AS effective_end_timestamp,
+      COALESCE(i.created_timestamp, r.created_timestamp, r.first_received_timestamp) AS created_timestamp,
+      GREATEST(
+        COALESCE(i.updated_timestamp, TIMESTAMP('1970-01-01 00:00:00+00')),
+        COALESCE(r.updated_timestamp, r.received_timestamp, r.created_timestamp, TIMESTAMP('1970-01-01 00:00:00+00'))
+      ) AS updated_timestamp
+    FROM `your-project.listing_ingestion.raw_listing_records` AS r
+    LEFT JOIN `your-project.listing_ingestion.integration_registry` AS i
+      ON r.integration_id = i.integration_id
+  ),
+  normalized AS (
+    SELECT
+      *,
+      CASE
+        WHEN raw_source_type IN ('MLS', 'MLS_FEED') THEN 'MLS'
+        WHEN raw_source_type IN ('RESO', 'RESO_WEB_API', 'RESO_FEED') THEN 'RESO'
+        WHEN raw_source_type IN ('BROKER', 'BROKER_API', 'BROKER_FEED') THEN 'BROKER'
+        WHEN raw_source_type IN ('PARTNER', 'PARTNER_API', 'PARTNER_FEED') THEN 'PARTNER'
+        WHEN raw_source_type IN ('BULK', 'BULK_UPLOAD', 'FILE_UPLOAD') THEN 'BULK_UPLOAD'
+        WHEN raw_source_type IN ('AGENT', 'AGENT_APP', 'AGENT_PORTAL') THEN 'AGENT_APPLICATION'
+        WHEN raw_source_type IN ('OWNER', 'OWNER_APP', 'FSBO') THEN 'OWNER_APPLICATION'
+        WHEN raw_source_type IN ('BUILDER', 'BUILDER_SYSTEM') THEN 'BUILDER_SYSTEM'
+        WHEN raw_source_type IN ('PROPERTY_MANAGER', 'PROPERTY_MANAGEMENT', 'PMS') THEN 'PROPERTY_MANAGEMENT'
+        WHEN raw_source_type IN ('MASTER_DATA', 'INTERNAL', 'ADMIN') THEN 'MASTER_DATA'
+        ELSE 'UNKNOWN'
+      END AS source_type
+    FROM source_metadata
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN source_type IN ('MLS', 'RESO', 'BROKER', 'PARTNER') THEN 'SYNDICATED_SUPPLY'
+        WHEN source_type IN ('AGENT_APPLICATION', 'OWNER_APPLICATION', 'BULK_UPLOAD') THEN 'DIRECT_SUPPLY'
+        WHEN source_type IN ('BUILDER_SYSTEM', 'PROPERTY_MANAGEMENT') THEN 'INSTITUTIONAL_SUPPLY'
+        WHEN source_type = 'MASTER_DATA' THEN 'INTERNAL_SUPPLY'
+        ELSE 'UNCLASSIFIED'
+      END AS source_category,
+      CASE
+        WHEN source_type IN ('MLS', 'RESO', 'BROKER', 'PARTNER', 'BUILDER_SYSTEM', 'PROPERTY_MANAGEMENT') THEN 'INTEGRATION'
+        WHEN source_type = 'BULK_UPLOAD' THEN 'FILE'
+        WHEN source_type IN ('AGENT_APPLICATION', 'OWNER_APPLICATION') THEN 'APPLICATION'
+        WHEN source_type = 'MASTER_DATA' THEN 'INTERNAL'
+        ELSE 'UNKNOWN'
+      END AS source_channel,
+      CASE
+        WHEN ingestion_method LIKE '%API%' THEN 'API'
+        WHEN ingestion_method LIKE '%WEBHOOK%' THEN 'WEBHOOK'
+        WHEN ingestion_method LIKE '%SFTP%' OR ingestion_method LIKE '%FTP%' THEN 'MANAGED_FILE_TRANSFER'
+        WHEN ingestion_method LIKE '%FILE%' OR ingestion_method LIKE '%UPLOAD%' THEN 'FILE_UPLOAD'
+        WHEN ingestion_method LIKE '%STREAM%' OR ingestion_method LIKE '%QUEUE%' THEN 'STREAM'
+        WHEN ingestion_method LIKE '%APPLICATION%' OR ingestion_method LIKE '%PORTAL%' THEN 'USER_ENTRY'
+        ELSE ingestion_method
+      END AS source_subchannel,
+      CASE
+        WHEN configured_is_first_party THEN TRUE
+        WHEN source_type IN ('AGENT_APPLICATION', 'OWNER_APPLICATION', 'MASTER_DATA') THEN TRUE
+        ELSE FALSE
+      END AS is_first_party
+    FROM normalized
+  ),
+  ranked AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY listing_source_natural_key
+        ORDER BY updated_timestamp DESC, listing_record_id DESC
+      ) AS source_record_rank
+    FROM classified
+  )
+  SELECT
+    TO_HEX(MD5(CAST(listing_source_natural_key AS BYTES))) AS listing_source_key,
+    listing_source_natural_key,
+    source_name,
+    source_display_name,
+    source_type,
+    source_category,
+    source_channel,
+    source_subchannel,
+    source_system,
+    source_platform,
+    provider_id,
+    provider_name,
+    partner_id,
+    partner_name,
+    broker_id,
+    broker_name,
+    mls_id,
+    mls_name,
+    reso_organization_id,
+    feed_id,
+    feed_name,
+    feed_format,
+    feed_version,
+    integration_id,
+    integration_type,
+    ingestion_method,
+    submission_method,
+    uploader_actor_type,
+    owner_type,
+    application_name,
+    api_client_id,
+    source_account_id,
+    external_source_code,
+    source_country_code,
+    source_region_code,
+    source_market_code,
+    source_timezone,
+    source_url_host,
+    source_status,
+    is_active,
+    is_first_party,
+    is_paid_source,
+    source_priority,
+    trust_tier,
+    data_quality_tier,
+    effective_start_timestamp,
+    effective_end_timestamp,
+    created_timestamp,
+    updated_timestamp
+  FROM ranked
+  WHERE source_record_rank = 1;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH source_metadata AS (
+    SELECT
+      r.listing_record_id,
+      COALESCE(
+        NULLIF(TRIM(r.source_id), ''),
+        NULLIF(TRIM(r.integration_id), ''),
+        NULLIF(TRIM(r.feed_id), ''),
+        NULLIF(TRIM(r.mls_id), ''),
+        NULLIF(TRIM(r.partner_id), ''),
+        NULLIF(TRIM(r.broker_id), ''),
+        CONCAT(
+          COALESCE(NULLIF(TRIM(r.source_system), ''), 'UNKNOWN_SYSTEM'), ':',
+          COALESCE(NULLIF(TRIM(r.ingestion_method), ''), 'UNKNOWN_METHOD'), ':',
+          COALESCE(NULLIF(TRIM(r.source_account_id), ''), 'UNKNOWN_ACCOUNT')
+        )
+      ) AS listing_source_natural_key,
+      COALESCE(NULLIF(TRIM(i.source_name), ''), NULLIF(TRIM(r.source_name), ''), 'Unknown listing source') AS source_name,
+      COALESCE(NULLIF(TRIM(i.source_display_name), ''), NULLIF(TRIM(r.source_display_name), ''), NULLIF(TRIM(i.source_name), ''), NULLIF(TRIM(r.source_name), ''), 'Unknown listing source') AS source_display_name,
+      UPPER(COALESCE(NULLIF(TRIM(i.source_type), ''), NULLIF(TRIM(r.source_type), ''), 'UNKNOWN')) AS raw_source_type,
+      COALESCE(NULLIF(TRIM(i.source_system), ''), NULLIF(TRIM(r.source_system), ''), 'UNKNOWN_SYSTEM') AS source_system,
+      COALESCE(NULLIF(TRIM(i.source_platform), ''), NULLIF(TRIM(r.source_platform), ''), 'UNKNOWN_PLATFORM') AS source_platform,
+      COALESCE(NULLIF(TRIM(r.provider_id), ''), NULLIF(TRIM(i.provider_id), '')) AS provider_id,
+      COALESCE(NULLIF(TRIM(r.provider_name), ''), NULLIF(TRIM(i.provider_name), '')) AS provider_name,
+      COALESCE(NULLIF(TRIM(r.partner_id), ''), NULLIF(TRIM(i.partner_id), '')) AS partner_id,
+      COALESCE(NULLIF(TRIM(r.partner_name), ''), NULLIF(TRIM(i.partner_name), '')) AS partner_name,
+      COALESCE(NULLIF(TRIM(r.broker_id), ''), NULLIF(TRIM(i.broker_id), '')) AS broker_id,
+      COALESCE(NULLIF(TRIM(r.broker_name), ''), NULLIF(TRIM(i.broker_name), '')) AS broker_name,
+      COALESCE(NULLIF(TRIM(r.mls_id), ''), NULLIF(TRIM(i.mls_id), '')) AS mls_id,
+      COALESCE(NULLIF(TRIM(r.mls_name), ''), NULLIF(TRIM(i.mls_name), '')) AS mls_name,
+      COALESCE(NULLIF(TRIM(r.reso_organization_id), ''), NULLIF(TRIM(i.reso_organization_id), '')) AS reso_organization_id,
+      COALESCE(NULLIF(TRIM(r.feed_id), ''), NULLIF(TRIM(i.feed_id), '')) AS feed_id,
+      COALESCE(NULLIF(TRIM(r.feed_name), ''), NULLIF(TRIM(i.feed_name), '')) AS feed_name,
+      UPPER(COALESCE(NULLIF(TRIM(r.feed_format), ''), NULLIF(TRIM(i.feed_format), ''), 'UNKNOWN')) AS feed_format,
+      COALESCE(NULLIF(TRIM(r.feed_version), ''), NULLIF(TRIM(i.feed_version), '')) AS feed_version,
+      COALESCE(NULLIF(TRIM(r.integration_id), ''), NULLIF(TRIM(i.integration_id), '')) AS integration_id,
+      UPPER(COALESCE(NULLIF(TRIM(r.integration_type), ''), NULLIF(TRIM(i.integration_type), ''), 'UNKNOWN')) AS integration_type,
+      UPPER(COALESCE(NULLIF(TRIM(r.ingestion_method), ''), NULLIF(TRIM(i.ingestion_method), ''), 'UNKNOWN')) AS ingestion_method,
+      UPPER(COALESCE(NULLIF(TRIM(r.submission_method), ''), NULLIF(TRIM(i.submission_method), ''), 'UNKNOWN')) AS submission_method,
+      UPPER(COALESCE(NULLIF(TRIM(r.uploader_actor_type), ''), 'UNKNOWN')) AS uploader_actor_type,
+      UPPER(COALESCE(NULLIF(TRIM(r.owner_type), ''), NULLIF(TRIM(i.owner_type), ''), 'UNKNOWN')) AS owner_type,
+      COALESCE(NULLIF(TRIM(r.application_name), ''), NULLIF(TRIM(i.application_name), '')) AS application_name,
+      COALESCE(NULLIF(TRIM(r.api_client_id), ''), NULLIF(TRIM(i.api_client_id), '')) AS api_client_id,
+      COALESCE(NULLIF(TRIM(r.source_account_id), ''), NULLIF(TRIM(i.source_account_id), '')) AS source_account_id,
+      COALESCE(NULLIF(TRIM(r.external_source_code), ''), NULLIF(TRIM(i.external_source_code), '')) AS external_source_code,
+      UPPER(COALESCE(NULLIF(TRIM(r.source_country_code), ''), NULLIF(TRIM(i.source_country_code), ''), 'UNKNOWN')) AS source_country_code,
+      UPPER(COALESCE(NULLIF(TRIM(r.source_region_code), ''), NULLIF(TRIM(i.source_region_code), ''), 'UNKNOWN')) AS source_region_code,
+      UPPER(COALESCE(NULLIF(TRIM(r.source_market_code), ''), NULLIF(TRIM(i.source_market_code), ''), 'UNKNOWN')) AS source_market_code,
+      COALESCE(NULLIF(TRIM(r.source_timezone), ''), NULLIF(TRIM(i.source_timezone), ''), 'UTC') AS source_timezone,
+      LOWER(COALESCE(NULLIF(TRIM(r.source_url_host), ''), NULLIF(TRIM(i.source_url_host), ''))) AS source_url_host,
+      UPPER(COALESCE(NULLIF(TRIM(i.source_status), ''), NULLIF(TRIM(r.source_status), ''), 'ACTIVE')) AS source_status,
+      COALESCE(i.is_active, r.is_active, TRUE) AS is_active,
+      COALESCE(i.is_first_party, r.is_first_party, FALSE) AS configured_is_first_party,
+      COALESCE(i.is_paid_source, r.is_paid_source, FALSE) AS is_paid_source,
+      COALESCE(i.source_priority, r.source_priority, 999) AS source_priority,
+      UPPER(COALESCE(NULLIF(TRIM(i.trust_tier), ''), NULLIF(TRIM(r.trust_tier), ''), 'UNRATED')) AS trust_tier,
+      UPPER(COALESCE(NULLIF(TRIM(i.data_quality_tier), ''), NULLIF(TRIM(r.data_quality_tier), ''), 'UNRATED')) AS data_quality_tier,
+      COALESCE(i.effective_start_timestamp, r.first_received_timestamp, r.created_timestamp) AS effective_start_timestamp,
+      COALESCE(i.effective_end_timestamp, TIMESTAMP '9999-12-31 23:59:59') AS effective_end_timestamp,
+      COALESCE(i.created_timestamp, r.created_timestamp, r.first_received_timestamp) AS created_timestamp,
+      GREATEST(
+        COALESCE(i.updated_timestamp, TIMESTAMP '1970-01-01 00:00:00'),
+        COALESCE(r.updated_timestamp, r.received_timestamp, r.created_timestamp, TIMESTAMP '1970-01-01 00:00:00')
+      ) AS updated_timestamp
+    FROM listing_ingestion_raw_records AS r
+    LEFT JOIN listing_integration_registry AS i
+      ON r.integration_id = i.integration_id
+  ),
+  normalized AS (
+    SELECT
+      *,
+      CASE
+        WHEN raw_source_type IN ('MLS', 'MLS_FEED') THEN 'MLS'
+        WHEN raw_source_type IN ('RESO', 'RESO_WEB_API', 'RESO_FEED') THEN 'RESO'
+        WHEN raw_source_type IN ('BROKER', 'BROKER_API', 'BROKER_FEED') THEN 'BROKER'
+        WHEN raw_source_type IN ('PARTNER', 'PARTNER_API', 'PARTNER_FEED') THEN 'PARTNER'
+        WHEN raw_source_type IN ('BULK', 'BULK_UPLOAD', 'FILE_UPLOAD') THEN 'BULK_UPLOAD'
+        WHEN raw_source_type IN ('AGENT', 'AGENT_APP', 'AGENT_PORTAL') THEN 'AGENT_APPLICATION'
+        WHEN raw_source_type IN ('OWNER', 'OWNER_APP', 'FSBO') THEN 'OWNER_APPLICATION'
+        WHEN raw_source_type IN ('BUILDER', 'BUILDER_SYSTEM') THEN 'BUILDER_SYSTEM'
+        WHEN raw_source_type IN ('PROPERTY_MANAGER', 'PROPERTY_MANAGEMENT', 'PMS') THEN 'PROPERTY_MANAGEMENT'
+        WHEN raw_source_type IN ('MASTER_DATA', 'INTERNAL', 'ADMIN') THEN 'MASTER_DATA'
+        ELSE 'UNKNOWN'
+      END AS source_type
+    FROM source_metadata
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN source_type IN ('MLS', 'RESO', 'BROKER', 'PARTNER') THEN 'SYNDICATED_SUPPLY'
+        WHEN source_type IN ('AGENT_APPLICATION', 'OWNER_APPLICATION', 'BULK_UPLOAD') THEN 'DIRECT_SUPPLY'
+        WHEN source_type IN ('BUILDER_SYSTEM', 'PROPERTY_MANAGEMENT') THEN 'INSTITUTIONAL_SUPPLY'
+        WHEN source_type = 'MASTER_DATA' THEN 'INTERNAL_SUPPLY'
+        ELSE 'UNCLASSIFIED'
+      END AS source_category,
+      CASE
+        WHEN source_type IN ('MLS', 'RESO', 'BROKER', 'PARTNER', 'BUILDER_SYSTEM', 'PROPERTY_MANAGEMENT') THEN 'INTEGRATION'
+        WHEN source_type = 'BULK_UPLOAD' THEN 'FILE'
+        WHEN source_type IN ('AGENT_APPLICATION', 'OWNER_APPLICATION') THEN 'APPLICATION'
+        WHEN source_type = 'MASTER_DATA' THEN 'INTERNAL'
+        ELSE 'UNKNOWN'
+      END AS source_channel,
+      CASE
+        WHEN ingestion_method LIKE '%API%' THEN 'API'
+        WHEN ingestion_method LIKE '%WEBHOOK%' THEN 'WEBHOOK'
+        WHEN ingestion_method LIKE '%SFTP%' OR ingestion_method LIKE '%FTP%' THEN 'MANAGED_FILE_TRANSFER'
+        WHEN ingestion_method LIKE '%FILE%' OR ingestion_method LIKE '%UPLOAD%' THEN 'FILE_UPLOAD'
+        WHEN ingestion_method LIKE '%STREAM%' OR ingestion_method LIKE '%QUEUE%' THEN 'STREAM'
+        WHEN ingestion_method LIKE '%APPLICATION%' OR ingestion_method LIKE '%PORTAL%' THEN 'USER_ENTRY'
+        ELSE ingestion_method
+      END AS source_subchannel,
+      CASE
+        WHEN configured_is_first_party THEN TRUE
+        WHEN source_type IN ('AGENT_APPLICATION', 'OWNER_APPLICATION', 'MASTER_DATA') THEN TRUE
+        ELSE FALSE
+      END AS is_first_party
+    FROM normalized
+  ),
+  ranked AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY listing_source_natural_key
+        ORDER BY updated_timestamp DESC, listing_record_id DESC
+      ) AS source_record_rank
+    FROM classified
+  )
+  SELECT
+    MD5(listing_source_natural_key) AS listing_source_key,
+    listing_source_natural_key,
+    source_name,
+    source_display_name,
+    source_type,
+    source_category,
+    source_channel,
+    source_subchannel,
+    source_system,
+    source_platform,
+    provider_id,
+    provider_name,
+    partner_id,
+    partner_name,
+    broker_id,
+    broker_name,
+    mls_id,
+    mls_name,
+    reso_organization_id,
+    feed_id,
+    feed_name,
+    feed_format,
+    feed_version,
+    integration_id,
+    integration_type,
+    ingestion_method,
+    submission_method,
+    uploader_actor_type,
+    owner_type,
+    application_name,
+    api_client_id,
+    source_account_id,
+    external_source_code,
+    source_country_code,
+    source_region_code,
+    source_market_code,
+    source_timezone,
+    source_url_host,
+    source_status,
+    is_active,
+    is_first_party,
+    is_paid_source,
+    source_priority,
+    trust_tier,
+    data_quality_tier,
+    effective_start_timestamp,
+    effective_end_timestamp,
+    created_timestamp,
+    updated_timestamp
+  FROM ranked
+  WHERE source_record_rank = 1;
+
+Calculation Notes: |
+  1️⃣ Exclude property reference, valuation-only, test, training, and deleted records unless specified.  
+  2️⃣ Relisted properties must have a new listing record source, not inherit from prior listings.  
+  3️⃣ Feed retransmissions and listing updates do not create a new source.  
+  4️⃣ Authorized transfers to a different feed require an effective-dated source change.  
+  5️⃣ Consumer web-session timeout and traffic attribution rules do not apply.  
+  6️⃣ Session, referrer, or campaign data must not overwrite Listing Source.  
+  7️⃣ Use the source effective at the reporting timestamp for point-in-time reporting.
+
+Business Use Case: |
+  Marketplace Operations compares active inventory, publication success, duplicate rate, lead conversion, freshness, and listing expiry by Listing Source. Executives use the results to renegotiate underperforming feed agreements, prioritize direct broker or builder integrations, reduce dependency on high-cost syndication partners, and direct onboarding resources toward sources that deliver complete and converting inventory.
+
+
+Source Data: Listing Ingestion Platform, MLS and RESO feeds, broker and partner APIs, bulk-upload services, agent and owner listing applications, builder systems, property-management integrations, and listing master data
+
+Report Attributes: |
+  ["Listing Source Provider","Listing Status","Listing Type","Property Type","Market","Brokerage","Price Band","Listing Age Band","Publication Status","Data Quality Tier","Lead Conversion Band"]
+
+Dashboard Usage: [Inventory Acquisition Executive Dashboard, Listing Supply and Coverage Dashboard, Source Quality and Freshness Dashboard, Listing Conversion by Source Dashboard, Syndication Partner Performance Dashboard, Broker and MLS Feed Operations Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Listing Source Provider, Listing Source Feed, Listing Type, Property Type, Listing Status, Listing Market, Brokerage, Listing Agent, Inventory Acquisition Channel, Syndication Partner]
+
+Derived Dimensions: [Listing Source Group, Direct vs Syndicated Source, Professional vs Consumer Source, Source Ownership Type, Source Dependency Tier]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-11T18:30:28.151156+00:00
+
+Last Modified By: devyendarm
+
+
