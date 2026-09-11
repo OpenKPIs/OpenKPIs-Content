@@ -1,0 +1,583 @@
+# Metric: Active Property Listing Count
+# Generated: 2026-09-11T21:30:33.323Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Active Property Listing Count
+Formula: COUNT(DISTINCT CASE WHEN active_start_at <= snapshot_timestamp AND (active_end_at > snapshot_timestamp OR active_end_at IS NULL) AND publication_status = 'published' AND is_searchable = TRUE AND is_suppressed = FALSE AND is_deleted = FALSE THEN canonical_listing_id END)
+
+Description: |
+  Counts distinct property listings that are published, searchable, and eligible for customer discovery at a defined snapshot time. It measures available marketplace inventory rather than unique physical properties, listing impressions, or listings that were active at any other time during the reporting period.
+
+Category: Performance
+
+Tags: [metric]
+
+Industry: Real Estate Tech
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Item
+
+Measure Type: count
+
+Aggregation Window: Time based - Daily
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH latest_listings AS (
+    SELECT *
+    FROM `your-project.listing_management.listings`
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY listing_id, marketplace_id
+      ORDER BY updated_at DESC, ingested_at DESC
+    ) = 1
+  ),
+  latest_inventory AS (
+    SELECT *
+    FROM `your-project.marketplace_inventory.listing_inventory`
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY listing_id, marketplace_id
+      ORDER BY updated_at DESC, ingested_at DESC
+    ) = 1
+  ),
+  active_listings AS (
+    SELECT
+      l.listing_id,
+      l.property_id,
+      l.marketplace_id,
+      COALESCE(i.marketplace_name, l.marketplace_name) AS marketplace_name,
+      l.business_unit,
+      l.brand_name,
+      COALESCE(i.channel, l.channel, 'marketplace') AS channel,
+      l.language_code,
+      l.country_code,
+      l.region_name,
+      l.state_code,
+      l.city_name,
+      l.postal_code,
+      l.property_type,
+      l.property_subtype,
+      l.property_class,
+      l.listing_type,
+      l.transaction_type,
+      l.ownership_type,
+      l.seller_id,
+      l.seller_type,
+      l.agency_id,
+      l.agent_id,
+      l.currency_code,
+      l.listing_price,
+      l.bedroom_count,
+      l.bathroom_count,
+      l.area_value,
+      l.area_unit,
+      l.floor_number,
+      l.furnishing_status,
+      l.construction_status,
+      i.inventory_status,
+      l.occupancy_status,
+      l.verification_status,
+      l.moderation_status,
+      l.premium_tier,
+      COALESCE(l.is_featured, FALSE) AS is_featured,
+      COALESCE(l.is_promoted, FALSE) AS is_promoted,
+      COALESCE(l.is_new_build, FALSE) AS is_new_build,
+      l.rental_period,
+      l.lease_term,
+      l.pet_policy,
+      COALESCE(l.parking_available, FALSE) AS parking_available,
+      l.energy_rating,
+      l.amenity_package,
+      i.inventory_type,
+      l.published_at,
+      l.expires_at,
+      l.price_visibility_status
+    FROM latest_listings AS l
+    INNER JOIN latest_inventory AS i
+      ON l.listing_id = i.listing_id
+     AND l.marketplace_id = i.marketplace_id
+    WHERE l.listing_id IS NOT NULL
+      AND l.property_id IS NOT NULL
+      AND LOWER(TRIM(l.listing_status)) IN ('active', 'published', 'live')
+      AND COALESCE(l.is_deleted, FALSE) = FALSE
+      AND (l.published_at IS NULL OR l.published_at <= CURRENT_TIMESTAMP())
+      AND (l.unpublished_at IS NULL OR l.unpublished_at > CURRENT_TIMESTAMP())
+      AND (l.expires_at IS NULL OR l.expires_at > CURRENT_TIMESTAMP())
+      AND LOWER(TRIM(i.inventory_status)) IN ('active', 'available', 'live')
+      AND COALESCE(i.is_available, TRUE) = TRUE
+      AND COALESCE(i.available_quantity, 1) > 0
+      AND LOWER(COALESCE(l.moderation_status, 'approved')) IN ('approved', 'accepted', 'live')
+  ),
+  dimension_rows AS (
+    SELECT
+      listing_id,
+      CURRENT_DATE() AS snapshot_date,
+      'listing_management_marketplace_inventory' AS source_system,
+      COALESCE(CAST(marketplace_id AS STRING), 'unknown') AS marketplace_id,
+      COALESCE(marketplace_name, 'unknown') AS marketplace_name,
+      COALESCE(business_unit, 'unknown') AS business_unit,
+      COALESCE(brand_name, 'unknown') AS brand_name,
+      COALESCE(channel, 'unknown') AS channel,
+      COALESCE(language_code, 'unknown') AS language_code,
+      COALESCE(country_code, 'unknown') AS country_code,
+      COALESCE(region_name, 'unknown') AS region_name,
+      COALESCE(state_code, 'unknown') AS state_code,
+      COALESCE(city_name, 'unknown') AS city_name,
+      COALESCE(postal_code, 'unknown') AS postal_code,
+      COALESCE(property_type, 'unknown') AS property_type,
+      COALESCE(property_subtype, 'unknown') AS property_subtype,
+      COALESCE(property_class, 'unknown') AS property_class,
+      COALESCE(listing_type, 'unknown') AS listing_type,
+      COALESCE(transaction_type, 'unknown') AS transaction_type,
+      COALESCE(ownership_type, 'unknown') AS ownership_type,
+      COALESCE(CAST(seller_id AS STRING), 'unknown') AS seller_id,
+      COALESCE(seller_type, 'unknown') AS seller_type,
+      COALESCE(CAST(agency_id AS STRING), 'unknown') AS agency_id,
+      COALESCE(CAST(agent_id AS STRING), 'unknown') AS agent_id,
+      COALESCE(currency_code, 'unknown') AS currency_code,
+      CASE
+        WHEN listing_price IS NULL THEN 'unknown'
+        WHEN listing_price < 100000 THEN 'under_100k'
+        WHEN listing_price < 250000 THEN '100k_to_249999'
+        WHEN listing_price < 500000 THEN '250k_to_499999'
+        WHEN listing_price < 1000000 THEN '500k_to_999999'
+        ELSE '1m_plus'
+      END AS price_band,
+      CASE
+        WHEN bedroom_count IS NULL THEN 'unknown'
+        WHEN bedroom_count = 0 THEN 'studio'
+        WHEN bedroom_count >= 5 THEN '5_plus'
+        ELSE CAST(bedroom_count AS STRING)
+      END AS bedroom_band,
+      CASE
+        WHEN bathroom_count IS NULL THEN 'unknown'
+        WHEN bathroom_count >= 5 THEN '5_plus'
+        ELSE CAST(bathroom_count AS STRING)
+      END AS bathroom_band,
+      CASE
+        WHEN area_value IS NULL THEN 'unknown'
+        WHEN area_value < 50 THEN 'under_50'
+        WHEN area_value < 100 THEN '50_to_99'
+        WHEN area_value < 200 THEN '100_to_199'
+        WHEN area_value < 500 THEN '200_to_499'
+        ELSE '500_plus'
+      END AS area_band,
+      COALESCE(area_unit, 'unknown') AS area_unit,
+      CASE
+        WHEN floor_number IS NULL THEN 'unknown'
+        WHEN floor_number < 0 THEN 'below_ground'
+        WHEN floor_number = 0 THEN 'ground'
+        WHEN floor_number <= 5 THEN '1_to_5'
+        WHEN floor_number <= 10 THEN '6_to_10'
+        ELSE '11_plus'
+      END AS floor_band,
+      COALESCE(furnishing_status, 'unknown') AS furnishing_status,
+      COALESCE(construction_status, 'unknown') AS construction_status,
+      COALESCE(inventory_status, 'unknown') AS availability_status,
+      COALESCE(occupancy_status, 'unknown') AS occupancy_status,
+      COALESCE(verification_status, 'unknown') AS verification_status,
+      COALESCE(moderation_status, 'unknown') AS moderation_status,
+      COALESCE(premium_tier, 'standard') AS premium_tier,
+      is_featured AS featured_flag,
+      is_promoted AS promoted_flag,
+      is_new_build AS new_build_flag,
+      COALESCE(rental_period, 'not_applicable') AS rental_period,
+      COALESCE(lease_term, 'not_applicable') AS lease_term,
+      COALESCE(pet_policy, 'unknown') AS pet_policy,
+      parking_available AS parking_available_flag,
+      COALESCE(energy_rating, 'unknown') AS energy_rating,
+      COALESCE(amenity_package, 'unknown') AS amenity_package,
+      COALESCE(inventory_type, 'unknown') AS inventory_type,
+      CASE
+        WHEN published_at IS NULL THEN 'unknown'
+        WHEN published_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY) THEN '0_to_7_days'
+        WHEN published_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY) THEN '8_to_30_days'
+        WHEN published_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY) THEN '31_to_90_days'
+        ELSE '91_plus_days'
+      END AS publish_age_band,
+      CASE
+        WHEN expires_at IS NULL THEN 'no_expiration'
+        WHEN expires_at <= TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 7 DAY) THEN 'expires_in_7_days'
+        WHEN expires_at <= TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 30 DAY) THEN 'expires_in_8_to_30_days'
+        WHEN expires_at <= TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 90 DAY) THEN 'expires_in_31_to_90_days'
+        ELSE 'expires_after_90_days'
+      END AS expiration_band,
+      COALESCE(price_visibility_status, 'unknown') AS price_visibility_status,
+      CASE
+        WHEN marketplace_id IS NULL
+          OR country_code IS NULL
+          OR property_type IS NULL
+          OR transaction_type IS NULL
+          OR seller_id IS NULL THEN 'incomplete'
+        ELSE 'complete'
+      END AS data_quality_status
+    FROM active_listings
+  )
+  SELECT
+    snapshot_date,
+    source_system,
+    marketplace_id,
+    marketplace_name,
+    business_unit,
+    brand_name,
+    channel,
+    language_code,
+    country_code,
+    region_name,
+    state_code,
+    city_name,
+    postal_code,
+    property_type,
+    property_subtype,
+    property_class,
+    listing_type,
+    transaction_type,
+    ownership_type,
+    seller_id,
+    seller_type,
+    agency_id,
+    agent_id,
+    currency_code,
+    price_band,
+    bedroom_band,
+    bathroom_band,
+    area_band,
+    area_unit,
+    floor_band,
+    furnishing_status,
+    construction_status,
+    availability_status,
+    occupancy_status,
+    verification_status,
+    moderation_status,
+    premium_tier,
+    featured_flag,
+    promoted_flag,
+    new_build_flag,
+    rental_period,
+    lease_term,
+    pet_policy,
+    parking_available_flag,
+    energy_rating,
+    amenity_package,
+    inventory_type,
+    publish_age_band,
+    expiration_band,
+    price_visibility_status,
+    data_quality_status,
+    COUNT(DISTINCT listing_id) AS active_property_listing_count
+  FROM dimension_rows
+  GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH ranked_listings AS (
+    SELECT
+      l.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY listing_id, marketplace_id
+        ORDER BY updated_at DESC, ingested_at DESC
+      ) AS row_rank
+    FROM listing_management_listings AS l
+  ),
+  latest_listings AS (
+    SELECT *
+    FROM ranked_listings
+    WHERE row_rank = 1
+  ),
+  ranked_inventory AS (
+    SELECT
+      i.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY listing_id, marketplace_id
+        ORDER BY updated_at DESC, ingested_at DESC
+      ) AS row_rank
+    FROM marketplace_inventory_listing_inventory AS i
+  ),
+  latest_inventory AS (
+    SELECT *
+    FROM ranked_inventory
+    WHERE row_rank = 1
+  ),
+  active_listings AS (
+    SELECT
+      l.listing_id,
+      l.property_id,
+      l.marketplace_id,
+      COALESCE(i.marketplace_name, l.marketplace_name) AS marketplace_name,
+      l.business_unit,
+      l.brand_name,
+      COALESCE(i.channel, l.channel, 'marketplace') AS channel,
+      l.language_code,
+      l.country_code,
+      l.region_name,
+      l.state_code,
+      l.city_name,
+      l.postal_code,
+      l.property_type,
+      l.property_subtype,
+      l.property_class,
+      l.listing_type,
+      l.transaction_type,
+      l.ownership_type,
+      l.seller_id,
+      l.seller_type,
+      l.agency_id,
+      l.agent_id,
+      l.currency_code,
+      l.listing_price,
+      l.bedroom_count,
+      l.bathroom_count,
+      l.area_value,
+      l.area_unit,
+      l.floor_number,
+      l.furnishing_status,
+      l.construction_status,
+      i.inventory_status,
+      l.occupancy_status,
+      l.verification_status,
+      l.moderation_status,
+      l.premium_tier,
+      COALESCE(l.is_featured, FALSE) AS is_featured,
+      COALESCE(l.is_promoted, FALSE) AS is_promoted,
+      COALESCE(l.is_new_build, FALSE) AS is_new_build,
+      l.rental_period,
+      l.lease_term,
+      l.pet_policy,
+      COALESCE(l.parking_available, FALSE) AS parking_available,
+      l.energy_rating,
+      l.amenity_package,
+      i.inventory_type,
+      l.published_at,
+      l.expires_at,
+      l.price_visibility_status
+    FROM latest_listings AS l
+    INNER JOIN latest_inventory AS i
+      ON l.listing_id = i.listing_id
+     AND l.marketplace_id = i.marketplace_id
+    WHERE l.listing_id IS NOT NULL
+      AND l.property_id IS NOT NULL
+      AND LOWER(TRIM(l.listing_status)) IN ('active', 'published', 'live')
+      AND COALESCE(l.is_deleted, FALSE) = FALSE
+      AND (l.published_at IS NULL OR l.published_at <= CURRENT_TIMESTAMP)
+      AND (l.unpublished_at IS NULL OR l.unpublished_at > CURRENT_TIMESTAMP)
+      AND (l.expires_at IS NULL OR l.expires_at > CURRENT_TIMESTAMP)
+      AND LOWER(TRIM(i.inventory_status)) IN ('active', 'available', 'live')
+      AND COALESCE(i.is_available, TRUE) = TRUE
+      AND COALESCE(i.available_quantity, 1) > 0
+      AND LOWER(COALESCE(l.moderation_status, 'approved')) IN ('approved', 'accepted', 'live')
+  ),
+  dimension_rows AS (
+    SELECT
+      listing_id,
+      CAST(CURRENT_TIMESTAMP AS DATE) AS snapshot_date,
+      'listing_management_marketplace_inventory' AS source_system,
+      COALESCE(CAST(marketplace_id AS VARCHAR), 'unknown') AS marketplace_id,
+      COALESCE(marketplace_name, 'unknown') AS marketplace_name,
+      COALESCE(business_unit, 'unknown') AS business_unit,
+      COALESCE(brand_name, 'unknown') AS brand_name,
+      COALESCE(channel, 'unknown') AS channel,
+      COALESCE(language_code, 'unknown') AS language_code,
+      COALESCE(country_code, 'unknown') AS country_code,
+      COALESCE(region_name, 'unknown') AS region_name,
+      COALESCE(state_code, 'unknown') AS state_code,
+      COALESCE(city_name, 'unknown') AS city_name,
+      COALESCE(postal_code, 'unknown') AS postal_code,
+      COALESCE(property_type, 'unknown') AS property_type,
+      COALESCE(property_subtype, 'unknown') AS property_subtype,
+      COALESCE(property_class, 'unknown') AS property_class,
+      COALESCE(listing_type, 'unknown') AS listing_type,
+      COALESCE(transaction_type, 'unknown') AS transaction_type,
+      COALESCE(ownership_type, 'unknown') AS ownership_type,
+      COALESCE(CAST(seller_id AS VARCHAR), 'unknown') AS seller_id,
+      COALESCE(seller_type, 'unknown') AS seller_type,
+      COALESCE(CAST(agency_id AS VARCHAR), 'unknown') AS agency_id,
+      COALESCE(CAST(agent_id AS VARCHAR), 'unknown') AS agent_id,
+      COALESCE(currency_code, 'unknown') AS currency_code,
+      CASE
+        WHEN listing_price IS NULL THEN 'unknown'
+        WHEN listing_price < 100000 THEN 'under_100k'
+        WHEN listing_price < 250000 THEN '100k_to_249999'
+        WHEN listing_price < 500000 THEN '250k_to_499999'
+        WHEN listing_price < 1000000 THEN '500k_to_999999'
+        ELSE '1m_plus'
+      END AS price_band,
+      CASE
+        WHEN bedroom_count IS NULL THEN 'unknown'
+        WHEN bedroom_count = 0 THEN 'studio'
+        WHEN bedroom_count >= 5 THEN '5_plus'
+        ELSE CAST(bedroom_count AS VARCHAR)
+      END AS bedroom_band,
+      CASE
+        WHEN bathroom_count IS NULL THEN 'unknown'
+        WHEN bathroom_count >= 5 THEN '5_plus'
+        ELSE CAST(bathroom_count AS VARCHAR)
+      END AS bathroom_band,
+      CASE
+        WHEN area_value IS NULL THEN 'unknown'
+        WHEN area_value < 50 THEN 'under_50'
+        WHEN area_value < 100 THEN '50_to_99'
+        WHEN area_value < 200 THEN '100_to_199'
+        WHEN area_value < 500 THEN '200_to_499'
+        ELSE '500_plus'
+      END AS area_band,
+      COALESCE(area_unit, 'unknown') AS area_unit,
+      CASE
+        WHEN floor_number IS NULL THEN 'unknown'
+        WHEN floor_number < 0 THEN 'below_ground'
+        WHEN floor_number = 0 THEN 'ground'
+        WHEN floor_number <= 5 THEN '1_to_5'
+        WHEN floor_number <= 10 THEN '6_to_10'
+        ELSE '11_plus'
+      END AS floor_band,
+      COALESCE(furnishing_status, 'unknown') AS furnishing_status,
+      COALESCE(construction_status, 'unknown') AS construction_status,
+      COALESCE(inventory_status, 'unknown') AS availability_status,
+      COALESCE(occupancy_status, 'unknown') AS occupancy_status,
+      COALESCE(verification_status, 'unknown') AS verification_status,
+      COALESCE(moderation_status, 'unknown') AS moderation_status,
+      COALESCE(premium_tier, 'standard') AS premium_tier,
+      is_featured AS featured_flag,
+      is_promoted AS promoted_flag,
+      is_new_build AS new_build_flag,
+      COALESCE(rental_period, 'not_applicable') AS rental_period,
+      COALESCE(lease_term, 'not_applicable') AS lease_term,
+      COALESCE(pet_policy, 'unknown') AS pet_policy,
+      parking_available AS parking_available_flag,
+      COALESCE(energy_rating, 'unknown') AS energy_rating,
+      COALESCE(amenity_package, 'unknown') AS amenity_package,
+      COALESCE(inventory_type, 'unknown') AS inventory_type,
+      CASE
+        WHEN published_at IS NULL THEN 'unknown'
+        WHEN published_at >= CURRENT_TIMESTAMP - INTERVAL '7 day' THEN '0_to_7_days'
+        WHEN published_at >= CURRENT_TIMESTAMP - INTERVAL '30 day' THEN '8_to_30_days'
+        WHEN published_at >= CURRENT_TIMESTAMP - INTERVAL '90 day' THEN '31_to_90_days'
+        ELSE '91_plus_days'
+      END AS publish_age_band,
+      CASE
+        WHEN expires_at IS NULL THEN 'no_expiration'
+        WHEN expires_at <= CURRENT_TIMESTAMP + INTERVAL '7 day' THEN 'expires_in_7_days'
+        WHEN expires_at <= CURRENT_TIMESTAMP + INTERVAL '30 day' THEN 'expires_in_8_to_30_days'
+        WHEN expires_at <= CURRENT_TIMESTAMP + INTERVAL '90 day' THEN 'expires_in_31_to_90_days'
+        ELSE 'expires_after_90_days'
+      END AS expiration_band,
+      COALESCE(price_visibility_status, 'unknown') AS price_visibility_status,
+      CASE
+        WHEN marketplace_id IS NULL
+          OR country_code IS NULL
+          OR property_type IS NULL
+          OR transaction_type IS NULL
+          OR seller_id IS NULL THEN 'incomplete'
+        ELSE 'complete'
+      END AS data_quality_status
+    FROM active_listings
+  )
+  SELECT
+    snapshot_date,
+    source_system,
+    marketplace_id,
+    marketplace_name,
+    business_unit,
+    brand_name,
+    channel,
+    language_code,
+    country_code,
+    region_name,
+    state_code,
+    city_name,
+    postal_code,
+    property_type,
+    property_subtype,
+    property_class,
+    listing_type,
+    transaction_type,
+    ownership_type,
+    seller_id,
+    seller_type,
+    agency_id,
+    agent_id,
+    currency_code,
+    price_band,
+    bedroom_band,
+    bathroom_band,
+    area_band,
+    area_unit,
+    floor_band,
+    furnishing_status,
+    construction_status,
+    availability_status,
+    occupancy_status,
+    verification_status,
+    moderation_status,
+    premium_tier,
+    featured_flag,
+    promoted_flag,
+    new_build_flag,
+    rental_period,
+    lease_term,
+    pet_policy,
+    parking_available_flag,
+    energy_rating,
+    amenity_package,
+    inventory_type,
+    publish_age_band,
+    expiration_band,
+    price_visibility_status,
+    data_quality_status,
+    COUNT(DISTINCT listing_id) AS active_property_listing_count
+  FROM dimension_rows
+  GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51;
+
+Calculation Notes: |
+  1️⃣ Calculate as a point-in-time inventory snapshot.  
+  2️⃣ Count each canonical_listing_id once, regardless of multiple records.  
+  3️⃣ Include listings that started before the snapshot timestamp and ended after.  
+  4️⃣ Exclude drafts, rejected, deleted, test, spam, suppressed, and embargoed listings.  
+  5️⃣ Ignore listings activated/deactivated between daily snapshots.  
+  6️⃣ Count multiple legitimate listings for the same property separately unless canonicalized.  
+  7️⃣ Treat active_end_at as an exclusive boundary.
+
+Business Use Case: |
+  Marketplace Operations reviews daily active listing inventory by market, property type, transaction type, and supply partner. If a priority market declines by more than 10% day over day, the team investigates feed failures, bulk expirations, moderation backlogs, or partner churn and can restore interrupted feeds, extend eligible listings, or launch targeted broker acquisition activity.
+
+
+Source Data: Listing Management System and Marketplace Inventory Warehouse
+
+Report Attributes: |
+  ["Snapshot Date","Market","Country","Region","City","Neighborhood","Transaction Type","Property Type","Listing Source","Supply Partner","Brokerage","Price Band","Listing Age Band","Furnishing Status","New Construction Indicator","Premium Listing Indicator"]
+
+Dashboard Usage: [Marketplace Supply Health Dashboard, Executive Marketplace Scorecard, Listing Inventory Operations Dashboard, Market Coverage Dashboard, Supply Partner Performance Dashboard, Search and Discovery Health Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [New Property Listing Count, Deactivated Property Listing Count, Unique Active Property Count, Property Listing Impression Count, Property Listing View Count, Property Inquiry Count, Expired Property Listing Count]
+
+Derived KPIs: [Active Listing Growth Rate, Active Listing Churn Rate, Listings per Active Market, Views per Active Listing, Inquiries per Active Listing, Active Listing Coverage Rate, Median Active Listing Age]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-11T21:30:32.869104+00:00
+
+Last Modified By: devyendarm
+
+
