@@ -1,0 +1,117 @@
+# KPI: Customer Retention Rate
+# Generated: 2026-09-11T22:30:34.908Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Customer Retention Rate
+Formula: ((Number of Customers at End of Period - New Customers Acquired During Period) / Number of Customers at Start of Period) × 100
+
+Description: |
+  Measures the percentage of customers who continue to use a service or make purchases over a specific period. It indicates customer loyalty and the effectiveness of retention strategies.
+
+Category: Retention
+
+Tags: [kpi]
+
+Industry: [E-commerce & SaaS]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: User
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT
+    COUNT(DISTINCT CASE WHEN current_period.active THEN user_id END) AS retained_users,
+    COUNT(DISTINCT user_id) AS total_users,
+    COUNT(DISTINCT CASE WHEN current_period.active THEN user_id END) / COUNT(DISTINCT user_id) AS retention_rate
+  FROM (
+    SELECT
+      user_id,
+      MAX(IF(event_name = 'login', 1, 0)) AS active
+    FROM `your-project.crm.user_events`
+    WHERE event_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) AND CURRENT_DATE()
+    GROUP BY user_id
+  ) AS current_period
+  JOIN (
+    SELECT DISTINCT user_id
+    FROM `your-project.crm.user_events`
+    WHERE event_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 60 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+  ) AS previous_period
+  ON current_period.user_id = previous_period.user_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT
+    COUNT(DISTINCT CASE WHEN current_period.active THEN user_id END) AS retained_users,
+    COUNT(DISTINCT user_id) AS total_users,
+    COUNT(DISTINCT CASE WHEN current_period.active THEN user_id END) / COUNT(DISTINCT user_id) AS retention_rate
+  FROM (
+    SELECT
+      user_id,
+      MAX(CASE WHEN event_name = 'login' THEN 1 ELSE 0 END) AS active
+    FROM aep_backend_dataset.user_events
+    WHERE event_date BETWEEN DATEADD(day, -30, CURRENT_DATE()) AND CURRENT_DATE()
+    GROUP BY user_id
+  ) AS current_period
+  JOIN (
+    SELECT DISTINCT user_id
+    FROM aep_backend_dataset.user_events
+    WHERE event_date BETWEEN DATEADD(day, -60, CURRENT_DATE()) AND DATEADD(day, -30, CURRENT_DATE())
+  ) AS previous_period
+  ON current_period.user_id = previous_period.user_id;
+
+Calculation Notes: |
+  1️⃣ Exclude churned customers due to involuntary reasons.  
+  2️⃣ Focus on voluntary churn for analysis.  
+  3️⃣ Analyze seasonal variations in customer behavior.  
+  4️⃣ Adjust strategies based on seasonal trends.  
+  5️⃣ Monitor payment failure impacts on customer retention.  
+  6️⃣ Use data to identify patterns in customer behavior.  
+  7️⃣ Implement targeted interventions for at-risk customers.
+
+Business Use Case: |
+  Executives use this KPI to assess the effectiveness of customer loyalty programs and make strategic decisions on marketing investments.
+
+
+Source Data: CRM
+
+Report Attributes: |
+  ["Customer Segment","Geography","Product Category"]
+
+Dashboard Usage: [Executive Overview, Marketing Performance]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Churn Rate, Customer Lifetime Value, Repeat Purchase Rate]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-11T22:30:34.264108+00:00
+
+Last Modified By: devyendarm
+
+
