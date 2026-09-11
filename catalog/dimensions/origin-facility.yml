@@ -1,0 +1,431 @@
+# Dimension: Origin Facility
+# Generated: 2026-09-11T23:30:18.954Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Origin Facility
+
+Description: |
+  Identifies the canonical logistics facility from which a shipment, consignment, or transportation leg begins physical movement through the supply chain. It enables performance, cost, capacity, service, and quality analysis by the location responsible for shipment origination.
+
+Category: Performance
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH origin_references AS (
+    SELECT
+      'TMS' AS source_system,
+      CAST(origin_facility_id AS STRING) AS source_facility_id,
+      MAX(updated_at) AS last_origin_activity_at
+    FROM `your-project.tms.shipments`
+    WHERE origin_facility_id IS NOT NULL
+    GROUP BY 1, 2
+  
+    UNION ALL
+  
+    SELECT
+      'WMS' AS source_system,
+      CAST(origin_warehouse_id AS STRING) AS source_facility_id,
+      MAX(updated_at) AS last_origin_activity_at
+    FROM `your-project.wms.outbound_shipments`
+    WHERE origin_warehouse_id IS NOT NULL
+    GROUP BY 1, 2
+  
+    UNION ALL
+  
+    SELECT
+      'SHIPMENT_EXECUTION' AS source_system,
+      CAST(ship_from_facility_id AS STRING) AS source_facility_id,
+      MAX(updated_at) AS last_origin_activity_at
+    FROM `your-project.shipment_execution.shipments`
+    WHERE ship_from_facility_id IS NOT NULL
+    GROUP BY 1, 2
+  
+    UNION ALL
+  
+    SELECT
+      'CARRIER' AS source_system,
+      CAST(origin_location_id AS STRING) AS source_facility_id,
+      MAX(event_timestamp) AS last_origin_activity_at
+    FROM `your-project.carrier_events.shipment_events`
+    WHERE origin_location_id IS NOT NULL
+    GROUP BY 1, 2
+  
+    UNION ALL
+  
+    SELECT
+      'ERP' AS source_system,
+      CAST(ship_from_location_id AS STRING) AS source_facility_id,
+      MAX(updated_at) AS last_origin_activity_at
+    FROM `your-project.erp.delivery_headers`
+    WHERE ship_from_location_id IS NOT NULL
+    GROUP BY 1, 2
+  ),
+  current_xref AS (
+    SELECT
+      facility_id,
+      UPPER(source_system) AS source_system,
+      CAST(source_facility_id AS STRING) AS source_facility_id,
+      source_updated_at
+    FROM `your-project.mdm.facility_identifier_xref`
+    WHERE is_current = TRUE
+  ),
+  resolved_origins AS (
+    SELECT
+      COALESCE(x.facility_id, r.source_facility_id) AS facility_id,
+      MAX(r.last_origin_activity_at) AS last_origin_activity_at
+    FROM origin_references r
+    LEFT JOIN current_xref x
+      ON x.source_system = r.source_system
+     AND x.source_facility_id = r.source_facility_id
+    GROUP BY 1
+  ),
+  identifier_pivot AS (
+    SELECT
+      facility_id,
+      MAX(IF(source_system = 'ERP', source_facility_id, NULL)) AS erp_location_id,
+      MAX(IF(source_system = 'WMS', source_facility_id, NULL)) AS wms_facility_id,
+      MAX(IF(source_system = 'TMS', source_facility_id, NULL)) AS tms_facility_id,
+      MAX(IF(source_system = 'CARRIER', source_facility_id, NULL)) AS carrier_location_code
+    FROM current_xref
+    GROUP BY facility_id
+  ),
+  facility_ranked AS (
+    SELECT
+      fm.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY fm.facility_id
+        ORDER BY fm.effective_start_date DESC, fm.source_updated_at DESC
+      ) AS row_number
+    FROM `your-project.mdm.enterprise_facility_master` fm
+    WHERE fm.is_deleted = FALSE
+      AND CURRENT_DATE() BETWEEN fm.effective_start_date
+                             AND COALESCE(fm.effective_end_date, DATE '9999-12-31')
+  ),
+  facility_current AS (
+    SELECT * EXCEPT (row_number)
+    FROM facility_ranked
+    WHERE row_number = 1
+  ),
+  operator_ranked AS (
+    SELECT
+      operator_id,
+      operator_name,
+      ROW_NUMBER() OVER (
+        PARTITION BY operator_id
+        ORDER BY source_updated_at DESC
+      ) AS row_number
+    FROM `your-project.mdm.facility_operators`
+    WHERE is_deleted = FALSE
+  ),
+  operator_current AS (
+    SELECT operator_id, operator_name
+    FROM operator_ranked
+    WHERE row_number = 1
+  )
+  SELECT
+    TO_HEX(MD5(CAST(fm.facility_id AS STRING))) AS origin_facility_key,
+    CAST(fm.facility_id AS STRING) AS origin_facility_id,
+    COALESCE(NULLIF(TRIM(fm.facility_code), ''), CAST(fm.facility_id AS STRING)) AS origin_facility_code,
+    COALESCE(NULLIF(TRIM(fm.facility_name), ''), NULLIF(TRIM(fm.facility_code), ''), CAST(fm.facility_id AS STRING)) AS origin_facility_name,
+    NULLIF(TRIM(fm.facility_short_name), '') AS origin_facility_short_name,
+    UPPER(NULLIF(TRIM(fm.facility_type), '')) AS origin_facility_type,
+    UPPER(NULLIF(TRIM(fm.facility_subtype), '')) AS origin_facility_subtype,
+    UPPER(COALESCE(NULLIF(TRIM(fm.facility_status), ''), 'UNKNOWN')) AS origin_facility_status,
+    COALESCE(fm.is_active, UPPER(fm.facility_status) IN ('ACTIVE', 'OPEN', 'OPERATIONAL')) AS is_active,
+    fm.effective_start_date,
+    fm.effective_end_date,
+    NULLIF(TRIM(fm.address_line_1), '') AS address_line_1,
+    NULLIF(TRIM(fm.address_line_2), '') AS address_line_2,
+    NULLIF(TRIM(fm.city), '') AS city,
+    UPPER(NULLIF(TRIM(fm.state_province_code), '')) AS state_province_code,
+    NULLIF(TRIM(fm.state_province_name), '') AS state_province_name,
+    UPPER(NULLIF(TRIM(fm.postal_code), '')) AS postal_code,
+    NULLIF(TRIM(fm.county_name), '') AS county_name,
+    UPPER(NULLIF(TRIM(fm.country_code), '')) AS country_code,
+    NULLIF(TRIM(fm.country_name), '') AS country_name,
+    NULLIF(TRIM(fm.region_name), '') AS region_name,
+    NULLIF(TRIM(fm.district_name), '') AS district_name,
+    NULLIF(TRIM(fm.time_zone_name), '') AS time_zone_name,
+    SAFE_CAST(fm.latitude AS NUMERIC) AS latitude,
+    SAFE_CAST(fm.longitude AS NUMERIC) AS longitude,
+    UPPER(NULLIF(TRIM(fm.ownership_type), '')) AS ownership_type,
+    CAST(fm.operator_id AS STRING) AS operator_id,
+    COALESCE(NULLIF(TRIM(op.operator_name), ''), NULLIF(TRIM(fm.operator_name), '')) AS operator_name,
+    CAST(fm.parent_facility_id AS STRING) AS parent_facility_id,
+    NULLIF(TRIM(parent.facility_name), '') AS parent_facility_name,
+    COALESCE(NULLIF(TRIM(fm.erp_location_id), ''), ids.erp_location_id) AS erp_location_id,
+    COALESCE(NULLIF(TRIM(fm.wms_facility_id), ''), ids.wms_facility_id) AS wms_facility_id,
+    COALESCE(NULLIF(TRIM(fm.tms_facility_id), ''), ids.tms_facility_id) AS tms_facility_id,
+    COALESCE(NULLIF(TRIM(fm.carrier_location_code), ''), ids.carrier_location_code) AS carrier_location_code,
+    SAFE_CAST(fm.dock_count AS INT64) AS dock_count,
+    SAFE_CAST(fm.storage_capacity AS NUMERIC) AS storage_capacity,
+    UPPER(NULLIF(TRIM(fm.capacity_unit), '')) AS capacity_unit,
+    UPPER(NULLIF(TRIM(fm.primary_transport_mode), '')) AS primary_transport_mode,
+    NULLIF(TRIM(fm.service_level), '') AS service_level,
+    NULLIF(TRIM(fm.receiving_hours), '') AS receiving_hours,
+    NULLIF(TRIM(fm.shipping_hours), '') AS shipping_hours,
+    NULLIF(TRIM(fm.primary_contact_name), '') AS primary_contact_name,
+    LOWER(NULLIF(TRIM(fm.primary_contact_email), '')) AS primary_contact_email,
+    NULLIF(TRIM(fm.primary_contact_phone), '') AS primary_contact_phone,
+    COALESCE(fm.is_hazmat_capable, FALSE) AS is_hazmat_capable,
+    COALESCE(fm.is_temperature_controlled, FALSE) AS is_temperature_controlled,
+    COALESCE(fm.is_cross_dock_capable, FALSE) AS is_cross_dock_capable,
+    COALESCE(NULLIF(TRIM(fm.source_system), ''), 'ENTERPRISE_FACILITY_MASTER') AS source_system,
+    GREATEST(
+      COALESCE(fm.source_updated_at, TIMESTAMP '1970-01-01 00:00:00+00'),
+      COALESCE(ro.last_origin_activity_at, TIMESTAMP '1970-01-01 00:00:00+00')
+    ) AS source_updated_at
+  FROM resolved_origins ro
+  JOIN facility_current fm
+    ON CAST(fm.facility_id AS STRING) = ro.facility_id
+  LEFT JOIN identifier_pivot ids
+    ON ids.facility_id = fm.facility_id
+  LEFT JOIN facility_current parent
+    ON parent.facility_id = fm.parent_facility_id
+  LEFT JOIN operator_current op
+    ON op.operator_id = fm.operator_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH origin_references AS (
+    SELECT
+      'TMS' AS source_system,
+      CAST(origin_facility_id AS VARCHAR) AS source_facility_id,
+      MAX(updated_at) AS last_origin_activity_at
+    FROM tms_shipments
+    WHERE origin_facility_id IS NOT NULL
+    GROUP BY 1, 2
+  
+    UNION ALL
+  
+    SELECT
+      'WMS' AS source_system,
+      CAST(origin_warehouse_id AS VARCHAR) AS source_facility_id,
+      MAX(updated_at) AS last_origin_activity_at
+    FROM wms_outbound_shipments
+    WHERE origin_warehouse_id IS NOT NULL
+    GROUP BY 1, 2
+  
+    UNION ALL
+  
+    SELECT
+      'SHIPMENT_EXECUTION' AS source_system,
+      CAST(ship_from_facility_id AS VARCHAR) AS source_facility_id,
+      MAX(updated_at) AS last_origin_activity_at
+    FROM shipment_execution_shipments
+    WHERE ship_from_facility_id IS NOT NULL
+    GROUP BY 1, 2
+  
+    UNION ALL
+  
+    SELECT
+      'CARRIER' AS source_system,
+      CAST(origin_location_id AS VARCHAR) AS source_facility_id,
+      MAX(event_timestamp) AS last_origin_activity_at
+    FROM carrier_shipment_events
+    WHERE origin_location_id IS NOT NULL
+    GROUP BY 1, 2
+  
+    UNION ALL
+  
+    SELECT
+      'ERP' AS source_system,
+      CAST(ship_from_location_id AS VARCHAR) AS source_facility_id,
+      MAX(updated_at) AS last_origin_activity_at
+    FROM erp_delivery_headers
+    WHERE ship_from_location_id IS NOT NULL
+    GROUP BY 1, 2
+  ),
+  current_xref AS (
+    SELECT
+      facility_id,
+      UPPER(source_system) AS source_system,
+      CAST(source_facility_id AS VARCHAR) AS source_facility_id,
+      source_updated_at
+    FROM facility_identifier_xref
+    WHERE is_current = TRUE
+  ),
+  resolved_origins AS (
+    SELECT
+      COALESCE(CAST(x.facility_id AS VARCHAR), r.source_facility_id) AS facility_id,
+      MAX(r.last_origin_activity_at) AS last_origin_activity_at
+    FROM origin_references r
+    LEFT JOIN current_xref x
+      ON x.source_system = r.source_system
+     AND x.source_facility_id = r.source_facility_id
+    GROUP BY 1
+  ),
+  identifier_pivot AS (
+    SELECT
+      facility_id,
+      MAX(CASE WHEN source_system = 'ERP' THEN source_facility_id END) AS erp_location_id,
+      MAX(CASE WHEN source_system = 'WMS' THEN source_facility_id END) AS wms_facility_id,
+      MAX(CASE WHEN source_system = 'TMS' THEN source_facility_id END) AS tms_facility_id,
+      MAX(CASE WHEN source_system = 'CARRIER' THEN source_facility_id END) AS carrier_location_code
+    FROM current_xref
+    GROUP BY facility_id
+  ),
+  facility_ranked AS (
+    SELECT
+      fm.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY fm.facility_id
+        ORDER BY fm.effective_start_date DESC, fm.source_updated_at DESC
+      ) AS row_number
+    FROM enterprise_facility_master fm
+    WHERE fm.is_deleted = FALSE
+      AND CURRENT_DATE BETWEEN fm.effective_start_date
+                           AND COALESCE(fm.effective_end_date, DATE '9999-12-31')
+  ),
+  facility_current AS (
+    SELECT *
+    FROM facility_ranked
+    WHERE row_number = 1
+  ),
+  operator_ranked AS (
+    SELECT
+      operator_id,
+      operator_name,
+      ROW_NUMBER() OVER (
+        PARTITION BY operator_id
+        ORDER BY source_updated_at DESC
+      ) AS row_number
+    FROM facility_operators
+    WHERE is_deleted = FALSE
+  ),
+  operator_current AS (
+    SELECT operator_id, operator_name
+    FROM operator_ranked
+    WHERE row_number = 1
+  )
+  SELECT
+    MD5(CAST(fm.facility_id AS VARCHAR)) AS origin_facility_key,
+    CAST(fm.facility_id AS VARCHAR) AS origin_facility_id,
+    COALESCE(NULLIF(TRIM(fm.facility_code), ''), CAST(fm.facility_id AS VARCHAR)) AS origin_facility_code,
+    COALESCE(NULLIF(TRIM(fm.facility_name), ''), NULLIF(TRIM(fm.facility_code), ''), CAST(fm.facility_id AS VARCHAR)) AS origin_facility_name,
+    NULLIF(TRIM(fm.facility_short_name), '') AS origin_facility_short_name,
+    UPPER(NULLIF(TRIM(fm.facility_type), '')) AS origin_facility_type,
+    UPPER(NULLIF(TRIM(fm.facility_subtype), '')) AS origin_facility_subtype,
+    UPPER(COALESCE(NULLIF(TRIM(fm.facility_status), ''), 'UNKNOWN')) AS origin_facility_status,
+    COALESCE(
+      fm.is_active,
+      CASE WHEN UPPER(fm.facility_status) IN ('ACTIVE', 'OPEN', 'OPERATIONAL') THEN TRUE ELSE FALSE END
+    ) AS is_active,
+    fm.effective_start_date,
+    fm.effective_end_date,
+    NULLIF(TRIM(fm.address_line_1), '') AS address_line_1,
+    NULLIF(TRIM(fm.address_line_2), '') AS address_line_2,
+    NULLIF(TRIM(fm.city), '') AS city,
+    UPPER(NULLIF(TRIM(fm.state_province_code), '')) AS state_province_code,
+    NULLIF(TRIM(fm.state_province_name), '') AS state_province_name,
+    UPPER(NULLIF(TRIM(fm.postal_code), '')) AS postal_code,
+    NULLIF(TRIM(fm.county_name), '') AS county_name,
+    UPPER(NULLIF(TRIM(fm.country_code), '')) AS country_code,
+    NULLIF(TRIM(fm.country_name), '') AS country_name,
+    NULLIF(TRIM(fm.region_name), '') AS region_name,
+    NULLIF(TRIM(fm.district_name), '') AS district_name,
+    NULLIF(TRIM(fm.time_zone_name), '') AS time_zone_name,
+    CAST(fm.latitude AS DECIMAL(18,8)) AS latitude,
+    CAST(fm.longitude AS DECIMAL(18,8)) AS longitude,
+    UPPER(NULLIF(TRIM(fm.ownership_type), '')) AS ownership_type,
+    CAST(fm.operator_id AS VARCHAR) AS operator_id,
+    COALESCE(NULLIF(TRIM(op.operator_name), ''), NULLIF(TRIM(fm.operator_name), '')) AS operator_name,
+    CAST(fm.parent_facility_id AS VARCHAR) AS parent_facility_id,
+    NULLIF(TRIM(parent.facility_name), '') AS parent_facility_name,
+    COALESCE(NULLIF(TRIM(fm.erp_location_id), ''), ids.erp_location_id) AS erp_location_id,
+    COALESCE(NULLIF(TRIM(fm.wms_facility_id), ''), ids.wms_facility_id) AS wms_facility_id,
+    COALESCE(NULLIF(TRIM(fm.tms_facility_id), ''), ids.tms_facility_id) AS tms_facility_id,
+    COALESCE(NULLIF(TRIM(fm.carrier_location_code), ''), ids.carrier_location_code) AS carrier_location_code,
+    CAST(fm.dock_count AS INTEGER) AS dock_count,
+    CAST(fm.storage_capacity AS DECIMAL(18,4)) AS storage_capacity,
+    UPPER(NULLIF(TRIM(fm.capacity_unit), '')) AS capacity_unit,
+    UPPER(NULLIF(TRIM(fm.primary_transport_mode), '')) AS primary_transport_mode,
+    NULLIF(TRIM(fm.service_level), '') AS service_level,
+    NULLIF(TRIM(fm.receiving_hours), '') AS receiving_hours,
+    NULLIF(TRIM(fm.shipping_hours), '') AS shipping_hours,
+    NULLIF(TRIM(fm.primary_contact_name), '') AS primary_contact_name,
+    LOWER(NULLIF(TRIM(fm.primary_contact_email), '')) AS primary_contact_email,
+    NULLIF(TRIM(fm.primary_contact_phone), '') AS primary_contact_phone,
+    COALESCE(fm.is_hazmat_capable, FALSE) AS is_hazmat_capable,
+    COALESCE(fm.is_temperature_controlled, FALSE) AS is_temperature_controlled,
+    COALESCE(fm.is_cross_dock_capable, FALSE) AS is_cross_dock_capable,
+    COALESCE(NULLIF(TRIM(fm.source_system), ''), 'ENTERPRISE_FACILITY_MASTER') AS source_system,
+    GREATEST(
+      COALESCE(fm.source_updated_at, TIMESTAMP '1970-01-01 00:00:00'),
+      COALESCE(ro.last_origin_activity_at, TIMESTAMP '1970-01-01 00:00:00')
+    ) AS source_updated_at
+  FROM resolved_origins ro
+  JOIN facility_current fm
+    ON CAST(fm.facility_id AS VARCHAR) = ro.facility_id
+  LEFT JOIN identifier_pivot ids
+    ON ids.facility_id = fm.facility_id
+  LEFT JOIN facility_current parent
+    ON parent.facility_id = fm.parent_facility_id
+  LEFT JOIN operator_current op
+    ON op.operator_id = fm.operator_id;
+
+Calculation Notes: |
+  1️⃣ Use the canonical facility identifier for the initial dispatch location.  
+  2️⃣ Identify the planned ship-from facility before physical induction.  
+  3️⃣ After induction, use the actual first accepted facility.  
+  4️⃣ Preserve the initial shipment origin for multi-leg transportation.  
+  5️⃣ Use a separate leg-origin dimension for each transportation leg.  
+  6️⃣ For returns, use the first facility that accepts the reverse-logistics shipment.  
+  7️⃣ Corrections must be effective-dated and not overwrite historical assignments.
+
+Business Use Case: |
+  A network operations executive compares on-time departure, dwell time, shipment volume, exception rate, and transportation cost by origin facility. Facilities with sustained congestion or missed cutoffs can be assigned additional labor, revised carrier collection schedules, altered routing rules, or temporary volume caps.
+
+
+Source Data: Transportation Management System, Warehouse Management System, shipment execution platform, carrier event feeds, ERP, and enterprise facility master
+
+Report Attributes: |
+  ["Origin Facility Name","Origin Facility Type","Origin Country","Origin Region","Origin City","Destination Facility","Carrier","Transportation Mode","Service Level","Route","Shipment Status","Departure Date"]
+
+Dashboard Usage: [Origin Facility Performance, Network Operations Control Tower, Facility Capacity and Throughput, On-Time Departure Performance, Shipment Exception Analysis, Transportation Cost by Origin, Carrier Pickup Compliance, Network Quality Scorecard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Destination Facility, Current Facility, Previous Facility, Next Facility, Facility Type, Origin Country, Origin Region, Origin City, Carrier, Transportation Mode, Shipment, Route, Service Level]
+
+Derived Dimensions: [Origin Facility Name, Origin Facility Type, Origin Facility Country, Origin Facility Region, Origin Facility City, Origin Facility Time Zone, Origin Network Zone, Origin Operating Business Unit, Origin Facility Active Status]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-11T23:30:17.792933+00:00
+
+Last Modified By: devyendarm
+
+
