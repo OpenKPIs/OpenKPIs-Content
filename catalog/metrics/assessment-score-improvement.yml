@@ -1,0 +1,540 @@
+# Metric: Assessment Score Improvement
+# Generated: 2026-09-11T23:30:26.526Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Assessment Score Improvement
+Formula: SUM(100 * (((comparison_score - comparison_scale_min) / (comparison_scale_max - comparison_scale_min)) - ((baseline_score - baseline_scale_min) / (baseline_scale_max - baseline_scale_min)))) / COUNT(eligible_learner_assessment_pairs)
+
+Description: |
+  Assessment Score Improvement measures the average percentage-point change between a learner's designated baseline and comparison assessment scores for the same learning objectives and intervention. It reports positive values for knowledge gain, zero for no change, and negative values for score deterioration.
+
+Category: Performance
+
+Tags: [metric]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH catalog AS (
+    SELECT
+      assessment_id,
+      course_id,
+      assessment_pair_id,
+      assessment_name,
+      LOWER(assessment_stage) AS assessment_stage,
+      passing_score_percentage,
+      improvement_threshold_points
+    FROM `your-project.lms.assessment_catalog`
+    WHERE is_active = TRUE
+  ),
+  scored_attempts AS (
+    SELECT
+      a.attempt_id,
+      a.enrollment_id,
+      a.learner_id,
+      a.assessment_id,
+      a.attempt_number,
+      a.submitted_at,
+      a.score AS raw_score,
+      a.max_score,
+      COALESCE(
+        a.score_percentage,
+        SAFE_MULTIPLY(SAFE_DIVIDE(a.score, NULLIF(a.max_score, 0)), 100)
+      ) AS score_pct,
+      c.course_id,
+      c.assessment_pair_id,
+      c.assessment_name,
+      c.assessment_stage,
+      c.passing_score_percentage,
+      c.improvement_threshold_points
+    FROM `your-project.lms.assessment_attempts` AS a
+    INNER JOIN catalog AS c
+      ON a.assessment_id = c.assessment_id
+    WHERE LOWER(a.attempt_status) IN ('completed', 'submitted', 'graded')
+      AND a.submitted_at IS NOT NULL
+      AND COALESCE(a.is_deleted, FALSE) = FALSE
+      AND COALESCE(a.is_valid, TRUE) = TRUE
+  ),
+  valid_attempts AS (
+    SELECT *
+    FROM scored_attempts
+    WHERE score_pct IS NOT NULL
+      AND score_pct BETWEEN 0 AND 100
+  ),
+  baseline_ranked AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY enrollment_id, course_id, assessment_pair_id
+        ORDER BY submitted_at, attempt_number, attempt_id
+      ) AS baseline_rank
+    FROM valid_attempts
+    WHERE assessment_stage IN ('baseline', 'pre', 'diagnostic')
+  ),
+  baselines AS (
+    SELECT *
+    FROM baseline_ranked
+    WHERE baseline_rank = 1
+  ),
+  completed_interventions AS (
+    SELECT
+      enrollment_id,
+      intervention_id,
+      intervention_type,
+      completion_status,
+      completed_at
+    FROM `your-project.lms.learning_intervention_completions`
+    WHERE LOWER(completion_status) IN ('completed', 'successful')
+      AND completed_at IS NOT NULL
+      AND COALESCE(is_deleted, FALSE) = FALSE
+  ),
+  intervention_ranked AS (
+    SELECT
+      b.enrollment_id,
+      b.course_id,
+      b.assessment_pair_id,
+      i.intervention_id,
+      i.intervention_type,
+      i.completion_status,
+      i.completed_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY b.enrollment_id, b.course_id, b.assessment_pair_id
+        ORDER BY i.completed_at, i.intervention_id
+      ) AS intervention_rank
+    FROM baselines AS b
+    INNER JOIN completed_interventions AS i
+      ON b.enrollment_id = i.enrollment_id
+     AND i.completed_at >= b.submitted_at
+  ),
+  selected_interventions AS (
+    SELECT *
+    FROM intervention_ranked
+    WHERE intervention_rank = 1
+  ),
+  post_ranked AS (
+    SELECT
+      b.*,
+      p.assessment_id AS post_assessment_id,
+      p.assessment_name AS post_assessment_name,
+      p.attempt_id AS post_attempt_id,
+      p.attempt_number AS post_attempt_number,
+      p.submitted_at AS post_attempt_at,
+      p.raw_score AS post_raw_score,
+      p.max_score AS post_max_score,
+      p.score_pct AS post_score_pct,
+      p.passing_score_percentage AS post_passing_score_pct,
+      p.improvement_threshold_points AS post_improvement_threshold,
+      i.intervention_id,
+      i.intervention_type,
+      i.completed_at AS intervention_completed_at,
+      i.completion_status AS intervention_completion_status,
+      ROW_NUMBER() OVER (
+        PARTITION BY b.enrollment_id, b.course_id, b.assessment_pair_id
+        ORDER BY p.submitted_at DESC, p.attempt_number DESC, p.attempt_id DESC
+      ) AS post_rank
+    FROM baselines AS b
+    LEFT JOIN selected_interventions AS i
+      ON b.enrollment_id = i.enrollment_id
+     AND b.course_id = i.course_id
+     AND b.assessment_pair_id = i.assessment_pair_id
+    INNER JOIN valid_attempts AS p
+      ON b.enrollment_id = p.enrollment_id
+     AND b.course_id = p.course_id
+     AND b.assessment_pair_id = p.assessment_pair_id
+     AND p.assessment_stage IN ('post', 'final', 'summative')
+     AND p.submitted_at > b.submitted_at
+     AND (i.completed_at IS NULL OR p.submitted_at >= i.completed_at)
+  ),
+  assessment_pairs AS (
+    SELECT *
+    FROM post_ranked
+    WHERE post_rank = 1
+  ),
+  enrollments AS (
+    SELECT
+      enrollment_id,
+      learner_id,
+      course_id,
+      enrollment_status,
+      enrollment_date,
+      course_completion_date,
+      cohort_id,
+      organization_id,
+      department_id,
+      region
+    FROM `your-project.lms.course_enrollments`
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+  ),
+  courses AS (
+    SELECT
+      course_id,
+      course_name,
+      course_version,
+      program_id
+    FROM `your-project.lms.course_catalog`
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+  )
+  SELECT
+    'Assessment Score Improvement' AS metric_name,
+    '1.0' AS metric_version,
+    CURRENT_TIMESTAMP() AS calculated_at,
+    DATE(p.post_attempt_at) AS reporting_date,
+    e.learner_id,
+    e.enrollment_id,
+    e.course_id,
+    c.course_name,
+    c.course_version,
+    c.program_id,
+    e.cohort_id,
+    e.organization_id,
+    e.department_id,
+    e.region,
+    e.enrollment_status,
+    e.enrollment_date,
+    e.course_completion_date,
+    p.assessment_id AS baseline_assessment_id,
+    p.assessment_name AS baseline_assessment_name,
+    p.attempt_id AS baseline_attempt_id,
+    p.attempt_number AS baseline_attempt_number,
+    p.submitted_at AS baseline_attempt_at,
+    p.raw_score AS baseline_raw_score,
+    p.max_score AS baseline_max_score,
+    ROUND(p.score_pct, 4) AS baseline_score_pct,
+    p.post_assessment_id,
+    p.post_assessment_name,
+    p.post_attempt_id,
+    p.post_attempt_number,
+    p.post_attempt_at,
+    p.post_raw_score,
+    p.post_max_score,
+    ROUND(p.post_score_pct, 4) AS post_score_pct,
+    p.intervention_id,
+    p.intervention_type,
+    p.intervention_completed_at,
+    p.intervention_completion_status,
+    DATE_DIFF(DATE(p.post_attempt_at), DATE(p.submitted_at), DAY) AS elapsed_days_between_assessments,
+    ROUND(p.post_score_pct - p.score_pct, 4) AS absolute_score_improvement_points,
+    ROUND(SAFE_MULTIPLY(SAFE_DIVIDE(p.post_score_pct - p.score_pct, NULLIF(p.score_pct, 0)), 100), 4) AS relative_score_improvement_pct,
+    ROUND(SAFE_MULTIPLY(SAFE_DIVIDE(p.post_score_pct - p.score_pct, NULLIF(100 - p.score_pct, 0)), 100), 4) AS normalized_gain_pct,
+    p.post_score_pct > p.score_pct AS improved_flag,
+    (p.post_score_pct - p.score_pct) >= COALESCE(p.post_improvement_threshold, p.improvement_threshold_points, 0) AS met_improvement_threshold_flag,
+    COALESCE(p.post_improvement_threshold, p.improvement_threshold_points, 0) AS improvement_threshold_points,
+    CASE WHEN p.passing_score_percentage IS NULL THEN NULL ELSE p.score_pct >= p.passing_score_percentage END AS baseline_pass_flag,
+    CASE WHEN p.post_passing_score_pct IS NULL THEN NULL ELSE p.post_score_pct >= p.post_passing_score_pct END AS post_pass_flag,
+    CASE
+      WHEN p.passing_score_percentage IS NULL OR p.post_passing_score_pct IS NULL THEN 'unknown'
+      WHEN p.score_pct < p.passing_score_percentage AND p.post_score_pct >= p.post_passing_score_pct THEN 'moved_to_pass'
+      WHEN p.score_pct >= p.passing_score_percentage AND p.post_score_pct < p.post_passing_score_pct THEN 'moved_to_fail'
+      WHEN p.score_pct >= p.passing_score_percentage AND p.post_score_pct >= p.post_passing_score_pct THEN 'remained_pass'
+      ELSE 'remained_fail'
+    END AS pass_status_change,
+    CASE
+      WHEN e.enrollment_id IS NULL THEN 'missing_enrollment'
+      WHEN p.post_attempt_at <= p.submitted_at THEN 'invalid_assessment_sequence'
+      WHEN p.score_pct NOT BETWEEN 0 AND 100 OR p.post_score_pct NOT BETWEEN 0 AND 100 THEN 'invalid_score_range'
+      WHEN p.passing_score_percentage IS NULL OR p.post_passing_score_pct IS NULL THEN 'missing_pass_threshold'
+      ELSE 'complete'
+    END AS data_quality_status,
+    'LMS' AS source_system
+  FROM assessment_pairs AS p
+  INNER JOIN enrollments AS e
+    ON p.enrollment_id = e.enrollment_id
+   AND p.course_id = e.course_id
+  LEFT JOIN courses AS c
+    ON e.course_id = c.course_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH catalog AS (
+    SELECT
+      assessment_id,
+      course_id,
+      assessment_pair_id,
+      assessment_name,
+      LOWER(assessment_stage) AS assessment_stage,
+      passing_score_percentage,
+      improvement_threshold_points
+    FROM lms_assessment_catalog
+    WHERE is_active = TRUE
+  ),
+  scored_attempts AS (
+    SELECT
+      a.attempt_id,
+      a.enrollment_id,
+      a.learner_id,
+      a.assessment_id,
+      a.attempt_number,
+      a.submitted_at,
+      a.score AS raw_score,
+      a.max_score,
+      COALESCE(
+        a.score_percentage,
+        (CAST(a.score AS DECIMAL(18,6)) / NULLIF(CAST(a.max_score AS DECIMAL(18,6)), 0)) * 100
+      ) AS score_pct,
+      c.course_id,
+      c.assessment_pair_id,
+      c.assessment_name,
+      c.assessment_stage,
+      c.passing_score_percentage,
+      c.improvement_threshold_points
+    FROM lms_assessment_attempts AS a
+    INNER JOIN catalog AS c
+      ON a.assessment_id = c.assessment_id
+    WHERE LOWER(a.attempt_status) IN ('completed', 'submitted', 'graded')
+      AND a.submitted_at IS NOT NULL
+      AND COALESCE(a.is_deleted, FALSE) = FALSE
+      AND COALESCE(a.is_valid, TRUE) = TRUE
+  ),
+  valid_attempts AS (
+    SELECT *
+    FROM scored_attempts
+    WHERE score_pct IS NOT NULL
+      AND score_pct BETWEEN 0 AND 100
+  ),
+  baseline_ranked AS (
+    SELECT
+      v.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY enrollment_id, course_id, assessment_pair_id
+        ORDER BY submitted_at, attempt_number, attempt_id
+      ) AS baseline_rank
+    FROM valid_attempts AS v
+    WHERE assessment_stage IN ('baseline', 'pre', 'diagnostic')
+  ),
+  baselines AS (
+    SELECT *
+    FROM baseline_ranked
+    WHERE baseline_rank = 1
+  ),
+  completed_interventions AS (
+    SELECT
+      enrollment_id,
+      intervention_id,
+      intervention_type,
+      completion_status,
+      completed_at
+    FROM lms_learning_intervention_completions
+    WHERE LOWER(completion_status) IN ('completed', 'successful')
+      AND completed_at IS NOT NULL
+      AND COALESCE(is_deleted, FALSE) = FALSE
+  ),
+  intervention_ranked AS (
+    SELECT
+      b.enrollment_id,
+      b.course_id,
+      b.assessment_pair_id,
+      i.intervention_id,
+      i.intervention_type,
+      i.completion_status,
+      i.completed_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY b.enrollment_id, b.course_id, b.assessment_pair_id
+        ORDER BY i.completed_at, i.intervention_id
+      ) AS intervention_rank
+    FROM baselines AS b
+    INNER JOIN completed_interventions AS i
+      ON b.enrollment_id = i.enrollment_id
+     AND i.completed_at >= b.submitted_at
+  ),
+  selected_interventions AS (
+    SELECT *
+    FROM intervention_ranked
+    WHERE intervention_rank = 1
+  ),
+  post_ranked AS (
+    SELECT
+      b.*,
+      p.assessment_id AS post_assessment_id,
+      p.assessment_name AS post_assessment_name,
+      p.attempt_id AS post_attempt_id,
+      p.attempt_number AS post_attempt_number,
+      p.submitted_at AS post_attempt_at,
+      p.raw_score AS post_raw_score,
+      p.max_score AS post_max_score,
+      p.score_pct AS post_score_pct,
+      p.passing_score_percentage AS post_passing_score_pct,
+      p.improvement_threshold_points AS post_improvement_threshold,
+      i.intervention_id,
+      i.intervention_type,
+      i.completed_at AS intervention_completed_at,
+      i.completion_status AS intervention_completion_status,
+      ROW_NUMBER() OVER (
+        PARTITION BY b.enrollment_id, b.course_id, b.assessment_pair_id
+        ORDER BY p.submitted_at DESC, p.attempt_number DESC, p.attempt_id DESC
+      ) AS post_rank
+    FROM baselines AS b
+    LEFT JOIN selected_interventions AS i
+      ON b.enrollment_id = i.enrollment_id
+     AND b.course_id = i.course_id
+     AND b.assessment_pair_id = i.assessment_pair_id
+    INNER JOIN valid_attempts AS p
+      ON b.enrollment_id = p.enrollment_id
+     AND b.course_id = p.course_id
+     AND b.assessment_pair_id = p.assessment_pair_id
+     AND p.assessment_stage IN ('post', 'final', 'summative')
+     AND p.submitted_at > b.submitted_at
+     AND (i.completed_at IS NULL OR p.submitted_at >= i.completed_at)
+  ),
+  assessment_pairs AS (
+    SELECT *
+    FROM post_ranked
+    WHERE post_rank = 1
+  ),
+  enrollments AS (
+    SELECT
+      enrollment_id,
+      learner_id,
+      course_id,
+      enrollment_status,
+      enrollment_date,
+      course_completion_date,
+      cohort_id,
+      organization_id,
+      department_id,
+      region
+    FROM lms_course_enrollments
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+  ),
+  courses AS (
+    SELECT
+      course_id,
+      course_name,
+      course_version,
+      program_id
+    FROM lms_course_catalog
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+  )
+  SELECT
+    'Assessment Score Improvement' AS metric_name,
+    '1.0' AS metric_version,
+    CURRENT_TIMESTAMP AS calculated_at,
+    CAST(p.post_attempt_at AS DATE) AS reporting_date,
+    e.learner_id,
+    e.enrollment_id,
+    e.course_id,
+    c.course_name,
+    c.course_version,
+    c.program_id,
+    e.cohort_id,
+    e.organization_id,
+    e.department_id,
+    e.region,
+    e.enrollment_status,
+    e.enrollment_date,
+    e.course_completion_date,
+    p.assessment_id AS baseline_assessment_id,
+    p.assessment_name AS baseline_assessment_name,
+    p.attempt_id AS baseline_attempt_id,
+    p.attempt_number AS baseline_attempt_number,
+    p.submitted_at AS baseline_attempt_at,
+    p.raw_score AS baseline_raw_score,
+    p.max_score AS baseline_max_score,
+    ROUND(CAST(p.score_pct AS DECIMAL(18,6)), 4) AS baseline_score_pct,
+    p.post_assessment_id,
+    p.post_assessment_name,
+    p.post_attempt_id,
+    p.post_attempt_number,
+    p.post_attempt_at,
+    p.post_raw_score,
+    p.post_max_score,
+    ROUND(CAST(p.post_score_pct AS DECIMAL(18,6)), 4) AS post_score_pct,
+    p.intervention_id,
+    p.intervention_type,
+    p.intervention_completed_at,
+    p.intervention_completion_status,
+    CAST(p.post_attempt_at AS DATE) - CAST(p.submitted_at AS DATE) AS elapsed_days_between_assessments,
+    ROUND(CAST(p.post_score_pct - p.score_pct AS DECIMAL(18,6)), 4) AS absolute_score_improvement_points,
+    ROUND(CAST(((p.post_score_pct - p.score_pct) / NULLIF(p.score_pct, 0)) * 100 AS DECIMAL(18,6)), 4) AS relative_score_improvement_pct,
+    ROUND(CAST(((p.post_score_pct - p.score_pct) / NULLIF(100 - p.score_pct, 0)) * 100 AS DECIMAL(18,6)), 4) AS normalized_gain_pct,
+    CASE WHEN p.post_score_pct > p.score_pct THEN TRUE ELSE FALSE END AS improved_flag,
+    CASE
+      WHEN (p.post_score_pct - p.score_pct) >= COALESCE(p.post_improvement_threshold, p.improvement_threshold_points, 0) THEN TRUE
+      ELSE FALSE
+    END AS met_improvement_threshold_flag,
+    COALESCE(p.post_improvement_threshold, p.improvement_threshold_points, 0) AS improvement_threshold_points,
+    CASE WHEN p.passing_score_percentage IS NULL THEN NULL WHEN p.score_pct >= p.passing_score_percentage THEN TRUE ELSE FALSE END AS baseline_pass_flag,
+    CASE WHEN p.post_passing_score_pct IS NULL THEN NULL WHEN p.post_score_pct >= p.post_passing_score_pct THEN TRUE ELSE FALSE END AS post_pass_flag,
+    CASE
+      WHEN p.passing_score_percentage IS NULL OR p.post_passing_score_pct IS NULL THEN 'unknown'
+      WHEN p.score_pct < p.passing_score_percentage AND p.post_score_pct >= p.post_passing_score_pct THEN 'moved_to_pass'
+      WHEN p.score_pct >= p.passing_score_percentage AND p.post_score_pct < p.post_passing_score_pct THEN 'moved_to_fail'
+      WHEN p.score_pct >= p.passing_score_percentage AND p.post_score_pct >= p.post_passing_score_pct THEN 'remained_pass'
+      ELSE 'remained_fail'
+    END AS pass_status_change,
+    CASE
+      WHEN e.enrollment_id IS NULL THEN 'missing_enrollment'
+      WHEN p.post_attempt_at <= p.submitted_at THEN 'invalid_assessment_sequence'
+      WHEN p.score_pct NOT BETWEEN 0 AND 100 OR p.post_score_pct NOT BETWEEN 0 AND 100 THEN 'invalid_score_range'
+      WHEN p.passing_score_percentage IS NULL OR p.post_passing_score_pct IS NULL THEN 'missing_pass_threshold'
+      ELSE 'complete'
+    END AS data_quality_status,
+    'LMS' AS source_system
+  FROM assessment_pairs AS p
+  INNER JOIN enrollments AS e
+    ON p.enrollment_id = e.enrollment_id
+   AND p.course_id = e.course_id
+  LEFT JOIN courses AS c
+    ON e.course_id = c.course_id;
+
+Calculation Notes: |
+  1️⃣ Normalize baseline and comparison scores to a 0-100 scale.  
+  2️⃣ Use the first valid submitted attempt for each baseline and comparison assessment.  
+  3️⃣ Include only assessment pairs mapped to the same course enrollment, intervention, and learning-objective set.  
+  4️⃣ Assign results to the comparison assessment submission month.  
+  5️⃣ Retain negative improvements and zero values as valid outcomes.  
+  6️⃣ Exclude incomplete, unscored, deleted, preview, instructor-test, sandbox, and integrity-invalidated attempts.  
+  7️⃣ Exclude pairs with missing scores, missing scale boundaries, or no approved assessment-pair mapping.
+
+Business Use Case: |
+  The Chief Learning Officer reviews score improvement by course, instructor, delivery mode, and learner cohort each month. Courses with improvement below 5 percentage points for two consecutive cohorts are prioritized for content redesign and assessment-alignment review, while courses achieving at least 10 percentage points without lower completion rates are candidates for broader deployment.
+
+
+Source Data: Learning Management System assessment attempt records, assessment catalog metadata, course enrollment records, and learning intervention completion records
+
+Report Attributes: |
+  ["Course","Program","Assessment Pair","Learning Objective","Subject Area","Instructor","Delivery Mode","Enrollment Cohort","Learner Grade Level","Organization","Geography","Baseline Proficiency Band","Comparison Proficiency Band","Assessment Submission Month","Device Type","Accessibility Accommodation Status"]
+
+Dashboard Usage: [Learning Outcomes Executive Dashboard, Course Effectiveness Dashboard, Assessment Performance Dashboard, Curriculum Quality Dashboard, Instructor Effectiveness Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Baseline Assessment Score, Post-Assessment Score, Assessment Completion Rate, Assessment Pass Rate, Course Completion Rate, Learning Objective Mastery Rate, Training Participation Rate]
+
+Derived KPIs: [Learners with Positive Score Improvement Rate, Target Score Improvement Attainment Rate, Average Score Improvement by Course, Median Assessment Score Improvement, Score Improvement per Learning Hour, High-Impact Course Rate]
+
+Data Sensitivity: restricted
+
+Contains PII: Yes
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-11T23:30:26.01452+00:00
+
+Last Modified By: devyendarm
+
+
