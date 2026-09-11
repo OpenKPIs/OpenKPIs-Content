@@ -1,0 +1,577 @@
+# Dimension: Fulfillment Strategy
+# Generated: 2026-09-11T21:30:25.820Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Fulfillment Strategy
+
+Description: |
+  Identifies the operational method selected to source, prepare, and deliver or hand off an order item to the customer. It distinguishes strategies such as distribution-center shipping, ship-from-store, supplier dropship, third-party fulfillment, and customer pickup.
+
+Category: Efficiency
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH order_lines AS (
+    SELECT * EXCEPT (row_num)
+    FROM (
+      SELECT
+        ol.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY ol.order_id, ol.order_line_id
+          ORDER BY ol.updated_timestamp DESC, ol.ingested_timestamp DESC
+        ) AS row_num
+      FROM `your-project.oms.order_lines` AS ol
+    )
+    WHERE row_num = 1
+  ),
+  fulfillment_assignments AS (
+    SELECT * EXCEPT (row_num)
+    FROM (
+      SELECT
+        fa.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY fa.fulfillment_unit_id
+          ORDER BY fa.updated_timestamp DESC, fa.ingested_timestamp DESC
+        ) AS row_num
+      FROM `your-project.dom.fulfillment_assignments` AS fa
+    )
+    WHERE row_num = 1
+  ),
+  assignment_counts AS (
+    SELECT
+      order_id,
+      order_line_id,
+      COUNT(DISTINCT fulfillment_unit_id) AS fulfillment_unit_count
+    FROM fulfillment_assignments
+    GROUP BY order_id, order_line_id
+  ),
+  wms_fulfillment AS (
+    SELECT * EXCEPT (row_num)
+    FROM (
+      SELECT
+        wf.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY wf.fulfillment_unit_id
+          ORDER BY wf.updated_timestamp DESC, wf.ingested_timestamp DESC
+        ) AS row_num
+      FROM `your-project.wms.fulfillment_orders` AS wf
+    )
+    WHERE row_num = 1
+  ),
+  tms_shipments AS (
+    SELECT * EXCEPT (row_num)
+    FROM (
+      SELECT
+        sh.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY sh.fulfillment_unit_id
+          ORDER BY sh.updated_timestamp DESC, sh.ingested_timestamp DESC
+        ) AS row_num
+      FROM `your-project.tms.shipments` AS sh
+    )
+    WHERE row_num = 1
+  ),
+  store_fulfillment AS (
+    SELECT * EXCEPT (row_num)
+    FROM (
+      SELECT
+        sf.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY sf.fulfillment_unit_id
+          ORDER BY sf.updated_timestamp DESC, sf.ingested_timestamp DESC
+        ) AS row_num
+      FROM `your-project.store_fulfillment.fulfillment_orders` AS sf
+    )
+    WHERE row_num = 1
+  ),
+  locations AS (
+    SELECT * EXCEPT (row_num)
+    FROM (
+      SELECT
+        loc.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY loc.location_id
+          ORDER BY loc.updated_timestamp DESC, loc.ingested_timestamp DESC
+        ) AS row_num
+      FROM `your-project.erp.locations` AS loc
+    )
+    WHERE row_num = 1
+  ),
+  order_fulfillment_grain AS (
+    SELECT
+      ol.*,
+      fa.* EXCEPT (order_id, order_line_id),
+      COALESCE(ac.fulfillment_unit_count, 1) AS fulfillment_unit_count
+    FROM order_lines AS ol
+    JOIN fulfillment_assignments AS fa
+      ON ol.order_id = fa.order_id
+     AND ol.order_line_id = fa.order_line_id
+    LEFT JOIN assignment_counts AS ac
+      ON ol.order_id = ac.order_id
+     AND ol.order_line_id = ac.order_line_id
+  
+    UNION ALL
+  
+    SELECT
+      ol.*,
+      CAST(NULL AS STRING) AS fulfillment_unit_id,
+      CAST(NULL AS STRING) AS strategy_code,
+      CAST(NULL AS STRING) AS strategy_name,
+      CAST(NULL AS STRING) AS fulfillment_type,
+      CAST(NULL AS STRING) AS delivery_method,
+      CAST(NULL AS STRING) AS sourcing_strategy,
+      CAST(NULL AS STRING) AS fulfillment_channel,
+      CAST(NULL AS STRING) AS assigned_node_id,
+      CAST(NULL AS STRING) AS allocation_rule,
+      CAST(NULL AS INT64) AS allocation_priority,
+      CAST(NULL AS STRING) AS routing_rule,
+      CAST(NULL AS STRING) AS service_level,
+      CAST(NULL AS BOOL) AS backorder_allowed,
+      CAST(NULL AS BOOL) AS substitution_allowed,
+      CAST(NULL AS STRING) AS consolidation_strategy,
+      CAST(NULL AS STRING) AS packaging_strategy,
+      CAST(NULL AS TIMESTAMP) AS promised_fulfillment_timestamp,
+      CAST(NULL AS TIMESTAMP) AS promised_delivery_timestamp,
+      CAST(NULL AS STRING) AS fulfillment_status,
+      CAST(NULL AS TIMESTAMP) AS created_timestamp,
+      CAST(NULL AS TIMESTAMP) AS updated_timestamp,
+      CAST(NULL AS TIMESTAMP) AS ingested_timestamp,
+      1 AS fulfillment_unit_count
+    FROM order_lines AS ol
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM fulfillment_assignments AS fa
+      WHERE fa.order_id = ol.order_id
+        AND fa.order_line_id = ol.order_line_id
+    )
+  ),
+  enriched AS (
+    SELECT
+      g.*,
+      wf.fulfillment_order_id,
+      wf.inventory_ownership_type,
+      wf.inventory_pool,
+      wf.actual_fulfillment_timestamp,
+      wf.fulfillment_status AS wms_fulfillment_status,
+      wf.packaging_strategy AS wms_packaging_strategy,
+      sh.carrier_code,
+      sh.carrier_service_level,
+      sh.shipment_mode,
+      sh.actual_delivery_timestamp,
+      sh.delivery_status,
+      sh.is_cross_border,
+      sf.pickup_type,
+      sf.fulfillment_status AS store_fulfillment_status,
+      sf.actual_ready_timestamp,
+      sf.strategy_code AS store_strategy_code,
+      loc.location_name,
+      loc.location_type,
+      loc.country_code AS ship_from_country_code,
+      UPPER(COALESCE(g.fulfillment_type, sf.fulfillment_type, 'SHIP')) AS normalized_fulfillment_type,
+      UPPER(COALESCE(g.delivery_method, sf.pickup_type, 'STANDARD_DELIVERY')) AS normalized_delivery_method,
+      UPPER(COALESCE(g.strategy_code, sf.strategy_code, wf.strategy_code, 'STANDARD_SHIP')) AS normalized_strategy_code
+    FROM order_fulfillment_grain AS g
+    LEFT JOIN wms_fulfillment AS wf
+      ON wf.fulfillment_unit_id = COALESCE(g.fulfillment_unit_id, g.order_line_id)
+    LEFT JOIN tms_shipments AS sh
+      ON sh.fulfillment_unit_id = COALESCE(g.fulfillment_unit_id, g.order_line_id)
+    LEFT JOIN store_fulfillment AS sf
+      ON sf.fulfillment_unit_id = COALESCE(g.fulfillment_unit_id, g.order_line_id)
+    LEFT JOIN locations AS loc
+      ON loc.location_id = COALESCE(g.assigned_node_id, wf.fulfillment_node_id, sf.store_id)
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT(CAST(order_id AS STRING), '|', CAST(order_line_id AS STRING), '|', COALESCE(CAST(fulfillment_unit_id AS STRING), 'UNASSIGNED')))) AS fulfillment_strategy_key,
+    COALESCE(CAST(fulfillment_unit_id AS STRING), CONCAT(CAST(order_id AS STRING), '-', CAST(order_line_id AS STRING), '-UNASSIGNED')) AS fulfillment_unit_id,
+    CAST(order_id AS STRING) AS order_id,
+    CAST(order_line_id AS STRING) AS order_line_id,
+    COALESCE(sales_channel, 'UNKNOWN') AS sales_channel,
+    COALESCE(order_channel, sales_channel, 'UNKNOWN') AS order_channel,
+    COALESCE(fulfillment_channel, IF(location_type = 'STORE', 'STORE', 'DISTRIBUTION_NETWORK')) AS fulfillment_channel,
+    normalized_strategy_code AS fulfillment_strategy_code,
+    COALESCE(strategy_name, INITCAP(REPLACE(normalized_strategy_code, '_', ' '))) AS fulfillment_strategy_name,
+    normalized_fulfillment_type AS fulfillment_type,
+    normalized_delivery_method AS delivery_method,
+    COALESCE(sourcing_strategy, 'RULE_BASED') AS sourcing_strategy,
+    COALESCE(location_type, 'UNASSIGNED') AS fulfillment_node_type,
+    COALESCE(CAST(assigned_node_id AS STRING), CAST(fulfillment_node_id AS STRING), CAST(store_id AS STRING), 'UNASSIGNED') AS fulfillment_node_id,
+    COALESCE(location_name, 'UNASSIGNED') AS fulfillment_node_name,
+    COALESCE(CAST(assigned_node_id AS STRING), CAST(fulfillment_node_id AS STRING), CAST(store_id AS STRING), 'UNASSIGNED') AS ship_from_location_id,
+    COALESCE(ship_to_location_type, 'CUSTOMER_ADDRESS') AS ship_to_location_type,
+    COALESCE(inventory_ownership_type, 'OWNED') AS inventory_ownership_type,
+    COALESCE(inventory_pool, 'DEFAULT') AS inventory_pool,
+    COALESCE(allocation_rule, 'STANDARD') AS allocation_rule,
+    COALESCE(allocation_priority, 999) AS allocation_priority,
+    COALESCE(routing_rule, 'STANDARD') AS routing_rule,
+    COALESCE(service_level, 'STANDARD') AS service_level,
+    COALESCE(carrier_service_level, service_level, 'STANDARD') AS carrier_service_level,
+    COALESCE(carrier_code, 'UNASSIGNED') AS carrier_code,
+    COALESCE(shipment_mode, IF(normalized_delivery_method LIKE '%PICKUP%', 'CUSTOMER_PICKUP', 'PARCEL')) AS shipment_mode,
+    normalized_fulfillment_type IN ('SHIP_FROM_STORE', 'SFS') AS is_ship_from_store,
+    normalized_delivery_method IN ('STORE_PICKUP', 'PICKUP', 'CURBSIDE_PICKUP') AS is_store_pickup,
+    normalized_delivery_method = 'CURBSIDE_PICKUP' AS is_curbside_pickup,
+    normalized_strategy_code IN ('BOPIS', 'BUY_ONLINE_PICKUP_IN_STORE') AS is_bopis,
+    normalized_strategy_code IN ('BOSS', 'BUY_ONLINE_SHIP_TO_STORE') AS is_boss,
+    normalized_fulfillment_type IN ('DROP_SHIP', 'DROPSHIP') AS is_drop_ship,
+    COALESCE(is_marketplace_order, FALSE) AS is_marketplace,
+    normalized_fulfillment_type IN ('DIRECT_SHIP', 'SHIP', 'SHIP_TO_HOME') AND location_type != 'STORE' AS is_direct_ship,
+    fulfillment_unit_count > 1 OR COALESCE(is_split_fulfillment, FALSE) AS is_split_fulfillment,
+    COALESCE(is_cross_border, ship_from_country_code != ship_to_country_code, FALSE) AS is_cross_border,
+    UPPER(COALESCE(service_level, carrier_service_level, 'STANDARD')) IN ('EXPEDITED', 'EXPRESS', 'NEXT_DAY', 'SAME_DAY') AS is_expedited,
+    COALESCE(backorder_allowed, FALSE) AS is_backorder_allowed,
+    COALESCE(substitution_allowed, FALSE) AS is_substitution_allowed,
+    COALESCE(consolidation_strategy, 'NONE') AS consolidation_strategy,
+    COALESCE(packaging_strategy, wms_packaging_strategy, 'STANDARD') AS packaging_strategy,
+    DATE(COALESCE(promised_fulfillment_timestamp, promised_ship_timestamp)) AS promised_fulfillment_date,
+    DATE(COALESCE(promised_delivery_timestamp, requested_delivery_timestamp)) AS promised_delivery_date,
+    DATE(COALESCE(actual_fulfillment_timestamp, actual_ready_timestamp)) AS actual_fulfillment_date,
+    DATE(actual_delivery_timestamp) AS actual_delivery_date,
+    COALESCE(delivery_status, store_fulfillment_status, wms_fulfillment_status, fulfillment_status, order_line_status, 'UNKNOWN') AS fulfillment_status,
+    COALESCE(created_timestamp, order_created_timestamp) AS strategy_effective_timestamp,
+    GREATEST(COALESCE(updated_timestamp, TIMESTAMP '1970-01-01'), COALESCE(order_updated_timestamp, TIMESTAMP '1970-01-01'), COALESCE(actual_fulfillment_timestamp, TIMESTAMP '1970-01-01'), COALESCE(actual_delivery_timestamp, TIMESTAMP '1970-01-01')) AS strategy_last_updated_timestamp,
+    'OMS|DOM|WMS|TMS|STORE_FULFILLMENT|ERP' AS source_system
+  FROM enriched;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH order_lines_ranked AS (
+    SELECT
+      ol.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY ol.order_id, ol.order_line_id
+        ORDER BY ol.updated_timestamp DESC, ol.ingested_timestamp DESC
+      ) AS row_num
+    FROM aep_backend_dataset.oms_order_lines AS ol
+  ),
+  order_lines AS (
+    SELECT *
+    FROM order_lines_ranked
+    WHERE row_num = 1
+  ),
+  assignments_ranked AS (
+    SELECT
+      fa.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY fa.fulfillment_unit_id
+        ORDER BY fa.updated_timestamp DESC, fa.ingested_timestamp DESC
+      ) AS row_num
+    FROM aep_backend_dataset.dom_fulfillment_assignments AS fa
+  ),
+  fulfillment_assignments AS (
+    SELECT *
+    FROM assignments_ranked
+    WHERE row_num = 1
+  ),
+  assignment_counts AS (
+    SELECT
+      order_id,
+      order_line_id,
+      COUNT(DISTINCT fulfillment_unit_id) AS fulfillment_unit_count
+    FROM fulfillment_assignments
+    GROUP BY order_id, order_line_id
+  ),
+  wms_ranked AS (
+    SELECT
+      wf.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY wf.fulfillment_unit_id
+        ORDER BY wf.updated_timestamp DESC, wf.ingested_timestamp DESC
+      ) AS row_num
+    FROM aep_backend_dataset.wms_fulfillment_orders AS wf
+  ),
+  wms_fulfillment AS (
+    SELECT *
+    FROM wms_ranked
+    WHERE row_num = 1
+  ),
+  tms_ranked AS (
+    SELECT
+      sh.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY sh.fulfillment_unit_id
+        ORDER BY sh.updated_timestamp DESC, sh.ingested_timestamp DESC
+      ) AS row_num
+    FROM aep_backend_dataset.tms_shipments AS sh
+  ),
+  tms_shipments AS (
+    SELECT *
+    FROM tms_ranked
+    WHERE row_num = 1
+  ),
+  store_ranked AS (
+    SELECT
+      sf.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY sf.fulfillment_unit_id
+        ORDER BY sf.updated_timestamp DESC, sf.ingested_timestamp DESC
+      ) AS row_num
+    FROM aep_backend_dataset.store_fulfillment_orders AS sf
+  ),
+  store_fulfillment AS (
+    SELECT *
+    FROM store_ranked
+    WHERE row_num = 1
+  ),
+  location_ranked AS (
+    SELECT
+      loc.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY loc.location_id
+        ORDER BY loc.updated_timestamp DESC, loc.ingested_timestamp DESC
+      ) AS row_num
+    FROM aep_backend_dataset.erp_locations AS loc
+  ),
+  locations AS (
+    SELECT *
+    FROM location_ranked
+    WHERE row_num = 1
+  ),
+  assigned_grain AS (
+    SELECT
+      ol.order_id,
+      ol.order_line_id,
+      ol.sales_channel,
+      ol.order_channel,
+      ol.ship_to_location_type,
+      ol.ship_to_country_code,
+      ol.is_marketplace_order,
+      ol.is_split_fulfillment,
+      ol.promised_ship_timestamp,
+      ol.requested_delivery_timestamp,
+      ol.order_line_status,
+      ol.order_created_timestamp,
+      ol.order_updated_timestamp,
+      fa.fulfillment_unit_id,
+      fa.strategy_code,
+      fa.strategy_name,
+      fa.fulfillment_type,
+      fa.delivery_method,
+      fa.sourcing_strategy,
+      fa.fulfillment_channel,
+      fa.assigned_node_id,
+      fa.allocation_rule,
+      fa.allocation_priority,
+      fa.routing_rule,
+      fa.service_level,
+      fa.backorder_allowed,
+      fa.substitution_allowed,
+      fa.consolidation_strategy,
+      fa.packaging_strategy,
+      fa.promised_fulfillment_timestamp,
+      fa.promised_delivery_timestamp,
+      fa.fulfillment_status,
+      fa.created_timestamp,
+      fa.updated_timestamp,
+      COALESCE(ac.fulfillment_unit_count, 1) AS fulfillment_unit_count
+    FROM order_lines AS ol
+    JOIN fulfillment_assignments AS fa
+      ON ol.order_id = fa.order_id
+     AND ol.order_line_id = fa.order_line_id
+    LEFT JOIN assignment_counts AS ac
+      ON ol.order_id = ac.order_id
+     AND ol.order_line_id = ac.order_line_id
+  ),
+  unassigned_grain AS (
+    SELECT
+      ol.order_id,
+      ol.order_line_id,
+      ol.sales_channel,
+      ol.order_channel,
+      ol.ship_to_location_type,
+      ol.ship_to_country_code,
+      ol.is_marketplace_order,
+      ol.is_split_fulfillment,
+      ol.promised_ship_timestamp,
+      ol.requested_delivery_timestamp,
+      ol.order_line_status,
+      ol.order_created_timestamp,
+      ol.order_updated_timestamp,
+      CAST(NULL AS VARCHAR) AS fulfillment_unit_id,
+      CAST(NULL AS VARCHAR) AS strategy_code,
+      CAST(NULL AS VARCHAR) AS strategy_name,
+      CAST(NULL AS VARCHAR) AS fulfillment_type,
+      CAST(NULL AS VARCHAR) AS delivery_method,
+      CAST(NULL AS VARCHAR) AS sourcing_strategy,
+      CAST(NULL AS VARCHAR) AS fulfillment_channel,
+      CAST(NULL AS VARCHAR) AS assigned_node_id,
+      CAST(NULL AS VARCHAR) AS allocation_rule,
+      CAST(NULL AS INTEGER) AS allocation_priority,
+      CAST(NULL AS VARCHAR) AS routing_rule,
+      CAST(NULL AS VARCHAR) AS service_level,
+      CAST(NULL AS BOOLEAN) AS backorder_allowed,
+      CAST(NULL AS BOOLEAN) AS substitution_allowed,
+      CAST(NULL AS VARCHAR) AS consolidation_strategy,
+      CAST(NULL AS VARCHAR) AS packaging_strategy,
+      CAST(NULL AS TIMESTAMP) AS promised_fulfillment_timestamp,
+      CAST(NULL AS TIMESTAMP) AS promised_delivery_timestamp,
+      CAST(NULL AS VARCHAR) AS fulfillment_status,
+      CAST(NULL AS TIMESTAMP) AS created_timestamp,
+      CAST(NULL AS TIMESTAMP) AS updated_timestamp,
+      1 AS fulfillment_unit_count
+    FROM order_lines AS ol
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM fulfillment_assignments AS fa
+      WHERE fa.order_id = ol.order_id
+        AND fa.order_line_id = ol.order_line_id
+    )
+  ),
+  order_fulfillment_grain AS (
+    SELECT * FROM assigned_grain
+    UNION ALL
+    SELECT * FROM unassigned_grain
+  ),
+  enriched AS (
+    SELECT
+      g.*,
+      wf.fulfillment_node_id,
+      wf.inventory_ownership_type,
+      wf.inventory_pool,
+      wf.actual_fulfillment_timestamp,
+      wf.fulfillment_status AS wms_fulfillment_status,
+      wf.packaging_strategy AS wms_packaging_strategy,
+      sh.carrier_code,
+      sh.carrier_service_level,
+      sh.shipment_mode,
+      sh.actual_delivery_timestamp,
+      sh.delivery_status,
+      sh.is_cross_border,
+      sf.store_id,
+      sf.pickup_type,
+      sf.fulfillment_type AS store_fulfillment_type,
+      sf.fulfillment_status AS store_fulfillment_status,
+      sf.actual_ready_timestamp,
+      sf.strategy_code AS store_strategy_code,
+      loc.location_name,
+      loc.location_type,
+      loc.country_code AS ship_from_country_code,
+      UPPER(COALESCE(g.fulfillment_type, sf.fulfillment_type, 'SHIP')) AS normalized_fulfillment_type,
+      UPPER(COALESCE(g.delivery_method, sf.pickup_type, 'STANDARD_DELIVERY')) AS normalized_delivery_method,
+      UPPER(COALESCE(g.strategy_code, sf.strategy_code, wf.strategy_code, 'STANDARD_SHIP')) AS normalized_strategy_code
+    FROM order_fulfillment_grain AS g
+    LEFT JOIN wms_fulfillment AS wf
+      ON wf.fulfillment_unit_id = COALESCE(g.fulfillment_unit_id, CAST(g.order_line_id AS VARCHAR))
+    LEFT JOIN tms_shipments AS sh
+      ON sh.fulfillment_unit_id = COALESCE(g.fulfillment_unit_id, CAST(g.order_line_id AS VARCHAR))
+    LEFT JOIN store_fulfillment AS sf
+      ON sf.fulfillment_unit_id = COALESCE(g.fulfillment_unit_id, CAST(g.order_line_id AS VARCHAR))
+    LEFT JOIN locations AS loc
+      ON loc.location_id = COALESCE(g.assigned_node_id, wf.fulfillment_node_id, sf.store_id)
+  )
+  SELECT
+    MD5(CONCAT(CAST(order_id AS VARCHAR), '|', CAST(order_line_id AS VARCHAR), '|', COALESCE(CAST(fulfillment_unit_id AS VARCHAR), 'UNASSIGNED'))) AS fulfillment_strategy_key,
+    COALESCE(CAST(fulfillment_unit_id AS VARCHAR), CONCAT(CAST(order_id AS VARCHAR), '-', CAST(order_line_id AS VARCHAR), '-UNASSIGNED')) AS fulfillment_unit_id,
+    CAST(order_id AS VARCHAR) AS order_id,
+    CAST(order_line_id AS VARCHAR) AS order_line_id,
+    COALESCE(sales_channel, 'UNKNOWN') AS sales_channel,
+    COALESCE(order_channel, sales_channel, 'UNKNOWN') AS order_channel,
+    COALESCE(fulfillment_channel, CASE WHEN location_type = 'STORE' THEN 'STORE' ELSE 'DISTRIBUTION_NETWORK' END) AS fulfillment_channel,
+    normalized_strategy_code AS fulfillment_strategy_code,
+    COALESCE(strategy_name, INITCAP(REPLACE(normalized_strategy_code, '_', ' '))) AS fulfillment_strategy_name,
+    normalized_fulfillment_type AS fulfillment_type,
+    normalized_delivery_method AS delivery_method,
+    COALESCE(sourcing_strategy, 'RULE_BASED') AS sourcing_strategy,
+    COALESCE(location_type, 'UNASSIGNED') AS fulfillment_node_type,
+    COALESCE(CAST(assigned_node_id AS VARCHAR), CAST(fulfillment_node_id AS VARCHAR), CAST(store_id AS VARCHAR), 'UNASSIGNED') AS fulfillment_node_id,
+    COALESCE(location_name, 'UNASSIGNED') AS fulfillment_node_name,
+    COALESCE(CAST(assigned_node_id AS VARCHAR), CAST(fulfillment_node_id AS VARCHAR), CAST(store_id AS VARCHAR), 'UNASSIGNED') AS ship_from_location_id,
+    COALESCE(ship_to_location_type, 'CUSTOMER_ADDRESS') AS ship_to_location_type,
+    COALESCE(inventory_ownership_type, 'OWNED') AS inventory_ownership_type,
+    COALESCE(inventory_pool, 'DEFAULT') AS inventory_pool,
+    COALESCE(allocation_rule, 'STANDARD') AS allocation_rule,
+    COALESCE(allocation_priority, 999) AS allocation_priority,
+    COALESCE(routing_rule, 'STANDARD') AS routing_rule,
+    COALESCE(service_level, 'STANDARD') AS service_level,
+    COALESCE(carrier_service_level, service_level, 'STANDARD') AS carrier_service_level,
+    COALESCE(carrier_code, 'UNASSIGNED') AS carrier_code,
+    COALESCE(shipment_mode, CASE WHEN normalized_delivery_method LIKE '%PICKUP%' THEN 'CUSTOMER_PICKUP' ELSE 'PARCEL' END) AS shipment_mode,
+    normalized_fulfillment_type IN ('SHIP_FROM_STORE', 'SFS') AS is_ship_from_store,
+    normalized_delivery_method IN ('STORE_PICKUP', 'PICKUP', 'CURBSIDE_PICKUP') AS is_store_pickup,
+    normalized_delivery_method = 'CURBSIDE_PICKUP' AS is_curbside_pickup,
+    normalized_strategy_code IN ('BOPIS', 'BUY_ONLINE_PICKUP_IN_STORE') AS is_bopis,
+    normalized_strategy_code IN ('BOSS', 'BUY_ONLINE_SHIP_TO_STORE') AS is_boss,
+    normalized_fulfillment_type IN ('DROP_SHIP', 'DROPSHIP') AS is_drop_ship,
+    COALESCE(is_marketplace_order, FALSE) AS is_marketplace,
+    normalized_fulfillment_type IN ('DIRECT_SHIP', 'SHIP', 'SHIP_TO_HOME') AND COALESCE(location_type, 'UNASSIGNED') <> 'STORE' AS is_direct_ship,
+    fulfillment_unit_count > 1 OR COALESCE(is_split_fulfillment, FALSE) AS is_split_fulfillment,
+    COALESCE(is_cross_border, ship_from_country_code <> ship_to_country_code, FALSE) AS is_cross_border,
+    UPPER(COALESCE(service_level, carrier_service_level, 'STANDARD')) IN ('EXPEDITED', 'EXPRESS', 'NEXT_DAY', 'SAME_DAY') AS is_expedited,
+    COALESCE(backorder_allowed, FALSE) AS is_backorder_allowed,
+    COALESCE(substitution_allowed, FALSE) AS is_substitution_allowed,
+    COALESCE(consolidation_strategy, 'NONE') AS consolidation_strategy,
+    COALESCE(packaging_strategy, wms_packaging_strategy, 'STANDARD') AS packaging_strategy,
+    CAST(COALESCE(promised_fulfillment_timestamp, promised_ship_timestamp) AS DATE) AS promised_fulfillment_date,
+    CAST(COALESCE(promised_delivery_timestamp, requested_delivery_timestamp) AS DATE) AS promised_delivery_date,
+    CAST(COALESCE(actual_fulfillment_timestamp, actual_ready_timestamp) AS DATE) AS actual_fulfillment_date,
+    CAST(actual_delivery_timestamp AS DATE) AS actual_delivery_date,
+    COALESCE(delivery_status, store_fulfillment_status, wms_fulfillment_status, fulfillment_status, order_line_status, 'UNKNOWN') AS fulfillment_status,
+    COALESCE(created_timestamp, order_created_timestamp) AS strategy_effective_timestamp,
+    GREATEST(COALESCE(updated_timestamp, TIMESTAMP '1970-01-01 00:00:00'), COALESCE(order_updated_timestamp, TIMESTAMP '1970-01-01 00:00:00'), COALESCE(actual_fulfillment_timestamp, TIMESTAMP '1970-01-01 00:00:00'), COALESCE(actual_delivery_timestamp, TIMESTAMP '1970-01-01 00:00:00')) AS strategy_last_updated_timestamp,
+    'OMS|DOM|WMS|TMS|STORE_FULFILLMENT|ERP' AS source_system
+  FROM enriched;
+
+Calculation Notes: |
+  1️⃣ Assign strategy at fulfillment-unit grain, not order grain.  
+  2️⃣ Retain separate values for each fulfillment unit when order lines are split.  
+  3️⃣ Capture value upon strategy assignment; create new record on rerouting.  
+  4️⃣ Use initial committed strategy for booked-order reporting.  
+  5️⃣ Use strategy effective at event timestamp for operational reporting.  
+  6️⃣ Use final strategy for completed-fulfillment reporting.  
+  7️⃣ Canceled units keep last assigned strategy but filter by cancellation status.
+
+Business Use Case: |
+  The Chief Supply Chain Officer reviews cost, cycle time, split rate, cancellation rate, and on-time fulfillment by Fulfillment Strategy. If ship-from-store volume shows higher cancellation and handling cost than distribution-center shipping in selected regions, fulfillment leadership can tighten store eligibility, rebalance inventory, or redirect eligible demand to distribution centers and third-party nodes.
+
+
+Source Data: Order Management System, Distributed Order Management, Warehouse Management System, Transportation Management System, Store Fulfillment Platform, and ERP
+
+Report Attributes: |
+  ["Order Date","Fulfillment Date","Order Channel","Sales Region","Customer Region","Product Category","Fulfillment Location","Fulfillment Node Type","Fulfillment Provider","Delivery Method","Shipping Service Level","Carrier","Order Priority","Shipment Status"]
+
+Dashboard Usage: [Fulfillment Operations Performance, Order Orchestration Effectiveness, Network Fulfillment Mix, Omnichannel Fulfillment, Perfect Order Performance, Delivery Promise and On-Time Fulfillment, Fulfillment Cost and Productivity, Executive Supply Chain Scorecard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Fulfillment Location, Fulfillment Node Type, Fulfillment Provider, Delivery Method, Shipping Service Level, Order Channel, Inventory Source, Customer Handoff Method, Shipment Status, Order Line]
+
+Derived Dimensions: [Fulfillment Channel, Fulfillment Ownership Model, Pickup vs Delivery Indicator, Store-Based Fulfillment Indicator, External Fulfillment Indicator, Fulfillment Strategy Group]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-11T21:30:23.825436+00:00
+
+Last Modified By: devyendarm
+
+
