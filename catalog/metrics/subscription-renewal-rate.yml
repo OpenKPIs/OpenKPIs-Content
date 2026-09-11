@@ -1,0 +1,97 @@
+# Metric: Subscription Renewal Rate
+# Generated: 2026-09-11T22:30:38.525Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Subscription Renewal Rate
+Formula: (Number of Renewed Subscriptions / Total Subscriptions Up for Renewal) * 100
+
+Description: |
+  Measures the percentage of existing subscribers who renew their subscriptions within a given period. It indicates customer retention and loyalty in e-commerce and SaaS industries.
+
+Category: Retention
+
+Tags: [metric]
+
+Industry: E-commerce & SaaS
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: User
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT customer_id,
+         COUNT(CASE WHEN event_name = 'subscription_renewed' THEN 1 END) AS renewals,
+         COUNT(CASE WHEN event_name = 'subscription_started' THEN 1 END) AS total_subscriptions,
+         SAFE_DIVIDE(COUNT(CASE WHEN event_name = 'subscription_renewed' THEN 1 END),
+                     COUNT(CASE WHEN event_name = 'subscription_started' THEN 1 END)) AS renewal_rate
+  FROM `your-project.crm.subscription_events`
+  WHERE event_name IN ('subscription_started', 'subscription_renewed')
+  GROUP BY customer_id
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT customer_id,
+         COUNT(CASE WHEN event_name = 'subscription_renewed' THEN 1 END) AS renewals,
+         COUNT(CASE WHEN event_name = 'subscription_started' THEN 1 END) AS total_subscriptions,
+         SAFE_DIVIDE(COUNT(CASE WHEN event_name = 'subscription_renewed' THEN 1 END),
+                     COUNT(CASE WHEN event_name = 'subscription_started' THEN 1 END)) AS renewal_rate
+  FROM crm.subscription_events
+  WHERE event_name IN ('subscription_started', 'subscription_renewed')
+  GROUP BY customer_id
+
+Calculation Notes: |
+  1️⃣ Exclude canceled subscriptions prior to renewal.  
+  2️⃣ Consider grace periods for late renewals.  
+  3️⃣ Assess renewal eligibility based on cancellation date.  
+  4️⃣ Track grace period duration for late renewals.  
+  5️⃣ Ensure accurate reporting of active subscriptions.
+
+Business Use Case: |
+  Executives use this metric to assess the effectiveness of retention strategies and make decisions on customer engagement initiatives.
+
+
+Source Data: CRM
+
+Report Attributes: |
+  ["Geography","Subscription Type","Customer Segment"]
+
+Dashboard Usage: [Executive Overview, Customer Retention Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Churn Rate, Customer Lifetime Value, Net Promoter Score]
+
+Derived KPIs: [Annual Recurring Revenue, Customer Retention Rate]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-11T22:30:38.113509+00:00
+
+Last Modified By: devyendarm
+
+
