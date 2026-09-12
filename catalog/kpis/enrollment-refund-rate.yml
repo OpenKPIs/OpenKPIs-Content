@@ -1,0 +1,519 @@
+# KPI: Enrollment Refund Rate
+# Generated: 2026-09-12T20:30:10.055Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Enrollment Refund Rate
+Formula: (Count of distinct eligible paid enrollment IDs with at least one settled refund greater than zero during the applicable refund observation window / Count of distinct eligible paid enrollment IDs in the matured enrollment cohort) × 100
+
+Description: |
+  Enrollment Refund Rate measures the percentage of eligible paid enrollments that receive at least one settled monetary refund within the applicable refund observation window. It identifies post-conversion revenue reversal associated with acquisition quality, enrollment expectations, learner onboarding, course engagement, billing experience, and retained learner value.
+
+Category: Revenue
+
+Tags: [kpi]
+
+Industry: [EdTech & E-Learning]
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Item
+
+Measure Type: rate
+
+Aggregation Window: Time based - Daily, reported by weekly and monthly enrollment cohort
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT
+      DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH), MONTH) AS reporting_start_date,
+      CURRENT_DATE() AS reporting_end_exclusive,
+      CURRENT_TIMESTAMP() AS as_of_timestamp
+  ),
+  payments_by_enrollment AS (
+    SELECT
+      enrollment_id,
+      ANY_VALUE(currency HAVING MAX processed_at) AS currency,
+      ANY_VALUE(processor HAVING MAX processed_at) AS payment_processor,
+      ANY_VALUE(payment_method_type HAVING MAX processed_at) AS payment_method_type,
+      SUM(amount) AS paid_amount,
+      MAX(processed_at) AS last_payment_at
+    FROM `your-project.billing.payment_transactions`
+    CROSS JOIN parameters
+    WHERE LOWER(transaction_type) IN ('charge', 'capture', 'payment')
+      AND LOWER(status) IN ('succeeded', 'settled', 'completed', 'captured')
+      AND amount > 0
+      AND processed_at <= as_of_timestamp
+      AND enrollment_id IS NOT NULL
+    GROUP BY enrollment_id
+  ),
+  refunds_by_enrollment AS (
+    SELECT
+      enrollment_id,
+      SUM(amount) AS refunded_amount,
+      COUNT(DISTINCT refund_id) AS refund_transaction_count,
+      MIN(processed_at) AS first_refund_at,
+      MAX(processed_at) AS latest_refund_at
+    FROM `your-project.billing.refund_transactions`
+    CROSS JOIN parameters
+    WHERE LOWER(status) IN ('succeeded', 'settled', 'completed')
+      AND amount > 0
+      AND processed_at <= as_of_timestamp
+      AND enrollment_id IS NOT NULL
+    GROUP BY enrollment_id
+  ),
+  latest_attribution AS (
+    SELECT
+      enrollment_id,
+      campaign_id,
+      device_category,
+      platform,
+      acquisition_channel_group
+    FROM `your-project.analytics.enrollment_attribution`
+    WHERE enrollment_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY enrollment_id
+      ORDER BY attributed_at DESC, attribution_record_id DESC
+    ) = 1
+  ),
+  eligible_enrollment_base AS (
+    SELECT
+      p.reporting_start_date,
+      DATE_SUB(p.reporting_end_exclusive, INTERVAL 1 DAY) AS reporting_end_date,
+      DATE(p.as_of_timestamp) AS as_of_date,
+      e.enrollment_id,
+      DATE(e.enrolled_at) AS enrollment_date,
+      DATE_TRUNC(DATE(e.enrolled_at), WEEK(MONDAY)) AS enrollment_week,
+      DATE_TRUNC(DATE(e.enrolled_at), MONTH) AS enrollment_month,
+      COALESCE(pay.currency, o.currency, 'UNKNOWN') AS currency,
+      COALESCE(pay.payment_processor, 'UNKNOWN') AS payment_processor,
+      COALESCE(pay.payment_method_type, 'UNKNOWN') AS payment_method_type,
+      COALESCE(o.order_channel, 'UNKNOWN') AS order_channel,
+      COALESCE(e.enrollment_channel, o.order_channel, 'UNKNOWN') AS enrollment_channel,
+      e.course_id,
+      COALESCE(c.course_name, 'UNKNOWN') AS course_name,
+      COALESCE(c.course_category, 'UNKNOWN') AS course_category,
+      COALESCE(c.course_level, 'UNKNOWN') AS course_level,
+      COALESCE(c.delivery_mode, 'UNKNOWN') AS delivery_mode,
+      COALESCE(CAST(c.instructor_id AS STRING), 'UNKNOWN') AS instructor_id,
+      COALESCE(cr.country_code, 'UNKNOWN') AS learner_country,
+      COALESCE(cr.region, 'UNKNOWN') AS learner_region,
+      COALESCE(cr.learner_segment, 'UNKNOWN') AS learner_segment,
+      COALESCE(cr.customer_type, 'UNKNOWN') AS customer_type,
+      COALESCE(CAST(o.campaign_id AS STRING), CAST(a.campaign_id AS STRING), 'UNATTRIBUTED') AS campaign_id,
+      COALESCE(cm.campaign_name, 'UNATTRIBUTED') AS campaign_name,
+      COALESCE(cm.source, 'UNATTRIBUTED') AS campaign_source,
+      COALESCE(cm.medium, 'UNATTRIBUTED') AS campaign_medium,
+      COALESCE(cm.term, 'UNATTRIBUTED') AS campaign_term,
+      COALESCE(cm.content, 'UNATTRIBUTED') AS campaign_content,
+      COALESCE(a.device_category, 'UNKNOWN') AS device_category,
+      COALESCE(a.platform, 'UNKNOWN') AS platform,
+      COALESCE(a.acquisition_channel_group, 'UNATTRIBUTED') AS acquisition_channel_group,
+      COALESCE(o.is_enterprise, FALSE) AS is_enterprise,
+      pay.paid_amount,
+      COALESCE(r.refunded_amount, 0) AS refunded_amount,
+      COALESCE(r.refund_transaction_count, 0) AS refund_transaction_count,
+      r.first_refund_at
+    FROM `your-project.commerce.enrollments` e
+    JOIN payments_by_enrollment pay
+      ON pay.enrollment_id = e.enrollment_id
+    CROSS JOIN parameters p
+    LEFT JOIN `your-project.commerce.orders` o
+      ON o.order_id = e.order_id
+    LEFT JOIN `your-project.learning.course_dimension` c
+      ON c.course_id = e.course_id
+    LEFT JOIN `your-project.crm.customer_dimension` cr
+      ON cr.customer_id = e.customer_id
+    LEFT JOIN latest_attribution a
+      ON a.enrollment_id = e.enrollment_id
+    LEFT JOIN `your-project.crm.campaign_dimension` cm
+      ON CAST(cm.campaign_id AS STRING) = COALESCE(CAST(o.campaign_id AS STRING), CAST(a.campaign_id AS STRING))
+    LEFT JOIN refunds_by_enrollment r
+      ON r.enrollment_id = e.enrollment_id
+    WHERE DATE(e.enrolled_at) >= p.reporting_start_date
+      AND DATE(e.enrolled_at) < p.reporting_end_exclusive
+      AND LOWER(COALESCE(e.enrollment_status, 'unknown')) NOT IN ('draft', 'test', 'fraudulent', 'void')
+      AND COALESCE(e.is_test, FALSE) = FALSE
+      AND pay.paid_amount > 0
+  )
+  SELECT
+    reporting_start_date,
+    reporting_end_date,
+    as_of_date,
+    enrollment_month,
+    enrollment_week,
+    enrollment_date,
+    currency,
+    payment_processor,
+    payment_method_type,
+    order_channel,
+    enrollment_channel,
+    course_id,
+    course_name,
+    course_category,
+    course_level,
+    delivery_mode,
+    instructor_id,
+    learner_country,
+    learner_region,
+    learner_segment,
+    customer_type,
+    campaign_id,
+    campaign_name,
+    campaign_source,
+    campaign_medium,
+    campaign_term,
+    campaign_content,
+    device_category,
+    platform,
+    acquisition_channel_group,
+    is_enterprise,
+    COUNT(DISTINCT enrollment_id) AS eligible_enrollments,
+    COUNT(DISTINCT IF(refunded_amount > 0, enrollment_id, NULL)) AS refunded_enrollments,
+    COUNT(DISTINCT IF(refunded_amount = 0, enrollment_id, NULL)) AS non_refunded_enrollments,
+    COUNT(DISTINCT IF(refunded_amount >= paid_amount - 0.01, enrollment_id, NULL)) AS full_refund_enrollments,
+    COUNT(DISTINCT IF(refunded_amount > 0 AND refunded_amount < paid_amount - 0.01, enrollment_id, NULL)) AS partial_refund_enrollments,
+    SUM(refund_transaction_count) AS refund_transaction_count,
+    ROUND(SUM(paid_amount), 2) AS gross_enrollment_revenue,
+    ROUND(SUM(refunded_amount), 2) AS refunded_amount,
+    ROUND(SUM(GREATEST(paid_amount - refunded_amount, 0)), 2) AS non_refunded_amount,
+    ROUND(
+      100 * SAFE_DIVIDE(
+        COUNT(DISTINCT IF(refunded_amount > 0, enrollment_id, NULL)),
+        COUNT(DISTINCT enrollment_id)
+      ),
+      4
+    ) AS enrollment_refund_rate,
+    ROUND(100 * SAFE_DIVIDE(SUM(refunded_amount), SUM(paid_amount)), 4) AS refund_amount_rate,
+    ROUND(
+      SAFE_DIVIDE(
+        SUM(IF(refunded_amount > 0, refunded_amount, 0)),
+        COUNT(DISTINCT IF(refunded_amount > 0, enrollment_id, NULL))
+      ),
+      2
+    ) AS avg_refund_amount_per_refunded_enrollment,
+    ROUND(
+      AVG(
+        IF(
+          refunded_amount > 0,
+          TIMESTAMP_DIFF(first_refund_at, TIMESTAMP(enrollment_date), SECOND) / 86400.0,
+          NULL
+        )
+      ),
+      2
+    ) AS avg_days_to_first_refund,
+    'Enrollment Refund Rate' AS kpi_name,
+    'percent' AS kpi_unit,
+    'Distinct eligible paid enrollments with at least one successfully settled positive refund' AS numerator_definition,
+    'All distinct eligible paid enrollments created in the reporting cohort' AS denominator_definition,
+    CURRENT_TIMESTAMP() AS generated_at
+  FROM eligible_enrollment_base
+  GROUP BY
+    reporting_start_date,
+    reporting_end_date,
+    as_of_date,
+    enrollment_month,
+    enrollment_week,
+    enrollment_date,
+    currency,
+    payment_processor,
+    payment_method_type,
+    order_channel,
+    enrollment_channel,
+    course_id,
+    course_name,
+    course_category,
+    course_level,
+    delivery_mode,
+    instructor_id,
+    learner_country,
+    learner_region,
+    learner_segment,
+    customer_type,
+    campaign_id,
+    campaign_name,
+    campaign_source,
+    campaign_medium,
+    campaign_term,
+    campaign_content,
+    device_category,
+    platform,
+    acquisition_channel_group,
+    is_enterprise;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT
+      CAST(DATE_TRUNC('month', CURRENT_DATE - INTERVAL '12 months') AS DATE) AS reporting_start_date,
+      CURRENT_DATE AS reporting_end_exclusive,
+      CURRENT_TIMESTAMP AS as_of_timestamp
+  ),
+  payments_by_enrollment AS (
+    SELECT
+      enrollment_id,
+      MAX(currency) AS currency,
+      MAX(processor) AS payment_processor,
+      MAX(payment_method_type) AS payment_method_type,
+      SUM(amount) AS paid_amount,
+      MAX(processed_at) AS last_payment_at
+    FROM billing_payment_transactions_backend_dataset
+    CROSS JOIN parameters
+    WHERE LOWER(transaction_type) IN ('charge', 'capture', 'payment')
+      AND LOWER(status) IN ('succeeded', 'settled', 'completed', 'captured')
+      AND amount > 0
+      AND processed_at <= as_of_timestamp
+      AND enrollment_id IS NOT NULL
+    GROUP BY enrollment_id
+  ),
+  refunds_by_enrollment AS (
+    SELECT
+      enrollment_id,
+      SUM(amount) AS refunded_amount,
+      COUNT(DISTINCT refund_id) AS refund_transaction_count,
+      MIN(processed_at) AS first_refund_at,
+      MAX(processed_at) AS latest_refund_at
+    FROM billing_refund_transactions_backend_dataset
+    CROSS JOIN parameters
+    WHERE LOWER(status) IN ('succeeded', 'settled', 'completed')
+      AND amount > 0
+      AND processed_at <= as_of_timestamp
+      AND enrollment_id IS NOT NULL
+    GROUP BY enrollment_id
+  ),
+  ranked_attribution AS (
+    SELECT
+      enrollment_id,
+      campaign_id,
+      device_category,
+      platform,
+      acquisition_channel_group,
+      ROW_NUMBER() OVER (
+        PARTITION BY enrollment_id
+        ORDER BY attributed_at DESC, attribution_record_id DESC
+      ) AS attribution_rank
+    FROM enrollment_attribution_backend_dataset
+    WHERE enrollment_id IS NOT NULL
+  ),
+  latest_attribution AS (
+    SELECT
+      enrollment_id,
+      campaign_id,
+      device_category,
+      platform,
+      acquisition_channel_group
+    FROM ranked_attribution
+    WHERE attribution_rank = 1
+  ),
+  eligible_enrollment_base AS (
+    SELECT
+      p.reporting_start_date,
+      CAST(p.reporting_end_exclusive - INTERVAL '1 day' AS DATE) AS reporting_end_date,
+      CAST(p.as_of_timestamp AS DATE) AS as_of_date,
+      e.enrollment_id,
+      CAST(e.enrolled_at AS DATE) AS enrollment_date,
+      CAST(DATE_TRUNC('week', e.enrolled_at) AS DATE) AS enrollment_week,
+      CAST(DATE_TRUNC('month', e.enrolled_at) AS DATE) AS enrollment_month,
+      COALESCE(pay.currency, o.currency, 'UNKNOWN') AS currency,
+      COALESCE(pay.payment_processor, 'UNKNOWN') AS payment_processor,
+      COALESCE(pay.payment_method_type, 'UNKNOWN') AS payment_method_type,
+      COALESCE(o.order_channel, 'UNKNOWN') AS order_channel,
+      COALESCE(e.enrollment_channel, o.order_channel, 'UNKNOWN') AS enrollment_channel,
+      e.course_id,
+      COALESCE(c.course_name, 'UNKNOWN') AS course_name,
+      COALESCE(c.course_category, 'UNKNOWN') AS course_category,
+      COALESCE(c.course_level, 'UNKNOWN') AS course_level,
+      COALESCE(c.delivery_mode, 'UNKNOWN') AS delivery_mode,
+      COALESCE(CAST(c.instructor_id AS VARCHAR), 'UNKNOWN') AS instructor_id,
+      COALESCE(cr.country_code, 'UNKNOWN') AS learner_country,
+      COALESCE(cr.region, 'UNKNOWN') AS learner_region,
+      COALESCE(cr.learner_segment, 'UNKNOWN') AS learner_segment,
+      COALESCE(cr.customer_type, 'UNKNOWN') AS customer_type,
+      COALESCE(CAST(o.campaign_id AS VARCHAR), CAST(a.campaign_id AS VARCHAR), 'UNATTRIBUTED') AS campaign_id,
+      COALESCE(cm.campaign_name, 'UNATTRIBUTED') AS campaign_name,
+      COALESCE(cm.source, 'UNATTRIBUTED') AS campaign_source,
+      COALESCE(cm.medium, 'UNATTRIBUTED') AS campaign_medium,
+      COALESCE(cm.term, 'UNATTRIBUTED') AS campaign_term,
+      COALESCE(cm.content, 'UNATTRIBUTED') AS campaign_content,
+      COALESCE(a.device_category, 'UNKNOWN') AS device_category,
+      COALESCE(a.platform, 'UNKNOWN') AS platform,
+      COALESCE(a.acquisition_channel_group, 'UNATTRIBUTED') AS acquisition_channel_group,
+      COALESCE(o.is_enterprise, FALSE) AS is_enterprise,
+      pay.paid_amount,
+      COALESCE(r.refunded_amount, 0) AS refunded_amount,
+      COALESCE(r.refund_transaction_count, 0) AS refund_transaction_count,
+      r.first_refund_at,
+      e.enrolled_at
+    FROM commerce_enrollments_backend_dataset e
+    JOIN payments_by_enrollment pay
+      ON pay.enrollment_id = e.enrollment_id
+    CROSS JOIN parameters p
+    LEFT JOIN commerce_orders_backend_dataset o
+      ON o.order_id = e.order_id
+    LEFT JOIN learning_course_dimension_backend_dataset c
+      ON c.course_id = e.course_id
+    LEFT JOIN crm_customer_dimension_backend_dataset cr
+      ON cr.customer_id = e.customer_id
+    LEFT JOIN latest_attribution a
+      ON a.enrollment_id = e.enrollment_id
+    LEFT JOIN crm_campaign_dimension_backend_dataset cm
+      ON CAST(cm.campaign_id AS VARCHAR) = COALESCE(CAST(o.campaign_id AS VARCHAR), CAST(a.campaign_id AS VARCHAR))
+    LEFT JOIN refunds_by_enrollment r
+      ON r.enrollment_id = e.enrollment_id
+    WHERE CAST(e.enrolled_at AS DATE) >= p.reporting_start_date
+      AND CAST(e.enrolled_at AS DATE) < p.reporting_end_exclusive
+      AND LOWER(COALESCE(e.enrollment_status, 'unknown')) NOT IN ('draft', 'test', 'fraudulent', 'void')
+      AND COALESCE(e.is_test, FALSE) = FALSE
+      AND pay.paid_amount > 0
+  )
+  SELECT
+    reporting_start_date,
+    reporting_end_date,
+    as_of_date,
+    enrollment_month,
+    enrollment_week,
+    enrollment_date,
+    currency,
+    payment_processor,
+    payment_method_type,
+    order_channel,
+    enrollment_channel,
+    course_id,
+    course_name,
+    course_category,
+    course_level,
+    delivery_mode,
+    instructor_id,
+    learner_country,
+    learner_region,
+    learner_segment,
+    customer_type,
+    campaign_id,
+    campaign_name,
+    campaign_source,
+    campaign_medium,
+    campaign_term,
+    campaign_content,
+    device_category,
+    platform,
+    acquisition_channel_group,
+    is_enterprise,
+    COUNT(DISTINCT enrollment_id) AS eligible_enrollments,
+    COUNT(DISTINCT CASE WHEN refunded_amount > 0 THEN enrollment_id END) AS refunded_enrollments,
+    COUNT(DISTINCT CASE WHEN refunded_amount = 0 THEN enrollment_id END) AS non_refunded_enrollments,
+    COUNT(DISTINCT CASE WHEN refunded_amount >= paid_amount - 0.01 THEN enrollment_id END) AS full_refund_enrollments,
+    COUNT(DISTINCT CASE WHEN refunded_amount > 0 AND refunded_amount < paid_amount - 0.01 THEN enrollment_id END) AS partial_refund_enrollments,
+    SUM(refund_transaction_count) AS refund_transaction_count,
+    ROUND(SUM(paid_amount), 2) AS gross_enrollment_revenue,
+    ROUND(SUM(refunded_amount), 2) AS refunded_amount,
+    ROUND(SUM(CASE WHEN paid_amount > refunded_amount THEN paid_amount - refunded_amount ELSE 0 END), 2) AS non_refunded_amount,
+    ROUND(
+      100.0 * COUNT(DISTINCT CASE WHEN refunded_amount > 0 THEN enrollment_id END)
+        / NULLIF(COUNT(DISTINCT enrollment_id), 0),
+      4
+    ) AS enrollment_refund_rate,
+    ROUND(100.0 * SUM(refunded_amount) / NULLIF(SUM(paid_amount), 0), 4) AS refund_amount_rate,
+    ROUND(
+      SUM(CASE WHEN refunded_amount > 0 THEN refunded_amount ELSE 0 END)
+        / NULLIF(COUNT(DISTINCT CASE WHEN refunded_amount > 0 THEN enrollment_id END), 0),
+      2
+    ) AS avg_refund_amount_per_refunded_enrollment,
+    ROUND(
+      AVG(
+        CASE
+          WHEN refunded_amount > 0
+          THEN TIMESTAMPDIFF(DAY, enrolled_at, first_refund_at)
+        END
+      ),
+      2
+    ) AS avg_days_to_first_refund,
+    'Enrollment Refund Rate' AS kpi_name,
+    'percent' AS kpi_unit,
+    'Distinct eligible paid enrollments with at least one successfully settled positive refund' AS numerator_definition,
+    'All distinct eligible paid enrollments created in the reporting cohort' AS denominator_definition,
+    CURRENT_TIMESTAMP AS generated_at
+  FROM eligible_enrollment_base
+  GROUP BY
+    reporting_start_date,
+    reporting_end_date,
+    as_of_date,
+    enrollment_month,
+    enrollment_week,
+    enrollment_date,
+    currency,
+    payment_processor,
+    payment_method_type,
+    order_channel,
+    enrollment_channel,
+    course_id,
+    course_name,
+    course_category,
+    course_level,
+    delivery_mode,
+    instructor_id,
+    learner_country,
+    learner_region,
+    learner_segment,
+    customer_type,
+    campaign_id,
+    campaign_name,
+    campaign_source,
+    campaign_medium,
+    campaign_term,
+    campaign_content,
+    device_category,
+    platform,
+    acquisition_channel_group,
+    is_enterprise;
+
+Calculation Notes: |
+  1️⃣ Use commercial paid enrollment ID for tracking.  
+  2️⃣ Assign enrollments to cohorts based on payment settlement timestamps.  
+  3️⃣ Finalize cohorts after refund window and settlement grace period.  
+  4️⃣ Count each enrollment once per qualifying settled refund, regardless of transaction splits.  
+  5️⃣ Include full and partial refunds; exclude specific transaction types (e.g., voids, declines).  
+  6️⃣ Remove enrollment from count if a settled refund is reversed and no other qualifying refunds exist.  
+  7️⃣ Label earlier results as provisional until finalization.
+
+Business Use Case: |
+  A revenue executive reviews the matured monthly rate and finds that enrollments attributed to a specific paid-social campaign and installment plan have a materially higher refund rate than comparable cohorts. Marketing can restrict the campaign or correct its claims, Product can revise pre-purchase course information and first-week onboarding, and Billing can inspect installment disclosures and refund reasons before additional budget is allocated.
+
+
+Source Data: Billing and payment processor data such as Stripe or Adyen, commerce order and enrollment services, LMS activity data, CRM learner and campaign data such as Salesforce, customer support refund cases, and Digital Analytics such as GA4 stitched through governed enrollment, order, and customer identifiers
+
+Report Attributes: |
+  ["Enrollment cohort date","Cohort maturity status","Course or learning product","Program","Subject category","Instructor or content partner","Acquisition channel","Campaign","Landing page","Enrollment device","Country or region","New versus returning learner","Payment method","Payment plan","Promotion or coupon","Refund reason category","Full versus partial refund","Days from payment to refund","First-week engagement band","Course completion status"]
+
+Dashboard Usage: [Executive Revenue and Enrollment Health, Enrollment Conversion and Refund Funnel, Learner Journey Performance, Billing and Payments Operations, Course Quality and Retention, Acquisition Cohort Profitability]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Enrollment Conversion Rate, Enrollment Cancellation Rate, Refunded Enrollment Revenue, Revenue Refund Rate, Chargeback Rate, Payment Failure Rate, Course Completion Rate, First-Week Engagement Rate, Learner Retention Rate, Customer Lifetime Value]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-12T20:30:09.528563+00:00
+
+Last Modified By: devyendarm
+
+
