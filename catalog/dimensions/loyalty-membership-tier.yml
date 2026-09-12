@@ -1,0 +1,343 @@
+# Dimension: Loyalty Membership Tier
+# Generated: 2026-09-12T21:30:13.360Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Loyalty Membership Tier
+
+Description: |
+  Identifies the loyalty-program status assigned to an authenticated traveler when a web or mobile interaction occurs. It enables comparison of digital behavior, conversion, engagement, and retention across standardized membership levels without exposing the traveler’s identity.
+
+Category: Retention
+
+Tags: [dimension]
+
+Industry: Travel & Hospitality
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  login
+
+Adobe Event: |
+  login
+
+W3 Data Layer: |
+  {"user":[{"profile":[{"profileInfo":{"loyaltyMembershipTier":"<standardized_tier>"}}]}]}
+
+GA4 Data Layer: |
+  {"event":"login","user_properties":{"loyalty_membership_tier":"<standardized_tier>"},"loyalty_membership_tier":"<standardized_tier>"}
+
+Adobe Client Data Layer: |
+  {"data":{"user":{"loyalty":{"membershipTier":"<standardized_tier>"}}},"event":"login"}
+
+XDM Mapping: |
+  {"loyalty":{"tier":"<standardized_tier>"}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH raw_login_events AS (
+    SELECT
+      COALESCE(NULLIF(TRIM(user_id), ''), NULLIF(TRIM(user_pseudo_id), '')) AS loyalty_member_key,
+      TIMESTAMP_MICROS(event_timestamp) AS observed_at,
+      event_name AS source_event_name,
+      event_bundle_sequence_id,
+      batch_event_index,
+      (SELECT value.string_value FROM UNNEST(user_properties) WHERE key = 'loyalty_membership_tier' ORDER BY set_timestamp_micros DESC LIMIT 1) AS user_property_tier,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'loyalty_membership_tier' LIMIT 1) AS event_parameter_tier,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'ga4_data_layer' LIMIT 1) AS ga4_data_layer_json,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'w3_data_layer' LIMIT 1) AS w3_data_layer_json,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'adobe_client_data_layer' LIMIT 1) AS adobe_data_layer_json,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'xdm_mapping' LIMIT 1) AS xdm_mapping_json
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE REGEXP_CONTAINS(_TABLE_SUFFIX, r'^\d{8}$')
+      AND event_name = 'login'
+  ),
+  extracted AS (
+    SELECT
+      *,
+      COALESCE(
+        NULLIF(TRIM(user_property_tier), ''),
+        NULLIF(TRIM(event_parameter_tier), ''),
+        NULLIF(TRIM(JSON_VALUE(ga4_data_layer_json, '$.loyalty_membership_tier')), ''),
+        NULLIF(TRIM(JSON_VALUE(ga4_data_layer_json, '$.user_properties.loyalty_membership_tier')), ''),
+        NULLIF(TRIM(JSON_VALUE(w3_data_layer_json, '$.user[0].profile[0].profileInfo.loyaltyMembershipTier')), ''),
+        NULLIF(TRIM(JSON_VALUE(adobe_data_layer_json, '$.data.user.loyalty.membershipTier')), ''),
+        NULLIF(TRIM(JSON_VALUE(xdm_mapping_json, '$.loyalty.tier')), '')
+      ) AS raw_loyalty_membership_tier,
+      CASE
+        WHEN NULLIF(TRIM(user_property_tier), '') IS NOT NULL THEN 'ga4_user_property'
+        WHEN NULLIF(TRIM(event_parameter_tier), '') IS NOT NULL THEN 'ga4_event_parameter'
+        WHEN NULLIF(TRIM(JSON_VALUE(ga4_data_layer_json, '$.loyalty_membership_tier')), '') IS NOT NULL THEN 'ga4_data_layer'
+        WHEN NULLIF(TRIM(JSON_VALUE(ga4_data_layer_json, '$.user_properties.loyalty_membership_tier')), '') IS NOT NULL THEN 'ga4_data_layer_user_property'
+        WHEN NULLIF(TRIM(JSON_VALUE(w3_data_layer_json, '$.user[0].profile[0].profileInfo.loyaltyMembershipTier')), '') IS NOT NULL THEN 'w3_data_layer'
+        WHEN NULLIF(TRIM(JSON_VALUE(adobe_data_layer_json, '$.data.user.loyalty.membershipTier')), '') IS NOT NULL THEN 'adobe_client_data_layer'
+        WHEN NULLIF(TRIM(JSON_VALUE(xdm_mapping_json, '$.loyalty.tier')), '') IS NOT NULL THEN 'xdm_mapping'
+      END AS tier_source,
+      CASE
+        WHEN NULLIF(TRIM(user_property_tier), '') IS NOT NULL THEN 1
+        WHEN NULLIF(TRIM(event_parameter_tier), '') IS NOT NULL THEN 2
+        WHEN NULLIF(TRIM(JSON_VALUE(ga4_data_layer_json, '$.loyalty_membership_tier')), '') IS NOT NULL THEN 3
+        WHEN NULLIF(TRIM(JSON_VALUE(ga4_data_layer_json, '$.user_properties.loyalty_membership_tier')), '') IS NOT NULL THEN 4
+        WHEN NULLIF(TRIM(JSON_VALUE(w3_data_layer_json, '$.user[0].profile[0].profileInfo.loyaltyMembershipTier')), '') IS NOT NULL THEN 5
+        WHEN NULLIF(TRIM(JSON_VALUE(adobe_data_layer_json, '$.data.user.loyalty.membershipTier')), '') IS NOT NULL THEN 6
+        WHEN NULLIF(TRIM(JSON_VALUE(xdm_mapping_json, '$.loyalty.tier')), '') IS NOT NULL THEN 7
+      END AS tier_source_priority
+    FROM raw_login_events
+    WHERE loyalty_member_key IS NOT NULL
+  ),
+  normalized AS (
+    SELECT
+      loyalty_member_key,
+      observed_at,
+      source_event_name,
+      event_bundle_sequence_id,
+      batch_event_index,
+      raw_loyalty_membership_tier,
+      REGEXP_REPLACE(
+        REGEXP_REPLACE(LOWER(TRIM(raw_loyalty_membership_tier)), r'[^a-z0-9]+', '_'),
+        r'(^_+|_+$)',
+        ''
+      ) AS loyalty_membership_tier,
+      tier_source,
+      tier_source_priority
+    FROM extracted
+    WHERE raw_loyalty_membership_tier IS NOT NULL
+  ),
+  deduplicated_observations AS (
+    SELECT * EXCEPT(observation_rank)
+    FROM (
+      SELECT
+        *,
+        ROW_NUMBER() OVER (
+          PARTITION BY loyalty_member_key, observed_at
+          ORDER BY tier_source_priority, event_bundle_sequence_id DESC, batch_event_index DESC
+        ) AS observation_rank
+      FROM normalized
+      WHERE loyalty_membership_tier <> ''
+    )
+    WHERE observation_rank = 1
+  ),
+  sequenced AS (
+    SELECT
+      *,
+      LAG(loyalty_membership_tier) OVER (
+        PARTITION BY loyalty_member_key
+        ORDER BY observed_at, event_bundle_sequence_id, batch_event_index
+      ) AS previous_loyalty_membership_tier
+    FROM deduplicated_observations
+  ),
+  tier_changes AS (
+    SELECT
+      loyalty_member_key,
+      loyalty_membership_tier,
+      raw_loyalty_membership_tier,
+      tier_source,
+      source_event_name,
+      observed_at AS effective_from_timestamp
+    FROM sequenced
+    WHERE previous_loyalty_membership_tier IS NULL
+       OR loyalty_membership_tier <> previous_loyalty_membership_tier
+  ),
+  versioned AS (
+    SELECT
+      *,
+      LEAD(effective_from_timestamp) OVER (
+        PARTITION BY loyalty_member_key
+        ORDER BY effective_from_timestamp
+      ) AS next_effective_from_timestamp
+    FROM tier_changes
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT(
+      loyalty_member_key,
+      '|',
+      loyalty_membership_tier,
+      '|',
+      CAST(effective_from_timestamp AS STRING)
+    ))) AS loyalty_membership_tier_sk,
+    loyalty_member_key,
+    loyalty_membership_tier,
+    raw_loyalty_membership_tier,
+    tier_source,
+    source_event_name,
+    effective_from_timestamp,
+    IF(
+      next_effective_from_timestamp IS NULL,
+      NULL,
+      TIMESTAMP_SUB(next_effective_from_timestamp, INTERVAL 1 MICROSECOND)
+    ) AS effective_to_timestamp,
+    next_effective_from_timestamp IS NULL AS is_current,
+    CURRENT_TIMESTAMP() AS warehouse_loaded_at
+  FROM versioned
+  ORDER BY loyalty_member_key, effective_from_timestamp;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH raw_login_events AS (
+    SELECT
+      COALESCE(
+        NULLIF(TRIM(identityMap['LoyaltyID'][0].id), ''),
+        NULLIF(TRIM(identityMap['CRMID'][0].id), ''),
+        NULLIF(TRIM(identityMap['ECID'][0].id), ''),
+        NULLIF(TRIM(_id), '')
+      ) AS loyalty_member_key,
+      CAST(timestamp AS TIMESTAMP) AS observed_at,
+      _id AS source_event_id,
+      eventType AS source_event_name,
+      NULLIF(TRIM(loyalty.tier), '') AS raw_loyalty_membership_tier
+    FROM your_aep_dataset
+    WHERE LOWER(eventType) IN ('login', 'user.login')
+  ),
+  normalized AS (
+    SELECT
+      loyalty_member_key,
+      observed_at,
+      source_event_id,
+      source_event_name,
+      raw_loyalty_membership_tier,
+      REGEXP_REPLACE(
+        REGEXP_REPLACE(
+          LOWER(TRIM(raw_loyalty_membership_tier)),
+          '[^a-z0-9]+',
+          '_'
+        ),
+        '(^_+|_+$)',
+        ''
+      ) AS loyalty_membership_tier,
+      'xdm_loyalty_tier' AS tier_source
+    FROM raw_login_events
+    WHERE loyalty_member_key IS NOT NULL
+      AND raw_loyalty_membership_tier IS NOT NULL
+  ),
+  deduplicated_observations AS (
+    SELECT
+      loyalty_member_key,
+      observed_at,
+      source_event_id,
+      source_event_name,
+      raw_loyalty_membership_tier,
+      loyalty_membership_tier,
+      tier_source
+    FROM (
+      SELECT
+        *,
+        ROW_NUMBER() OVER (
+          PARTITION BY loyalty_member_key, observed_at
+          ORDER BY source_event_id DESC
+        ) AS observation_rank
+      FROM normalized
+      WHERE loyalty_membership_tier <> ''
+    ) ranked
+    WHERE observation_rank = 1
+  ),
+  sequenced AS (
+    SELECT
+      *,
+      LAG(loyalty_membership_tier) OVER (
+        PARTITION BY loyalty_member_key
+        ORDER BY observed_at, source_event_id
+      ) AS previous_loyalty_membership_tier
+    FROM deduplicated_observations
+  ),
+  tier_changes AS (
+    SELECT
+      loyalty_member_key,
+      loyalty_membership_tier,
+      raw_loyalty_membership_tier,
+      tier_source,
+      source_event_id,
+      source_event_name,
+      observed_at AS effective_from_timestamp
+    FROM sequenced
+    WHERE previous_loyalty_membership_tier IS NULL
+       OR loyalty_membership_tier <> previous_loyalty_membership_tier
+  ),
+  versioned AS (
+    SELECT
+      *,
+      LEAD(effective_from_timestamp) OVER (
+        PARTITION BY loyalty_member_key
+        ORDER BY effective_from_timestamp, source_event_id
+      ) AS next_effective_from_timestamp
+    FROM tier_changes
+  )
+  SELECT
+    MD5(CONCAT(
+      loyalty_member_key,
+      '|',
+      loyalty_membership_tier,
+      '|',
+      CAST(effective_from_timestamp AS VARCHAR)
+    )) AS loyalty_membership_tier_sk,
+    loyalty_member_key,
+    loyalty_membership_tier,
+    raw_loyalty_membership_tier,
+    tier_source,
+    source_event_id,
+    source_event_name,
+    effective_from_timestamp,
+    CASE
+      WHEN next_effective_from_timestamp IS NULL THEN NULL
+      ELSE next_effective_from_timestamp - INTERVAL '1 microsecond'
+    END AS effective_to_timestamp,
+    CASE
+      WHEN next_effective_from_timestamp IS NULL THEN TRUE
+      ELSE FALSE
+    END AS is_current,
+    CURRENT_TIMESTAMP AS warehouse_loaded_at
+  FROM versioned
+  ORDER BY loyalty_member_key, effective_from_timestamp;
+
+Calculation Notes: |
+  1️⃣ Capture tier effective at event time from authenticated profile or first-party data.  
+  2️⃣ Do not restate historical events if a member changes tier.  
+  3️⃣ Normalize source labels using the governed tier reference table.  
+  4️⃣ Preserve invitation-only levels where contractually allowed.  
+  5️⃣ Classify authenticated members with no valid tier as UNKNOWN.  
+  6️⃣ Classify unauthenticated visitors as NOT_AVAILABLE.  
+  7️⃣ Do not infer tier from fares, points, trip frequency, spend, or browser storage.
+
+Business Use Case: |
+  The loyalty executive compares authenticated booking conversion, ancillary attachment, self-service adoption, and digital abandonment by membership tier. Product and loyalty teams then prioritize elite-member journey defects, adjust tier-specific digital benefits, and target experience improvements where strategically valuable members show disproportionate friction.
+
+
+Source Data: Digital Analytics (GA4 web and app event streams)
+
+Report Attributes: |
+  ["Digital Channel","Device Category","Authentication Status","Loyalty Program","Booking Funnel Stage","Travel Product Type","Origin Market","Destination Market","Campaign","Event Date"]
+
+Dashboard Usage: [Digital Loyalty Performance, Member Booking Funnel, Elite Member Experience, Authenticated Customer Engagement, Digital Retention and Repeat Booking, Loyalty Benefit Adoption]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Loyalty Membership Status, Loyalty Program, Loyalty Enrollment Date, Loyalty Tier Effective Date, Loyalty Tier Expiration Date, Authentication Status, Digital Channel, Booking Status, Travel Product Type, Customer Country]
+
+Derived Dimensions: [Loyalty Tier Rank, Loyalty Tier Group, Elite Member Indicator, Base Member Indicator, Loyalty Enrollment Indicator, Known Loyalty Tier Indicator]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-12T21:30:12.48876+00:00
+
+Last Modified By: devyendarm
+
+
