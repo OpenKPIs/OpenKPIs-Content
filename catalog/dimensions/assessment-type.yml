@@ -1,0 +1,471 @@
+# Dimension: Assessment Type
+# Generated: 2026-09-12T21:30:09.315Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Assessment Type
+
+Description: |
+  Classifies a digital assessment according to its governed pedagogical purpose, such as diagnostic, formative, summative, practice, placement, or certification. It enables performance, completion, integrity, and learner-progression outcomes to be compared across assessment categories without conflating purpose with delivery format or question type.
+
+Category: Performance
+
+Tags: [dimension]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  item_category
+
+Adobe Event: |
+  view_item
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"category":{"primaryCategory":"assessment"},"eventInfo":{"eventName":"view_item"},"attributes":{"assessmentType":"formative"}}],"product":[{"category":{"subCategory1":"formative","primaryCategory":"assessment"},"attributes":{"assessmentType":"formative"},"productInfo":{"productName":"Digital assessment"}}]}}
+
+GA4 Data Layer: |
+  {"event":"view_item","ecommerce":{"items":[{"item_name":"Digital assessment","item_category":"formative"}]}}
+
+Adobe Client Data Layer: |
+  {"data":{"assessment":{"type":"formative"}},"event":"view_item"}
+
+XDM Mapping: |
+  {"commerce":{"productViews":{"value":1}},"eventType":"commerce.productViews","productListItems":[{"name":"Digital assessment","productCategories":[{"categoryID":"formative","categoryName":"Formative"}]}]}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH event_items AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS source_event_date,
+      TIMESTAMP_MICROS(e.event_timestamp) AS source_event_ts,
+      e.user_pseudo_id AS source_user_pseudo_id,
+      CAST((
+        SELECT ep.value.int_value
+        FROM UNNEST(e.event_params) AS ep
+        WHERE ep.key = 'ga_session_id'
+        LIMIT 1
+      ) AS STRING) AS source_session_id,
+      e.event_bundle_sequence_id AS source_event_bundle_sequence_id,
+      e.batch_event_index AS source_batch_event_index,
+      e.event_name AS source_event_name,
+      i.item_id AS source_item_id,
+      i.item_name AS source_item_name,
+      i.item_category AS source_item_category,
+      i.item_category2 AS source_item_category2,
+      i.item_category3 AS source_item_category3,
+      i.item_category4 AS source_item_category4,
+      i.item_category5 AS source_item_category5,
+      (
+        SELECT COALESCE(
+          ep.value.string_value,
+          CAST(ep.value.int_value AS STRING),
+          CAST(ep.value.double_value AS STRING),
+          CAST(ep.value.float_value AS STRING)
+        )
+        FROM UNNEST(e.event_params) AS ep
+        WHERE ep.key = 'assessment_type'
+        LIMIT 1
+      ) AS event_assessment_type,
+      (
+        SELECT LOWER(TRIM(ep.value.string_value))
+        FROM UNNEST(e.event_params) AS ep
+        WHERE ep.key IN ('primary_category', 'content_category', 'content_type')
+        ORDER BY CASE ep.key
+          WHEN 'primary_category' THEN 1
+          WHEN 'content_category' THEN 2
+          ELSE 3
+        END
+        LIMIT 1
+      ) AS event_primary_category,
+      CONCAT(
+        CAST(e.event_timestamp AS STRING), ':',
+        COALESCE(e.user_pseudo_id, ''), ':',
+        CAST(COALESCE(e.event_bundle_sequence_id, 0) AS STRING)
+      ) AS source_event_id
+    FROM `your-project.analytics_123456789.events_*` AS e
+    LEFT JOIN UNNEST(e.items) AS i
+    WHERE e.event_name = 'view_item'
+  ),
+  assessment_events AS (
+    SELECT
+      *,
+      COALESCE(NULLIF(TRIM(event_assessment_type), ''), NULLIF(TRIM(source_item_category), '')) AS raw_assessment_type,
+      CASE
+        WHEN NULLIF(TRIM(event_assessment_type), '') IS NOT NULL THEN 'event_params.assessment_type'
+        ELSE 'items.item_category'
+      END AS extraction_path
+    FROM event_items
+    WHERE
+      NULLIF(TRIM(event_assessment_type), '') IS NOT NULL
+      OR event_primary_category = 'assessment'
+      OR LOWER(TRIM(source_item_name)) IN ('digital assessment', 'assessment')
+      OR REGEXP_CONTAINS(LOWER(COALESCE(source_item_name, '')), r'(^|[^a-z])assessment([^a-z]|$)')
+  ),
+  normalized AS (
+    SELECT
+      *,
+      REGEXP_REPLACE(
+        REGEXP_REPLACE(LOWER(TRIM(raw_assessment_type)), r'[^a-z0-9]+', '_'),
+        r'^_+|_+$',
+        ''
+      ) AS normalized_value
+    FROM assessment_events
+    WHERE NULLIF(TRIM(raw_assessment_type), '') IS NOT NULL
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_value IN ('formative', 'formative_assessment', 'assessment_formative') THEN 'formative'
+        WHEN normalized_value IN ('summative', 'summative_assessment', 'assessment_summative') THEN 'summative'
+        WHEN normalized_value IN ('diagnostic', 'diagnostic_assessment', 'pre_assessment', 'preassessment') THEN 'diagnostic'
+        WHEN normalized_value IN ('benchmark', 'benchmark_assessment', 'interim', 'interim_assessment') THEN 'benchmark'
+        WHEN normalized_value IN ('practice', 'practice_assessment', 'mock', 'mock_assessment', 'self_check') THEN 'practice'
+        ELSE normalized_value
+      END AS assessment_type_code
+    FROM normalized
+    WHERE normalized_value <> ''
+  ),
+  aggregated AS (
+    SELECT
+      assessment_type_code,
+      ARRAY_AGG(raw_assessment_type ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS raw_assessment_type,
+      ARRAY_AGG(extraction_path ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS extraction_path,
+      MIN(source_event_date) AS source_event_date,
+      MIN(source_event_ts) AS first_seen_ts,
+      MAX(source_event_ts) AS last_seen_ts,
+      ARRAY_AGG(source_user_pseudo_id IGNORE NULLS ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS source_user_pseudo_id,
+      ARRAY_AGG(source_session_id IGNORE NULLS ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS source_session_id,
+      ARRAY_AGG(source_event_bundle_sequence_id IGNORE NULLS ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS source_event_bundle_sequence_id,
+      ARRAY_AGG(source_batch_event_index IGNORE NULLS ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS source_batch_event_index,
+      ARRAY_AGG(source_item_id IGNORE NULLS ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS source_item_id,
+      ARRAY_AGG(source_item_name IGNORE NULLS ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS source_item_name,
+      ARRAY_AGG(source_item_category IGNORE NULLS ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS source_item_category,
+      ARRAY_AGG(source_item_category2 IGNORE NULLS ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS source_item_category2,
+      ARRAY_AGG(source_item_category3 IGNORE NULLS ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS source_item_category3,
+      ARRAY_AGG(source_item_category4 IGNORE NULLS ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS source_item_category4,
+      ARRAY_AGG(source_item_category5 IGNORE NULLS ORDER BY source_event_ts LIMIT 1)[SAFE_OFFSET(0)] AS source_item_category5,
+      COUNT(DISTINCT source_event_id) AS event_count,
+      COUNT(DISTINCT source_user_pseudo_id) AS user_count,
+      COUNT(DISTINCT IF(
+        source_user_pseudo_id IS NOT NULL AND source_session_id IS NOT NULL,
+        CONCAT(source_user_pseudo_id, ':', source_session_id),
+        NULL
+      )) AS session_count,
+      COUNT(DISTINCT COALESCE(NULLIF(source_item_id, ''), NULLIF(source_item_name, ''))) AS item_count,
+      COUNT(*) AS source_record_count
+    FROM classified
+    GROUP BY assessment_type_code
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT('assessment_type|', assessment_type_code))) AS assessment_type_key,
+    assessment_type_code,
+    INITCAP(REPLACE(assessment_type_code, '_', ' ')) AS assessment_type_name,
+    CASE assessment_type_code
+      WHEN 'formative' THEN 'Assessment used during learning to monitor progress and guide instruction.'
+      WHEN 'summative' THEN 'Assessment used to evaluate learning at the end of an instructional period.'
+      WHEN 'diagnostic' THEN 'Assessment used to identify prior knowledge, strengths, and learning needs.'
+      WHEN 'benchmark' THEN 'Periodic assessment used to compare progress against an established standard.'
+      WHEN 'practice' THEN 'Low-stakes assessment used for practice, rehearsal, or self-checking.'
+      ELSE CONCAT('Assessment classified as ', REPLACE(assessment_type_code, '_', ' '), '.')
+    END AS assessment_type_description,
+    CASE
+      WHEN assessment_type_code IN ('formative', 'practice') THEN 'assessment_for_learning'
+      WHEN assessment_type_code = 'summative' THEN 'assessment_of_learning'
+      WHEN assessment_type_code = 'diagnostic' THEN 'assessment_before_learning'
+      WHEN assessment_type_code = 'benchmark' THEN 'progress_monitoring'
+      ELSE 'other_assessment'
+    END AS assessment_type_group,
+    CASE assessment_type_code
+      WHEN 'formative' THEN 'monitor_and_improve_learning'
+      WHEN 'summative' THEN 'evaluate_learning_outcomes'
+      WHEN 'diagnostic' THEN 'identify_learning_needs'
+      WHEN 'benchmark' THEN 'measure_progress_against_standard'
+      WHEN 'practice' THEN 'practice_and_self_check'
+      ELSE 'other'
+    END AS assessment_purpose,
+    CASE
+      WHEN assessment_type_code = 'diagnostic' THEN 'before_learning'
+      WHEN assessment_type_code IN ('formative', 'benchmark', 'practice') THEN 'during_learning'
+      WHEN assessment_type_code = 'summative' THEN 'after_learning'
+      ELSE 'unspecified'
+    END AS learning_stage,
+    assessment_type_code = 'formative' AS is_formative,
+    assessment_type_code = 'summative' AS is_summative,
+    assessment_type_code = 'diagnostic' AS is_diagnostic,
+    assessment_type_code = 'benchmark' AS is_benchmark,
+    assessment_type_code = 'practice' AS is_practice,
+    assessment_type_code NOT IN ('formative', 'summative', 'diagnostic', 'benchmark', 'practice') AS is_other,
+    'GA4' AS source_platform,
+    'your-project.analytics_123456789.events_*' AS source_dataset,
+    'view_item' AS source_event_name,
+    source_event_date,
+    first_seen_ts AS source_event_ts,
+    source_user_pseudo_id,
+    source_session_id,
+    source_event_bundle_sequence_id,
+    source_batch_event_index,
+    source_item_id,
+    source_item_name,
+    source_item_category,
+    source_item_category2,
+    source_item_category3,
+    source_item_category4,
+    source_item_category5,
+    raw_assessment_type,
+    extraction_path,
+    'assessment_type_normalization_v1' AS normalization_rule_version,
+    CASE
+      WHEN assessment_type_code IN ('formative', 'summative', 'diagnostic', 'benchmark', 'practice') THEN 'VALID_STANDARD_VALUE'
+      ELSE 'VALID_UNMAPPED_VALUE'
+    END AS data_quality_status,
+    TRUE AS is_valid,
+    first_seen_ts AS effective_start_ts,
+    TIMESTAMP('9999-12-31 23:59:59+00') AS effective_end_ts,
+    TRUE AS is_current,
+    first_seen_ts,
+    last_seen_ts,
+    event_count,
+    user_count,
+    session_count,
+    item_count,
+    source_record_count,
+    CURRENT_DATE() AS load_date,
+    CURRENT_TIMESTAMP() AS load_ts,
+    'ga4_view_item_assessment' AS record_source,
+    CURRENT_TIMESTAMP() AS created_ts,
+    CURRENT_TIMESTAMP() AS updated_ts
+  FROM aggregated;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH event_items AS (
+    SELECT
+      CAST(timestamp AS DATE) AS source_event_date,
+      timestamp AS source_event_ts,
+      CAST(NULL AS STRING) AS source_user_id,
+      CAST(NULL AS STRING) AS source_session_id,
+      CAST(NULL AS BIGINT) AS source_event_bundle_sequence_id,
+      CAST(NULL AS BIGINT) AS source_batch_event_index,
+      eventType AS source_event_name,
+      _id AS source_event_id,
+      item.SKU AS source_item_id,
+      item.name AS source_item_name,
+      element_at(item.productCategories, 1).categoryID AS source_item_category,
+      element_at(item.productCategories, 1).categoryName AS source_item_category_name,
+      element_at(item.productCategories, 2).categoryID AS source_item_category2,
+      element_at(item.productCategories, 3).categoryID AS source_item_category3,
+      element_at(item.productCategories, 4).categoryID AS source_item_category4,
+      element_at(item.productCategories, 5).categoryID AS source_item_category5
+    FROM aep_assessment_event_dataset
+    LATERAL VIEW OUTER explode(productListItems) exploded_items AS item
+    WHERE eventType = 'commerce.productViews'
+      AND COALESCE(commerce.productViews.value, 0) > 0
+  ),
+  assessment_events AS (
+    SELECT
+      *,
+      NULLIF(TRIM(source_item_category), '') AS raw_assessment_type,
+      'productListItems.productCategories[0].categoryID' AS extraction_path
+    FROM event_items
+    WHERE
+      NULLIF(TRIM(source_item_category), '') IS NOT NULL
+      AND (
+        LOWER(TRIM(source_item_name)) IN ('digital assessment', 'assessment')
+        OR LOWER(COALESCE(source_item_name, '')) RLIKE '(^|[^a-z])assessment([^a-z]|$)'
+        OR LOWER(COALESCE(source_item_category_name, '')) RLIKE 'assessment|formative|summative|diagnostic|benchmark|practice'
+        OR LOWER(TRIM(source_item_category)) IN (
+          'formative', 'summative', 'diagnostic', 'benchmark', 'practice',
+          'formative_assessment', 'summative_assessment', 'diagnostic_assessment',
+          'benchmark_assessment', 'practice_assessment'
+        )
+      )
+  ),
+  normalized AS (
+    SELECT
+      *,
+      regexp_replace(
+        regexp_replace(lower(trim(raw_assessment_type)), '[^a-z0-9]+', '_'),
+        '^_+|_+$',
+        ''
+      ) AS normalized_value
+    FROM assessment_events
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_value IN ('formative', 'formative_assessment', 'assessment_formative') THEN 'formative'
+        WHEN normalized_value IN ('summative', 'summative_assessment', 'assessment_summative') THEN 'summative'
+        WHEN normalized_value IN ('diagnostic', 'diagnostic_assessment', 'pre_assessment', 'preassessment') THEN 'diagnostic'
+        WHEN normalized_value IN ('benchmark', 'benchmark_assessment', 'interim', 'interim_assessment') THEN 'benchmark'
+        WHEN normalized_value IN ('practice', 'practice_assessment', 'mock', 'mock_assessment', 'self_check') THEN 'practice'
+        ELSE normalized_value
+      END AS assessment_type_code
+    FROM normalized
+    WHERE normalized_value <> ''
+  ),
+  aggregated AS (
+    SELECT
+      assessment_type_code,
+      min(raw_assessment_type) AS raw_assessment_type,
+      min(extraction_path) AS extraction_path,
+      min(source_event_date) AS source_event_date,
+      min(source_event_ts) AS first_seen_ts,
+      max(source_event_ts) AS last_seen_ts,
+      min(source_user_id) AS source_user_id,
+      min(source_session_id) AS source_session_id,
+      min(source_event_bundle_sequence_id) AS source_event_bundle_sequence_id,
+      min(source_batch_event_index) AS source_batch_event_index,
+      min(source_item_id) AS source_item_id,
+      min(source_item_name) AS source_item_name,
+      min(source_item_category) AS source_item_category,
+      min(source_item_category2) AS source_item_category2,
+      min(source_item_category3) AS source_item_category3,
+      min(source_item_category4) AS source_item_category4,
+      min(source_item_category5) AS source_item_category5,
+      count(DISTINCT source_event_id) AS event_count,
+      count(DISTINCT source_user_id) AS user_count,
+      count(DISTINCT CASE
+        WHEN source_user_id IS NOT NULL AND source_session_id IS NOT NULL
+        THEN concat(source_user_id, ':', source_session_id)
+      END) AS session_count,
+      count(DISTINCT COALESCE(NULLIF(source_item_id, ''), NULLIF(source_item_name, ''))) AS item_count,
+      count(*) AS source_record_count
+    FROM classified
+    GROUP BY assessment_type_code
+  )
+  SELECT
+    sha2(concat('assessment_type|', assessment_type_code), 256) AS assessment_type_key,
+    assessment_type_code,
+    initcap(replace(assessment_type_code, '_', ' ')) AS assessment_type_name,
+    CASE assessment_type_code
+      WHEN 'formative' THEN 'Assessment used during learning to monitor progress and guide instruction.'
+      WHEN 'summative' THEN 'Assessment used to evaluate learning at the end of an instructional period.'
+      WHEN 'diagnostic' THEN 'Assessment used to identify prior knowledge, strengths, and learning needs.'
+      WHEN 'benchmark' THEN 'Periodic assessment used to compare progress against an established standard.'
+      WHEN 'practice' THEN 'Low-stakes assessment used for practice, rehearsal, or self-checking.'
+      ELSE concat('Assessment classified as ', replace(assessment_type_code, '_', ' '), '.')
+    END AS assessment_type_description,
+    CASE
+      WHEN assessment_type_code IN ('formative', 'practice') THEN 'assessment_for_learning'
+      WHEN assessment_type_code = 'summative' THEN 'assessment_of_learning'
+      WHEN assessment_type_code = 'diagnostic' THEN 'assessment_before_learning'
+      WHEN assessment_type_code = 'benchmark' THEN 'progress_monitoring'
+      ELSE 'other_assessment'
+    END AS assessment_type_group,
+    CASE assessment_type_code
+      WHEN 'formative' THEN 'monitor_and_improve_learning'
+      WHEN 'summative' THEN 'evaluate_learning_outcomes'
+      WHEN 'diagnostic' THEN 'identify_learning_needs'
+      WHEN 'benchmark' THEN 'measure_progress_against_standard'
+      WHEN 'practice' THEN 'practice_and_self_check'
+      ELSE 'other'
+    END AS assessment_purpose,
+    CASE
+      WHEN assessment_type_code = 'diagnostic' THEN 'before_learning'
+      WHEN assessment_type_code IN ('formative', 'benchmark', 'practice') THEN 'during_learning'
+      WHEN assessment_type_code = 'summative' THEN 'after_learning'
+      ELSE 'unspecified'
+    END AS learning_stage,
+    assessment_type_code = 'formative' AS is_formative,
+    assessment_type_code = 'summative' AS is_summative,
+    assessment_type_code = 'diagnostic' AS is_diagnostic,
+    assessment_type_code = 'benchmark' AS is_benchmark,
+    assessment_type_code = 'practice' AS is_practice,
+    assessment_type_code NOT IN ('formative', 'summative', 'diagnostic', 'benchmark', 'practice') AS is_other,
+    'Adobe AEP' AS source_platform,
+    'aep_assessment_event_dataset' AS source_dataset,
+    'commerce.productViews' AS source_event_name,
+    source_event_date,
+    first_seen_ts AS source_event_ts,
+    source_user_id AS source_user_pseudo_id,
+    source_session_id,
+    source_event_bundle_sequence_id,
+    source_batch_event_index,
+    source_item_id,
+    source_item_name,
+    source_item_category,
+    source_item_category2,
+    source_item_category3,
+    source_item_category4,
+    source_item_category5,
+    raw_assessment_type,
+    extraction_path,
+    'assessment_type_normalization_v1' AS normalization_rule_version,
+    CASE
+      WHEN assessment_type_code IN ('formative', 'summative', 'diagnostic', 'benchmark', 'practice') THEN 'VALID_STANDARD_VALUE'
+      ELSE 'VALID_UNMAPPED_VALUE'
+    END AS data_quality_status,
+    TRUE AS is_valid,
+    first_seen_ts AS effective_start_ts,
+    CAST('9999-12-31 23:59:59' AS TIMESTAMP) AS effective_end_ts,
+    TRUE AS is_current,
+    first_seen_ts,
+    last_seen_ts,
+    event_count,
+    user_count,
+    session_count,
+    item_count,
+    source_record_count,
+    current_date() AS load_date,
+    current_timestamp() AS load_ts,
+    'aep_product_view_assessment' AS record_source,
+    current_timestamp() AS created_ts,
+    current_timestamp() AS updated_ts
+  FROM aggregated;
+
+Calculation Notes: |
+  1️⃣ Assign the value from governed assessment metadata using the assessment identifier captured on assignment, start, submission, and completion events.
+  2️⃣ Use one canonical value per assessment version: diagnostic, formative, summative, practice, placement, certification, or other.
+  3️⃣ Do not infer assessment type from question format, delivery channel, proctoring mode, score, or completion behavior.
+  4️⃣ Preserve the event-time classification when an assessment is reclassified; apply the revised value only to events generated after the metadata effective timestamp unless an approved historical restatement is performed.
+  5️⃣ Map null, blank, unmapped, or invalid source values to unknown rather than excluding the associated assessment event.
+  6️⃣ For assessments serving multiple purposes, use the primary governed purpose and retain secondary purposes in a separate multi-value attribute.
+  7️⃣ Deduplicate repeated client and server events by assessment identifier, attempt identifier, event name, and event timestamp before reporting event volumes by type.
+
+Business Use Case: |
+  The Chief Learning Officer compares completion rates, score distributions, retry behavior, and learner progression across formative, summative, and certification assessments. Product and curriculum leaders use the findings to identify assessment categories creating disproportionate abandonment or failure, then adjust instructional sequencing, assessment design, feedback timing, or intervention rules.
+
+
+Source Data: Digital Analytics (GA4) + LMS Event Stream + Digital Assessment Metadata
+
+Report Attributes: |
+  ["Course","Learning Program","Subject","Grade Level","Assessment Name","Assessment Status","Assessment Delivery Mode","Proctoring Mode","Attempt Number","Learner Cohort","Device Category","Acquisition Channel","Calendar Period"]
+
+Dashboard Usage: [Assessment Performance Executive Dashboard, Digital Learning Engagement Dashboard, Learner Progression and Mastery Dashboard, Assessment Completion and Abandonment Dashboard, Certification Readiness Dashboard, Curriculum Effectiveness Dashboard, Assessment Data Quality Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Assessment ID, Assessment Name, Course, Learning Program, Subject, Grade Level, Assessment Delivery Mode, Question Type, Attempt Number, Assessment Status, Proctoring Mode, Learner Cohort]
+
+Derived Dimensions: [Assessment Stakes Level, Assessment Purpose Group, Assessment Journey Stage, Assessment Type Reporting Group]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-12T21:30:08.716228+00:00
+
+Last Modified By: devyendarm
+
+
