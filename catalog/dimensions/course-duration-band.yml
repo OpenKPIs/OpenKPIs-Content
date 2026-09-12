@@ -1,0 +1,306 @@
+# Dimension: Course Duration Band
+# Generated: 2026-09-12T23:30:09.966Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Course Duration Band
+
+Description: |
+  Course Duration Band classifies each digital course into a standardized, ordered range based on its published expected instructional duration. It measures the learner time commitment represented by the course offering, not enrollment access length, elapsed completion time, or an individual learner's observed consumption time.
+
+Category: Engagement
+
+Tags: [dimension]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  view_item
+
+W3 Data Layer: |
+  {"event":[{"eventInfo":{"eventName":"view_item"},"attributes":{"courseDurationBand":"{{course_duration_band}}"}}],"product":[{"attributes":{"courseDurationBand":"{{course_duration_band}}"},"productInfo":{"productID":"{{course_id}}","productName":"{{course_name}}"}}]}
+
+GA4 Data Layer: |
+  {"event":"view_item","ecommerce":{"items":[{"item_id":"{{course_id}}","item_name":"{{course_name}}","course_duration_band":"{{course_duration_band}}"}]}}
+
+Adobe Client Data Layer: |
+  {"data":{"course":{"courseId":"{{course_id}}","courseName":"{{course_name}}","courseDurationBand":"{{course_duration_band}}"}},"event":"view_item"}
+
+XDM Mapping: |
+  {"commerce":{"productViews":{"value":1}},"eventType":"commerce.productViews","productListItems":[{"SKU":"{{course_id}}","name":"{{course_name}}","productCategories":[{"categoryID":"course_duration_band","categoryName":"{{course_duration_band}}"}]}]}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH view_item_events AS (
+    SELECT
+      TIMESTAMP_MICROS(e.event_timestamp) AS event_timestamp,
+      e.event_date,
+      e.user_pseudo_id,
+      e.event_bundle_sequence_id,
+      COALESCE(
+        NULLIF(TRIM(i.item_id), ''),
+        (
+          SELECT ARRAY_AGG(
+            NULLIF(TRIM(p.value.string_value), '') IGNORE NULLS
+            ORDER BY CASE p.key
+              WHEN 'course_id' THEN 1
+              WHEN 'courseId' THEN 2
+              WHEN 'productID' THEN 3
+              ELSE 4
+            END
+            LIMIT 1
+          )[SAFE_OFFSET(0)]
+          FROM UNNEST(i.item_params) AS p
+          WHERE p.key IN ('course_id', 'courseId', 'productID')
+        ),
+        (
+          SELECT ARRAY_AGG(
+            NULLIF(TRIM(p.value.string_value), '') IGNORE NULLS
+            ORDER BY CASE p.key
+              WHEN 'course_id' THEN 1
+              WHEN 'courseId' THEN 2
+              WHEN 'productID' THEN 3
+              ELSE 4
+            END
+            LIMIT 1
+          )[SAFE_OFFSET(0)]
+          FROM UNNEST(e.event_params) AS p
+          WHERE p.key IN ('course_id', 'courseId', 'productID')
+        )
+      ) AS course_id,
+      COALESCE(
+        NULLIF(TRIM(i.item_name), ''),
+        (
+          SELECT ARRAY_AGG(
+            NULLIF(TRIM(p.value.string_value), '') IGNORE NULLS
+            ORDER BY CASE p.key
+              WHEN 'course_name' THEN 1
+              WHEN 'courseName' THEN 2
+              WHEN 'productName' THEN 3
+              ELSE 4
+            END
+            LIMIT 1
+          )[SAFE_OFFSET(0)]
+          FROM UNNEST(i.item_params) AS p
+          WHERE p.key IN ('course_name', 'courseName', 'productName')
+        ),
+        (
+          SELECT ARRAY_AGG(
+            NULLIF(TRIM(p.value.string_value), '') IGNORE NULLS
+            ORDER BY CASE p.key
+              WHEN 'course_name' THEN 1
+              WHEN 'courseName' THEN 2
+              WHEN 'productName' THEN 3
+              ELSE 4
+            END
+            LIMIT 1
+          )[SAFE_OFFSET(0)]
+          FROM UNNEST(e.event_params) AS p
+          WHERE p.key IN ('course_name', 'courseName', 'productName')
+        )
+      ) AS course_name,
+      COALESCE(
+        (
+          SELECT ARRAY_AGG(
+            NULLIF(TRIM(p.value.string_value), '') IGNORE NULLS
+            ORDER BY CASE p.key
+              WHEN 'course_duration_band' THEN 1
+              WHEN 'courseDurationBand' THEN 2
+              ELSE 3
+            END
+            LIMIT 1
+          )[SAFE_OFFSET(0)]
+          FROM UNNEST(i.item_params) AS p
+          WHERE p.key IN ('course_duration_band', 'courseDurationBand')
+        ),
+        (
+          SELECT ARRAY_AGG(
+            NULLIF(TRIM(p.value.string_value), '') IGNORE NULLS
+            ORDER BY CASE p.key
+              WHEN 'course_duration_band' THEN 1
+              WHEN 'courseDurationBand' THEN 2
+              ELSE 3
+            END
+            LIMIT 1
+          )[SAFE_OFFSET(0)]
+          FROM UNNEST(e.event_params) AS p
+          WHERE p.key IN ('course_duration_band', 'courseDurationBand')
+        )
+      ) AS raw_course_duration_band
+    FROM `your-project.analytics_123456789.events_*` AS e
+    CROSS JOIN UNNEST(e.items) AS i
+    WHERE e.event_name = 'view_item'
+      AND REGEXP_CONTAINS(_TABLE_SUFFIX, r'^\d{8}$')
+  ),
+  cleaned AS (
+    SELECT
+      event_timestamp,
+      event_date,
+      user_pseudo_id,
+      event_bundle_sequence_id,
+      course_id,
+      course_name,
+      REGEXP_REPLACE(TRIM(raw_course_duration_band), r'\s+', ' ') AS course_duration_band
+    FROM view_item_events
+    WHERE NULLIF(TRIM(course_id), '') IS NOT NULL
+      AND NULLIF(TRIM(raw_course_duration_band), '') IS NOT NULL
+  ),
+  ranked AS (
+    SELECT
+      *,
+      MIN(event_timestamp) OVER (
+        PARTITION BY course_id, LOWER(course_duration_band)
+      ) AS attribute_first_seen_timestamp,
+      MAX(event_timestamp) OVER (
+        PARTITION BY course_id, LOWER(course_duration_band)
+      ) AS attribute_last_seen_timestamp,
+      COUNT(*) OVER (
+        PARTITION BY course_id, LOWER(course_duration_band)
+      ) AS supporting_event_count,
+      ROW_NUMBER() OVER (
+        PARTITION BY course_id
+        ORDER BY event_timestamp DESC, event_bundle_sequence_id DESC, course_duration_band
+      ) AS current_record_rank
+    FROM cleaned
+  )
+  SELECT
+    LOWER(TO_HEX(MD5(LOWER(course_duration_band)))) AS course_duration_band_key,
+    course_duration_band,
+    LOWER(course_duration_band) AS course_duration_band_normalized,
+    course_id,
+    course_name,
+    attribute_first_seen_timestamp,
+    attribute_last_seen_timestamp,
+    supporting_event_count,
+    event_date AS source_event_date,
+    'GA4' AS source_system,
+    'view_item.items.item_params.course_duration_band' AS source_attribute
+  FROM ranked
+  WHERE current_record_rank = 1;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH product_events AS (
+    SELECT
+      _id AS event_id,
+      timestamp AS event_timestamp,
+      EXPLODE(productListItems) AS product_item
+    FROM your_aep_event_dataset
+    WHERE eventType = 'commerce.productViews'
+      AND COALESCE(commerce.productViews.value, 0) > 0
+  ),
+  duration_categories AS (
+    SELECT
+      event_id,
+      event_timestamp,
+      product_item.SKU AS course_id,
+      product_item.name AS course_name,
+      EXPLODE(product_item.productCategories) AS duration_category
+    FROM product_events
+  ),
+  cleaned AS (
+    SELECT
+      event_id,
+      event_timestamp,
+      TRIM(course_id) AS course_id,
+      NULLIF(TRIM(course_name), '') AS course_name,
+      REGEXP_REPLACE(
+        TRIM(duration_category.categoryName),
+        '[[:space:]]+',
+        ' '
+      ) AS course_duration_band
+    FROM duration_categories
+    WHERE LOWER(TRIM(duration_category.categoryID)) = 'course_duration_band'
+      AND NULLIF(TRIM(course_id), '') IS NOT NULL
+      AND NULLIF(TRIM(duration_category.categoryName), '') IS NOT NULL
+  ),
+  ranked AS (
+    SELECT
+      *,
+      MIN(event_timestamp) OVER (
+        PARTITION BY course_id, LOWER(course_duration_band)
+      ) AS attribute_first_seen_timestamp,
+      MAX(event_timestamp) OVER (
+        PARTITION BY course_id, LOWER(course_duration_band)
+      ) AS attribute_last_seen_timestamp,
+      COUNT(*) OVER (
+        PARTITION BY course_id, LOWER(course_duration_band)
+      ) AS supporting_event_count,
+      ROW_NUMBER() OVER (
+        PARTITION BY course_id
+        ORDER BY event_timestamp DESC, event_id DESC, course_duration_band
+      ) AS current_record_rank
+    FROM cleaned
+  )
+  SELECT
+    MD5(LOWER(course_duration_band)) AS course_duration_band_key,
+    course_duration_band,
+    LOWER(course_duration_band) AS course_duration_band_normalized,
+    course_id,
+    course_name,
+    attribute_first_seen_timestamp,
+    attribute_last_seen_timestamp,
+    supporting_event_count,
+    event_id AS source_event_id,
+    'ADOBE_AEP' AS source_system,
+    'productListItems.productCategories.course_duration_band' AS source_attribute
+  FROM ranked
+  WHERE current_record_rank = 1;
+
+Calculation Notes: |
+  1️⃣ Use the publisher-approved expected instructional duration for the course version effective at the event timestamp.
+  2️⃣ Normalize supported source units and ISO 8601 duration values to minutes before assigning a band.
+  3️⃣ Exclude enrollment access periods, subscription terms, certificate validity, calendar span, and learner-observed completion time.
+  4️⃣ Classify zero, negative, malformed, or unsupported duration values as Unknown and raise a metadata-quality exception.
+  5️⃣ Assign Open-ended only when an explicit source indicator confirms that no finite expected duration applies; do not infer it from a null duration.
+  6️⃣ Preserve historical band assignments through effective-dated course versions and do not restate prior events after a metadata change unless an approved correction is issued.
+  7️⃣ For bundles or learning paths, use the published aggregate duration only; otherwise retain Unknown rather than summing optional or duplicative components.
+
+Business Use Case: |
+  The Chief Product Officer compares discovery-to-enrollment and completion behavior by Course Duration Band to determine whether the catalog over-indexes on long-form courses relative to learner demand. Product and content portfolio teams can respond by increasing microlearning supply, redesigning high-abandonment long-form courses into shorter modules, or adjusting recommendation placements by expected time commitment.
+
+
+Source Data: Digital Course Catalog + LMS
+
+Report Attributes: |
+  ["Course Category","Course Subject","Course Level","Delivery Modality","Content Format","Pricing Model","Acquisition Channel","Device Category","Learner Region","Course Language"]
+
+Dashboard Usage: [Digital Learning Engagement Dashboard, Course Portfolio Performance Dashboard, Discovery-to-Enrollment Funnel, Course Completion and Abandonment Dashboard, Content Supply and Demand Dashboard, Recommendation Effectiveness Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Course, Course Version, Course Category, Course Subject, Course Level, Delivery Modality, Content Format, Pricing Model, Language, Course Provider]
+
+Derived Dimensions: [Course Commitment Tier, Microlearning Flag, Long-Form Course Flag, Course Duration Family]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-12T23:30:09.496059+00:00
+
+Last Modified By: devyendarm
+
+
