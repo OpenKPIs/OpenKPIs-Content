@@ -1,0 +1,476 @@
+# KPI: Learner Support Resolution Rate
+# Generated: 2026-09-12T18:30:07.199Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Learner Support Resolution Rate
+Formula: (Distinct Eligible Matured Learner Support Tickets Qualifying as Resolved Within W / Distinct Eligible Matured Learner Support Tickets) × 100
+
+Description: |
+  Measures the percentage of eligible learner support tickets that reach a qualifying resolved status within the defined resolution observation window. It indicates how consistently the support function completes learner requests rather than leaving them open, administratively closed, or unresolved.
+
+Category: Quality
+
+Tags: [kpi]
+
+Industry: [EdTech & E-Learning]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Item
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily/Weekly/Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT
+      TIMESTAMP(DATE_SUB(CURRENT_DATE('UTC'), INTERVAL 90 DAY), 'UTC') AS cohort_start_at,
+      TIMESTAMP(CURRENT_DATE('UTC'), 'UTC') AS cohort_end_at,
+      CURRENT_TIMESTAMP() AS observation_cutoff_at
+  ),
+  ranked_cases AS (
+    SELECT
+      sc.*,
+      p.observation_cutoff_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY sc.case_id
+        ORDER BY sc.updated_at DESC, sc.created_at DESC
+      ) AS version_rank
+    FROM `your-project.crm.support_cases` AS sc
+    CROSS JOIN parameters AS p
+    WHERE sc.created_at >= p.cohort_start_at
+      AND sc.created_at < p.cohort_end_at
+      AND sc.created_at <= p.observation_cutoff_at
+      AND sc.updated_at <= p.observation_cutoff_at
+  ),
+  eligible_cases AS (
+    SELECT * EXCEPT (version_rank)
+    FROM ranked_cases
+    WHERE version_rank = 1
+      AND case_id IS NOT NULL
+      AND COALESCE(is_deleted, FALSE) = FALSE
+      AND COALESCE(is_test, FALSE) = FALSE
+      AND COALESCE(is_spam, FALSE) = FALSE
+      AND NULLIF(TRIM(CAST(merged_into_case_id AS STRING)), '') IS NULL
+      AND LOWER(TRIM(COALESCE(requester_type, 'learner'))) IN ('learner', 'student', 'customer')
+  ),
+  standardized_cases AS (
+    SELECT
+      *,
+      LOWER(TRIM(COALESCE(status, 'unknown'))) AS normalized_status,
+      LOWER(TRIM(COALESCE(resolution_code, 'unknown'))) AS normalized_resolution_code,
+      COALESCE(
+        resolved_at,
+        CASE
+          WHEN LOWER(TRIM(COALESCE(status, 'unknown'))) IN ('resolved', 'solved', 'completed')
+            THEN closed_at
+        END
+      ) AS resolution_candidate_at
+    FROM eligible_cases
+  ),
+  case_facts AS (
+    SELECT
+      DATE(created_at, 'UTC') AS metric_date,
+      observation_cutoff_at,
+      COALESCE(NULLIF(TRIM(channel), ''), 'unknown') AS support_channel,
+      COALESCE(NULLIF(TRIM(queue_name), ''), 'unassigned') AS queue_name,
+      COALESCE(NULLIF(TRIM(support_team), ''), 'unassigned') AS support_team,
+      COALESCE(NULLIF(TRIM(region), ''), 'unknown') AS region,
+      COALESCE(NULLIF(TRIM(country_code), ''), 'unknown') AS country_code,
+      COALESCE(NULLIF(TRIM(language_code), ''), 'unknown') AS language_code,
+      COALESCE(NULLIF(TRIM(learner_segment), ''), 'unknown') AS learner_segment,
+      COALESCE(NULLIF(TRIM(product_name), ''), 'unknown') AS product_name,
+      COALESCE(NULLIF(TRIM(CAST(course_id AS STRING)), ''), 'unknown') AS course_id,
+      COALESCE(NULLIF(TRIM(issue_category), ''), 'unknown') AS issue_category,
+      COALESCE(NULLIF(TRIM(issue_subcategory), ''), 'unknown') AS issue_subcategory,
+      COALESCE(NULLIF(TRIM(priority), ''), 'unknown') AS priority,
+      COALESCE(NULLIF(TRIM(severity), ''), 'unknown') AS severity,
+      COALESCE(NULLIF(TRIM(contact_reason), ''), 'unknown') AS contact_reason,
+      COALESCE(NULLIF(TRIM(intake_method), ''), 'unknown') AS intake_method,
+      COALESCE(NULLIF(TRIM(CAST(assigned_agent_id AS STRING)), ''), 'unassigned') AS assigned_agent_id,
+      normalized_status,
+      CASE
+        WHEN resolution_candidate_at >= created_at
+         AND resolution_candidate_at <= observation_cutoff_at
+         AND normalized_status NOT IN ('cancelled', 'canceled', 'duplicate', 'spam')
+          THEN TRUE
+        ELSE FALSE
+      END AS is_resolved,
+      CASE
+        WHEN resolution_candidate_at >= created_at
+         AND resolution_candidate_at <= observation_cutoff_at
+         AND normalized_status NOT IN ('cancelled', 'canceled', 'duplicate', 'spam')
+          THEN resolution_candidate_at
+      END AS valid_resolution_at,
+      COALESCE(first_contact_resolution_flag, FALSE) AS first_contact_resolution_flag,
+      COALESCE(reopen_count, 0) AS reopen_count,
+      COALESCE(escalation_count, 0) AS escalation_count,
+      sla_due_at
+    FROM standardized_cases
+  ),
+  aggregated AS (
+    SELECT
+      metric_date,
+      MAX(observation_cutoff_at) AS observation_cutoff_at,
+      support_channel,
+      queue_name,
+      support_team,
+      region,
+      country_code,
+      language_code,
+      learner_segment,
+      product_name,
+      course_id,
+      issue_category,
+      issue_subcategory,
+      priority,
+      severity,
+      contact_reason,
+      intake_method,
+      assigned_agent_id,
+      COUNT(*) AS total_support_cases,
+      COUNTIF(is_resolved) AS resolved_support_cases,
+      COUNTIF(NOT is_resolved) AS unresolved_support_cases,
+      COUNTIF(NOT is_resolved AND normalized_status IN ('new', 'open', 'in_progress', 'in progress', 'reopened')) AS open_cases,
+      COUNTIF(NOT is_resolved AND normalized_status IN ('pending', 'on_hold', 'on hold', 'waiting')) AS pending_cases,
+      COUNTIF(NOT is_resolved AND normalized_status IN ('closed', 'cancelled', 'canceled')) AS closed_unresolved_cases,
+      COUNTIF(is_resolved AND first_contact_resolution_flag) AS first_contact_resolved_cases,
+      COUNTIF(reopen_count > 0) AS reopened_cases,
+      COUNTIF(escalation_count > 0) AS escalated_cases,
+      COUNTIF(is_resolved AND sla_due_at IS NOT NULL) AS sla_eligible_resolved_cases,
+      COUNTIF(is_resolved AND sla_due_at IS NOT NULL AND valid_resolution_at <= sla_due_at) AS resolved_within_sla_cases,
+      COUNTIF(is_resolved AND sla_due_at IS NOT NULL AND valid_resolution_at > sla_due_at) AS resolved_outside_sla_cases,
+      COUNTIF(normalized_status IN ('resolved', 'solved', 'completed') AND valid_resolution_at IS NULL) AS cases_missing_resolution_timestamp,
+      AVG(IF(is_resolved, TIMESTAMP_DIFF(valid_resolution_at, created_at, SECOND) / 3600.0, NULL)) AS avg_resolution_hours,
+      MIN(IF(is_resolved, TIMESTAMP_DIFF(valid_resolution_at, created_at, SECOND) / 3600.0, NULL)) AS min_resolution_hours,
+      MAX(IF(is_resolved, TIMESTAMP_DIFF(valid_resolution_at, created_at, SECOND) / 3600.0, NULL)) AS max_resolution_hours,
+      APPROX_QUANTILES(IF(is_resolved, TIMESTAMP_DIFF(valid_resolution_at, created_at, SECOND) / 3600.0, NULL), 100)[OFFSET(50)] AS median_resolution_hours,
+      APPROX_QUANTILES(IF(is_resolved, TIMESTAMP_DIFF(valid_resolution_at, created_at, SECOND) / 3600.0, NULL), 100)[OFFSET(90)] AS p90_resolution_hours
+    FROM case_facts
+    GROUP BY
+      metric_date,
+      support_channel,
+      queue_name,
+      support_team,
+      region,
+      country_code,
+      language_code,
+      learner_segment,
+      product_name,
+      course_id,
+      issue_category,
+      issue_subcategory,
+      priority,
+      severity,
+      contact_reason,
+      intake_method,
+      assigned_agent_id
+  )
+  SELECT
+    metric_date,
+    TIMESTAMP(metric_date, 'UTC') AS cohort_start_at,
+    TIMESTAMP(DATE_ADD(metric_date, INTERVAL 1 DAY), 'UTC') AS cohort_end_at,
+    observation_cutoff_at,
+    'Customer Support Platform / CRM' AS source_system,
+    'Learner Support Resolution Rate' AS kpi_name,
+    'Percentage of eligible learner support cases created in the cohort that were resolved by the observation cutoff' AS kpi_definition,
+    'percent' AS kpi_unit,
+    'All eligible learner support cases created in the cohort' AS denominator_definition,
+    'Eligible cohort cases with a valid resolution timestamp by the observation cutoff' AS numerator_definition,
+    support_channel,
+    queue_name,
+    support_team,
+    region,
+    country_code,
+    language_code,
+    learner_segment,
+    product_name,
+    course_id,
+    issue_category,
+    issue_subcategory,
+    priority,
+    severity,
+    contact_reason,
+    intake_method,
+    assigned_agent_id,
+    total_support_cases,
+    resolved_support_cases,
+    unresolved_support_cases,
+    open_cases,
+    pending_cases,
+    closed_unresolved_cases,
+    first_contact_resolved_cases,
+    reopened_cases,
+    escalated_cases,
+    sla_eligible_resolved_cases,
+    resolved_within_sla_cases,
+    resolved_outside_sla_cases,
+    cases_missing_resolution_timestamp,
+    ROUND(100 * SAFE_DIVIDE(resolved_support_cases, total_support_cases), 4) AS resolution_rate,
+    ROUND(100 * SAFE_DIVIDE(unresolved_support_cases, total_support_cases), 4) AS unresolved_rate,
+    ROUND(100 * SAFE_DIVIDE(first_contact_resolved_cases, total_support_cases), 4) AS first_contact_resolution_rate,
+    ROUND(100 * SAFE_DIVIDE(resolved_within_sla_cases, sla_eligible_resolved_cases), 4) AS sla_resolution_rate,
+    ROUND(avg_resolution_hours, 4) AS avg_resolution_hours,
+    ROUND(min_resolution_hours, 4) AS min_resolution_hours,
+    ROUND(max_resolution_hours, 4) AS max_resolution_hours,
+    ROUND(median_resolution_hours, 4) AS median_resolution_hours,
+    ROUND(p90_resolution_hours, 4) AS p90_resolution_hours,
+    observation_cutoff_at AS data_refreshed_at
+  FROM aggregated
+  ORDER BY metric_date, support_channel, queue_name, issue_category, priority;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT
+      CAST(CURRENT_DATE - INTERVAL '90' DAY AS TIMESTAMP) AS cohort_start_at,
+      CAST(CURRENT_DATE AS TIMESTAMP) AS cohort_end_at,
+      CURRENT_TIMESTAMP AS observation_cutoff_at
+  ),
+  ranked_cases AS (
+    SELECT
+      sc.*,
+      p.observation_cutoff_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY sc.case_id
+        ORDER BY sc.updated_at DESC, sc.created_at DESC
+      ) AS version_rank
+    FROM crm_support_cases_backend_dataset AS sc
+    CROSS JOIN parameters AS p
+    WHERE sc.created_at >= p.cohort_start_at
+      AND sc.created_at < p.cohort_end_at
+      AND sc.created_at <= p.observation_cutoff_at
+      AND sc.updated_at <= p.observation_cutoff_at
+  ),
+  eligible_cases AS (
+    SELECT *
+    FROM ranked_cases
+    WHERE version_rank = 1
+      AND case_id IS NOT NULL
+      AND COALESCE(is_deleted, FALSE) = FALSE
+      AND COALESCE(is_test, FALSE) = FALSE
+      AND COALESCE(is_spam, FALSE) = FALSE
+      AND NULLIF(TRIM(CAST(merged_into_case_id AS VARCHAR)), '') IS NULL
+      AND LOWER(TRIM(COALESCE(requester_type, 'learner'))) IN ('learner', 'student', 'customer')
+  ),
+  standardized_cases AS (
+    SELECT
+      *,
+      LOWER(TRIM(COALESCE(status, 'unknown'))) AS normalized_status,
+      LOWER(TRIM(COALESCE(resolution_code, 'unknown'))) AS normalized_resolution_code,
+      COALESCE(
+        resolved_at,
+        CASE
+          WHEN LOWER(TRIM(COALESCE(status, 'unknown'))) IN ('resolved', 'solved', 'completed')
+            THEN closed_at
+          ELSE NULL
+        END
+      ) AS resolution_candidate_at
+    FROM eligible_cases
+  ),
+  case_facts AS (
+    SELECT
+      CAST(created_at AS DATE) AS metric_date,
+      observation_cutoff_at,
+      COALESCE(NULLIF(TRIM(channel), ''), 'unknown') AS support_channel,
+      COALESCE(NULLIF(TRIM(queue_name), ''), 'unassigned') AS queue_name,
+      COALESCE(NULLIF(TRIM(support_team), ''), 'unassigned') AS support_team,
+      COALESCE(NULLIF(TRIM(region), ''), 'unknown') AS region,
+      COALESCE(NULLIF(TRIM(country_code), ''), 'unknown') AS country_code,
+      COALESCE(NULLIF(TRIM(language_code), ''), 'unknown') AS language_code,
+      COALESCE(NULLIF(TRIM(learner_segment), ''), 'unknown') AS learner_segment,
+      COALESCE(NULLIF(TRIM(product_name), ''), 'unknown') AS product_name,
+      COALESCE(NULLIF(TRIM(CAST(course_id AS VARCHAR)), ''), 'unknown') AS course_id,
+      COALESCE(NULLIF(TRIM(issue_category), ''), 'unknown') AS issue_category,
+      COALESCE(NULLIF(TRIM(issue_subcategory), ''), 'unknown') AS issue_subcategory,
+      COALESCE(NULLIF(TRIM(priority), ''), 'unknown') AS priority,
+      COALESCE(NULLIF(TRIM(severity), ''), 'unknown') AS severity,
+      COALESCE(NULLIF(TRIM(contact_reason), ''), 'unknown') AS contact_reason,
+      COALESCE(NULLIF(TRIM(intake_method), ''), 'unknown') AS intake_method,
+      COALESCE(NULLIF(TRIM(CAST(assigned_agent_id AS VARCHAR)), ''), 'unassigned') AS assigned_agent_id,
+      normalized_status,
+      CASE
+        WHEN resolution_candidate_at >= created_at
+         AND resolution_candidate_at <= observation_cutoff_at
+         AND normalized_status NOT IN ('cancelled', 'canceled', 'duplicate', 'spam')
+          THEN 1
+        ELSE 0
+      END AS is_resolved,
+      CASE
+        WHEN resolution_candidate_at >= created_at
+         AND resolution_candidate_at <= observation_cutoff_at
+         AND normalized_status NOT IN ('cancelled', 'canceled', 'duplicate', 'spam')
+          THEN resolution_candidate_at
+        ELSE NULL
+      END AS valid_resolution_at,
+      CASE WHEN COALESCE(first_contact_resolution_flag, FALSE) THEN 1 ELSE 0 END AS first_contact_resolution_flag,
+      COALESCE(reopen_count, 0) AS reopen_count,
+      COALESCE(escalation_count, 0) AS escalation_count,
+      sla_due_at,
+      created_at
+    FROM standardized_cases
+  ),
+  aggregated AS (
+    SELECT
+      metric_date,
+      MAX(observation_cutoff_at) AS observation_cutoff_at,
+      support_channel,
+      queue_name,
+      support_team,
+      region,
+      country_code,
+      language_code,
+      learner_segment,
+      product_name,
+      course_id,
+      issue_category,
+      issue_subcategory,
+      priority,
+      severity,
+      contact_reason,
+      intake_method,
+      assigned_agent_id,
+      COUNT(*) AS total_support_cases,
+      SUM(CASE WHEN is_resolved = 1 THEN 1 ELSE 0 END) AS resolved_support_cases,
+      SUM(CASE WHEN is_resolved = 0 THEN 1 ELSE 0 END) AS unresolved_support_cases,
+      SUM(CASE WHEN is_resolved = 0 AND normalized_status IN ('new', 'open', 'in_progress', 'in progress', 'reopened') THEN 1 ELSE 0 END) AS open_cases,
+      SUM(CASE WHEN is_resolved = 0 AND normalized_status IN ('pending', 'on_hold', 'on hold', 'waiting') THEN 1 ELSE 0 END) AS pending_cases,
+      SUM(CASE WHEN is_resolved = 0 AND normalized_status IN ('closed', 'cancelled', 'canceled') THEN 1 ELSE 0 END) AS closed_unresolved_cases,
+      SUM(CASE WHEN is_resolved = 1 AND first_contact_resolution_flag = 1 THEN 1 ELSE 0 END) AS first_contact_resolved_cases,
+      SUM(CASE WHEN reopen_count > 0 THEN 1 ELSE 0 END) AS reopened_cases,
+      SUM(CASE WHEN escalation_count > 0 THEN 1 ELSE 0 END) AS escalated_cases,
+      SUM(CASE WHEN is_resolved = 1 AND sla_due_at IS NOT NULL THEN 1 ELSE 0 END) AS sla_eligible_resolved_cases,
+      SUM(CASE WHEN is_resolved = 1 AND sla_due_at IS NOT NULL AND valid_resolution_at <= sla_due_at THEN 1 ELSE 0 END) AS resolved_within_sla_cases,
+      SUM(CASE WHEN is_resolved = 1 AND sla_due_at IS NOT NULL AND valid_resolution_at > sla_due_at THEN 1 ELSE 0 END) AS resolved_outside_sla_cases,
+      SUM(CASE WHEN normalized_status IN ('resolved', 'solved', 'completed') AND valid_resolution_at IS NULL THEN 1 ELSE 0 END) AS cases_missing_resolution_timestamp,
+      AVG(CASE WHEN is_resolved = 1 THEN EXTRACT(EPOCH FROM (valid_resolution_at - created_at)) / 3600.0 ELSE NULL END) AS avg_resolution_hours,
+      MIN(CASE WHEN is_resolved = 1 THEN EXTRACT(EPOCH FROM (valid_resolution_at - created_at)) / 3600.0 ELSE NULL END) AS min_resolution_hours,
+      MAX(CASE WHEN is_resolved = 1 THEN EXTRACT(EPOCH FROM (valid_resolution_at - created_at)) / 3600.0 ELSE NULL END) AS max_resolution_hours,
+      PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY CASE WHEN is_resolved = 1 THEN EXTRACT(EPOCH FROM (valid_resolution_at - created_at)) / 3600.0 ELSE NULL END) AS median_resolution_hours,
+      PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY CASE WHEN is_resolved = 1 THEN EXTRACT(EPOCH FROM (valid_resolution_at - created_at)) / 3600.0 ELSE NULL END) AS p90_resolution_hours
+    FROM case_facts
+    GROUP BY
+      metric_date,
+      support_channel,
+      queue_name,
+      support_team,
+      region,
+      country_code,
+      language_code,
+      learner_segment,
+      product_name,
+      course_id,
+      issue_category,
+      issue_subcategory,
+      priority,
+      severity,
+      contact_reason,
+      intake_method,
+      assigned_agent_id
+  )
+  SELECT
+    metric_date,
+    CAST(metric_date AS TIMESTAMP) AS cohort_start_at,
+    CAST(metric_date AS TIMESTAMP) + INTERVAL '1' DAY AS cohort_end_at,
+    observation_cutoff_at,
+    'Customer Support Platform / CRM' AS source_system,
+    'Learner Support Resolution Rate' AS kpi_name,
+    'Percentage of eligible learner support cases created in the cohort that were resolved by the observation cutoff' AS kpi_definition,
+    'percent' AS kpi_unit,
+    'All eligible learner support cases created in the cohort' AS denominator_definition,
+    'Eligible cohort cases with a valid resolution timestamp by the observation cutoff' AS numerator_definition,
+    support_channel,
+    queue_name,
+    support_team,
+    region,
+    country_code,
+    language_code,
+    learner_segment,
+    product_name,
+    course_id,
+    issue_category,
+    issue_subcategory,
+    priority,
+    severity,
+    contact_reason,
+    intake_method,
+    assigned_agent_id,
+    total_support_cases,
+    resolved_support_cases,
+    unresolved_support_cases,
+    open_cases,
+    pending_cases,
+    closed_unresolved_cases,
+    first_contact_resolved_cases,
+    reopened_cases,
+    escalated_cases,
+    sla_eligible_resolved_cases,
+    resolved_within_sla_cases,
+    resolved_outside_sla_cases,
+    cases_missing_resolution_timestamp,
+    ROUND(100.0 * resolved_support_cases / NULLIF(total_support_cases, 0), 4) AS resolution_rate,
+    ROUND(100.0 * unresolved_support_cases / NULLIF(total_support_cases, 0), 4) AS unresolved_rate,
+    ROUND(100.0 * first_contact_resolved_cases / NULLIF(total_support_cases, 0), 4) AS first_contact_resolution_rate,
+    ROUND(100.0 * resolved_within_sla_cases / NULLIF(sla_eligible_resolved_cases, 0), 4) AS sla_resolution_rate,
+    ROUND(avg_resolution_hours, 4) AS avg_resolution_hours,
+    ROUND(min_resolution_hours, 4) AS min_resolution_hours,
+    ROUND(max_resolution_hours, 4) AS max_resolution_hours,
+    ROUND(median_resolution_hours, 4) AS median_resolution_hours,
+    ROUND(p90_resolution_hours, 4) AS p90_resolution_hours,
+    observation_cutoff_at AS data_refreshed_at
+  FROM aggregated
+  ORDER BY metric_date, support_channel, queue_name, issue_category, priority;
+
+Calculation Notes: |
+  1️⃣ Use `ticket_created_at` for reporting cohort assignment and first qualifying resolution timestamp.  
+  2️⃣ Assign W based on priority, issue type, or service plan; default to 7 days if no policy exists.  
+  3️⃣ Qualifying resolution requires terminal resolved/closed status, non-administrative resolution code, and no reopen within 72 hours.  
+  4️⃣ Reopened tickets within 72 hours only qualify if resolved again within original W and remain closed for 72-hour confirmation.  
+  5️⃣ Apply organization reporting timezone before cohort assignment.  
+  6️⃣ Retain historical SLA-window versions and deduplicate merged records.  
+  7️⃣ Calculate distinct ticket IDs instead of status-event counts.
+
+Business Use Case: |
+  The Head of Learner Support reviews this rate by issue category, channel, language, and support team each week. If payment-access tickets fall below the 90% target while backlog and escalation rates rise, the leader can reallocate trained agents, correct routing rules, publish a targeted knowledge article, and require the product team to remove the recurring access failure.
+
+
+Source Data: Customer Support Platform / CRM
+
+Report Attributes: |
+  ["Reporting Date","Support Channel","Issue Category","Issue Subcategory","Ticket Priority","Product","Course","Learning Program","Learner Type","Subscription Plan","Institution","Region","Language","Support Team","Resolution Mode","SLA Policy"]
+
+Dashboard Usage: [Learner Support Executive Dashboard, Support Operations Performance Dashboard, Learner Experience Quality Dashboard, Support SLA and Backlog Dashboard, Course and Product Health Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Average Support Resolution Time, First Contact Resolution Rate, Support SLA Compliance Rate, Learner Support Reopen Rate, Learner Support Backlog, Learner Support Satisfaction Score, Learner Support Ticket Escalation Rate, Support Ticket Deflection Rate]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-12T18:30:05.850154+00:00
+
+Last Modified By: devyendarm
+
+
