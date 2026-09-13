@@ -1,0 +1,432 @@
+# Dimension: Booking Journey Entry Channel
+# Generated: 2026-09-13T20:30:05.811Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Booking Journey Entry Channel
+
+Description: |
+  Identifies the normalized digital channel associated with the first qualifying booking-intent event in a traveler's booking journey. The value is fixed at journey entry and enables consistent comparison of downstream conversion, abandonment, and booking behavior by originating channel.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Travel & Hospitality
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Booking journey, from the first qualifying digital booking-intent event until booking completion, 30 days of booking inactivity, or a 90-day maximum journey duration
+
+GA4 Event: |
+  begin_checkout
+
+Adobe Event: |
+  begin_checkout
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"begin_checkout","eventAction":"begin_checkout"},"attributes":{"bookingJourneyEntryChannel":"paid_search"}}]}}
+
+GA4 Data Layer: |
+  {"event":"begin_checkout","booking_journey_entry_channel":"paid_search"}
+
+Adobe Client Data Layer: |
+  {"data":{"bookingJourney":{"entryChannel":"paid_search"}},"event":"begin_checkout"}
+
+XDM Mapping: |
+  {"commerce":{"checkouts":{"value":1}},"eventType":"commerce.checkouts","_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"paid_search"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH checkout_events AS (
+    SELECT
+      e.user_pseudo_id,
+      e.user_id,
+      e.event_date,
+      e.event_timestamp,
+      e.event_name,
+      e.platform,
+      e.stream_id,
+      e.device.category AS device_category,
+      e.device.operating_system,
+      e.device.web_info.browser AS browser,
+      e.device.language,
+      e.device.web_info.hostname,
+      e.geo.country,
+      e.geo.region,
+      e.geo.city,
+      e.app_info.id AS app_id,
+      e.app_info.version AS app_version,
+      e.privacy_info.analytics_storage,
+      e.privacy_info.ads_storage,
+      p.booking_journey_id,
+      p.booking_journey_entry_channel_raw,
+      SAFE_CAST(p.ga_session_id AS INT64) AS session_id,
+      SAFE_CAST(p.ga_session_number AS INT64) AS session_number,
+      p.page_location,
+      p.page_referrer,
+      COALESCE(p.source, e.collected_traffic_source.manual_source, e.traffic_source.source) AS source,
+      COALESCE(p.medium, e.collected_traffic_source.manual_medium, e.traffic_source.medium) AS medium,
+      COALESCE(p.campaign_name, e.collected_traffic_source.manual_campaign_name, e.traffic_source.name) AS campaign_name,
+      COALESCE(p.campaign_id, e.collected_traffic_source.manual_campaign_id) AS campaign_id,
+      COALESCE(p.content, e.collected_traffic_source.manual_content) AS content,
+      COALESCE(p.term, e.collected_traffic_source.manual_term) AS term,
+      e.collected_traffic_source.manual_creative_format AS creative_format,
+      e.collected_traffic_source.manual_marketing_tactic AS marketing_tactic,
+      e.collected_traffic_source.gclid,
+      e.collected_traffic_source.dclid,
+      e.collected_traffic_source.srsltid,
+      p.ad_user_data,
+      p.ad_personalization
+    FROM `your-project.analytics_123456789.events_*` AS e
+    LEFT JOIN UNNEST([(
+      SELECT AS STRUCT
+        MAX(IF(ep.key = 'booking_journey_id',
+          COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS booking_journey_id,
+        MAX(IF(ep.key = 'booking_journey_entry_channel',
+          COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS booking_journey_entry_channel_raw,
+        MAX(IF(ep.key = 'ga_session_id',
+          COALESCE(CAST(ep.value.int_value AS STRING), ep.value.string_value), NULL)) AS ga_session_id,
+        MAX(IF(ep.key = 'ga_session_number',
+          COALESCE(CAST(ep.value.int_value AS STRING), ep.value.string_value), NULL)) AS ga_session_number,
+        MAX(IF(ep.key = 'page_location', ep.value.string_value, NULL)) AS page_location,
+        MAX(IF(ep.key = 'page_referrer', ep.value.string_value, NULL)) AS page_referrer,
+        MAX(IF(ep.key IN ('source', 'utm_source'), ep.value.string_value, NULL)) AS source,
+        MAX(IF(ep.key IN ('medium', 'utm_medium'), ep.value.string_value, NULL)) AS medium,
+        MAX(IF(ep.key IN ('campaign', 'campaign_name', 'utm_campaign'), ep.value.string_value, NULL)) AS campaign_name,
+        MAX(IF(ep.key IN ('campaign_id', 'utm_id'),
+          COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS campaign_id,
+        MAX(IF(ep.key IN ('content', 'utm_content'), ep.value.string_value, NULL)) AS content,
+        MAX(IF(ep.key IN ('term', 'utm_term'), ep.value.string_value, NULL)) AS term,
+        MAX(IF(ep.key = 'ad_user_data', ep.value.string_value, NULL)) AS ad_user_data,
+        MAX(IF(ep.key = 'ad_personalization', ep.value.string_value, NULL)) AS ad_personalization
+      FROM UNNEST(e.event_params) AS ep
+    )]) AS p ON TRUE
+    WHERE e.event_name = 'begin_checkout'
+  ),
+  prepared AS (
+    SELECT
+      *,
+      COALESCE(
+        NULLIF(TRIM(booking_journey_id), ''),
+        CONCAT(
+          COALESCE(NULLIF(user_pseudo_id, ''), NULLIF(user_id, ''), 'anonymous'),
+          '|',
+          COALESCE(CAST(session_id AS STRING), CAST(event_timestamp AS STRING))
+        )
+      ) AS resolved_booking_journey_id,
+      NULLIF(
+        REGEXP_REPLACE(
+          LOWER(TRIM(booking_journey_entry_channel_raw)),
+          r'[^a-z0-9]+',
+          '_'
+        ),
+        ''
+      ) AS normalized_explicit_channel,
+      LOWER(COALESCE(source, '')) AS source_lower,
+      LOWER(COALESCE(medium, '')) AS medium_lower
+    FROM checkout_events
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_explicit_channel IN ('paid_search', 'paidsearch', 'cpc', 'ppc', 'sem') THEN 'paid_search'
+        WHEN normalized_explicit_channel IN ('organic_search', 'organicsearch', 'seo') THEN 'organic_search'
+        WHEN normalized_explicit_channel IN ('paid_social', 'paidsocial', 'social_paid') THEN 'paid_social'
+        WHEN normalized_explicit_channel IN ('organic_social', 'organicsocial', 'social', 'social_organic') THEN 'organic_social'
+        WHEN normalized_explicit_channel IN ('display', 'programmatic', 'banner') THEN 'display'
+        WHEN normalized_explicit_channel IN ('affiliate', 'affiliates') THEN 'affiliate'
+        WHEN normalized_explicit_channel IN ('referral', 'partner_referral') THEN 'referral'
+        WHEN normalized_explicit_channel IN ('email', 'e_mail') THEN 'email'
+        WHEN normalized_explicit_channel IN ('sms', 'text_message') THEN 'sms'
+        WHEN normalized_explicit_channel IN ('push', 'push_notification') THEN 'push_notification'
+        WHEN normalized_explicit_channel IN ('video', 'paid_video') THEN 'video'
+        WHEN normalized_explicit_channel IN ('direct', 'none', 'not_set') THEN 'direct'
+        WHEN normalized_explicit_channel IS NOT NULL THEN normalized_explicit_channel
+        WHEN gclid IS NOT NULL OR REGEXP_CONTAINS(medium_lower, r'^(cpc|ppc|paidsearch|paid_search|sem)$') THEN 'paid_search'
+        WHEN REGEXP_CONTAINS(medium_lower, r'^(organic|seo)$') THEN 'organic_search'
+        WHEN REGEXP_CONTAINS(medium_lower, r'^(paid_social|paidsocial|social_paid)$') THEN 'paid_social'
+        WHEN REGEXP_CONTAINS(medium_lower, r'^(social|social_network|social_media|organic_social)$') THEN 'organic_social'
+        WHEN REGEXP_CONTAINS(medium_lower, r'^(display|cpm|banner|programmatic)$') THEN 'display'
+        WHEN REGEXP_CONTAINS(medium_lower, r'^(affiliate|affiliates)$') THEN 'affiliate'
+        WHEN REGEXP_CONTAINS(medium_lower, r'^(email|e-mail)$') THEN 'email'
+        WHEN REGEXP_CONTAINS(medium_lower, r'^(sms|text)$') THEN 'sms'
+        WHEN REGEXP_CONTAINS(medium_lower, r'^(push|notification)$') THEN 'push_notification'
+        WHEN REGEXP_CONTAINS(medium_lower, r'^(video|cpv)$') THEN 'video'
+        WHEN REGEXP_CONTAINS(medium_lower, r'^(referral)$') THEN 'referral'
+        WHEN (source_lower IN ('', '(direct)', 'direct') AND medium_lower IN ('', '(none)', 'none', '(not set)')) THEN 'direct'
+        ELSE 'other'
+      END AS entry_channel
+    FROM prepared
+  ),
+  deduplicated AS (
+    SELECT *
+    FROM classified
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY resolved_booking_journey_id
+      ORDER BY event_timestamp, event_date
+    ) = 1
+  )
+  SELECT
+    TO_HEX(SHA256(entry_channel)) AS booking_journey_entry_channel_key,
+    resolved_booking_journey_id AS booking_journey_id,
+    user_pseudo_id,
+    user_id,
+    session_id,
+    session_number,
+    PARSE_DATE('%Y%m%d', event_date) AS event_date,
+    TIMESTAMP_MICROS(event_timestamp) AS event_timestamp,
+    event_name AS entry_event_name,
+    booking_journey_entry_channel_raw AS entry_channel_raw,
+    entry_channel,
+    CASE
+      WHEN entry_channel IN ('paid_search', 'paid_social', 'display', 'video', 'affiliate') THEN 'Paid'
+      WHEN entry_channel IN ('organic_search', 'organic_social', 'referral') THEN 'Organic and Earned'
+      WHEN entry_channel IN ('email', 'sms', 'push_notification') THEN 'Owned'
+      WHEN entry_channel = 'direct' THEN 'Direct'
+      ELSE 'Other'
+    END AS channel_group,
+    CASE
+      WHEN entry_channel IN ('paid_search', 'organic_search') THEN 'Search'
+      WHEN entry_channel IN ('paid_social', 'organic_social') THEN 'Social'
+      WHEN entry_channel IN ('email', 'sms', 'push_notification') THEN 'Messaging'
+      WHEN entry_channel IN ('display', 'video') THEN 'Advertising'
+      WHEN entry_channel IN ('affiliate', 'referral') THEN 'Partner'
+      WHEN entry_channel = 'direct' THEN 'Direct'
+      ELSE 'Other'
+    END AS channel_category,
+    entry_channel IN ('paid_search', 'paid_social', 'display', 'video', 'affiliate') AS is_paid,
+    entry_channel IN ('email', 'sms', 'push_notification') AS is_owned,
+    entry_channel IN ('organic_search', 'organic_social', 'referral') AS is_earned,
+    source,
+    medium,
+    campaign_name,
+    campaign_id,
+    content,
+    term,
+    creative_format,
+    marketing_tactic,
+    gclid,
+    dclid,
+    srsltid,
+    page_location,
+    page_referrer,
+    page_location AS landing_page,
+    hostname,
+    platform,
+    stream_id,
+    device_category,
+    operating_system,
+    browser,
+    language,
+    country,
+    region,
+    city,
+    app_id,
+    app_version,
+    analytics_storage AS consent_analytics_storage,
+    ads_storage AS consent_ads_storage,
+    ad_user_data AS consent_ad_user_data,
+    ad_personalization AS consent_ad_personalization,
+    'GA4' AS record_source,
+    TIMESTAMP_MICROS(event_timestamp) AS effective_from_timestamp,
+    CURRENT_TIMESTAMP() AS loaded_at
+  FROM deduplicated;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH checkout_events AS (
+    SELECT
+      timestamp AS event_timestamp,
+      eventType AS entry_event_name,
+      CAST(_experience.analytics.customDimensions.eVars.eVar1 AS STRING) AS entry_channel_raw,
+      identityMap['ECID'][0].id AS ecid,
+      CAST(web.webPageDetails.URL AS STRING) AS page_location,
+      CAST(web.webReferrer.URL AS STRING) AS page_referrer,
+      CAST(marketing.trackingCode AS STRING) AS campaign_name,
+      CAST(device.type AS STRING) AS device_category,
+      CAST(device.operatingSystem AS STRING) AS operating_system,
+      CAST(environment.browserDetails.name AS STRING) AS browser,
+      CAST(environment.browserDetails.acceptLanguage AS STRING) AS language,
+      CAST(placeContext.geo.countryCode AS STRING) AS country,
+      CAST(placeContext.geo.stateProvince AS STRING) AS region,
+      CAST(placeContext.geo.city AS STRING) AS city,
+      CAST(application.id AS STRING) AS app_id,
+      CAST(application.version AS STRING) AS app_version
+    FROM aep_analytics_dataset
+    WHERE eventType = 'commerce.checkouts'
+      AND COALESCE(commerce.checkouts.value, 0) > 0
+  ),
+  prepared AS (
+    SELECT
+      *,
+      SHA2(
+        CONCAT_WS(
+          '|',
+          COALESCE(ecid, 'anonymous'),
+          CAST(event_timestamp AS STRING),
+          entry_event_name
+        ),
+        256
+      ) AS booking_journey_id,
+      NULLIF(
+        REGEXP_REPLACE(
+          LOWER(TRIM(entry_channel_raw)),
+          '[^a-z0-9]+',
+          '_'
+        ),
+        ''
+      ) AS normalized_explicit_channel
+    FROM checkout_events
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_explicit_channel IN ('paid_search', 'paidsearch', 'cpc', 'ppc', 'sem') THEN 'paid_search'
+        WHEN normalized_explicit_channel IN ('organic_search', 'organicsearch', 'seo') THEN 'organic_search'
+        WHEN normalized_explicit_channel IN ('paid_social', 'paidsocial', 'social_paid') THEN 'paid_social'
+        WHEN normalized_explicit_channel IN ('organic_social', 'organicsocial', 'social', 'social_organic') THEN 'organic_social'
+        WHEN normalized_explicit_channel IN ('display', 'programmatic', 'banner') THEN 'display'
+        WHEN normalized_explicit_channel IN ('affiliate', 'affiliates') THEN 'affiliate'
+        WHEN normalized_explicit_channel IN ('referral', 'partner_referral') THEN 'referral'
+        WHEN normalized_explicit_channel IN ('email', 'e_mail') THEN 'email'
+        WHEN normalized_explicit_channel IN ('sms', 'text_message') THEN 'sms'
+        WHEN normalized_explicit_channel IN ('push', 'push_notification') THEN 'push_notification'
+        WHEN normalized_explicit_channel IN ('video', 'paid_video') THEN 'video'
+        WHEN normalized_explicit_channel IN ('direct', 'none', 'not_set') THEN 'direct'
+        WHEN normalized_explicit_channel IS NOT NULL THEN normalized_explicit_channel
+        ELSE 'unknown'
+      END AS entry_channel
+    FROM prepared
+  ),
+  deduplicated AS (
+    SELECT *
+    FROM (
+      SELECT
+        *,
+        ROW_NUMBER() OVER (
+          PARTITION BY booking_journey_id
+          ORDER BY event_timestamp
+        ) AS entry_row_number
+      FROM classified
+    ) ranked
+    WHERE entry_row_number = 1
+  )
+  SELECT
+    SHA2(entry_channel, 256) AS booking_journey_entry_channel_key,
+    booking_journey_id,
+    ecid AS user_pseudo_id,
+    CAST(NULL AS STRING) AS user_id,
+    CAST(NULL AS BIGINT) AS session_id,
+    CAST(NULL AS BIGINT) AS session_number,
+    CAST(event_timestamp AS DATE) AS event_date,
+    event_timestamp,
+    entry_event_name,
+    entry_channel_raw,
+    entry_channel,
+    CASE
+      WHEN entry_channel IN ('paid_search', 'paid_social', 'display', 'video', 'affiliate') THEN 'Paid'
+      WHEN entry_channel IN ('organic_search', 'organic_social', 'referral') THEN 'Organic and Earned'
+      WHEN entry_channel IN ('email', 'sms', 'push_notification') THEN 'Owned'
+      WHEN entry_channel = 'direct' THEN 'Direct'
+      ELSE 'Other'
+    END AS channel_group,
+    CASE
+      WHEN entry_channel IN ('paid_search', 'organic_search') THEN 'Search'
+      WHEN entry_channel IN ('paid_social', 'organic_social') THEN 'Social'
+      WHEN entry_channel IN ('email', 'sms', 'push_notification') THEN 'Messaging'
+      WHEN entry_channel IN ('display', 'video') THEN 'Advertising'
+      WHEN entry_channel IN ('affiliate', 'referral') THEN 'Partner'
+      WHEN entry_channel = 'direct' THEN 'Direct'
+      ELSE 'Other'
+    END AS channel_category,
+    CASE WHEN entry_channel IN ('paid_search', 'paid_social', 'display', 'video', 'affiliate') THEN TRUE ELSE FALSE END AS is_paid,
+    CASE WHEN entry_channel IN ('email', 'sms', 'push_notification') THEN TRUE ELSE FALSE END AS is_owned,
+    CASE WHEN entry_channel IN ('organic_search', 'organic_social', 'referral') THEN TRUE ELSE FALSE END AS is_earned,
+    CAST(NULL AS STRING) AS source,
+    CAST(NULL AS STRING) AS medium,
+    campaign_name,
+    CAST(NULL AS STRING) AS campaign_id,
+    CAST(NULL AS STRING) AS content,
+    CAST(NULL AS STRING) AS term,
+    CAST(NULL AS STRING) AS creative_format,
+    CAST(NULL AS STRING) AS marketing_tactic,
+    CAST(NULL AS STRING) AS gclid,
+    CAST(NULL AS STRING) AS dclid,
+    CAST(NULL AS STRING) AS srsltid,
+    page_location,
+    page_referrer,
+    page_location AS landing_page,
+    PARSE_URL(page_location, 'HOST') AS hostname,
+    CASE WHEN app_id IS NOT NULL THEN 'APP' ELSE 'WEB' END AS platform,
+    'aep_analytics_dataset' AS stream_id,
+    device_category,
+    operating_system,
+    browser,
+    language,
+    country,
+    region,
+    city,
+    app_id,
+    app_version,
+    CAST(NULL AS STRING) AS consent_analytics_storage,
+    CAST(NULL AS STRING) AS consent_ads_storage,
+    CAST(NULL AS STRING) AS consent_ad_user_data,
+    CAST(NULL AS STRING) AS consent_ad_personalization,
+    'ADOBE_AEP' AS record_source,
+    event_timestamp AS effective_from_timestamp,
+    CURRENT_TIMESTAMP() AS loaded_at
+  FROM deduplicated;
+
+Calculation Notes: |
+  1️⃣ Assign channel from the last digital touchpoint before or during the first booking-intent event.  
+  2️⃣ Include booking-engine entry, availability search, fare/room search, or product selection.  
+  3️⃣ Maintain validated campaign and referrer context across brand-to-booking-engine domains; do not classify as referrals.  
+  4️⃣ Use "Unknown" for missing, malformed, or blocked source evidence.  
+  5️⃣ Use "Not Applicable" for records outside an identified booking journey.  
+  6️⃣ Assign direct traffic only after exhausting other traffic source rules.  
+  7️⃣ Prioritize campaign, paid-platform, metasearch, affiliate, messaging, social, search, and external-referrer sources.
+
+Business Use Case: |
+  The Chief Marketing Officer compares booking completion and abandonment by entry channel and identifies that metasearch initiates high-volume journeys but underperforms paid search after availability results. Marketing can then adjust partner bids and landing experiences, while Digital Commerce investigates channel-specific price, inventory, or booking-engine friction.
+
+
+Source Data: Digital Analytics (GA4 and first-party web/app event stream)
+
+Report Attributes: |
+  ["Booking Journey Start Date","Digital Platform","Device Category","Traffic Source","Campaign Name","Landing Page","Booking Engine","Travel Product Type","Destination","Property","Market","Customer Type","Booking Outcome"]
+
+Dashboard Usage: [Digital Booking Journey Executive Dashboard, Booking Funnel Performance Dashboard, Digital Channel Conversion Dashboard, Booking Abandonment Diagnostic Dashboard, Marketing Acquisition Quality Dashboard, Direct Booking Growth Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Booking Journey ID, Booking Journey Start Date, Session Acquisition Channel, Traffic Source, Traffic Medium, Campaign Name, Referring Domain, Landing Page, Booking Engine, Digital Platform, Device Category, Destination, Property, Travel Product Type, Booking Completion Channel]
+
+Derived Dimensions: [Booking Journey Entry Channel Group, Booking Journey Entry Channel Paid Status, Booking Journey Entry Channel Ownership Type, Booking Journey Entry Partner Type, Booking Journey Entry Channel Detail]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-13T20:30:04.479516+00:00
+
+Last Modified By: devyendarm
+
+
