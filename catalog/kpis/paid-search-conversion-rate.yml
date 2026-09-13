@@ -1,7 +1,7 @@
 # KPI: Paid Search Conversion Rate
-# Generated: 2026-09-13T22:53:59.245Z
+# Generated: 2026-09-13T22:54:07.622Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Paid Search Conversion Rate
 Formula: (Paid Search Sessions with ≥ 1 purchase / Total Paid Search Sessions) × 100
@@ -11,29 +11,593 @@ Description: |
 
 Category: Acquisition
 
+Tags: [kpi, E-commerce: Top-of-Funnel & Marketing Acquisition]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Session
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "order-confirmation",
+        "pageName": "checkout:order-confirmation",
+        "destinationURL": "https://www.example.com/checkout/confirmation?gclid=EAIaIQobChMI_example"
+      },
+      "category": {
+        "primaryCategory": "checkout",
+        "pageType": "order-confirmation"
+      },
+      "attributes": {
+        "trafficSource": "google",
+        "trafficMedium": "cpc",
+        "channel": "Paid Search",
+        "campaign": "nonbrand_running-shoes_exact",
+        "campaignType": "non-brand",
+        "adGroup": "running-shoes-mens",
+        "keyword": "mens running shoes",
+        "matchType": "exact",
+        "gclid": "EAIaIQobChMI_example"
+      }
+    },
+    "transaction": {
+      "transactionID": "ORD-100245",
+      "total": {
+        "basePrice": 129.98,
+        "currency": "USD",
+        "taxRate": 0.08,
+        "shipping": 5.99,
+        "transactionTotal": 146.37
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-45821",
+            "productName": "Trail Runner Pro"
+          },
+          "category": {
+            "primaryCategory": "Footwear"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 64.99,
+            "currency": "USD"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "traffic_source": "google",
+    "traffic_medium": "cpc",
+    "traffic_campaign": "nonbrand_running-shoes_exact",
+    "campaign_type": "non-brand",
+    "ad_group": "running-shoes-mens",
+    "search_term": "mens running shoes",
+    "match_type": "exact",
+    "gclid": "EAIaIQobChMI_example",
+    "ecommerce": {
+      "transaction_id": "ORD-100245",
+      "value": 129.98,
+      "tax": 10.4,
+      "shipping": 5.99,
+      "currency": "USD",
+      "coupon": "",
+      "items": [
+        {
+          "item_id": "SKU-45821",
+          "item_name": "Trail Runner Pro",
+          "item_category": "Footwear",
+          "price": 64.99,
+          "quantity": 2
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "marketing": {
+      "trafficSource": "google",
+      "trafficMedium": "cpc",
+      "channel": "Paid Search",
+      "trackingCode": "nonbrand_running-shoes_exact",
+      "campaignType": "non-brand",
+      "adGroup": "running-shoes-mens",
+      "keyword": "mens running shoes",
+      "matchType": "exact",
+      "gclid": "EAIaIQobChMI_example"
+    },
+    "transaction": {
+      "purchaseID": "ORD-100245",
+      "currencyCode": "USD",
+      "total": 129.98,
+      "tax": 10.4,
+      "shipping": 5.99,
+      "products": [
+        {
+          "productID": "SKU-45821",
+          "productName": "Trail Runner Pro",
+          "category": "Footwear",
+          "quantity": 2,
+          "price": 64.99
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "channel": {
+      "_type": "https://ns.adobe.com/xdm/channel-types/search",
+      "mediaType": "paid",
+      "mediaAction": "clicks"
+    },
+    "marketing": {
+      "trackingCode": "nonbrand_running-shoes_exact",
+      "campaignName": "nonbrand_running-shoes_exact",
+      "campaignGroup": "non-brand"
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD-100245",
+        "currencyCode": "USD",
+        "priceTotal": 129.98
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-45821",
+        "name": "Trail Runner Pro",
+        "quantity": 2,
+        "priceTotal": 129.98
+      }
+    ],
+    "web": {
+      "webPageDetails": {
+        "name": "checkout:order-confirmation",
+        "URL": "https://www.example.com/checkout/confirmation?gclid=EAIaIQobChMI_example"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "google / cpc",
+            "eVar2": "running-shoes-mens",
+            "eVar3": "mens running shoes",
+            "eVar4": "exact",
+            "eVar5": "EAIaIQobChMI_example"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Paid Search Conversion Rate = (Paid Search sessions with >= 1 purchase / all Paid Search sessions) x 100
+  -- Reporting period 2026-08-01 to 2026-08-31 by session start date (event_date is already in the property time zone).
+  -- The scan starts 30 days earlier so a transaction_id first seen in an earlier session is not credited again.
+  WITH raw_events AS (
+    SELECT
+      e.user_pseudo_id,
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_dt,
+      e.event_timestamp,
+      e.event_name,
+      NULLIF(e.ecommerce.transaction_id, '(not set)') AS transaction_id,
+      e.ecommerce.purchase_revenue AS purchase_revenue,
+      e.ecommerce.refund_value AS refund_value,
+      ARRAY_LENGTH(e.items) AS item_count,
+      LOWER(COALESCE(e.session_traffic_source_last_click.cross_channel_campaign.source,
+                     e.session_traffic_source_last_click.manual_campaign.source)) AS stslc_source,
+      LOWER(COALESCE(e.session_traffic_source_last_click.cross_channel_campaign.medium,
+                     e.session_traffic_source_last_click.manual_campaign.medium)) AS stslc_medium,
+      LOWER(COALESCE(e.session_traffic_source_last_click.cross_channel_campaign.campaign_name,
+                     e.session_traffic_source_last_click.google_ads_campaign.campaign_name,
+                     e.session_traffic_source_last_click.manual_campaign.campaign_name)) AS stslc_campaign,
+      e.collected_traffic_source.manual_source AS cts_source,
+      e.collected_traffic_source.manual_medium AS cts_medium,
+      e.collected_traffic_source.manual_campaign_name AS cts_campaign,
+      e.collected_traffic_source.gclid AS cts_gclid,
+      (
+        SELECT AS STRUCT
+          MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+          MAX(IF(ep.key = 'source', ep.value.string_value, NULL)) AS source,
+          MAX(IF(ep.key = 'medium', ep.value.string_value, NULL)) AS medium,
+          MAX(IF(ep.key = 'campaign', ep.value.string_value, NULL)) AS campaign,
+          MAX(IF(ep.key = 'gclid', ep.value.string_value, NULL)) AS gclid,
+          MAX(IF(ep.key = 'page_location', ep.value.string_value, NULL)) AS page_location,
+          MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type,
+          MAX(IF(ep.key = 'order_type', ep.value.string_value, NULL)) AS order_type
+        FROM UNNEST(e.event_params) AS ep
+      ) AS p
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE e._TABLE_SUFFIX BETWEEN '20260702' AND '20260831'
+  ),
+  base_events AS (
+    SELECT
+      user_pseudo_id,
+      p.ga_session_id AS ga_session_id,
+      event_dt,
+      event_timestamp,
+      event_name,
+      transaction_id,
+      purchase_revenue,
+      LOWER(p.order_type) AS order_type,
+      stslc_source,
+      stslc_medium,
+      stslc_campaign,
+      LOWER(COALESCE(cts_source, p.source)) AS hit_source,
+      LOWER(COALESCE(cts_medium, p.medium)) AS hit_medium,
+      LOWER(COALESCE(cts_campaign, p.campaign)) AS hit_campaign,
+      COALESCE(cts_gclid, p.gclid,
+               REGEXP_EXTRACT(p.page_location, r'[?&](?:gclid|wbraid|gbraid)=([^&#]+)')) AS hit_click_id
+    FROM raw_events
+    WHERE user_pseudo_id IS NOT NULL
+      AND p.ga_session_id IS NOT NULL
+      AND COALESCE(p.traffic_type, '') <> 'internal'
+  ),
+  keyed AS (
+    SELECT
+      *,
+      IF(hit_source IS NOT NULL OR hit_click_id IS NOT NULL,
+         CONCAT(COALESCE(hit_source, ''), '|', COALESCE(hit_medium, ''), '|',
+                COALESCE(hit_campaign, ''), '|', COALESCE(hit_click_id, '')),
+         NULL) AS hit_campaign_key
+    FROM base_events
+  ),
+  -- A new campaign parameter set (e.g. a second ad click) after the landing page starts a new session segment
+  flagged AS (
+    SELECT
+      *,
+      LAST_VALUE(hit_campaign_key IGNORE NULLS) OVER w_prior AS prev_campaign_key,
+      COALESCE(SUM(IF(event_name = 'page_view', 1, 0)) OVER w_prior, 0) AS prior_page_views
+    FROM keyed
+    WINDOW w_prior AS (
+      PARTITION BY user_pseudo_id, ga_session_id
+      ORDER BY event_timestamp
+      ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+    )
+  ),
+  segmented AS (
+    SELECT
+      *,
+      SUM(IF(hit_campaign_key IS NOT NULL
+             AND ((prev_campaign_key IS NOT NULL AND hit_campaign_key <> prev_campaign_key)
+                  OR (prev_campaign_key IS NULL AND prior_page_views > 0)), 1, 0))
+        OVER (PARTITION BY user_pseudo_id, ga_session_id
+              ORDER BY event_timestamp
+              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS segment_num
+    FROM flagged
+  ),
+  sessions AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      segment_num,
+      MIN(event_dt) AS session_date,
+      MAX(stslc_source) AS stslc_source,
+      MAX(stslc_medium) AS stslc_medium,
+      MAX(stslc_campaign) AS stslc_campaign,
+      ARRAY_AGG(
+        IF(hit_campaign_key IS NOT NULL,
+           STRUCT(hit_source AS source, hit_medium AS medium, hit_campaign AS campaign, hit_click_id AS click_id),
+           NULL)
+        IGNORE NULLS ORDER BY event_timestamp LIMIT 1
+      )[SAFE_OFFSET(0)] AS landing
+    FROM segmented
+    GROUP BY user_pseudo_id, ga_session_id, segment_num
+  ),
+  classified AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      segment_num,
+      session_date,
+      IF(segment_num = 0, COALESCE(stslc_source, landing.source), landing.source) AS source,
+      IF(segment_num = 0, COALESCE(stslc_medium, landing.medium), landing.medium) AS medium,
+      IF(segment_num = 0, COALESCE(stslc_campaign, landing.campaign), landing.campaign) AS campaign,
+      landing.click_id AS click_id
+    FROM sessions
+  ),
+  -- Denominator: every Paid Search session (bounced and non-engaged included); Shopping, PMax, Display and Video excluded
+  paid_search_sessions AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      segment_num,
+      session_date,
+      click_id,
+      CASE
+        WHEN REGEXP_CONTAINS(COALESCE(campaign, ''), r'non[ _-]?brand|generic') THEN 'Non-Brand'
+        WHEN REGEXP_CONTAINS(COALESCE(campaign, ''), r'brand') THEN 'Brand'
+        ELSE 'Non-Brand'
+      END AS brand_segment
+    FROM classified
+    WHERE session_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-31'
+      AND (
+        (REGEXP_CONTAINS(COALESCE(medium, ''), r'^(.*cp.*|ppc|retargeting|paid.*)$')
+         AND REGEXP_CONTAINS(COALESCE(source, ''), r'(^|[.])(google|bing|yahoo|duckduckgo|baidu|yandex|ecosia)([.]|$)'))
+        OR click_id IS NOT NULL
+      )
+      AND NOT REGEXP_CONTAINS(COALESCE(campaign, ''), r'(([^a-df-z]|^)shop|shopping|pmax|performance[ _-]?max|display|video|youtube)')
+      AND NOT REGEXP_CONTAINS(COALESCE(medium, ''), r'(display|banner|expandable|interstitial|cpm|video)')
+  ),
+  purchases AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      segment_num,
+      transaction_id,
+      purchase_revenue,
+      ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) AS txn_occurrence
+    FROM segmented
+    WHERE event_name = 'purchase'
+      AND transaction_id IS NOT NULL
+      AND COALESCE(order_type, '') NOT IN ('test', 'qa')
+      AND NOT STARTS_WITH(LOWER(transaction_id), 'test')
+  ),
+  refunds AS (
+    SELECT
+      transaction_id,
+      SUM(COALESCE(refund_value, 0)) AS refunded_value,
+      LOGICAL_OR(COALESCE(item_count, 0) = 0) AS has_full_refund
+    FROM raw_events
+    WHERE event_name = 'refund'
+      AND transaction_id IS NOT NULL
+      AND event_dt BETWEEN DATE '2026-08-01' AND DATE '2026-08-31'
+    GROUP BY transaction_id
+  ),
+  -- Numerator: each session counted once, first occurrence of a transaction_id only, fully refunded orders removed
+  converting_sessions AS (
+    SELECT DISTINCT
+      pu.user_pseudo_id,
+      pu.ga_session_id,
+      pu.segment_num
+    FROM purchases AS pu
+    LEFT JOIN refunds AS r
+      ON r.transaction_id = pu.transaction_id
+    WHERE pu.txn_occurrence = 1
+      AND NOT COALESCE(r.has_full_refund OR r.refunded_value >= pu.purchase_revenue, FALSE)
+  )
+  SELECT
+    s.session_date,
+    IF(GROUPING(s.brand_segment) = 1, 'All Paid Search', s.brand_segment) AS brand_segment,
+    COUNT(*) AS paid_search_sessions,
+    COUNT(c.user_pseudo_id) AS paid_search_sessions_with_purchase,
+    COUNTIF(s.click_id IS NOT NULL) AS sessions_with_click_id,
+    ROUND(SAFE_DIVIDE(COUNT(c.user_pseudo_id), COUNT(*)) * 100, 2) AS paid_search_conversion_rate_pct
+  FROM paid_search_sessions AS s
+  LEFT JOIN converting_sessions AS c
+    ON c.user_pseudo_id = s.user_pseudo_id
+    AND c.ga_session_id = s.ga_session_id
+    AND c.segment_num = s.segment_num
+  GROUP BY GROUPING SETS ((s.session_date, s.brand_segment), (s.session_date))
+  ORDER BY 1, 2;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Paid Search Conversion Rate = (Paid Search sessions with >= 1 purchase / all Paid Search sessions) x 100
+  -- Reporting period 2026-08-01 to 2026-08-31 by session start date in America/New_York (UTC bounds below).
+  -- The scan starts 30 days earlier so a purchaseID first seen in an earlier session is not credited again.
+  -- Internal traffic, bot hits and blocklisted IP ranges are removed by Edge Network bot rules and data prep before ingestion.
+  WITH base_events AS (
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      timestamp AS event_ts,
+      to_date(from_utc_timestamp(timestamp, 'America/New_York')) AS event_dt,
+      commerce.order.purchaseID AS purchase_id,
+      commerce.order.priceTotal AS order_total,
+      CASE WHEN eventType = 'web.webpagedetails.pageViews' OR web.webPageDetails.pageViews.value = 1 THEN 1 ELSE 0 END AS page_view_flag,
+      CASE WHEN eventType = 'commerce.purchases' OR commerce.purchases.value = 1 THEN 1 ELSE 0 END AS purchase_flag,
+      LOWER(COALESCE(
+        NULLIF(TRIM(regexp_extract(_experience.analytics.customDimensions.eVars.eVar1, '^([^/]*)/', 1)), ''),
+        NULLIF(regexp_extract(web.webPageDetails.URL, '[?&]utm_source=([^&#]*)', 1), '')
+      )) AS hit_source,
+      LOWER(COALESCE(
+        NULLIF(TRIM(regexp_extract(_experience.analytics.customDimensions.eVars.eVar1, '/(.*)$', 1)), ''),
+        NULLIF(regexp_extract(web.webPageDetails.URL, '[?&]utm_medium=([^&#]*)', 1), '')
+      )) AS hit_medium,
+      LOWER(COALESCE(
+        NULLIF(marketing.trackingCode, ''),
+        NULLIF(regexp_extract(web.webPageDetails.URL, '[?&]utm_campaign=([^&#]*)', 1), '')
+      )) AS hit_campaign,
+      COALESCE(
+        NULLIF(_experience.analytics.customDimensions.eVars.eVar5, ''),
+        NULLIF(regexp_extract(web.webPageDetails.URL, '[?&](gclid|wbraid|gbraid)=([^&#]*)', 2), '')
+      ) AS hit_click_id
+    FROM aep_web_experience_events
+    WHERE timestamp >= to_timestamp('2026-07-02 04:00:00')
+      AND timestamp < to_timestamp('2026-09-01 04:00:00')
+      AND identityMap['ECID'][0].id IS NOT NULL
+  ),
+  keyed AS (
+    SELECT
+      *,
+      CASE WHEN hit_source IS NOT NULL OR hit_click_id IS NOT NULL
+        THEN CONCAT_WS('|', COALESCE(hit_source, ''), COALESCE(hit_medium, ''),
+                       COALESCE(hit_campaign, ''), COALESCE(hit_click_id, ''))
+      END AS hit_campaign_key,
+      SESS_TIMEOUT(event_ts, 60 * 30)
+        OVER (PARTITION BY ecid ORDER BY event_ts ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS sess
+    FROM base_events
+  ),
+  -- 30-minute inactivity timeout, plus a new session segment when a new campaign parameter set arrives after the landing page
+  flagged AS (
+    SELECT
+      *,
+      sess.num AS visit_num,
+      LAST_VALUE(hit_campaign_key, true)
+        OVER (PARTITION BY ecid, sess.num ORDER BY event_ts ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_campaign_key,
+      COALESCE(SUM(page_view_flag)
+        OVER (PARTITION BY ecid, sess.num ORDER BY event_ts ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS prior_page_views
+    FROM keyed
+  ),
+  segmented AS (
+    SELECT
+      *,
+      SUM(CASE WHEN hit_campaign_key IS NOT NULL
+                AND ((prev_campaign_key IS NOT NULL AND hit_campaign_key <> prev_campaign_key)
+                     OR (prev_campaign_key IS NULL AND prior_page_views > 0))
+               THEN 1 ELSE 0 END)
+        OVER (PARTITION BY ecid, visit_num ORDER BY event_ts ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS segment_num
+    FROM flagged
+  ),
+  sessions AS (
+    SELECT
+      ecid,
+      visit_num,
+      segment_num,
+      MIN(event_dt) AS session_date,
+      MIN(CASE WHEN hit_campaign_key IS NOT NULL
+               THEN named_struct('ts', event_ts, 'source', hit_source, 'medium', hit_medium,
+                                 'campaign', hit_campaign, 'click_id', hit_click_id)
+          END) AS landing
+    FROM segmented
+    GROUP BY ecid, visit_num, segment_num
+  ),
+  -- Denominator: every Paid Search session (bounced and non-engaged included); Shopping, PMax, Display and Video excluded
+  paid_search_sessions AS (
+    SELECT
+      ecid,
+      visit_num,
+      segment_num,
+      session_date,
+      landing.click_id AS click_id,
+      CASE
+        WHEN COALESCE(landing.campaign, '') RLIKE 'non[ _-]?brand|generic' THEN 'Non-Brand'
+        WHEN COALESCE(landing.campaign, '') RLIKE 'brand' THEN 'Brand'
+        ELSE 'Non-Brand'
+      END AS brand_segment
+    FROM sessions
+    WHERE session_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-31'
+      AND (
+        (COALESCE(landing.medium, '') RLIKE '^(.*cp.*|ppc|retargeting|paid.*)$'
+         AND COALESCE(landing.source, '') RLIKE '(^|[.])(google|bing|yahoo|duckduckgo|baidu|yandex|ecosia)([.]|$)')
+        OR landing.click_id IS NOT NULL
+      )
+      AND NOT (COALESCE(landing.campaign, '') RLIKE '(([^a-df-z]|^)shop|shopping|pmax|performance[ _-]?max|display|video|youtube)')
+      AND NOT (COALESCE(landing.medium, '') RLIKE '(display|banner|expandable|interstitial|cpm|video)')
+  ),
+  purchases AS (
+    SELECT
+      ecid,
+      visit_num,
+      segment_num,
+      purchase_id,
+      order_total,
+      ROW_NUMBER() OVER (PARTITION BY purchase_id ORDER BY event_ts) AS txn_occurrence
+    FROM segmented
+    WHERE purchase_flag = 1
+      AND purchase_id IS NOT NULL
+      AND LOWER(purchase_id) NOT LIKE 'test%'
+  ),
+  reversals AS (
+    SELECT
+      commerce.order.purchaseID AS purchase_id,
+      MAX(CASE WHEN eventType = 'commerce.backofficeOrderCancelled' THEN 1 ELSE 0 END) AS is_cancelled,
+      SUM(CASE WHEN eventType = 'commerce.backofficeCreditMemoIssued'
+               THEN COALESCE(commerce.order.priceTotal, 0) ELSE 0 END) AS refunded_value
+    FROM commerce_backoffice_events
+    WHERE eventType IN ('commerce.backofficeOrderCancelled', 'commerce.backofficeCreditMemoIssued')
+      AND timestamp >= to_timestamp('2026-08-01 04:00:00')
+      AND timestamp < to_timestamp('2026-09-01 04:00:00')
+      AND commerce.order.purchaseID IS NOT NULL
+    GROUP BY commerce.order.purchaseID
+  ),
+  -- Numerator: each session counted once, first occurrence of a purchaseID only, cancelled or fully refunded orders removed
+  converting_sessions AS (
+    SELECT DISTINCT
+      pu.ecid,
+      pu.visit_num,
+      pu.segment_num
+    FROM purchases AS pu
+    LEFT JOIN reversals AS r
+      ON r.purchase_id = pu.purchase_id
+    WHERE pu.txn_occurrence = 1
+      AND NOT (r.purchase_id IS NOT NULL
+               AND (r.is_cancelled = 1 OR r.refunded_value >= COALESCE(pu.order_total, 0)))
+  )
+  SELECT
+    s.session_date,
+    CASE WHEN GROUPING(s.brand_segment) = 1 THEN 'All Paid Search' ELSE s.brand_segment END AS brand_segment,
+    COUNT(*) AS paid_search_sessions,
+    COUNT(c.ecid) AS paid_search_sessions_with_purchase,
+    SUM(CASE WHEN s.click_id IS NOT NULL THEN 1 ELSE 0 END) AS sessions_with_click_id,
+    ROUND(100.0 * COUNT(c.ecid) / NULLIF(COUNT(*), 0), 2) AS paid_search_conversion_rate_pct
+  FROM paid_search_sessions AS s
+  LEFT JOIN converting_sessions AS c
+    ON c.ecid = s.ecid
+    AND c.visit_num = s.visit_num
+    AND c.segment_num = s.segment_num
+  GROUP BY GROUPING SETS ((s.session_date, s.brand_segment), (s.session_date))
+  ORDER BY 1, 2;
 
+Calculation Notes: |
+  1️⃣ Channel assignment follows the GA4 session-scoped default channel group: a session is Paid Search when the medium matches ^(.*cp.*|ppc|retargeting|paid.*)$ and the source matches the search-engine list (google, bing, yahoo, duckduckgo, baidu, yandex, ecosia), or when a gclid / wbraid / gbraid is present on the landing hit; Shopping (Paid Shopping), Performance Max non-search placements, Display and Paid Video sessions are excluded from both numerator and denominator.
+  2️⃣ The denominator is every Paid Search session in the period, including bounced and non-engaged sessions; restricting it to engaged sessions or landing-page views inflates the rate and breaks comparability with the canonical Conversion Rate.
+  3️⃣ The numerator counts a session once regardless of how many purchase events it contains; purchases are deduplicated by transaction_id so page reloads of the confirmation page cannot double count, and a transaction_id seen in an earlier session is not credited again.
+  4️⃣ Sessions end after 30 minutes of inactivity or at a new campaign parameter set; a user returning from a second ad click within an open session starts a new session, and a purchase is credited to the session in which it occurs (session-scoped last-click), not to an earlier paid visit.
+  5️⃣ Exclude internal traffic, known bots, QA / test orders flagged by the order-type dimension and sessions from brand-safety blocklisted IP ranges; fully refunded or cancelled orders reversed within the reporting window are removed from the numerator.
+  6️⃣ When reconciling to Google Ads, join on gclid for auto-tagged clicks and expect a gap versus ad-platform clicks from consent-denied traffic, cookie loss and multi-click sessions; report the click-to-session match rate alongside the KPI and never substitute ad clicks for sessions in the denominator.
+  7️⃣ Report by session start date in the property time zone; brand and non-brand campaigns are broken out separately because brand terms convert several times higher and a blended figure masks non-brand performance shifts.
 
+Business Use Case: |
+  1️⃣ The SEM manager reviews the rate daily by campaign and ad group; when non-brand conversion rate falls more than 20% below its trailing four-week baseline while click volume holds, they audit the search-terms report, add negative keywords and reduce bids on the degraded query clusters.
+  2️⃣ The paid media lead combines the KPI with Return on Ad Spend in the weekly budget review; campaigns with above-target conversion rate but below-target ROAS are moved to value-based bidding (tROAS), while those below target on both are paused or restructured.
+  3️⃣ The CRO and site merchandising team take action when a Paid Search landing page converts materially below the channel average for the same keyword theme, prioritising that page for message-match fixes and A/B tests on offer, price display and above-the-fold content.
+  4️⃣ The performance marketing analyst monitors the gap between GA4 purchase sessions and Google Ads conversions each week; a divergence beyond the agreed tolerance triggers a check of auto-tagging, consent mode and the conversion import before bidding algorithms are fed distorted signals.
 
+Dependencies:
+  Events: [purchase, session-start]
+  Metrics: [sessions, purchases]
+  Dimensions: [session-default-channel-group, session-source-medium, session-campaign, gclid, transaction-id]
+  KPIs: [conversion-rate]
 
+Source Data: Digital Analytics (GA4) + Google Ads
 
+Report Attributes: |
+  Session Campaign; Ad Group; Keyword / Search Term; Brand vs Non-Brand; Match Type; Device Category; Landing Page; Country; New vs Returning User; Session Start Date
 
+Dashboard Usage: [Paid Search Performance Dashboard, Paid Media Efficiency Dashboard, Marketing Acquisition Scorecard, Channel Conversion Funnel Dashboard]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [conversion-rate, return-on-ad-spend, customer-acquisition-cost, new-customer-conversion-rate, landing-page-conversion-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +607,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-13T22:53:58.913+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-13T22:54:07.371+00:00
 
