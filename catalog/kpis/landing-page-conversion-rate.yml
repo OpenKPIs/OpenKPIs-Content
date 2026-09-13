@@ -1,7 +1,7 @@
 # KPI: Landing Page Conversion Rate
-# Generated: 2026-09-13T22:53:28.965Z
+# Generated: 2026-09-13T22:53:37.442Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Landing Page Conversion Rate
 Formula: (Entrance Sessions on Landing Page with ≥ 1 Purchase / Total Entrance Sessions on Landing Page) × 100
@@ -11,29 +11,437 @@ Description: |
 
 Category: Conversion
 
+Tags: [kpi, E-commerce: Top-of-Funnel & Marketing Acquisition]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Session
 
+Measure Type: Percentage
 
+Aggregation Window: Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "order-confirmation",
+        "pageName": "checkout:order-confirmation",
+        "destinationURL": "https://www.example.com/checkout/confirmation",
+        "referringURL": "https://www.example.com/checkout/payment"
+      },
+      "category": {
+        "primaryCategory": "checkout",
+        "pageType": "order-confirmation"
+      },
+      "attributes": {
+        "landingPageURL": "https://www.example.com/lp/summer-sale",
+        "landingPagePath": "/lp/summer-sale",
+        "landingPageGroup": "campaign-landing",
+        "sessionEntranceTimestamp": "2026-09-13T10:02:11Z"
+      }
+    },
+    "transaction": {
+      "transactionID": "T-100045872",
+      "total": {
+        "basePrice": 129.98,
+        "shipping": 5.99,
+        "taxRate": 0.08,
+        "transactionTotal": 146.39,
+        "currency": "USD"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-48213",
+            "productName": "Linen Summer Shirt",
+            "sku": "SKU-48213"
+          },
+          "category": {
+            "primaryCategory": "Apparel"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 64.99,
+            "currency": "USD"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "landing_page_location": "https://www.example.com/lp/summer-sale",
+    "landing_page_path": "/lp/summer-sale",
+    "landing_page_group": "campaign-landing",
+    "ecommerce": {
+      "transaction_id": "T-100045872",
+      "value": 146.39,
+      "tax": 10.4,
+      "shipping": 5.99,
+      "currency": "USD",
+      "items": [
+        {
+          "item_id": "SKU-48213",
+          "item_name": "Linen Summer Shirt",
+          "item_category": "Apparel",
+          "price": 64.99,
+          "quantity": 2
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "path": "transaction"
+    },
+    "page": {
+      "pageName": "checkout:order-confirmation",
+      "pageURL": "https://www.example.com/checkout/confirmation",
+      "landingPageURL": "https://www.example.com/lp/summer-sale",
+      "landingPagePath": "/lp/summer-sale",
+      "landingPageGroup": "campaign-landing"
+    },
+    "transaction": {
+      "purchaseID": "T-100045872",
+      "revenue": 146.39,
+      "currency": "USD",
+      "products": [
+        {
+          "productID": "SKU-48213",
+          "productName": "Linen Summer Shirt",
+          "category": "Apparel",
+          "quantity": 2,
+          "price": 64.99
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "web": {
+      "webPageDetails": {
+        "name": "checkout:order-confirmation",
+        "URL": "https://www.example.com/checkout/confirmation"
+      }
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100045872",
+        "priceTotal": 146.39,
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-48213",
+        "name": "Linen Summer Shirt",
+        "productCategories": [
+          {
+            "categoryID": "Apparel"
+          }
+        ],
+        "quantity": 2,
+        "priceTotal": 129.98
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "https://www.example.com/lp/summer-sale",
+            "eVar2": "campaign-landing"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH events AS (
+    SELECT
+      CONCAT(
+        user_pseudo_id, '.',
+        CAST((SELECT ep.value.int_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'ga_session_id') AS STRING)
+      ) AS session_key,
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      event_timestamp,
+      event_name,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'page_location') AS page_location,
+      (SELECT ep.value.int_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'entrances') AS entrances,
+      COALESCE(
+        NULLIF(ecommerce.transaction_id, '(not set)'),
+        (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'transaction_id')
+      ) AS transaction_id,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    -- Daily export tables only (intraday excluded); one extra leading day so sessions keep their true start date
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 33 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
+      AND user_pseudo_id IS NOT NULL
+  ),
+  
+  -- Each transaction_id counts once (confirmation-page reloads removed) and belongs to the session of its first hit
+  purchases AS (
+    SELECT
+      session_key
+    FROM events
+    WHERE event_name = 'purchase'
+      AND session_key IS NOT NULL
+      AND transaction_id IS NOT NULL
+      AND transaction_id NOT IN ('', '(not set)')
+      AND NOT STARTS_WITH(LOWER(transaction_id), 'test')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1
+  ),
+  
+  sessions AS (
+    SELECT
+      session_key,
+      ARRAY_AGG(event_date ORDER BY event_timestamp LIMIT 1)[OFFSET(0)] AS session_start_date,
+      ARRAY_AGG(
+        IF(event_name = 'page_view', page_location, NULL) IGNORE NULLS
+        ORDER BY IF(entrances = 1, 0, 1), event_timestamp
+        LIMIT 1
+      )[SAFE_OFFSET(0)] AS landing_page_raw,
+      COUNTIF(traffic_type = 'internal') > 0 AS is_internal
+    FROM events
+    WHERE session_key IS NOT NULL
+    GROUP BY session_key
+  ),
+  
+  session_landing AS (
+    SELECT
+      s.session_key,
+      s.session_start_date,
+      s.is_internal,
+      COALESCE(
+        NULLIF(
+          REGEXP_REPLACE(
+            REGEXP_REPLACE(
+              REGEXP_REPLACE(
+                REGEXP_REPLACE(
+                  REGEXP_REPLACE(
+                    REGEXP_REPLACE(LOWER(s.landing_page_raw), r'[#].*$', ''),
+                    r'([?&])(utm_[^=&]*|gclid|gbraid|wbraid|dclid|fbclid|msclkid|_gl|sessionid|sid)=[^&]*', r'\1'),
+                  r'&{2,}', '&'),
+                r'[?]&+', '?'),
+              r'[?&]+$', ''),
+            r'/+([?]|$)', r'\1'),
+          ''),
+        '(not set)'
+      ) AS landing_page,
+      p.session_key IS NOT NULL AS has_purchase
+    FROM sessions AS s
+    LEFT JOIN (SELECT DISTINCT session_key FROM purchases) AS p
+      ON s.session_key = p.session_key
+  ),
+  
+  landing_page_rates AS (
+    SELECT
+      GROUPING(landing_page) = 1 AS is_site_total,
+      landing_page,
+      COUNT(*) AS entrance_sessions,
+      COUNTIF(has_purchase) AS purchase_sessions
+    FROM session_landing
+    WHERE NOT is_internal
+      AND session_start_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 32 DAY)
+                                 AND DATE_SUB(CURRENT_DATE(), INTERVAL 4 DAY)
+    GROUP BY ROLLUP (landing_page)
+  )
+  
+  SELECT
+    IF(is_site_total, '(all landing pages)', landing_page) AS landing_page,
+    entrance_sessions,
+    purchase_sessions,
+    ROUND(SAFE_DIVIDE(purchase_sessions, entrance_sessions) * 100, 2) AS landing_page_conversion_rate_pct
+  FROM landing_page_rates
+  WHERE is_site_total
+     OR (landing_page <> '(not set)' AND entrance_sessions >= 200)
+  ORDER BY is_site_total DESC, entrance_sessions DESC
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH hits AS (
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      timestamp,
+      eventType,
+      web.webPageDetails.URL AS page_url,
+      commerce.order.purchaseID AS purchase_id,
+      commerce.purchases.value AS purchases,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY identityMap['ECID'][0].id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM aep_web_events_dataset
+    WHERE timestamp >= CAST(date_sub(current_date(), 33) AS TIMESTAMP)
+      AND timestamp <  CAST(date_sub(current_date(), 2) AS TIMESTAMP)
+      AND identityMap['ECID'][0].id IS NOT NULL
+      AND NOT (LOWER(COALESCE(environment.browserDetails.userAgent, '')) RLIKE 'bot|spider|crawl')
+  ),
+  
+  session_hits AS (
+    SELECT
+      CONCAT(ecid, '-', CAST(session.num AS STRING)) AS session_key,
+      timestamp,
+      eventType,
+      page_url,
+      purchase_id,
+      purchases
+    FROM hits
+  ),
+  
+  landing AS (
+    SELECT
+      session_key,
+      page_url AS landing_page_raw
+    FROM (
+      SELECT
+        session_key,
+        page_url,
+        ROW_NUMBER() OVER (PARTITION BY session_key ORDER BY timestamp) AS rn
+      FROM session_hits
+      WHERE eventType = 'web.webpagedetails.pageViews'
+        AND page_url IS NOT NULL
+    ) AS pv
+    WHERE rn = 1
+  ),
+  
+  -- Each purchaseID counts once (confirmation-page reloads removed) and belongs to the session of its first hit
+  purchases AS (
+    SELECT DISTINCT
+      session_key
+    FROM (
+      SELECT
+        session_key,
+        ROW_NUMBER() OVER (PARTITION BY purchase_id ORDER BY timestamp) AS rn
+      FROM session_hits
+      WHERE eventType = 'commerce.purchases'
+        AND COALESCE(purchases, 0) > 0
+        AND purchase_id IS NOT NULL
+        AND purchase_id <> ''
+        AND LOWER(purchase_id) NOT LIKE 'test%'
+    ) AS p
+    WHERE rn = 1
+  ),
+  
+  sessions AS (
+    SELECT
+      session_key,
+      to_date(MIN(timestamp)) AS session_start_date
+    FROM session_hits
+    GROUP BY session_key
+  ),
+  
+  session_landing AS (
+    SELECT
+      s.session_key,
+      s.session_start_date,
+      COALESCE(
+        NULLIF(
+          regexp_replace(
+            regexp_replace(
+              regexp_replace(
+                regexp_replace(
+                  regexp_replace(
+                    regexp_replace(LOWER(l.landing_page_raw), '[#].*$', ''),
+                    '([?&])(utm_[^=&]*|gclid|gbraid|wbraid|dclid|fbclid|msclkid|_gl|sessionid|sid)=[^&]*', '$1'),
+                  '&{2,}', '&'),
+                '[?]&+', '?'),
+              '[?&]+$', ''),
+            '/+([?]|$)', '$1'),
+          ''),
+        '(not set)'
+      ) AS landing_page,
+      CASE WHEN p.session_key IS NOT NULL THEN 1 ELSE 0 END AS has_purchase
+    FROM sessions AS s
+    LEFT JOIN landing AS l
+      ON s.session_key = l.session_key
+    LEFT JOIN purchases AS p
+      ON s.session_key = p.session_key
+  ),
+  
+  landing_page_rates AS (
+    SELECT
+      GROUPING(landing_page) = 1 AS is_site_total,
+      landing_page,
+      COUNT(*) AS entrance_sessions,
+      SUM(has_purchase) AS purchase_sessions
+    FROM session_landing
+    WHERE session_start_date BETWEEN date_sub(current_date(), 32)
+                                 AND date_sub(current_date(), 4)
+    GROUP BY ROLLUP (landing_page)
+  )
+  
+  SELECT
+    CASE WHEN is_site_total THEN '(all landing pages)' ELSE landing_page END AS landing_page,
+    entrance_sessions,
+    purchase_sessions,
+    ROUND(CAST(purchase_sessions AS DOUBLE) / NULLIF(entrance_sessions, 0) * 100, 2) AS landing_page_conversion_rate_pct
+  FROM landing_page_rates
+  WHERE is_site_total
+     OR (landing_page <> '(not set)' AND entrance_sessions >= 200)
+  ORDER BY is_site_total DESC, entrance_sessions DESC
 
+Calculation Notes: |
+  1️⃣ The landing page is the page_location of the first page_view in the session (GA4 landingPagePlusQueryString, Adobe Entry Page); sessions with no page_view, such as Measurement Protocol-only or app-only sessions, resolve to (not set) and are kept in the site total but excluded from page-level ranking.
+  2️⃣ The numerator counts distinct sessions containing at least one purchase with a non-null transaction_id; multiple orders in one session count once, and duplicate purchase hits from confirmation-page reloads are removed by transaction_id before counting.
+  3️⃣ The denominator is every entrance session on the landing page, including bounced and non-engaged sessions; restricting it to engaged sessions produces a different measure and must not be labelled with this KPI.
+  4️⃣ Sessions close after 30 minutes of inactivity and are not restarted by a mid-session campaign change or midnight rollover, so each session keeps its original landing page; purchases completed in a later session are out of scope and belong to user-scoped attribution KPIs.
+  5️⃣ Normalise the page key before grouping: lowercase the path, strip trailing slashes and tracking parameters (utm_*, gclid, fbclid, msclkid, session tokens), retain only governed functional parameters, and map localised or templated URLs to a landing page group for cross-market comparison.
+  6️⃣ Exclude internal traffic, known bots and spiders, and test or fraud-cancelled orders; later customer refunds do not reverse the conversion, keeping the rate reconcilable with GA4 and Adobe standard reports.
+  7️⃣ Attribute every session to its session start date so sessions spanning midnight count once, treat GA4 intraday tables as provisional and restate after 72 hours, and suppress page-level comparisons below 200 entrance sessions in the reporting window.
 
+Business Use Case: |
+  1️⃣ Performance marketing managers review the rate weekly by landing page and campaign; when a paid destination falls more than 20% below its landing page group median at stable traffic volume, they repoint ad final URLs to the stronger page and raise a conversion optimisation ticket.
+  2️⃣ The CRO and Product team uses the rate as the primary success metric for landing page template experiments, randomising on entrance sessions and rolling out the winning variant once the pre-registered significance and sample thresholds are met.
+  3️⃣ The SEO and Content lead audits high-entrance organic pages monthly; pages converting below the site-wide Conversion Rate receive shoppable modules above the fold (product grids, price and stock status, ratings) and are re-measured after 30 days.
+  4️⃣ Merchandising monitors campaign and promotion landing pages daily during launches; when the rate drops against forecast because hero SKUs sell out or pricing fails to render, the team swaps featured products or redirects traffic to the parent category page the same day.
 
+Dependencies:
+  Events: [page-view, purchase]
+  Dimensions: [landing-page, traffic-source, device-category]
+  KPIs: [session, conversion-rate]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Landing Page; Landing Page Group; Session Default Channel Group; Session Source / Medium; Session Campaign; Device Category; Country; New vs Returning User; Session Start Date
 
+Dashboard Usage: [Landing Page Performance Dashboard, Paid Media Efficiency Dashboard, SEO Content Performance Dashboard, CRO Experimentation Scorecard]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [conversion-rate, order-conversion-rate-visit, bounce-rate, paid-search-conversion-rate, new-customer-conversion-rate, email-click-to-purchase-conversion-rate, return-on-ad-spend]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +451,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-13T22:53:28.648+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-13T22:53:37.133+00:00
 
