@@ -1,0 +1,360 @@
+# Dimension: Monetization Model
+# Generated: 2026-09-13T20:30:09.450Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Monetization Model
+
+Description: |
+  Classifies the commercial mechanism through which a media or streaming interaction, entitlement, content item, offer, or transaction generates revenue or supports paid customer value. It distinguishes models such as subscription, advertising-supported, transactional purchase, rental, pay-per-view, freemium, sponsorship, licensing, affiliate, bundled, and hybrid monetization across acquisition, engagement, conversion, billing, retention, and lifetime-value analysis.
+
+Category: Revenue
+
+Tags: [dimension]
+
+Industry: Media & Streaming
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  content_interaction
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"view_item"},"attributes":{"monetizationModel":"subscription"}}]}}
+
+GA4 Data Layer: |
+  {"event":"view_item","monetization_model":"subscription"}
+
+Adobe Client Data Layer: |
+  {"data":{"content":{"monetizationModel":"subscription"}},"event":"content-interaction"}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"subscription"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH extracted AS (
+    SELECT
+      TIMESTAMP_MICROS(event_timestamp) AS event_ts,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'monetization_model' LIMIT 1) AS mm_snake,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'monetizationModel' LIMIT 1) AS mm_camel,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'business_model' LIMIT 1) AS business_model,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'access_model' LIMIT 1) AS access_model,
+      (SELECT up.value.string_value FROM UNNEST(user_properties) up WHERE up.key = 'monetization_model' LIMIT 1) AS user_monetization_model
+    FROM `your-project.analytics_123456789.events_*`
+  ),
+  observations AS (
+    SELECT
+      event_ts,
+      CASE
+        WHEN NULLIF(TRIM(mm_snake), '') IS NOT NULL THEN TRIM(mm_snake)
+        WHEN NULLIF(TRIM(mm_camel), '') IS NOT NULL THEN TRIM(mm_camel)
+        WHEN NULLIF(TRIM(business_model), '') IS NOT NULL THEN TRIM(business_model)
+        WHEN NULLIF(TRIM(access_model), '') IS NOT NULL THEN TRIM(access_model)
+        WHEN NULLIF(TRIM(user_monetization_model), '') IS NOT NULL THEN TRIM(user_monetization_model)
+      END AS source_value,
+      CASE
+        WHEN NULLIF(TRIM(mm_snake), '') IS NOT NULL THEN 'event_params.monetization_model'
+        WHEN NULLIF(TRIM(mm_camel), '') IS NOT NULL THEN 'event_params.monetizationModel'
+        WHEN NULLIF(TRIM(business_model), '') IS NOT NULL THEN 'event_params.business_model'
+        WHEN NULLIF(TRIM(access_model), '') IS NOT NULL THEN 'event_params.access_model'
+        WHEN NULLIF(TRIM(user_monetization_model), '') IS NOT NULL THEN 'user_properties.monetization_model'
+      END AS source_field,
+      CASE
+        WHEN NULLIF(TRIM(mm_snake), '') IS NOT NULL THEN 1
+        WHEN NULLIF(TRIM(mm_camel), '') IS NOT NULL THEN 2
+        WHEN NULLIF(TRIM(business_model), '') IS NOT NULL THEN 3
+        WHEN NULLIF(TRIM(access_model), '') IS NOT NULL THEN 4
+        WHEN NULLIF(TRIM(user_monetization_model), '') IS NOT NULL THEN 5
+      END AS derivation_priority
+    FROM extracted
+  ),
+  normalized AS (
+    SELECT
+      event_ts,
+      source_value,
+      source_field,
+      derivation_priority,
+      CASE
+        WHEN REGEXP_CONTAINS(LOWER(source_value), r'^(subscription|subscriber|svod|membership|recurring)$') THEN 'subscription'
+        WHEN REGEXP_CONTAINS(LOWER(source_value), r'^(ad[ _-]?supported|advertising|avod)$') THEN 'ad_supported'
+        WHEN REGEXP_CONTAINS(LOWER(source_value), r'^(transactional|tvod|pay[ _-]?per[ _-]?view|ppv)$') THEN 'transactional'
+        WHEN REGEXP_CONTAINS(LOWER(source_value), r'^(rental|rent)$') THEN 'rental'
+        WHEN REGEXP_CONTAINS(LOWER(source_value), r'^(purchase|buy|electronic[ _-]?sell[ _-]?through|est)$') THEN 'purchase'
+        WHEN REGEXP_CONTAINS(LOWER(source_value), r'^(freemium|free[ _-]?to[ _-]?paid)$') THEN 'freemium'
+        WHEN REGEXP_CONTAINS(LOWER(source_value), r'^(free|complimentary|no[ _-]?cost)$') THEN 'free'
+        WHEN REGEXP_CONTAINS(LOWER(source_value), r'^(hybrid|mixed|subscription[ _-]?and[ _-]?ads)$') THEN 'hybrid'
+        WHEN REGEXP_CONTAINS(LOWER(source_value), r'^(usage[ _-]?based|metered|consumption[ _-]?based)$') THEN 'usage_based'
+        WHEN REGEXP_CONTAINS(LOWER(source_value), r'^(sponsored|sponsorship)$') THEN 'sponsored'
+        WHEN REGEXP_CONTAINS(LOWER(source_value), r'^(donation|donation[ _-]?based)$') THEN 'donation_based'
+        WHEN REGEXP_CONTAINS(LOWER(source_value), r'^(license|licensed|licensing)$') THEN 'licensed'
+        ELSE COALESCE(NULLIF(REGEXP_REPLACE(LOWER(TRIM(source_value)), r'[^a-z0-9]+', '_'), ''), 'unknown')
+      END AS code
+    FROM observations
+    WHERE source_value IS NOT NULL
+  ),
+  models AS (
+    SELECT
+      code,
+      MIN(event_ts) AS first_observed_at,
+      MAX(event_ts) AS last_observed_at,
+      ARRAY_AGG(source_field ORDER BY derivation_priority, event_ts LIMIT 1)[OFFSET(0)] AS source_field,
+      ARRAY_AGG(source_value ORDER BY derivation_priority, event_ts LIMIT 1)[OFFSET(0)] AS source_value,
+      MIN(derivation_priority) AS derivation_priority
+    FROM normalized
+    GROUP BY code
+  )
+  SELECT
+    SUBSTR(TO_HEX(MD5(code)), 1, 16) AS monetization_model_key,
+    code AS monetization_model_code,
+    INITCAP(REPLACE(code, '_', ' ')) AS monetization_model_name,
+    CASE code
+      WHEN 'subscription' THEN 'Recurring payment in exchange for entitled access.'
+      WHEN 'ad_supported' THEN 'Access funded primarily by advertising revenue.'
+      WHEN 'transactional' THEN 'Payment is collected for an individual transaction or content unit.'
+      WHEN 'rental' THEN 'Payment grants access for a limited rental period.'
+      WHEN 'purchase' THEN 'One-time payment grants persistent purchased access.'
+      WHEN 'freemium' THEN 'Free base access with optional paid features or content.'
+      WHEN 'free' THEN 'Access is provided without a direct customer payment.'
+      WHEN 'hybrid' THEN 'Revenue combines multiple models such as subscription and advertising.'
+      WHEN 'usage_based' THEN 'Charges are determined by measured consumption or usage.'
+      WHEN 'sponsored' THEN 'Access is funded by a sponsor.'
+      WHEN 'donation_based' THEN 'Revenue is funded through voluntary contributions.'
+      WHEN 'licensed' THEN 'Revenue is generated through licensing rights or access.'
+      ELSE 'Source-provided monetization model requiring business classification.'
+    END AS monetization_model_description,
+    CASE
+      WHEN code IN ('subscription', 'freemium') THEN 'consumer_recurring'
+      WHEN code IN ('transactional', 'rental', 'purchase') THEN 'consumer_transactional'
+      WHEN code IN ('ad_supported', 'sponsored') THEN 'third_party_funded'
+      WHEN code = 'licensed' THEN 'licensing'
+      WHEN code = 'donation_based' THEN 'contribution'
+      WHEN code = 'usage_based' THEN 'consumption'
+      WHEN code = 'free' THEN 'non_revenue'
+      WHEN code = 'hybrid' THEN 'mixed'
+      ELSE 'other'
+    END AS monetization_category,
+    CASE
+      WHEN code = 'subscription' THEN 'subscription_revenue'
+      WHEN code = 'ad_supported' THEN 'advertising_revenue'
+      WHEN code IN ('transactional', 'rental', 'purchase') THEN 'transaction_revenue'
+      WHEN code = 'freemium' THEN 'upgrade_revenue'
+      WHEN code = 'usage_based' THEN 'usage_revenue'
+      WHEN code = 'sponsored' THEN 'sponsorship_revenue'
+      WHEN code = 'donation_based' THEN 'contribution_revenue'
+      WHEN code = 'licensed' THEN 'licensing_revenue'
+      WHEN code = 'hybrid' THEN 'mixed_revenue'
+      WHEN code = 'free' THEN 'none'
+      ELSE 'other'
+    END AS revenue_stream,
+    CASE WHEN code = 'subscription' THEN 'recurring' WHEN code IN ('transactional', 'rental', 'purchase') THEN 'one_time' WHEN code = 'usage_based' THEN 'variable' WHEN code IN ('free', 'ad_supported', 'sponsored') THEN 'no_direct_payment' WHEN code IN ('freemium', 'hybrid') THEN 'mixed' ELSE 'other' END AS payment_type,
+    CASE WHEN code = 'subscription' THEN 'plan_defined' WHEN code = 'usage_based' THEN 'usage_period' WHEN code IN ('transactional', 'rental', 'purchase') THEN 'per_transaction' WHEN code IN ('free', 'ad_supported', 'sponsored') THEN 'not_applicable' ELSE 'variable' END AS billing_frequency,
+    CASE WHEN code = 'subscription' THEN 'entitled' WHEN code = 'rental' THEN 'time_limited' WHEN code = 'purchase' THEN 'persistent' WHEN code IN ('free', 'ad_supported', 'sponsored') THEN 'open_or_registered' WHEN code = 'freemium' THEN 'tiered' ELSE 'model_defined' END AS access_type,
+    CASE WHEN code = 'rental' THEN 'limited' WHEN code IN ('purchase', 'licensed') THEN 'persistent_or_contractual' WHEN code = 'subscription' THEN 'subscription_term' ELSE 'not_fixed' END AS access_duration_type,
+    code IN ('subscription', 'hybrid') AS requires_subscription,
+    code IN ('ad_supported', 'hybrid') AS includes_advertising,
+    code IN ('transactional', 'rental', 'purchase') AS is_transactional,
+    code IN ('subscription', 'hybrid') AS is_recurring,
+    code = 'free' AS is_free,
+    code = 'freemium' AS is_freemium,
+    code = 'hybrid' AS is_hybrid,
+    code = 'usage_based' AS is_metered,
+    code = 'sponsored' AS is_sponsored,
+    code = 'donation_based' AS is_donation_based,
+    code = 'licensed' AS is_licensed,
+    code IN ('subscription', 'rental', 'purchase', 'transactional', 'licensed', 'hybrid') AS entitlement_required,
+    code IN ('subscription', 'freemium', 'hybrid') AS trial_supported,
+    code IN ('subscription', 'hybrid') AS auto_renewal_applicable,
+    code IN ('subscription', 'rental', 'licensed', 'hybrid') AS cancellation_applicable,
+    code NOT IN ('free', 'ad_supported', 'sponsored') AS refund_applicable,
+    code NOT IN ('free', 'ad_supported', 'sponsored') AS currency_applicable,
+    code NOT IN ('free', 'ad_supported', 'sponsored', 'donation_based') AS price_applicable,
+    code IN ('ad_supported', 'hybrid') AS ad_load_applicable,
+    code = 'usage_based' AS usage_limit_applicable,
+    code IN ('subscription', 'transactional', 'rental', 'purchase', 'freemium', 'hybrid') AS offer_applicable,
+    code NOT IN ('donation_based', 'sponsored') AS product_applicable,
+    TRUE AS content_applicable,
+    code IN ('subscription', 'freemium', 'hybrid', 'licensed') AS customer_segment_applicable,
+    TRUE AS channel_applicable,
+    TRUE AS platform_applicable,
+    TRUE AS region_applicable,
+    'active' AS lifecycle_status,
+    DATE(first_observed_at) AS effective_start_date,
+    CAST(NULL AS DATE) AS effective_end_date,
+    TRUE AS is_current,
+    'GA4' AS source_system,
+    source_field,
+    source_value,
+    CASE WHEN derivation_priority <= 2 THEN 'direct_event_parameter' WHEN derivation_priority <= 4 THEN 'alternate_event_parameter' ELSE 'user_property_fallback' END AS derivation_method,
+    derivation_priority,
+    CASE WHEN code IN ('subscription', 'ad_supported', 'transactional', 'rental', 'purchase', 'freemium', 'free', 'hybrid', 'usage_based', 'sponsored', 'donation_based', 'licensed') THEN 'valid' ELSE 'nonstandard_value' END AS data_quality_status,
+    first_observed_at,
+    last_observed_at
+  FROM models;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH observations AS (
+    SELECT
+      timestamp AS event_ts,
+      TRIM(_experience.analytics.customDimensions.eVars.eVar1) AS source_value,
+      '_experience.analytics.customDimensions.eVars.eVar1' AS source_field,
+      1 AS derivation_priority
+    FROM aep_analytics_events
+    WHERE NULLIF(TRIM(_experience.analytics.customDimensions.eVars.eVar1), '') IS NOT NULL
+  ),
+  normalized AS (
+    SELECT
+      event_ts,
+      source_value,
+      source_field,
+      derivation_priority,
+      CASE
+        WHEN LOWER(source_value) IN ('subscription', 'subscriber', 'svod', 'membership', 'recurring') THEN 'subscription'
+        WHEN LOWER(source_value) IN ('ad supported', 'ad-supported', 'ad_supported', 'advertising', 'avod') THEN 'ad_supported'
+        WHEN LOWER(source_value) IN ('transactional', 'tvod', 'pay per view', 'pay-per-view', 'pay_per_view', 'ppv') THEN 'transactional'
+        WHEN LOWER(source_value) IN ('rental', 'rent') THEN 'rental'
+        WHEN LOWER(source_value) IN ('purchase', 'buy', 'electronic sell through', 'est') THEN 'purchase'
+        WHEN LOWER(source_value) IN ('freemium', 'free to paid', 'free-to-paid') THEN 'freemium'
+        WHEN LOWER(source_value) IN ('free', 'complimentary', 'no cost') THEN 'free'
+        WHEN LOWER(source_value) IN ('hybrid', 'mixed', 'subscription and ads') THEN 'hybrid'
+        WHEN LOWER(source_value) IN ('usage based', 'usage-based', 'usage_based', 'metered', 'consumption based') THEN 'usage_based'
+        WHEN LOWER(source_value) IN ('sponsored', 'sponsorship') THEN 'sponsored'
+        WHEN LOWER(source_value) IN ('donation', 'donation based', 'donation-based') THEN 'donation_based'
+        WHEN LOWER(source_value) IN ('license', 'licensed', 'licensing') THEN 'licensed'
+        ELSE COALESCE(NULLIF(REGEXP_REPLACE(LOWER(TRIM(source_value)), '[^a-z0-9]+', '_'), ''), 'unknown')
+      END AS code
+    FROM observations
+  ),
+  models AS (
+    SELECT
+      code,
+      MIN(event_ts) AS first_observed_at,
+      MAX(event_ts) AS last_observed_at,
+      MIN(source_field) AS source_field,
+      MIN(source_value) AS source_value,
+      MIN(derivation_priority) AS derivation_priority
+    FROM normalized
+    GROUP BY code
+  )
+  SELECT
+    SUBSTRING(MD5(code), 1, 16) AS monetization_model_key,
+    code AS monetization_model_code,
+    INITCAP(REPLACE(code, '_', ' ')) AS monetization_model_name,
+    CASE code
+      WHEN 'subscription' THEN 'Recurring payment in exchange for entitled access.'
+      WHEN 'ad_supported' THEN 'Access funded primarily by advertising revenue.'
+      WHEN 'transactional' THEN 'Payment is collected for an individual transaction or content unit.'
+      WHEN 'rental' THEN 'Payment grants access for a limited rental period.'
+      WHEN 'purchase' THEN 'One-time payment grants persistent purchased access.'
+      WHEN 'freemium' THEN 'Free base access with optional paid features or content.'
+      WHEN 'free' THEN 'Access is provided without a direct customer payment.'
+      WHEN 'hybrid' THEN 'Revenue combines multiple models such as subscription and advertising.'
+      WHEN 'usage_based' THEN 'Charges are determined by measured consumption or usage.'
+      WHEN 'sponsored' THEN 'Access is funded by a sponsor.'
+      WHEN 'donation_based' THEN 'Revenue is funded through voluntary contributions.'
+      WHEN 'licensed' THEN 'Revenue is generated through licensing rights or access.'
+      ELSE 'Source-provided monetization model requiring business classification.'
+    END AS monetization_model_description,
+    CASE WHEN code IN ('subscription', 'freemium') THEN 'consumer_recurring' WHEN code IN ('transactional', 'rental', 'purchase') THEN 'consumer_transactional' WHEN code IN ('ad_supported', 'sponsored') THEN 'third_party_funded' WHEN code = 'licensed' THEN 'licensing' WHEN code = 'donation_based' THEN 'contribution' WHEN code = 'usage_based' THEN 'consumption' WHEN code = 'free' THEN 'non_revenue' WHEN code = 'hybrid' THEN 'mixed' ELSE 'other' END AS monetization_category,
+    CASE WHEN code = 'subscription' THEN 'subscription_revenue' WHEN code = 'ad_supported' THEN 'advertising_revenue' WHEN code IN ('transactional', 'rental', 'purchase') THEN 'transaction_revenue' WHEN code = 'freemium' THEN 'upgrade_revenue' WHEN code = 'usage_based' THEN 'usage_revenue' WHEN code = 'sponsored' THEN 'sponsorship_revenue' WHEN code = 'donation_based' THEN 'contribution_revenue' WHEN code = 'licensed' THEN 'licensing_revenue' WHEN code = 'hybrid' THEN 'mixed_revenue' WHEN code = 'free' THEN 'none' ELSE 'other' END AS revenue_stream,
+    CASE WHEN code = 'subscription' THEN 'recurring' WHEN code IN ('transactional', 'rental', 'purchase') THEN 'one_time' WHEN code = 'usage_based' THEN 'variable' WHEN code IN ('free', 'ad_supported', 'sponsored') THEN 'no_direct_payment' WHEN code IN ('freemium', 'hybrid') THEN 'mixed' ELSE 'other' END AS payment_type,
+    CASE WHEN code = 'subscription' THEN 'plan_defined' WHEN code = 'usage_based' THEN 'usage_period' WHEN code IN ('transactional', 'rental', 'purchase') THEN 'per_transaction' WHEN code IN ('free', 'ad_supported', 'sponsored') THEN 'not_applicable' ELSE 'variable' END AS billing_frequency,
+    CASE WHEN code = 'subscription' THEN 'entitled' WHEN code = 'rental' THEN 'time_limited' WHEN code = 'purchase' THEN 'persistent' WHEN code IN ('free', 'ad_supported', 'sponsored') THEN 'open_or_registered' WHEN code = 'freemium' THEN 'tiered' ELSE 'model_defined' END AS access_type,
+    CASE WHEN code = 'rental' THEN 'limited' WHEN code IN ('purchase', 'licensed') THEN 'persistent_or_contractual' WHEN code = 'subscription' THEN 'subscription_term' ELSE 'not_fixed' END AS access_duration_type,
+    code IN ('subscription', 'hybrid') AS requires_subscription,
+    code IN ('ad_supported', 'hybrid') AS includes_advertising,
+    code IN ('transactional', 'rental', 'purchase') AS is_transactional,
+    code IN ('subscription', 'hybrid') AS is_recurring,
+    code = 'free' AS is_free,
+    code = 'freemium' AS is_freemium,
+    code = 'hybrid' AS is_hybrid,
+    code = 'usage_based' AS is_metered,
+    code = 'sponsored' AS is_sponsored,
+    code = 'donation_based' AS is_donation_based,
+    code = 'licensed' AS is_licensed,
+    code IN ('subscription', 'rental', 'purchase', 'transactional', 'licensed', 'hybrid') AS entitlement_required,
+    code IN ('subscription', 'freemium', 'hybrid') AS trial_supported,
+    code IN ('subscription', 'hybrid') AS auto_renewal_applicable,
+    code IN ('subscription', 'rental', 'licensed', 'hybrid') AS cancellation_applicable,
+    code NOT IN ('free', 'ad_supported', 'sponsored') AS refund_applicable,
+    code NOT IN ('free', 'ad_supported', 'sponsored') AS currency_applicable,
+    code NOT IN ('free', 'ad_supported', 'sponsored', 'donation_based') AS price_applicable,
+    code IN ('ad_supported', 'hybrid') AS ad_load_applicable,
+    code = 'usage_based' AS usage_limit_applicable,
+    code IN ('subscription', 'transactional', 'rental', 'purchase', 'freemium', 'hybrid') AS offer_applicable,
+    code NOT IN ('donation_based', 'sponsored') AS product_applicable,
+    TRUE AS content_applicable,
+    code IN ('subscription', 'freemium', 'hybrid', 'licensed') AS customer_segment_applicable,
+    TRUE AS channel_applicable,
+    TRUE AS platform_applicable,
+    TRUE AS region_applicable,
+    'active' AS lifecycle_status,
+    CAST(first_observed_at AS DATE) AS effective_start_date,
+    CAST(NULL AS DATE) AS effective_end_date,
+    TRUE AS is_current,
+    'ADOBE_AEP' AS source_system,
+    source_field,
+    source_value,
+    'direct_xdm_dimension' AS derivation_method,
+    derivation_priority,
+    CASE WHEN code IN ('subscription', 'ad_supported', 'transactional', 'rental', 'purchase', 'freemium', 'free', 'hybrid', 'usage_based', 'sponsored', 'donation_based', 'licensed') THEN 'valid' ELSE 'nonstandard_value' END AS data_quality_status,
+    first_observed_at,
+    last_observed_at
+  FROM models;
+
+Calculation Notes: |
+  1️⃣ Assign model based on event timestamp using applicable records.  
+  2️⃣ Use controlled values: Subscription, Advertising-Supported, Transactional Purchase, Rental, Pay-Per-View, Freemium, Sponsorship, Licensing, Affiliate, Bundled, Hybrid, Free/Non-Monetized, Unknown.  
+  3️⃣ Classify recurring paid access as Subscription; ad-funded access without payment as Advertising-Supported.  
+  4️⃣ Use Bundled for packages with multiple services; Hybrid for interactions with multiple mechanisms.  
+  5️⃣ Free trials inherit Subscription only if a subscription entitlement exists; otherwise classify as Freemium or Free/Non-Monetized.  
+  6️⃣ Refunds and cancellations retain the model of the original agreement; exclude test accounts and invalidated events from reporting.  
+  7️⃣ Preserve Unknown for missing/conflicting source keys; do not infer model from payment presence/absence.
+
+Business Use Case: |
+  The Chief Revenue Officer compares conversion, engagement, churn, billing success, average revenue, and lifetime value across subscription, advertising-supported, transactional, and hybrid audiences. Based on the results, Revenue Management can adjust pricing and packaging, Product can change entitlement or ad-load experiences, and Marketing can shift acquisition investment toward models producing stronger retained customer value rather than only higher initial sign-up volume.
+
+
+Source Data: Subscription billing and commerce platforms stitched with entitlement services, ad servers, content management systems, product catalog and offer services, CRM, and Digital Analytics event streams
+
+Report Attributes: |
+  ["Customer Journey Stage","Subscription Plan","Offer","Content Type","Content Genre","Access Tier","Customer Status","Acquisition Channel","Marketing Campaign","Platform","Device Type","Application Version","Country","Region","Billing Frequency","Payment Method","Transaction Type","Entitlement Type","Trial Status","Cohort Month"]
+
+Dashboard Usage: [Executive Monetization Performance, Revenue Model Mix, Subscription and Advertising Performance, Conversion and Paid Access Funnel, Customer Lifetime Value by Monetization Model, Retention and Churn by Monetization Model, Billing and Payment Health, Content Monetization Performance, Pricing and Packaging Optimization, Acquisition Quality and Payback]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Subscription Plan, Offer, Product, Content, Content Type, Entitlement Type, Access Tier, Billing Frequency, Payment Method, Transaction Type, Revenue Type, Acquisition Channel, Marketing Campaign, Customer Journey Stage, Platform, Device Type, Geography, Customer Status]
+
+Derived Dimensions: [Monetization Model Family, Revenue Funding Type, Customer Payment Relationship, Recurring Revenue Indicator, Advertising Dependency, Access Payment Type, Paid Access Indicator, Monetization Model Combination]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-13T20:30:08.885267+00:00
+
+Last Modified By: devyendarm
+
+
