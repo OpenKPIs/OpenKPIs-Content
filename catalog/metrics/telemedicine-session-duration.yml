@@ -1,0 +1,141 @@
+# Metric: Telemedicine Session Duration
+# Generated: 2026-09-13T23:30:18.239Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Telemedicine Session Duration
+Formula: END_TIME - START_TIME
+
+Description: |
+  Measures the total time spent in a telemedicine session from start to end, providing insights into patient engagement and session efficiency.
+
+Category: Engagement
+
+Tags: [metric]
+
+Industry: Healthcare & Telemedicine
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Session
+
+Measure Type: average
+
+Aggregation Window: Time based - Daily
+
+GA4 Event: |
+  session_end
+
+Adobe Event: |
+  sessionComplete
+
+W3 Data Layer: |
+  {"event":"sessionComplete","eventInfo":{"eventName":"sessionComplete","eventLabel":"session_duration","eventAction":"end","eventCategory":"telemedicine"},"telemedicine":{"session":{"duration":{"unit":"seconds","value":0}}}}
+
+GA4 Data Layer: |
+  {"event":"session_end","session":{"duration":{"unit":"seconds","value":0}}}
+
+Adobe Client Data Layer: |
+  {"event":"sessionComplete","telemedicine":{"session":{"duration":{"unit":"seconds","value":0}}}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"eventType":"sessionComplete","telemedicine":{"session":{"duration":{"unit":"seconds","value":0}}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  SELECT
+    TIMESTAMP_SECONDS(session_end.timestamp) AS session_end_time,
+    TIMESTAMP_SECONDS(session_start.timestamp) AS session_start_time,
+    TIMESTAMP_DIFF(TIMESTAMP_SECONDS(session_end.timestamp), TIMESTAMP_SECONDS(session_start.timestamp), SECOND) AS session_duration_seconds
+  FROM
+    `your-project.analytics_123456789.events_*`,
+    UNNEST(event_params) AS params
+  WHERE
+    event_name = 'session_end'
+    AND params.key = 'session_duration'
+    AND params.value.int_value IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM UNNEST(event_params) AS start_params
+      WHERE start_params.key = 'session_start'
+    )
+  GROUP BY
+    session_end_time,
+    session_start_time
+  HAVING
+    session_duration_seconds IS NOT NULL
+    AND session_duration_seconds > 0
+  ORDER BY
+    session_end_time DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SELECT
+    sessionComplete.eventTimestamp AS session_end_time,
+    sessionStart.eventTimestamp AS session_start_time,
+    DATEDIFF(second, sessionStart.eventTimestamp, sessionComplete.eventTimestamp) AS session_duration_seconds
+  FROM
+    (SELECT
+      eventTimestamp,
+      telemedicine.session.duration.value AS duration_value
+    FROM
+      your_project.aep_dataset.events
+    WHERE
+      eventType = 'sessionComplete'
+      AND telemedicine.session.duration.value IS NOT NULL) AS sessionComplete
+  JOIN
+    (SELECT
+      eventTimestamp
+    FROM
+      your_project.aep_dataset.events
+    WHERE
+      eventType = 'sessionStart') AS sessionStart
+  ON
+    sessionComplete.eventTimestamp > sessionStart.eventTimestamp
+  ORDER BY
+    session_end_time DESC;
+
+Calculation Notes: |
+  1️⃣ Exclude sessions shorter than 1 minute.  
+  2️⃣ Filter out accidental logins.  
+  3️⃣ Account for timezone differences.  
+  4️⃣ Ensure accurate session tracking.  
+  5️⃣ Maintain data integrity in analysis.
+
+Business Use Case: |
+  Executives use this metric to optimize scheduling and resource allocation by identifying peak usage times and session lengths.
+
+
+Source Data: Digital Analytics
+
+Report Attributes: |
+  ["Doctor ID","Patient ID","Specialty"]
+
+Dashboard Usage: [Engagement Overview, Operational Efficiency]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Total Sessions, Session Start Time, Session End Time]
+
+Derived KPIs: [Average Session Duration, Session Efficiency Index]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-13T23:30:17.707078+00:00
+
+Last Modified By: devyendarm
+
+
