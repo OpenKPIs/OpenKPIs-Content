@@ -1,0 +1,421 @@
+# Metric: Viewing Request Count
+# Generated: 2026-09-13T23:30:14.580Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Viewing Request Count
+Formula: COUNT(DISTINCT CASE WHEN viewing_request_id IS NOT NULL AND submitted_at IS NOT NULL AND request_status IN ('submitted', 'pending', 'accepted', 'confirmed', 'reschedule_requested', 'completed', 'declined', 'expired', 'cancelled_by_requester', 'cancelled_by_agent') AND COALESCE(is_test, false) = false AND COALESCE(is_spam, false) = false THEN viewing_request_id END)
+
+Description: |
+  Counts unique, successfully submitted requests from prospective renters or buyers to view a property during the reporting period. Each valid viewing request is counted once using its persistent request identifier, regardless of subsequent acceptance, rejection, completion, or cancellation.
+
+Category: Conversion
+
+Tags: [metric]
+
+Industry: Real Estate Tech
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Measure Type: count
+
+Aggregation Window: Time based - Hourly/Daily/Monthly/Yearly
+
+GA4 Event: |
+  generate_lead
+
+Adobe Event: |
+  generate_lead
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventID":"<request_id>","eventName":"generate_lead","eventType":"conversion","timeStamp":"<request_submitted_at>","eventAction":"submit_form"},"attributes":{"city":"<city>","market":"<market>","region":"<region>","channel":"<channel>","country":"<country>","lead_id":"<lead_id>","bedrooms":"<bedrooms>","currency":"<iso_4217_currency>","language":"<language_code>","bathrooms":"<bathrooms>","crm_system":"<crm_system>","listing_id":"<listing_id>","page_title":"<page_title>","request_id":"<request_id>","campaign_id":"<campaign_id>","postal_code":"<postal_code>","property_id":"<property_id>","prospect_id":"<prospect_id>","rent_amount":"<rent_amount>","listing_type":"<listing_type>","request_type":"property_viewing","viewing_type":"<in_person_or_virtual>","authenticated":"<boolean>","campaign_name":"<campaign_name>","content_group":"<content_group>","customer_type":"<renter_or_buyer>","listing_price":"<listing_price>","page_location":"<page_url>","page_referrer":"<referrer_url>","property_type":"<property_type>","request_count":1,"source_system":"<source_system>","request_status":"submitted","schema_version":"1.0","campaign_medium":"<campaign_medium>","campaign_source":"<campaign_source>","device_category":"<desktop_mobile_or_tablet>","request_success":true,"furnished_status":"<furnished_status>","request_timezone":"<iana_timezone>","transaction_type":"<rent_or_buy>","analytics_consent":"<granted_or_denied>","availability_date":"<availability_date>","marketing_consent":"<granted_or_denied>","submission_method":"<web_form_app_agent_or_other>","request_created_at":"<iso_8601_timestamp>","request_submitted_at":"<iso_8601_timestamp>","preferred_viewing_date":"<preferred_viewing_date>","preferred_viewing_time":"<preferred_viewing_time>"}}]}}
+
+GA4 Data Layer: |
+  {"city":"<city>","event":"generate_lead","market":"<market>","region":"<region>","channel":"<channel>","country":"<country>","lead_id":"<lead_id>","bedrooms":"<bedrooms>","currency":"<iso_4217_currency>","language":"<language_code>","bathrooms":"<bathrooms>","crm_system":"<crm_system>","listing_id":"<listing_id>","page_title":"<page_title>","request_id":"<request_id>","campaign_id":"<campaign_id>","postal_code":"<postal_code>","property_id":"<property_id>","prospect_id":"<prospect_id>","rent_amount":"<rent_amount>","listing_type":"<listing_type>","request_type":"property_viewing","viewing_type":"<in_person_or_virtual>","authenticated":"<boolean>","campaign_name":"<campaign_name>","content_group":"<content_group>","customer_type":"<renter_or_buyer>","listing_price":"<listing_price>","page_location":"<page_url>","page_referrer":"<referrer_url>","property_type":"<property_type>","request_count":1,"source_system":"<source_system>","request_status":"submitted","schema_version":"1.0","campaign_medium":"<campaign_medium>","campaign_source":"<campaign_source>","device_category":"<desktop_mobile_or_tablet>","request_success":true,"furnished_status":"<furnished_status>","request_timezone":"<iana_timezone>","transaction_type":"<rent_or_buy>","analytics_consent":"<granted_or_denied>","availability_date":"<availability_date>","marketing_consent":"<granted_or_denied>","submission_method":"<web_form_app_agent_or_other>","request_created_at":"<iso_8601_timestamp>","request_submitted_at":"<iso_8601_timestamp>","preferred_viewing_date":"<preferred_viewing_date>","preferred_viewing_time":"<preferred_viewing_time>"}
+
+Adobe Client Data Layer: |
+  {"event":"generate_lead","eventInfo":{"city":"<city>","market":"<market>","region":"<region>","channel":"<channel>","country":"<country>","eventID":"<request_id>","lead_id":"<lead_id>","bedrooms":"<bedrooms>","currency":"<iso_4217_currency>","language":"<language_code>","bathrooms":"<bathrooms>","eventName":"generate_lead","eventType":"conversion","crm_system":"<crm_system>","listing_id":"<listing_id>","page_title":"<page_title>","request_id":"<request_id>","campaign_id":"<campaign_id>","eventAction":"submit_form","postal_code":"<postal_code>","property_id":"<property_id>","prospect_id":"<prospect_id>","rent_amount":"<rent_amount>","listing_type":"<listing_type>","request_type":"property_viewing","viewing_type":"<in_person_or_virtual>","authenticated":"<boolean>","campaign_name":"<campaign_name>","content_group":"<content_group>","customer_type":"<renter_or_buyer>","listing_price":"<listing_price>","page_location":"<page_url>","page_referrer":"<referrer_url>","property_type":"<property_type>","request_count":1,"source_system":"<source_system>","request_status":"submitted","schema_version":"1.0","campaign_medium":"<campaign_medium>","campaign_source":"<campaign_source>","device_category":"<desktop_mobile_or_tablet>","request_success":true,"furnished_status":"<furnished_status>","request_timezone":"<iana_timezone>","transaction_type":"<rent_or_buy>","analytics_consent":"<granted_or_denied>","availability_date":"<availability_date>","marketing_consent":"<granted_or_denied>","submission_method":"<web_form_app_agent_or_other>","request_created_at":"<iso_8601_timestamp>","request_submitted_at":"<iso_8601_timestamp>","preferred_viewing_date":"<preferred_viewing_date>","preferred_viewing_time":"<preferred_viewing_time>"}}
+
+XDM Mapping: |
+  {"_id":"<request_id>","web":{"webReferrer":{"URL":"<referrer_url>"},"webInteraction":{"name":"generate_lead","type":"other","linkClicks":{"value":1}},"webPageDetails":{"URL":"<page_url>","name":"<page_title>"}},"eventType":"generate_lead","timestamp":"<request_submitted_at>","_propertyExperience":{"viewingRequest":{"city":"<city>","leadId":"<lead_id>","market":"<market>","region":"<region>","channel":"<channel>","country":"<country>","bedrooms":"<bedrooms>","currency":"<iso_4217_currency>","language":"<language_code>","bathrooms":"<bathrooms>","crmSystem":"<crm_system>","listingId":"<listing_id>","pageTitle":"<page_title>","requestId":"<request_id>","campaignId":"<campaign_id>","postalCode":"<postal_code>","propertyId":"<property_id>","prospectId":"<prospect_id>","rentAmount":"<rent_amount>","listingType":"<listing_type>","requestType":"property_viewing","viewingType":"<in_person_or_virtual>","campaignName":"<campaign_name>","contentGroup":"<content_group>","customerType":"<renter_or_buyer>","listingPrice":"<listing_price>","pageLocation":"<page_url>","pageReferrer":"<referrer_url>","propertyType":"<property_type>","requestCount":1,"sourceSystem":"<source_system>","authenticated":"<boolean>","requestStatus":"submitted","schemaVersion":"1.0","campaignMedium":"<campaign_medium>","campaignSource":"<campaign_source>","deviceCategory":"<desktop_mobile_or_tablet>","requestSuccess":true,"furnishedStatus":"<furnished_status>","requestTimezone":"<iana_timezone>","transactionType":"<rent_or_buy>","analyticsConsent":"<granted_or_denied>","availabilityDate":"<availability_date>","marketingConsent":"<granted_or_denied>","requestCreatedAt":"<iso_8601_timestamp>","submissionMethod":"<web_form_app_agent_or_other>","requestSubmittedAt":"<iso_8601_timestamp>","preferredViewingDate":"<preferred_viewing_date>","preferredViewingTime":"<preferred_viewing_time>"}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH filtered_events AS (
+    SELECT
+      FARM_FINGERPRINT(TO_JSON_STRING(e)) AS event_row_id,
+      e.event_date,
+      e.event_timestamp,
+      ep.key AS parameter_key,
+      COALESCE(
+        ep.value.string_value,
+        CAST(ep.value.int_value AS STRING),
+        CAST(ep.value.double_value AS STRING),
+        CAST(ep.value.float_value AS STRING)
+      ) AS parameter_value
+    FROM `your-project.analytics_123456789.events_*` AS e
+    CROSS JOIN UNNEST(e.event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date)
+                            AND FORMAT_DATE('%Y%m%d', @end_date)
+      AND e.event_name = 'generate_lead'
+  ),
+  pivoted_events AS (
+    SELECT
+      event_row_id,
+      event_date,
+      event_timestamp,
+      MAX(IF(parameter_key = 'request_id', parameter_value, NULL)) AS request_id,
+      MAX(IF(parameter_key = 'request_type', parameter_value, NULL)) AS request_type,
+      MAX(IF(parameter_key = 'request_status', parameter_value, NULL)) AS request_status,
+      MAX(IF(parameter_key = 'request_success', parameter_value, NULL)) AS request_success_raw,
+      MAX(IF(parameter_key = 'request_count', parameter_value, NULL)) AS request_count_raw,
+      MAX(IF(parameter_key = 'property_id', parameter_value, NULL)) AS property_id,
+      MAX(IF(parameter_key = 'property_type', parameter_value, NULL)) AS property_type,
+      MAX(IF(parameter_key = 'listing_id', parameter_value, NULL)) AS listing_id,
+      MAX(IF(parameter_key = 'listing_type', parameter_value, NULL)) AS listing_type,
+      MAX(IF(parameter_key = 'transaction_type', parameter_value, NULL)) AS transaction_type,
+      MAX(IF(parameter_key = 'market', parameter_value, NULL)) AS market,
+      MAX(IF(parameter_key = 'country', parameter_value, NULL)) AS country,
+      MAX(IF(parameter_key = 'region', parameter_value, NULL)) AS region,
+      MAX(IF(parameter_key = 'city', parameter_value, NULL)) AS city,
+      MAX(IF(parameter_key = 'postal_code', parameter_value, NULL)) AS postal_code,
+      MAX(IF(parameter_key = 'currency', parameter_value, NULL)) AS currency,
+      MAX(IF(parameter_key = 'listing_price', parameter_value, NULL)) AS listing_price_raw,
+      MAX(IF(parameter_key = 'rent_amount', parameter_value, NULL)) AS rent_amount_raw,
+      MAX(IF(parameter_key = 'bedrooms', parameter_value, NULL)) AS bedrooms_raw,
+      MAX(IF(parameter_key = 'bathrooms', parameter_value, NULL)) AS bathrooms_raw,
+      MAX(IF(parameter_key = 'furnished_status', parameter_value, NULL)) AS furnished_status,
+      MAX(IF(parameter_key = 'availability_date', parameter_value, NULL)) AS availability_date_raw,
+      MAX(IF(parameter_key = 'viewing_type', parameter_value, NULL)) AS viewing_type,
+      MAX(IF(parameter_key = 'preferred_viewing_date', parameter_value, NULL)) AS preferred_viewing_date_raw,
+      MAX(IF(parameter_key = 'preferred_viewing_time', parameter_value, NULL)) AS preferred_viewing_time,
+      MAX(IF(parameter_key = 'lead_id', parameter_value, NULL)) AS lead_id,
+      MAX(IF(parameter_key = 'prospect_id', parameter_value, NULL)) AS prospect_id,
+      MAX(IF(parameter_key = 'customer_type', parameter_value, NULL)) AS customer_type,
+      MAX(IF(parameter_key = 'authenticated', parameter_value, NULL)) AS authenticated_raw,
+      MAX(IF(parameter_key = 'analytics_consent', parameter_value, NULL)) AS analytics_consent,
+      MAX(IF(parameter_key = 'marketing_consent', parameter_value, NULL)) AS marketing_consent,
+      MAX(IF(parameter_key = 'submission_method', parameter_value, NULL)) AS submission_method,
+      MAX(IF(parameter_key = 'channel', parameter_value, NULL)) AS channel,
+      MAX(IF(parameter_key = 'source_system', parameter_value, NULL)) AS source_system,
+      MAX(IF(parameter_key = 'crm_system', parameter_value, NULL)) AS crm_system,
+      MAX(IF(parameter_key = 'request_created_at', parameter_value, NULL)) AS request_created_at_raw,
+      MAX(IF(parameter_key = 'request_submitted_at', parameter_value, NULL)) AS request_submitted_at_raw,
+      MAX(IF(parameter_key = 'request_timezone', parameter_value, NULL)) AS request_timezone,
+      MAX(IF(parameter_key = 'page_location', parameter_value, NULL)) AS page_location,
+      MAX(IF(parameter_key = 'page_referrer', parameter_value, NULL)) AS page_referrer,
+      MAX(IF(parameter_key = 'page_title', parameter_value, NULL)) AS page_title,
+      MAX(IF(parameter_key = 'content_group', parameter_value, NULL)) AS content_group,
+      MAX(IF(parameter_key = 'campaign_id', parameter_value, NULL)) AS campaign_id,
+      MAX(IF(parameter_key = 'campaign_source', parameter_value, NULL)) AS campaign_source,
+      MAX(IF(parameter_key = 'campaign_medium', parameter_value, NULL)) AS campaign_medium,
+      MAX(IF(parameter_key = 'campaign_name', parameter_value, NULL)) AS campaign_name,
+      MAX(IF(parameter_key = 'device_category', parameter_value, NULL)) AS device_category,
+      MAX(IF(parameter_key = 'language', parameter_value, NULL)) AS language,
+      MAX(IF(parameter_key = 'schema_version', parameter_value, NULL)) AS schema_version
+    FROM filtered_events
+    GROUP BY event_row_id, event_date, event_timestamp
+  ),
+  typed_events AS (
+    SELECT
+      request_id,
+      request_type,
+      request_status,
+      LOWER(request_success_raw) IN ('true', '1') AS request_success,
+      COALESCE(SAFE_CAST(request_count_raw AS INT64), 1) AS request_count,
+      property_id,
+      property_type,
+      listing_id,
+      listing_type,
+      transaction_type,
+      market,
+      country,
+      region,
+      city,
+      postal_code,
+      currency,
+      SAFE_CAST(listing_price_raw AS NUMERIC) AS listing_price,
+      SAFE_CAST(rent_amount_raw AS NUMERIC) AS rent_amount,
+      SAFE_CAST(bedrooms_raw AS NUMERIC) AS bedrooms,
+      SAFE_CAST(bathrooms_raw AS NUMERIC) AS bathrooms,
+      furnished_status,
+      SAFE_CAST(availability_date_raw AS DATE) AS availability_date,
+      viewing_type,
+      SAFE_CAST(preferred_viewing_date_raw AS DATE) AS preferred_viewing_date,
+      preferred_viewing_time,
+      lead_id,
+      prospect_id,
+      customer_type,
+      CASE
+        WHEN LOWER(authenticated_raw) IN ('true', '1') THEN TRUE
+        WHEN LOWER(authenticated_raw) IN ('false', '0') THEN FALSE
+        ELSE NULL
+      END AS authenticated,
+      analytics_consent,
+      marketing_consent,
+      submission_method,
+      channel,
+      source_system,
+      crm_system,
+      SAFE_CAST(request_created_at_raw AS TIMESTAMP) AS request_created_at,
+      COALESCE(
+        SAFE_CAST(request_submitted_at_raw AS TIMESTAMP),
+        TIMESTAMP_MICROS(event_timestamp)
+      ) AS request_submitted_at,
+      request_timezone,
+      page_location,
+      page_referrer,
+      page_title,
+      content_group,
+      campaign_id,
+      campaign_source,
+      campaign_medium,
+      campaign_name,
+      device_category,
+      language,
+      schema_version,
+      event_timestamp
+    FROM pivoted_events
+    WHERE request_id IS NOT NULL
+      AND LOWER(request_type) = 'property_viewing'
+      AND LOWER(request_status) = 'submitted'
+      AND LOWER(request_success_raw) IN ('true', '1')
+  ),
+  deduplicated_requests AS (
+    SELECT *
+    FROM typed_events
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY request_id
+      ORDER BY request_submitted_at ASC, event_timestamp ASC
+    ) = 1
+  )
+  SELECT
+    request_id,
+    request_type,
+    request_status,
+    request_success,
+    request_count,
+    property_id,
+    property_type,
+    listing_id,
+    listing_type,
+    transaction_type,
+    market,
+    country,
+    region,
+    city,
+    postal_code,
+    currency,
+    listing_price,
+    rent_amount,
+    bedrooms,
+    bathrooms,
+    furnished_status,
+    availability_date,
+    viewing_type,
+    preferred_viewing_date,
+    preferred_viewing_time,
+    lead_id,
+    prospect_id,
+    customer_type,
+    authenticated,
+    analytics_consent,
+    marketing_consent,
+    submission_method,
+    channel,
+    source_system,
+    crm_system,
+    request_created_at,
+    request_submitted_at,
+    request_timezone,
+    page_location,
+    page_referrer,
+    page_title,
+    content_group,
+    campaign_id,
+    campaign_source,
+    campaign_medium,
+    campaign_name,
+    device_category,
+    language,
+    schema_version,
+    CAST(1 AS INT64) AS viewing_request_count
+  FROM deduplicated_requests;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH viewing_request_events AS (
+    SELECT
+      xdm._propertyExperience.viewingRequest.requestId AS request_id,
+      xdm._propertyExperience.viewingRequest.requestType AS request_type,
+      xdm._propertyExperience.viewingRequest.requestStatus AS request_status,
+      xdm._propertyExperience.viewingRequest.requestSuccess AS request_success,
+      COALESCE(CAST(xdm._propertyExperience.viewingRequest.requestCount AS BIGINT), 1) AS request_count,
+      xdm._propertyExperience.viewingRequest.propertyId AS property_id,
+      xdm._propertyExperience.viewingRequest.propertyType AS property_type,
+      xdm._propertyExperience.viewingRequest.listingId AS listing_id,
+      xdm._propertyExperience.viewingRequest.listingType AS listing_type,
+      xdm._propertyExperience.viewingRequest.transactionType AS transaction_type,
+      xdm._propertyExperience.viewingRequest.market AS market,
+      xdm._propertyExperience.viewingRequest.country AS country,
+      xdm._propertyExperience.viewingRequest.region AS region,
+      xdm._propertyExperience.viewingRequest.city AS city,
+      xdm._propertyExperience.viewingRequest.postalCode AS postal_code,
+      xdm._propertyExperience.viewingRequest.currency AS currency,
+      CAST(xdm._propertyExperience.viewingRequest.listingPrice AS DECIMAL(38, 9)) AS listing_price,
+      CAST(xdm._propertyExperience.viewingRequest.rentAmount AS DECIMAL(38, 9)) AS rent_amount,
+      CAST(xdm._propertyExperience.viewingRequest.bedrooms AS DECIMAL(10, 2)) AS bedrooms,
+      CAST(xdm._propertyExperience.viewingRequest.bathrooms AS DECIMAL(10, 2)) AS bathrooms,
+      xdm._propertyExperience.viewingRequest.furnishedStatus AS furnished_status,
+      CAST(xdm._propertyExperience.viewingRequest.availabilityDate AS DATE) AS availability_date,
+      xdm._propertyExperience.viewingRequest.viewingType AS viewing_type,
+      CAST(xdm._propertyExperience.viewingRequest.preferredViewingDate AS DATE) AS preferred_viewing_date,
+      xdm._propertyExperience.viewingRequest.preferredViewingTime AS preferred_viewing_time,
+      xdm._propertyExperience.viewingRequest.leadId AS lead_id,
+      xdm._propertyExperience.viewingRequest.prospectId AS prospect_id,
+      xdm._propertyExperience.viewingRequest.customerType AS customer_type,
+      xdm._propertyExperience.viewingRequest.authenticated AS authenticated,
+      xdm._propertyExperience.viewingRequest.analyticsConsent AS analytics_consent,
+      xdm._propertyExperience.viewingRequest.marketingConsent AS marketing_consent,
+      xdm._propertyExperience.viewingRequest.submissionMethod AS submission_method,
+      xdm._propertyExperience.viewingRequest.channel AS channel,
+      xdm._propertyExperience.viewingRequest.sourceSystem AS source_system,
+      xdm._propertyExperience.viewingRequest.crmSystem AS crm_system,
+      CAST(xdm._propertyExperience.viewingRequest.requestCreatedAt AS TIMESTAMP) AS request_created_at,
+      COALESCE(
+        CAST(xdm._propertyExperience.viewingRequest.requestSubmittedAt AS TIMESTAMP),
+        xdm.timestamp
+      ) AS request_submitted_at,
+      xdm._propertyExperience.viewingRequest.requestTimezone AS request_timezone,
+      xdm._propertyExperience.viewingRequest.pageLocation AS page_location,
+      xdm._propertyExperience.viewingRequest.pageReferrer AS page_referrer,
+      xdm._propertyExperience.viewingRequest.pageTitle AS page_title,
+      xdm._propertyExperience.viewingRequest.contentGroup AS content_group,
+      xdm._propertyExperience.viewingRequest.campaignId AS campaign_id,
+      xdm._propertyExperience.viewingRequest.campaignSource AS campaign_source,
+      xdm._propertyExperience.viewingRequest.campaignMedium AS campaign_medium,
+      xdm._propertyExperience.viewingRequest.campaignName AS campaign_name,
+      xdm._propertyExperience.viewingRequest.deviceCategory AS device_category,
+      xdm._propertyExperience.viewingRequest.language AS language,
+      xdm._propertyExperience.viewingRequest.schemaVersion AS schema_version,
+      xdm.timestamp AS event_timestamp
+    FROM property_experience_event_dataset AS xdm
+    WHERE xdm.eventType = 'generate_lead'
+      AND xdm.timestamp >= CAST('${START_TIMESTAMP}' AS TIMESTAMP)
+      AND xdm.timestamp < CAST('${END_TIMESTAMP}' AS TIMESTAMP)
+      AND xdm._propertyExperience.viewingRequest.requestId IS NOT NULL
+      AND LOWER(xdm._propertyExperience.viewingRequest.requestType) = 'property_viewing'
+      AND LOWER(xdm._propertyExperience.viewingRequest.requestStatus) = 'submitted'
+      AND xdm._propertyExperience.viewingRequest.requestSuccess = TRUE
+  ),
+  deduplicated_requests AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY request_id
+        ORDER BY request_submitted_at ASC, event_timestamp ASC
+      ) AS request_row_number
+    FROM viewing_request_events
+  )
+  SELECT
+    request_id,
+    request_type,
+    request_status,
+    request_success,
+    request_count,
+    property_id,
+    property_type,
+    listing_id,
+    listing_type,
+    transaction_type,
+    market,
+    country,
+    region,
+    city,
+    postal_code,
+    currency,
+    listing_price,
+    rent_amount,
+    bedrooms,
+    bathrooms,
+    furnished_status,
+    availability_date,
+    viewing_type,
+    preferred_viewing_date,
+    preferred_viewing_time,
+    lead_id,
+    prospect_id,
+    customer_type,
+    authenticated,
+    analytics_consent,
+    marketing_consent,
+    submission_method,
+    channel,
+    source_system,
+    crm_system,
+    request_created_at,
+    request_submitted_at,
+    request_timezone,
+    page_location,
+    page_referrer,
+    page_title,
+    content_group,
+    campaign_id,
+    campaign_source,
+    campaign_medium,
+    campaign_name,
+    device_category,
+    language,
+    schema_version,
+    CAST(1 AS BIGINT) AS viewing_request_count
+  FROM deduplicated_requests
+  WHERE request_row_number = 1;
+
+Calculation Notes: |
+  1️⃣ Count only successfully persisted and submitted viewing_request_id.  
+  2️⃣ Include valid requests even if later declined, expired, rescheduled, completed, or cancelled.  
+  3️⃣ Exclude button clicks, form starts, drafts, client-side retries, failed submissions, test activity, spam, synthetic monitoring, and deleted records without prior valid submission.  
+  4️⃣ Treat a request spanning multiple sessions as one request; no session timeout for deduplication.  
+  5️⃣ Count multiple valid requests by the same prospect for the same property separately if they have distinct identifiers.  
+  6️⃣ Rescheduling or editing does not count unless a new canonical request is created.  
+  7️⃣ Aggregate by submitted_at and recompute historical periods for late records or corrections.
+
+Business Use Case: |
+  The Product and Marketplace teams compare viewing request volume and property-detail-view conversion by market, listing, device, and acquisition channel. If high-traffic listings generate unusually few requests, they can investigate listing quality, availability, pricing, request-form friction, or agent responsiveness and prioritize corrective product or operational actions.
+
+
+Source Data: Viewing Request Service, CRM, and Digital Analytics
+
+Report Attributes: |
+  ["Submission Date","Submission Hour","Market","Country","City","Property","Property Type","Listing Type","Rental or Sale","Viewing Type","Request Status","Acquisition Channel","Request Channel","Device Type","Platform","Agent","Agency","New or Returning Requester","Listing Availability Status"]
+
+Dashboard Usage: [Marketplace Conversion Dashboard, Viewing Funnel Dashboard, Property Demand Dashboard, Listing Performance Dashboard, Agent Operations Dashboard, Executive Marketplace Health Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Property Detail View Count, Viewing Requester Count, Viewing Request Cancellation Count, Viewing Appointment Count, Confirmed Viewing Count, Completed Viewing Count, Property Inquiry Count, Listing Lead Count]
+
+Derived KPIs: [Property Detail View-to-Viewing Request Conversion Rate, Unique Visitor-to-Viewing Request Conversion Rate, Viewing Request Acceptance Rate, Viewing Request Confirmation Rate, Viewing Request Cancellation Rate, Viewing Request-to-Completed Viewing Rate, Average Viewing Requests per Requester, Average Viewing Requests per Active Listing, Median Time to Viewing Request Response]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-13T23:30:13.558154+00:00
+
+Last Modified By: devyendarm
+
+
