@@ -1,0 +1,335 @@
+# Dimension: Booking Lead Time Band
+# Generated: 2026-09-13T18:30:28.766Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Booking Lead Time Band
+
+Description: |
+  Classifies each digitally completed booking into a standardized range based on the number of local calendar days between booking confirmation and scheduled check-in. It enables comparison of advance-purchase behavior, conversion performance, demand timing, and revenue-management opportunities without exposing exact travel dates.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Travel & Hospitality
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"event":[{"eventInfo":{"eventName":"purchase"},"attributes":{"bookingLeadTimeBand":"{{booking_lead_time_band}}"}}]}
+
+GA4 Data Layer: |
+  {"event":"purchase","booking_lead_time_band":"{{booking_lead_time_band}}"}
+
+Adobe Client Data Layer: |
+  {"data":{"booking":{"leadTimeBand":"{{booking_lead_time_band}}"}},"event":"purchase"}
+
+XDM Mapping: |
+  {"_custom":{"bookingLeadTimeBand":"{{booking_lead_time_band}}"},"commerce":{"purchases":{"value":1}},"eventType":"commerce.purchases"}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH purchase_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS event_timestamp,
+      user_pseudo_id,
+      COALESCE(
+        NULLIF(ecommerce.transaction_id, ''),
+        (
+          SELECT ARRAY_AGG(
+            COALESCE(
+              ep.value.string_value,
+              CAST(ep.value.int_value AS STRING),
+              CAST(ep.value.float_value AS STRING),
+              CAST(ep.value.double_value AS STRING)
+            ) IGNORE NULLS
+            LIMIT 1
+          )[SAFE_OFFSET(0)]
+          FROM UNNEST(event_params) AS ep
+          WHERE ep.key = 'transaction_id'
+        )
+      ) AS transaction_id,
+      (
+        SELECT ARRAY_AGG(
+          COALESCE(
+            ep.value.string_value,
+            CAST(ep.value.int_value AS STRING),
+            CAST(ep.value.float_value AS STRING),
+            CAST(ep.value.double_value AS STRING)
+          ) IGNORE NULLS
+          ORDER BY CASE ep.key
+            WHEN 'booking_lead_time_band' THEN 1
+            WHEN 'bookingLeadTimeBand' THEN 2
+            WHEN 'lead_time_band' THEN 3
+            ELSE 4
+          END
+          LIMIT 1
+        )[SAFE_OFFSET(0)]
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key IN (
+          'booking_lead_time_band',
+          'bookingLeadTimeBand',
+          'lead_time_band'
+        )
+      ) AS source_lead_time_band,
+      (
+        SELECT ARRAY_AGG(
+          COALESCE(
+            ep.value.string_value,
+            CAST(ep.value.int_value AS STRING),
+            CAST(ep.value.float_value AS STRING),
+            CAST(ep.value.double_value AS STRING)
+          ) IGNORE NULLS
+          ORDER BY CASE ep.key
+            WHEN 'booking_lead_time_days' THEN 1
+            WHEN 'bookingLeadTimeDays' THEN 2
+            WHEN 'lead_time_days' THEN 3
+            ELSE 4
+          END
+          LIMIT 1
+        )[SAFE_OFFSET(0)]
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key IN (
+          'booking_lead_time_days',
+          'bookingLeadTimeDays',
+          'lead_time_days'
+        )
+      ) AS source_lead_time_days,
+      (
+        SELECT ARRAY_AGG(
+          COALESCE(
+            ep.value.string_value,
+            CAST(ep.value.int_value AS STRING)
+          ) IGNORE NULLS
+          ORDER BY CASE ep.key
+            WHEN 'check_in_date' THEN 1
+            WHEN 'checkin_date' THEN 2
+            WHEN 'arrival_date' THEN 3
+            WHEN 'travel_date' THEN 4
+            ELSE 5
+          END
+          LIMIT 1
+        )[SAFE_OFFSET(0)]
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key IN (
+          'check_in_date',
+          'checkin_date',
+          'arrival_date',
+          'travel_date'
+        )
+      ) AS check_in_date_raw,
+      (
+        SELECT ARRAY_AGG(
+          COALESCE(
+            ep.value.string_value,
+            CAST(ep.value.int_value AS STRING)
+          ) IGNORE NULLS
+          ORDER BY CASE ep.key
+            WHEN 'booking_date' THEN 1
+            WHEN 'reservation_date' THEN 2
+            ELSE 3
+          END
+          LIMIT 1
+        )[SAFE_OFFSET(0)]
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key IN ('booking_date', 'reservation_date')
+      ) AS booking_date_raw
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN @start_date AND @end_date
+      AND event_name = 'purchase'
+  ),
+  parsed_values AS (
+    SELECT
+      *,
+      COALESCE(
+        SAFE_CAST(source_lead_time_days AS INT64),
+        DATE_DIFF(
+          COALESCE(
+            SAFE_CAST(check_in_date_raw AS DATE),
+            SAFE.PARSE_DATE('%Y%m%d', check_in_date_raw)
+          ),
+          COALESCE(
+            SAFE_CAST(booking_date_raw AS DATE),
+            SAFE.PARSE_DATE('%Y%m%d', booking_date_raw),
+            DATE(event_timestamp)
+          ),
+          DAY
+        )
+      ) AS booking_lead_time_days
+    FROM purchase_events
+  ),
+  banded AS (
+    SELECT
+      *,
+      CASE
+        WHEN NULLIF(TRIM(source_lead_time_band), '') IS NOT NULL
+          THEN TRIM(source_lead_time_band)
+        WHEN booking_lead_time_days < 0 THEN 'Unknown'
+        WHEN booking_lead_time_days = 0 THEN 'Same day'
+        WHEN booking_lead_time_days BETWEEN 1 AND 3 THEN '1-3 days'
+        WHEN booking_lead_time_days BETWEEN 4 AND 7 THEN '4-7 days'
+        WHEN booking_lead_time_days BETWEEN 8 AND 14 THEN '8-14 days'
+        WHEN booking_lead_time_days BETWEEN 15 AND 30 THEN '15-30 days'
+        WHEN booking_lead_time_days BETWEEN 31 AND 60 THEN '31-60 days'
+        WHEN booking_lead_time_days BETWEEN 61 AND 90 THEN '61-90 days'
+        WHEN booking_lead_time_days BETWEEN 91 AND 180 THEN '91-180 days'
+        WHEN booking_lead_time_days BETWEEN 181 AND 365 THEN '181-365 days'
+        WHEN booking_lead_time_days >= 366 THEN '366+ days'
+        ELSE 'Unknown'
+      END AS booking_lead_time_band,
+      CASE
+        WHEN NULLIF(TRIM(source_lead_time_band), '') IS NOT NULL THEN 'collected_attribute'
+        WHEN SAFE_CAST(source_lead_time_days AS INT64) IS NOT NULL THEN 'lead_time_days'
+        WHEN check_in_date_raw IS NOT NULL THEN 'booking_and_check_in_dates'
+        ELSE 'unavailable'
+      END AS derivation_method
+    FROM parsed_values
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    user_pseudo_id,
+    transaction_id,
+    booking_lead_time_days,
+    booking_lead_time_band,
+    TRIM(
+      REGEXP_REPLACE(
+        LOWER(booking_lead_time_band),
+        r'[^a-z0-9]+',
+        '_'
+      ),
+      '_'
+    ) AS booking_lead_time_band_key,
+    CASE booking_lead_time_band
+      WHEN 'Same day' THEN 1
+      WHEN '1-3 days' THEN 2
+      WHEN '4-7 days' THEN 3
+      WHEN '8-14 days' THEN 4
+      WHEN '15-30 days' THEN 5
+      WHEN '31-60 days' THEN 6
+      WHEN '61-90 days' THEN 7
+      WHEN '91-180 days' THEN 8
+      WHEN '181-365 days' THEN 9
+      WHEN '366+ days' THEN 10
+      WHEN 'Unknown' THEN 999
+      ELSE 500
+    END AS booking_lead_time_band_sort_order,
+    derivation_method
+  FROM banded;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH purchase_events AS (
+    SELECT
+      _id AS experience_event_id,
+      CAST(timestamp AS TIMESTAMP) AS event_timestamp,
+      CAST(timestamp AS DATE) AS event_date,
+      commerce.order.purchaseID AS transaction_id,
+      NULLIF(TRIM(CAST(_custom.bookingLeadTimeBand AS VARCHAR)), '') AS source_lead_time_band
+    FROM aep_purchase_events
+    WHERE eventType = 'commerce.purchases'
+      AND COALESCE(commerce.purchases.value, 0) > 0
+  ),
+  banded AS (
+    SELECT
+      experience_event_id,
+      event_timestamp,
+      event_date,
+      transaction_id,
+      COALESCE(source_lead_time_band, 'Unknown') AS booking_lead_time_band,
+      CASE
+        WHEN source_lead_time_band IS NOT NULL THEN 'collected_attribute'
+        ELSE 'unavailable'
+      END AS derivation_method
+    FROM purchase_events
+  )
+  SELECT
+    experience_event_id,
+    event_timestamp,
+    event_date,
+    transaction_id,
+    booking_lead_time_band,
+    TRIM(
+      BOTH '_' FROM REGEXP_REPLACE(
+        LOWER(booking_lead_time_band),
+        '[^a-z0-9]+',
+        '_'
+      )
+    ) AS booking_lead_time_band_key,
+    CASE booking_lead_time_band
+      WHEN 'Same day' THEN 1
+      WHEN '1-3 days' THEN 2
+      WHEN '4-7 days' THEN 3
+      WHEN '8-14 days' THEN 4
+      WHEN '15-30 days' THEN 5
+      WHEN '31-60 days' THEN 6
+      WHEN '61-90 days' THEN 7
+      WHEN '91-180 days' THEN 8
+      WHEN '181-365 days' THEN 9
+      WHEN '366+ days' THEN 10
+      WHEN 'Unknown' THEN 999
+      ELSE 500
+    END AS booking_lead_time_band_sort_order,
+    derivation_method
+  FROM banded;
+
+Calculation Notes: |
+  1️⃣ Assign band based on local calendar dates in property's timezone.  
+  2️⃣ Use server-confirmed booking timestamp when available.  
+  3️⃣ Classify zero calendar days as Same Day.  
+  4️⃣ Retain original band for the original booking event.  
+  5️⃣ Emit a separate band for qualifying digital modification events.  
+  6️⃣ Preserve cancelled bookings for cancellation analysis.  
+  7️⃣ Classify missing inputs as Unknown and negative/invalid values as Invalid.
+
+Business Use Case: |
+  Revenue Management compares conversion rate, booking value, cancellation propensity, and room-night demand across lead-time bands to determine when to release inventory, adjust advance-purchase offers, or increase digital media investment. For example, a sustained shift from 31-60 Days toward 0-7 Days can trigger tighter near-term inventory controls and a reassessment of early-booking promotions.
+
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  ["Booking Date","Check-in Month","Property","Destination","Market","Digital Channel","Traffic Source","Campaign","Device Category","Rate Plan","Room Type","Length of Stay Band","Booking Status"]
+
+Dashboard Usage: [Digital Booking Conversion Dashboard, Booking Pace and Lead Time Dashboard, Revenue Management Demand Dashboard, Digital Channel Performance Dashboard, Cancellation and Modification Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Booking Lead Time Days, Booking Date, Check-in Date, Check-out Date, Length of Stay Band, Booking Status, Property, Destination, Digital Channel, Device Category, Rate Plan, Room Type]
+
+Derived Dimensions: [Advance Purchase Segment, Last-Minute Booking Flag, Long-Lead Booking Flag, Booking Window Cohort, Booking Lead Time Group]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-13T18:30:28.118114+00:00
+
+Last Modified By: devyendarm
+
+
