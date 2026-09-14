@@ -1,7 +1,7 @@
 # Dimension: Notification Channel
-# Generated: 2026-09-14T18:46:20.394Z
+# Generated: 2026-09-14T18:46:28.939Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Notification Channel
 
@@ -10,31 +10,565 @@ Description: |
 
 Category: Experience
 
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
 
+Industry: E-commerce
 
+Priority: Medium
 
+Core Area: Engagement
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  notification_open
 
+Adobe Event: |
+  notification:open
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageID": "order-tracking",
+          "pageName": "order:tracking",
+          "pageType": "order_tracking",
+          "destinationURL": "https://www.example-store.com/orders/T-100482/tracking?nch=tok_7f3a9c&utm_source=klaviyo&utm_medium=sms&utm_campaign=shipment_out_for_delivery"
+        },
+        "attributes": {
+          "campaignSource": "klaviyo",
+          "campaignMedium": "sms",
+          "campaignName": "shipment_out_for_delivery"
+        }
+      },
+      "transaction": {
+        "transactionID": "T-100482"
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "notification_open",
+            "eventAction": "notification_landing",
+            "type": "post_purchase"
+          },
+          "attributes": {
+            "notificationChannel": "SMS",
+            "notificationType": "out_for_delivery",
+            "channelSource": "channel_token",
+            "messageID": "MSG-5521907",
+            "flowID": "FLOW-SHIP-OFD",
+            "carrier": "UPS"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "notification_open",
+    "notification_channel": "SMS",
+    "notification_type": "out_for_delivery",
+    "channel_source": "channel_token",
+    "campaign_medium": "sms",
+    "message_id": "MSG-5521907",
+    "campaign_or_flow_id": "FLOW-SHIP-OFD",
+    "transaction_id": "T-100482",
+    "carrier": "UPS",
+    "page_type": "order_tracking"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "notification:open",
+    "eventInfo": {
+      "eventName": "notification_open",
+      "eventAction": "notification_landing"
+    },
+    "page": {
+      "pageName": "order:tracking",
+      "pageType": "order_tracking"
+    },
+    "notification": {
+      "channel": "SMS",
+      "type": "out_for_delivery",
+      "channelSource": "channel_token",
+      "messageID": "MSG-5521907",
+      "flowID": "FLOW-SHIP-OFD"
+    },
+    "marketing": {
+      "trackingCode": "klaviyo:sms:shipment_out_for_delivery",
+      "utmMedium": "sms"
+    },
+    "commerce": {
+      "transactionID": "T-100482",
+      "carrier": "UPS"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "timestamp": "2026-09-14T15:42:10Z",
+    "web": {
+      "webPageDetails": {
+        "name": "order:tracking",
+        "URL": "https://www.example-store.com/orders/T-100482/tracking"
+      },
+      "webInteraction": {
+        "name": "notification:open",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "marketing": {
+      "trackingCode": "klaviyo:sms:shipment_out_for_delivery"
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "T-100482"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar61": "SMS",
+            "eVar62": "out_for_delivery",
+            "eVar63": "channel_token"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Notification Channel: transactional notification sends and opens by delivered channel
+  -- Base population = every send in the ESP / SMS send logs (hard bounces, carrier-filtered SMS and invalid push tokens included); opens counted within 7 days of send
+  -- Send-date cohort: the 30 days ending 8 days ago, so every send has a complete 7-day engagement window
+  WITH send_log AS (
+    SELECT
+      s.send_id,
+      s.message_id,
+      s.provider,
+      s.shipment_id,
+      s.sent_at,
+      LOWER(TRIM(s.message_type)) AS message_type,
+      LOWER(TRIM(s.delivery_status)) AS delivery_status,
+      LOWER(TRIM(s.delivered_channel)) AS provider_channel
+    FROM `your-project.messaging.notification_send_log` AS s
+    WHERE DATE(s.sent_at) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 37 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 8 DAY)
+      AND s.message_category = 'transactional'
+      AND NOT COALESCE(s.is_test_send, FALSE)
+      AND NOT COALESCE(s.is_seed_or_proof_list, FALSE)
+      AND NOT COALESCE(s.is_internal_recipient, FALSE)
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY s.send_id ORDER BY s.status_updated_at DESC) = 1
+  ),
+  -- Delivered channel normalisation: MMS / short code / long code to SMS, app and web push to Push, content cards to In-App, WhatsApp / RCS / voice to Other
+  sends AS (
+    SELECT
+      sl.*,
+      CASE
+        WHEN sl.provider_channel IS NULL OR sl.provider_channel = '' THEN '(not set)'
+        WHEN sl.provider_channel IN ('email', 'e-mail', 'email_studio') THEN 'Email'
+        WHEN sl.provider_channel IN ('sms', 'mms', 'short_code', 'long_code', 'text', 'mobileconnect') THEN 'SMS'
+        WHEN sl.provider_channel IN ('push', 'mobile_push', 'app_push', 'web_push', 'ios_push', 'android_push', 'mobilepush') THEN 'Push'
+        WHEN sl.provider_channel IN ('in-app', 'in_app', 'inapp', 'in_app_message', 'content_card', 'content_cards') THEN 'In-App'
+        WHEN sl.provider_channel IN ('whatsapp', 'rcs', 'voice', 'other') THEN 'Other'
+        ELSE '(not set)'
+      END AS notification_channel
+    FROM send_log AS sl
+  ),
+  -- ESP engagement inside the 7-day window: human email opens (machine opens excluded), push direct opens, in-app rendered impressions, non-prefetch clicks
+  esp_engagement AS (
+    SELECT
+      s.send_id,
+      LOGICAL_OR(LOWER(en.engagement_type) = 'open' AND NOT COALESCE(en.is_machine_open, FALSE)) AS has_human_open,
+      LOGICAL_OR(LOWER(en.engagement_type) = 'direct_open') AS has_direct_open,
+      LOGICAL_OR(LOWER(en.engagement_type) = 'impression') AS has_impression,
+      LOGICAL_OR(LOWER(en.engagement_type) = 'click' AND NOT COALESCE(en.is_prefetch_click, FALSE)) AS has_click
+    FROM sends AS s
+    JOIN `your-project.messaging.notification_engagement_log` AS en
+      ON en.send_id = s.send_id
+    WHERE en.engaged_at >= s.sent_at
+      AND en.engaged_at < TIMESTAMP_ADD(s.sent_at, INTERVAL 7 DAY)
+    GROUP BY s.send_id
+  ),
+  ga4_events AS (
+    SELECT
+      e.event_name,
+      e.user_pseudo_id,
+      e.event_timestamp,
+      MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+      LOWER(TRIM(MAX(IF(ep.key = 'notification_channel', ep.value.string_value, NULL)))) AS channel_raw,
+      LOWER(TRIM(MAX(IF(ep.key = 'notification_type', ep.value.string_value, NULL)))) AS notification_type,
+      LOWER(TRIM(MAX(IF(ep.key = 'channel_source', ep.value.string_value, NULL)))) AS channel_source,
+      MAX(IF(ep.key = 'message_id', ep.value.string_value, NULL)) AS message_id,
+      LOWER(TRIM(MAX(IF(ep.key = 'page_type', ep.value.string_value, NULL)))) AS page_type
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 37 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name IN ('notification_open', 'page_view')
+    GROUP BY e.event_name, e.user_pseudo_id, e.event_timestamp, e.event_bundle_sequence_id
+  ),
+  -- Tracked notification landings; the channel comes from the signed channel token (utm_medium only as fallback)
+  landings AS (
+    SELECT
+      g.user_pseudo_id,
+      g.ga_session_id,
+      g.event_timestamp,
+      g.message_id,
+      g.notification_type,
+      g.channel_source,
+      CASE
+        WHEN g.channel_raw IS NULL OR g.channel_raw = '' THEN '(not set)'
+        WHEN g.channel_raw IN ('email', 'e-mail', 'email_studio') THEN 'Email'
+        WHEN g.channel_raw IN ('sms', 'mms', 'short_code', 'long_code', 'text', 'mobileconnect') THEN 'SMS'
+        WHEN g.channel_raw IN ('push', 'mobile_push', 'app_push', 'web_push', 'ios_push', 'android_push', 'mobilepush') THEN 'Push'
+        WHEN g.channel_raw IN ('in-app', 'in_app', 'inapp', 'in_app_message', 'content_card', 'content_cards') THEN 'In-App'
+        WHEN g.channel_raw IN ('whatsapp', 'rcs', 'voice', 'other') THEN 'Other'
+        ELSE '(not set)'
+      END AS notification_channel
+    FROM ga4_events AS g
+    WHERE g.event_name = 'notification_open'
+      AND g.message_id IS NOT NULL
+  ),
+  -- First landing per send within 7 days, credited to the channel of the originating send
+  send_first_landing AS (
+    SELECT
+      s.send_id,
+      l.user_pseudo_id,
+      l.ga_session_id,
+      l.event_timestamp AS landing_ts,
+      l.channel_source
+    FROM sends AS s
+    JOIN landings AS l
+      ON l.message_id = s.message_id
+     AND l.notification_channel = s.notification_channel
+    WHERE TIMESTAMP_MICROS(l.event_timestamp) >= s.sent_at
+      AND TIMESTAMP_MICROS(l.event_timestamp) < TIMESTAMP_ADD(s.sent_at, INTERVAL 7 DAY)
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY s.send_id ORDER BY l.event_timestamp) = 1
+  ),
+  -- The channel is inherited by the landing session only (GA4 30-minute session), never by later sessions
+  -- Order status checks are page_view hits with page_type = order_status
+  landing_session_status_checks AS (
+    SELECT
+      fl.send_id,
+      COUNT(*) AS order_status_checks
+    FROM send_first_landing AS fl
+    JOIN ga4_events AS g
+      ON g.user_pseudo_id = fl.user_pseudo_id
+     AND g.ga_session_id = fl.ga_session_id
+    WHERE g.event_name = 'page_view'
+      AND g.page_type = 'order_status'
+      AND g.event_timestamp >= fl.landing_ts
+    GROUP BY fl.send_id
+  ),
+  send_outcomes AS (
+    SELECT
+      s.send_id,
+      s.notification_channel,
+      s.shipment_id,
+      s.message_type,
+      s.delivery_status,
+      fl.send_id IS NOT NULL AS has_tracked_landing,
+      fl.channel_source,
+      COALESCE(sc.order_status_checks, 0) AS order_status_checks,
+      CASE s.notification_channel
+        WHEN 'Email' THEN 'human_open_excluding_machine_opens'
+        WHEN 'Push' THEN 'direct_open'
+        WHEN 'In-App' THEN 'rendered_impression'
+        ELSE 'click_based'
+      END AS open_signal,
+      (
+        CASE s.notification_channel
+          WHEN 'Email' THEN COALESCE(en.has_human_open, FALSE)
+          WHEN 'Push' THEN COALESCE(en.has_direct_open, FALSE)
+          WHEN 'In-App' THEN COALESCE(en.has_impression, FALSE)
+          ELSE COALESCE(en.has_click, FALSE)
+        END
+        OR fl.send_id IS NOT NULL
+      ) AS is_opened
+    FROM sends AS s
+    LEFT JOIN esp_engagement AS en
+      ON en.send_id = s.send_id
+    LEFT JOIN send_first_landing AS fl
+      ON fl.send_id = s.send_id
+    LEFT JOIN landing_session_status_checks AS sc
+      ON sc.send_id = s.send_id
+  )
+  SELECT
+    notification_channel,
+    open_signal,
+    COUNT(DISTINCT send_id) AS notifications_sent,
+    COUNT(DISTINCT IF(delivery_status = 'delivered', send_id, NULL)) AS notifications_delivered,
+    COUNT(DISTINCT IF(delivery_status IN ('hard_bounce', 'soft_bounce', 'failed', 'carrier_filtered', 'invalid_token', 'undelivered'), send_id, NULL)) AS notifications_undelivered,
+    COUNT(DISTINCT IF(is_opened, send_id, NULL)) AS notifications_opened,
+    ROUND(SAFE_DIVIDE(COUNT(DISTINCT IF(is_opened, send_id, NULL)), COUNT(DISTINCT send_id)), 4) AS notification_open_rate,
+    COUNT(DISTINCT IF(has_tracked_landing, send_id, NULL)) AS sends_with_tracked_landing,
+    ROUND(SAFE_DIVIDE(COUNT(DISTINCT IF(has_tracked_landing, send_id, NULL)), COUNT(DISTINCT send_id)), 4) AS tracked_landing_rate,
+    COUNT(DISTINCT IF(has_tracked_landing AND channel_source = 'utm_medium', send_id, NULL)) AS landings_channel_from_utm_fallback,
+    SUM(order_status_checks) AS order_status_checks_in_landing_sessions,
+    COUNT(DISTINCT CONCAT(shipment_id, '|', message_type)) AS notified_shipment_updates,
+    ROUND(SAFE_DIVIDE(COUNT(DISTINCT send_id), SUM(COUNT(DISTINCT send_id)) OVER ()), 4) AS share_of_sends
+  FROM send_outcomes
+  GROUP BY notification_channel, open_signal
+  ORDER BY notifications_sent DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Notification Channel: transactional notification sends and opens by delivered channel
+  -- Base population = every send in the ESP / SMS send log dataset (hard bounces, carrier-filtered SMS and invalid push tokens included); opens counted within 7 days of send
+  -- Send-date cohort: the 30 days ending 8 days ago, so every send has a complete 7-day engagement window
+  -- XDM landing hits carry no message ID, so each landing is credited to the latest send for the same order, channel and message type in the 7 days before it
+  WITH send_log AS (
+    SELECT send_id, provider, transaction_id, shipment_id, sent_at, message_type, delivery_status, provider_channel
+    FROM (
+      SELECT
+        s.send_id,
+        s.provider,
+        s.transaction_id,
+        s.shipment_id,
+        s.sent_at,
+        LOWER(TRIM(s.message_type)) AS message_type,
+        LOWER(TRIM(s.delivery_status)) AS delivery_status,
+        LOWER(TRIM(s.delivered_channel)) AS provider_channel,
+        ROW_NUMBER() OVER (PARTITION BY s.send_id ORDER BY s.status_updated_at DESC) AS rn
+      FROM aep_notification_send_log_dataset s
+      WHERE s.sent_at >= date_sub(current_date(), 37)
+        AND s.sent_at < date_sub(current_date(), 7)
+        AND s.message_category = 'transactional'
+        AND COALESCE(s.is_test_send, false) = false
+        AND COALESCE(s.is_seed_or_proof_list, false) = false
+        AND COALESCE(s.is_internal_recipient, false) = false
+    ) d
+    WHERE rn = 1
+  ),
+  -- Delivered channel normalisation: MMS / short code / long code to SMS, app and web push to Push, content cards to In-App, WhatsApp / RCS / voice to Other
+  sends AS (
+    SELECT
+      sl.*,
+      CASE
+        WHEN sl.provider_channel IS NULL OR sl.provider_channel = '' THEN '(not set)'
+        WHEN sl.provider_channel IN ('email', 'e-mail', 'email_studio') THEN 'Email'
+        WHEN sl.provider_channel IN ('sms', 'mms', 'short_code', 'long_code', 'text', 'mobileconnect') THEN 'SMS'
+        WHEN sl.provider_channel IN ('push', 'mobile_push', 'app_push', 'web_push', 'ios_push', 'android_push', 'mobilepush') THEN 'Push'
+        WHEN sl.provider_channel IN ('in-app', 'in_app', 'inapp', 'in_app_message', 'content_card', 'content_cards') THEN 'In-App'
+        WHEN sl.provider_channel IN ('whatsapp', 'rcs', 'voice', 'other') THEN 'Other'
+        ELSE '(not set)'
+      END AS notification_channel
+    FROM send_log sl
+  ),
+  -- ESP engagement inside the 7-day window: human email opens (machine opens excluded), push direct opens, in-app rendered impressions, non-prefetch clicks
+  esp_engagement AS (
+    SELECT
+      s.send_id,
+      MAX(CASE WHEN LOWER(en.engagement_type) = 'open' AND COALESCE(en.is_machine_open, false) = false THEN 1 ELSE 0 END) AS has_human_open,
+      MAX(CASE WHEN LOWER(en.engagement_type) = 'direct_open' THEN 1 ELSE 0 END) AS has_direct_open,
+      MAX(CASE WHEN LOWER(en.engagement_type) = 'impression' THEN 1 ELSE 0 END) AS has_impression,
+      MAX(CASE WHEN LOWER(en.engagement_type) = 'click' AND COALESCE(en.is_prefetch_click, false) = false THEN 1 ELSE 0 END) AS has_click
+    FROM sends s
+    JOIN aep_notification_engagement_log_dataset en
+      ON en.send_id = s.send_id
+    WHERE en.engaged_at >= s.sent_at
+      AND en.engaged_at < s.sent_at + INTERVAL 7 DAYS
+    GROUP BY s.send_id
+  ),
+  -- Sessionise all web hits first (30-minute inactivity timeout) so the landing session boundary is correct
+  sessionized AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS ecid,
+      timestamp AS event_ts,
+      eventType AS event_type,
+      web.webInteraction.name AS interaction_name,
+      LOWER(TRIM(web.webPageDetails.siteSection)) AS site_section,
+      LOWER(TRIM(_experience.analytics.customDimensions.eVars.eVar45)) AS page_type,
+      commerce.order.purchaseID AS purchase_id,
+      LOWER(TRIM(_experience.analytics.customDimensions.eVars.eVar61)) AS channel_raw,
+      LOWER(TRIM(_experience.analytics.customDimensions.eVars.eVar62)) AS notification_type,
+      LOWER(TRIM(_experience.analytics.customDimensions.eVars.eVar63)) AS channel_source,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY endUserIDs._experience.ecid.id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 37)
+      AND timestamp < current_date()
+      AND endUserIDs._experience.ecid.id IS NOT NULL
+  ),
+  landings AS (
+    SELECT
+      w.ecid,
+      w.event_ts,
+      w.session.num AS session_num,
+      w.purchase_id,
+      w.notification_type,
+      w.channel_source,
+      CASE
+        WHEN w.channel_raw IS NULL OR w.channel_raw = '' THEN '(not set)'
+        WHEN w.channel_raw IN ('email', 'e-mail', 'email_studio') THEN 'Email'
+        WHEN w.channel_raw IN ('sms', 'mms', 'short_code', 'long_code', 'text', 'mobileconnect') THEN 'SMS'
+        WHEN w.channel_raw IN ('push', 'mobile_push', 'app_push', 'web_push', 'ios_push', 'android_push', 'mobilepush') THEN 'Push'
+        WHEN w.channel_raw IN ('in-app', 'in_app', 'inapp', 'in_app_message', 'content_card', 'content_cards') THEN 'In-App'
+        WHEN w.channel_raw IN ('whatsapp', 'rcs', 'voice', 'other') THEN 'Other'
+        ELSE '(not set)'
+      END AS notification_channel
+    FROM sessionized w
+    WHERE w.interaction_name = 'notification:open'
+      AND w.purchase_id IS NOT NULL
+  ),
+  landing_to_send AS (
+    SELECT send_id, ecid, session_num, event_ts, channel_source
+    FROM (
+      SELECT
+        s.send_id,
+        l.ecid,
+        l.session_num,
+        l.event_ts,
+        l.channel_source,
+        ROW_NUMBER() OVER (PARTITION BY l.ecid, l.event_ts ORDER BY s.sent_at DESC) AS rn
+      FROM landings l
+      JOIN sends s
+        ON s.transaction_id = l.purchase_id
+       AND s.notification_channel = l.notification_channel
+       AND s.message_type = l.notification_type
+      WHERE l.event_ts >= s.sent_at
+        AND l.event_ts < s.sent_at + INTERVAL 7 DAYS
+    ) r
+    WHERE rn = 1
+  ),
+  send_first_landing AS (
+    SELECT send_id, ecid, session_num, landing_ts, channel_source
+    FROM (
+      SELECT
+        lts.send_id,
+        lts.ecid,
+        lts.session_num,
+        lts.event_ts AS landing_ts,
+        lts.channel_source,
+        ROW_NUMBER() OVER (PARTITION BY lts.send_id ORDER BY lts.event_ts) AS rn
+      FROM landing_to_send lts
+    ) f
+    WHERE rn = 1
+  ),
+  -- The channel is inherited by the landing session only, never by later sessions
+  -- Order status checks are page views (page:view) with page type eVar45 = order_status (siteSection order_status as fallback)
+  landing_session_status_checks AS (
+    SELECT
+      fl.send_id,
+      COUNT(*) AS order_status_checks
+    FROM send_first_landing fl
+    JOIN sessionized w
+      ON w.ecid = fl.ecid
+     AND w.session.num = fl.session_num
+    WHERE w.event_type = 'web.webpagedetails.pageViews'
+      AND COALESCE(w.page_type, w.site_section) = 'order_status'
+      AND w.event_ts >= fl.landing_ts
+    GROUP BY fl.send_id
+  ),
+  send_outcomes AS (
+    SELECT
+      s.send_id,
+      s.notification_channel,
+      s.shipment_id,
+      s.message_type,
+      s.delivery_status,
+      CASE WHEN fl.send_id IS NOT NULL THEN 1 ELSE 0 END AS has_tracked_landing,
+      fl.channel_source,
+      COALESCE(sc.order_status_checks, 0) AS order_status_checks,
+      CASE s.notification_channel
+        WHEN 'Email' THEN 'human_open_excluding_machine_opens'
+        WHEN 'Push' THEN 'direct_open'
+        WHEN 'In-App' THEN 'rendered_impression'
+        ELSE 'click_based'
+      END AS open_signal,
+      CASE
+        WHEN fl.send_id IS NOT NULL THEN 1
+        WHEN s.notification_channel = 'Email' THEN COALESCE(en.has_human_open, 0)
+        WHEN s.notification_channel = 'Push' THEN COALESCE(en.has_direct_open, 0)
+        WHEN s.notification_channel = 'In-App' THEN COALESCE(en.has_impression, 0)
+        ELSE COALESCE(en.has_click, 0)
+      END AS is_opened
+    FROM sends s
+    LEFT JOIN esp_engagement en
+      ON en.send_id = s.send_id
+    LEFT JOIN send_first_landing fl
+      ON fl.send_id = s.send_id
+    LEFT JOIN landing_session_status_checks sc
+      ON sc.send_id = s.send_id
+  ),
+  totals AS (
+    SELECT COUNT(DISTINCT send_id) AS all_sends
+    FROM send_outcomes
+  )
+  SELECT
+    o.notification_channel,
+    o.open_signal,
+    COUNT(DISTINCT o.send_id) AS notifications_sent,
+    COUNT(DISTINCT CASE WHEN o.delivery_status = 'delivered' THEN o.send_id END) AS notifications_delivered,
+    COUNT(DISTINCT CASE WHEN o.delivery_status IN ('hard_bounce', 'soft_bounce', 'failed', 'carrier_filtered', 'invalid_token', 'undelivered') THEN o.send_id END) AS notifications_undelivered,
+    COUNT(DISTINCT CASE WHEN o.is_opened = 1 THEN o.send_id END) AS notifications_opened,
+    ROUND(CAST(COUNT(DISTINCT CASE WHEN o.is_opened = 1 THEN o.send_id END) AS DOUBLE) / NULLIF(COUNT(DISTINCT o.send_id), 0), 4) AS notification_open_rate,
+    COUNT(DISTINCT CASE WHEN o.has_tracked_landing = 1 THEN o.send_id END) AS sends_with_tracked_landing,
+    ROUND(CAST(COUNT(DISTINCT CASE WHEN o.has_tracked_landing = 1 THEN o.send_id END) AS DOUBLE) / NULLIF(COUNT(DISTINCT o.send_id), 0), 4) AS tracked_landing_rate,
+    COUNT(DISTINCT CASE WHEN o.has_tracked_landing = 1 AND o.channel_source = 'utm_medium' THEN o.send_id END) AS landings_channel_from_utm_fallback,
+    SUM(o.order_status_checks) AS order_status_checks_in_landing_sessions,
+    COUNT(DISTINCT CONCAT(o.shipment_id, '|', o.message_type)) AS notified_shipment_updates,
+    ROUND(CAST(COUNT(DISTINCT o.send_id) AS DOUBLE) / NULLIF(MAX(t.all_sends), 0), 4) AS share_of_sends
+  FROM send_outcomes o
+  CROSS JOIN totals t
+  GROUP BY o.notification_channel, o.open_signal
+  ORDER BY notifications_sent DESC;
 
+Calculation Notes: |
+  1️⃣ Capture and value set: the governed values are Email, SMS, Push, In-App and Other, resolved from the send record as the system of record (Klaviyo message channel, Braze message or Canvas step channel, Salesforce Marketing Cloud Email Studio / MobileConnect / MobilePush, Shopify customer notification type). Normalisation rolls MMS and short-code or long-code SMS into SMS, mobile app push and web push into Push, in-app messages and content cards into In-App, and WhatsApp, RCS and voice into Other; blank or unmapped provider values resolve to '(not set)' and are reviewed weekly rather than guessed. On web and app events the parameter is populated from a signed channel token on the tracking link (with utm_medium only as a fallback), never inferred from device type or referrer.
+  2️⃣ Delivered, not intended: the value is the channel on which the message was delivered. Fallback orchestration (Braze Intelligent Channel, push-to-SMS fallback when a push token is invalid, email fallback when SMS consent is absent) records the channel actually used, and a notification fanned out to several channels for the same shipment update produces one send row per channel. Shipment-level counts of notified shipments deduplicate on shipment ID plus message type, whereas channel breakdowns count at send grain.
+  3️⃣ Open measurability differs by channel and must be stated on every cross-channel comparison: Email opens exclude machine opens flagged by the ESP (Apple Mail Privacy Protection, security scanner pre-fetch); Push counts direct opens only, not influenced opens; In-App counts a rendered impression; SMS has no open signal, so the SMS open is the first tracked short-link click and those rows are flagged as click-based. Shopify native notifications without an ESP provide sends only, so opens for that stream come solely from tracked clicks through to the order status page.
+  4️⃣ Timing and attribution: opens and clicks are credited to the channel of the originating send and reported against the send date, with engagement counted within 7 days of send. A web or app session started from a notification link inherits the channel for that landing session only (30-minute inactivity timeout), so shipment-tracking-view and order-status-check (page_view with page_type = order_status) events in that session carry it; later sessions are not credited to the notification.
+  5️⃣ Exclusions and base population: test sends, seed and proof lists, internal staff notifications (Shopify staff order notifications) and link pre-fetch clicks from corporate email gateways are excluded. Hard bounces, carrier-filtered SMS and invalid push tokens stay in the send base with their delivery status, because the Delivery Notification Open Rate denominator is the full population of sends from the ESP and SMS send logs, not delivered messages.
+  6️⃣ Boundaries: marketing acquisition channels are out of scope, so Email or SMS as a traffic channel for campaign sessions belongs to Traffic Source, First Touch Channel Grouping and the GA4 Default Channel Grouping, not here. The channel a customer uses to contact the retailer belongs to Support Channel. Message type (order confirmed, shipped, out for delivery, delayed, delivered) is a separate parameter and is never stored as a channel value, and the sending provider (e.g. Klaviyo versus Postscript) is a separate attribute.
+  7️⃣ Value action by journey context: in Post-Purchase Logistics & Fulfillment the channel is captured on order and shipment updates (shipment-notification-open, shipment-delay-notification); in click-and-collect fulfilment it is captured on pickup-ready notifications; in lifecycle engagement it is captured on the general notification_open event. The value set and normalisation rules stay identical across contexts so channel performance can be compared end to end.
 
+Business Use Case: |
+  1️⃣ Customer Service leadership: when 'where is my order' contacts per 100 shipped orders stay above target for two consecutive weeks among orders notified by Email only, request that CRM add SMS for out-for-delivery and delay messages for opted-in customers and track contact deflection against an Email-only holdout for four weeks.
+  2️⃣ CRM and Lifecycle Marketing: when the Push share of shipment update sends falls more than 15% week over week after an app release (token churn or opt-out), confirm the Email and SMS fallback rules fired for affected customers and raise a defect with the mobile team if fallback coverage is incomplete.
+  3️⃣ Operations (Fulfillment and Carrier Management): during a carrier disruption, compare shipment-delay-notification sends and opens by channel against order-status-check volume for the affected lanes, and trigger a second delay notice on the higher-reach channel where opens lag and self-service status checks spike.
+  4️⃣ Finance: at the quarterly messaging budget review, compare SMS and Push cost per delivered notification with the support cost of contacts deflected per channel, and restrict paid SMS to delay and out-for-delivery message types when cost per deflected contact exceeds the blended agent handling cost.
 
+Dependencies:
+  Events: [shipment-notification-open, shipment-delay-notification, shipment-tracking-view, order-status-check]
 
+Source Data: ESP / SMS Send Logs (Klaviyo / Braze / Salesforce Marketing Cloud) + Shopify Customer Notifications + Digital Analytics (GA4)
 
+Report Attributes: |
+  Notification Message Type; Carrier; Shipping Tier; Delivery Region; Device Category; Customer Status; Delivery Status
 
+Dashboard Usage: [Post-Purchase Communications Performance, Delivery Notification Open Rate by Channel, WISMO Contact Deflection, Carrier Delay Communications]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [support-channel, traffic-source, first-touch-channel-grouping, shipping-tier, carrier]
 
+Derived Dimensions: [preferred-notification-channel]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +576,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-14T18:46:19.922+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-14T18:46:28.579+00:00
 
