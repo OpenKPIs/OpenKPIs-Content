@@ -1,19 +1,19 @@
 # Metric: Content Discovery-to-Play Rate
-# Generated: 2026-09-05T16:30:21.433Z
+# Generated: 2026-09-14T08:12:32.330Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Metric Name: Content Discovery-to-Play Rate
-Formula: (COUNT(DISTINCT discovery_event_id WHERE attributed_qualified_play = true) / COUNT(DISTINCT eligible_discovery_event_id)) * 100
+Formula: (COUNT(DISTINCT session × title exposures from view_item_list WHERE discovery_source IN (search, browse, recommendation, editorial) AND tile item_variant NOT IN (trailer, preview), with title = content_series_id falling back to content_id / item_id, WHERE a video_start of the same title (content_series_id falling back to content_id) with play_trigger NOT IN (autoplay, next_episode) AND content_type NOT IN (trailer, preview) occurs in the same session at or after the first exposure and within 30 minutes of it) / COUNT(DISTINCT session × title exposures from view_item_list with the same discovery_source and trailer/preview rules)) × 100
 
 Description: |
-  Measures the percentage of eligible content discovery interactions that lead to a qualified play of the selected title within the same session and a 30-minute attribution window. It indicates how effectively search, browse, recommendation, and editorial discovery experiences convert content interest into actual viewing or listening.
+  Percentage of distinct title discovery exposures (a title surfaced to a viewer in a search, browse, recommendation or editorial list, counted once per session) that are followed by a playback start of that same title in the same session within 30 minutes of the first exposure. It is the streaming industry's browse-to-play conversion measure and shows how well the catalogue presentation, ranking and artwork turn what a viewer is shown into what they actually watch.
 
 Category: Conversion
 
-Tags: [metric]
+Tags: [metric, Media & Streaming: Content Discovery & Playback]
 
-Industry: Media & Streaming
+Industry: Media & Streaming, Media
 
 Priority: High
 
@@ -21,52 +21,674 @@ Core Area: Discovery
 
 Scope: Session
 
-Measure Type: percentage
+Measure Type: Percentage
 
-Aggregation Window: Time based - Daily
+Aggregation Window: Daily, Weekly, Monthly
 
 GA4 Event: |
-  select_content
+  view_item_list
 
 Adobe Event: |
-  select_content
+  content:impression
 
 W3 Data Layer: |
-  {"digitalData":{"event":[{"eventInfo":{"autoplay":false,"event_id":"evt-7f6f51db-3f68-4b81-b21b-d9bbc610d384","play_type":"video_start","content_id":"title-12345","event_name":"select_content","session_id":"1741435200","search_term":null,"content_type":"video","same_session":true,"content_genre":"drama","content_title":"Example Title","play_event_id":"play-9110ea86-55a2-45a2-96dc-138e064214cd","interaction_id":"int-46f3794d-3d20-4ac7-9ce5-47dc01cb6c51","qualified_play":true,"user_pseudo_id":"anon-550e8400-e29b-41d4-a716-446655440000","event_timestamp":"2025-03-08T12:00:00.000Z","source_page_url":"https://www.example.com/home","source_position":3,"content_language":"en-US","content_provider":"Example Studios","discovery_method":"recommendation","interaction_type":"content_selection","attribution_model":"last_eligible_content_selection","consent_analytics":true,"content_series_id":"series-204","discovery_surface":"home","recommendation_id":"rec-78421","source_page_title":"Home","eligibility_reason":"selectable_content_title","source_screen_name":"home","watch_time_seconds":30,"content_entitlement":"subscription","source_component_id":"rail-trending-now","eligible_interaction":true,"play_start_timestamp":"2025-03-08T12:01:00.000Z","search_results_count":null,"time_to_play_seconds":60,"content_season_number":2,"play_position_seconds":0,"source_component_name":"Trending Now","source_component_type":"content_rail","content_episode_number":5,"content_maturity_rating":"TV-14","editorial_collection_id":null,"recommendation_strategy":"trending_personalized","content_duration_seconds":2700,"attribution_window_minutes":30,"attributed_to_interaction_id":"int-46f3794d-3d20-4ac7-9ce5-47dc01cb6c51","qualification_threshold_seconds":30}}]}}
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "view_item_list",
+            "eventAction": "content:impression",
+            "type": "impression"
+          },
+          "category": {
+            "primaryCategory": "content discovery"
+          },
+          "attributes": {
+            "item_list_id": "rail-trending-now",
+            "item_list_name": "Trending Now",
+            "discovery_source": "recommendation",
+            "discovery_surface": "home",
+            "recommendation_model_variant": "ranker-v7-treatment",
+            "items": [
+              {
+                "content_id": "series-204",
+                "content_name": "Example Series",
+                "genre": "drama",
+                "content_type": "series",
+                "position": 3,
+                "content_series_id": "series-204",
+                "entitlement_status": "entitled"
+              },
+              {
+                "content_id": "title-12345",
+                "content_name": "Example Film",
+                "genre": "thriller",
+                "content_type": "film",
+                "position": 4,
+                "content_series_id": null,
+                "entitlement_status": "not_in_plan"
+              }
+            ]
+          }
+        },
+        {
+          "eventInfo": {
+            "eventName": "video_start",
+            "eventAction": "video:start",
+            "type": "playback"
+          },
+          "category": {
+            "primaryCategory": "content playback"
+          },
+          "attributes": {
+            "content_id": "episode-204-02-05",
+            "content_series_id": "series-204",
+            "content_type": "episode",
+            "play_trigger": "user_click",
+            "video_title": "Example Series S2 E5",
+            "video_provider": "example_player",
+            "video_duration": 2700,
+            "discovery_source": "recommendation",
+            "discovery_surface": "home",
+            "item_list_id": "rail-trending-now"
+          }
+        }
+      ]
+    }
+  }
 
 GA4 Data Layer: |
-  {"event":"select_content","item_id":"title-12345","autoplay":false,"event_id":"evt-7f6f51db-3f68-4b81-b21b-d9bbc610d384","play_type":"video_start","content_id":"title-12345","session_id":"1741435200","search_term":null,"content_type":"video","same_session":true,"content_genre":"drama","content_title":"Example Title","play_event_id":"play-9110ea86-55a2-45a2-96dc-138e064214cd","interaction_id":"int-46f3794d-3d20-4ac7-9ce5-47dc01cb6c51","qualified_play":true,"user_pseudo_id":"anon-550e8400-e29b-41d4-a716-446655440000","event_timestamp":"2025-03-08T12:00:00.000Z","source_page_url":"https://www.example.com/home","source_position":3,"content_language":"en-US","content_provider":"Example Studios","discovery_method":"recommendation","interaction_type":"content_selection","attribution_model":"last_eligible_content_selection","consent_analytics":true,"content_series_id":"series-204","discovery_surface":"home","recommendation_id":"rec-78421","source_page_title":"Home","eligibility_reason":"selectable_content_title","source_screen_name":"home","watch_time_seconds":30,"content_entitlement":"subscription","source_component_id":"rail-trending-now","eligible_interaction":true,"play_start_timestamp":"2025-03-08T12:01:00.000Z","search_results_count":null,"time_to_play_seconds":60,"content_season_number":2,"play_position_seconds":0,"source_component_name":"Trending Now","source_component_type":"content_rail","content_episode_number":5,"content_maturity_rating":"TV-14","editorial_collection_id":null,"recommendation_strategy":"trending_personalized","content_duration_seconds":2700,"attribution_window_minutes":30,"attributed_to_interaction_id":"int-46f3794d-3d20-4ac7-9ce5-47dc01cb6c51","qualification_threshold_seconds":30}
+  {
+    "view_item_list": {
+      "event": "view_item_list",
+      "discovery_source": "recommendation",
+      "discovery_surface": "home",
+      "recommendation_model_variant": "ranker-v7-treatment",
+      "ecommerce": {
+        "item_list_id": "rail-trending-now",
+        "item_list_name": "Trending Now",
+        "items": [
+          {
+            "item_id": "series-204",
+            "item_name": "Example Series",
+            "item_category": "drama",
+            "item_variant": "series",
+            "index": 3,
+            "content_series_id": "series-204",
+            "entitlement_status": "entitled"
+          },
+          {
+            "item_id": "title-12345",
+            "item_name": "Example Film",
+            "item_category": "thriller",
+            "item_variant": "film",
+            "index": 4,
+            "content_series_id": null,
+            "entitlement_status": "not_in_plan"
+          }
+        ]
+      }
+    },
+    "video_start": {
+      "event": "video_start",
+      "content_id": "episode-204-02-05",
+      "content_series_id": "series-204",
+      "content_type": "episode",
+      "play_trigger": "user_click",
+      "video_title": "Example Series S2 E5",
+      "video_provider": "example_player",
+      "video_duration": 2700,
+      "discovery_source": "recommendation",
+      "discovery_surface": "home",
+      "item_list_id": "rail-trending-now"
+    }
+  }
 
 Adobe Client Data Layer: |
-  {"event":"select_content","eventInfo":{"autoplay":false,"event_id":"evt-7f6f51db-3f68-4b81-b21b-d9bbc610d384","play_type":"video_start","content_id":"title-12345","event_name":"select_content","session_id":"1741435200","search_term":null,"content_type":"video","same_session":true,"content_genre":"drama","content_title":"Example Title","play_event_id":"play-9110ea86-55a2-45a2-96dc-138e064214cd","interaction_id":"int-46f3794d-3d20-4ac7-9ce5-47dc01cb6c51","qualified_play":true,"user_pseudo_id":"anon-550e8400-e29b-41d4-a716-446655440000","event_timestamp":"2025-03-08T12:00:00.000Z","source_page_url":"https://www.example.com/home","source_position":3,"content_language":"en-US","content_provider":"Example Studios","discovery_method":"recommendation","interaction_type":"content_selection","attribution_model":"last_eligible_content_selection","consent_analytics":true,"content_series_id":"series-204","discovery_surface":"home","recommendation_id":"rec-78421","source_page_title":"Home","eligibility_reason":"selectable_content_title","source_screen_name":"home","watch_time_seconds":30,"content_entitlement":"subscription","source_component_id":"rail-trending-now","eligible_interaction":true,"play_start_timestamp":"2025-03-08T12:01:00.000Z","search_results_count":null,"time_to_play_seconds":60,"content_season_number":2,"play_position_seconds":0,"source_component_name":"Trending Now","source_component_type":"content_rail","content_episode_number":5,"content_maturity_rating":"TV-14","editorial_collection_id":null,"recommendation_strategy":"trending_personalized","content_duration_seconds":2700,"attribution_window_minutes":30,"attributed_to_interaction_id":"int-46f3794d-3d20-4ac7-9ce5-47dc01cb6c51","qualification_threshold_seconds":30}}
+  {
+    "content:impression": {
+      "event": "content:impression",
+      "eventInfo": {
+        "path": "content.list"
+      },
+      "content": {
+        "list": {
+          "item_list_id": "rail-trending-now",
+          "item_list_name": "Trending Now",
+          "discovery_source": "recommendation",
+          "discovery_surface": "home",
+          "recommendation_model_variant": "ranker-v7-treatment"
+        },
+        "items": [
+          {
+            "content_id": "series-204",
+            "content_name": "Example Series",
+            "genre": "drama",
+            "content_type": "series",
+            "position": 3,
+            "content_series_id": "series-204",
+            "entitlement_status": "entitled"
+          },
+          {
+            "content_id": "title-12345",
+            "content_name": "Example Film",
+            "genre": "thriller",
+            "content_type": "film",
+            "position": 4,
+            "content_series_id": null,
+            "entitlement_status": "not_in_plan"
+          }
+        ]
+      }
+    },
+    "video:start": {
+      "event": "video:start",
+      "eventInfo": {
+        "path": "media.playback"
+      },
+      "media": {
+        "playback": {
+          "content_id": "episode-204-02-05",
+          "content_series_id": "series-204",
+          "content_type": "episode",
+          "play_trigger": "user_click",
+          "video_title": "Example Series S2 E5",
+          "video_provider": "example_player",
+          "video_duration": 2700,
+          "discovery_source": "recommendation",
+          "discovery_surface": "home",
+          "item_list_id": "rail-trending-now"
+        }
+      }
+    }
+  }
 
 XDM Mapping: |
-  {"web":{"webInteraction":{"URL":"https://www.example.com/home","name":"select_content","type":"other","region":"Trending Now","linkClicks":{"value":1}},"webPageDetails":{"URL":"https://www.example.com/home","name":"Home"}},"eventType":"web.webinteraction.linkClicks","timestamp":"2025-03-08T12:00:00.000Z","identityMap":{"ECID":[{"id":"anon-550e8400-e29b-41d4-a716-446655440000","primary":true,"authenticatedState":"ambiguous"}]},"eventMergeId":"evt-7f6f51db-3f68-4b81-b21b-d9bbc610d384","_contentDiscovery":{"autoplay":false,"event_id":"evt-7f6f51db-3f68-4b81-b21b-d9bbc610d384","play_type":"video_start","content_id":"title-12345","event_name":"select_content","session_id":"1741435200","search_term":null,"content_type":"video","same_session":true,"content_genre":"drama","content_title":"Example Title","play_event_id":"play-9110ea86-55a2-45a2-96dc-138e064214cd","interaction_id":"int-46f3794d-3d20-4ac7-9ce5-47dc01cb6c51","qualified_play":true,"user_pseudo_id":"anon-550e8400-e29b-41d4-a716-446655440000","event_timestamp":"2025-03-08T12:00:00.000Z","source_page_url":"https://www.example.com/home","source_position":3,"content_language":"en-US","content_provider":"Example Studios","discovery_method":"recommendation","interaction_type":"content_selection","attribution_model":"last_eligible_content_selection","consent_analytics":true,"content_series_id":"series-204","discovery_surface":"home","recommendation_id":"rec-78421","source_page_title":"Home","eligibility_reason":"selectable_content_title","source_screen_name":"home","watch_time_seconds":30,"content_entitlement":"subscription","source_component_id":"rail-trending-now","eligible_interaction":true,"play_start_timestamp":"2025-03-08T12:01:00.000Z","search_results_count":null,"time_to_play_seconds":60,"content_season_number":2,"play_position_seconds":0,"source_component_name":"Trending Now","source_component_type":"content_rail","content_episode_number":5,"content_maturity_rating":"TV-14","editorial_collection_id":null,"recommendation_strategy":"trending_personalized","content_duration_seconds":2700,"attribution_window_minutes":30,"attributed_to_interaction_id":"int-46f3794d-3d20-4ac7-9ce5-47dc01cb6c51","qualification_threshold_seconds":30}}
+  {
+    "view_item_list": {
+      "eventType": "commerce.productListViews",
+      "commerce": {
+        "productListViews": {
+          "value": 1
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "series-204",
+          "name": "Example Series",
+          "productCategories": [
+            {
+              "categoryName": "drama"
+            }
+          ],
+          "_experience": {
+            "analytics": {
+              "customDimensions": {
+                "eVars": {
+                  "eVar11": "series",
+                  "eVar12": "3",
+                  "eVar13": "series-204",
+                  "eVar14": "entitled"
+                }
+              }
+            }
+          }
+        },
+        {
+          "SKU": "title-12345",
+          "name": "Example Film",
+          "productCategories": [
+            {
+              "categoryName": "thriller"
+            }
+          ],
+          "_experience": {
+            "analytics": {
+              "customDimensions": {
+                "eVars": {
+                  "eVar11": "film",
+                  "eVar12": "4",
+                  "eVar14": "not_in_plan"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "_tenant": {
+        "discovery": {
+          "listId": "rail-trending-now",
+          "listName": "Trending Now",
+          "discoverySource": "recommendation",
+          "discoverySurface": "home",
+          "recommendationModelVariant": "ranker-v7-treatment"
+        }
+      }
+    },
+    "video_start": {
+      "eventType": "media.sessionStart",
+      "mediaCollection": {
+        "playhead": 0,
+        "sessionDetails": {
+          "name": "episode-204-02-05",
+          "friendlyName": "Example Series S2 E5",
+          "length": 2700,
+          "contentType": "vod",
+          "streamType": "video",
+          "playerName": "example_player"
+        }
+      },
+      "mediaTimed": {
+        "primaryAssetReference": {
+          "_id": "episode-204-02-05"
+        },
+        "starts": {
+          "value": 1
+        }
+      },
+      "_tenant": {
+        "playback": {
+          "contentId": "episode-204-02-05",
+          "contentSeriesId": "series-204",
+          "contentType": "episode",
+          "playTrigger": "user_click",
+          "discoverySource": "recommendation",
+          "discoverySurface": "home",
+          "listId": "rail-trending-now"
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Content Discovery-to-Play Rate = session x title exposures followed by a user-initiated video_start of the same title within 30 minutes / all eligible session x title exposures x 100
+  -- Set before running: reporting time zone and reporting date range (end the range at least 3 days ago so late video_start hits have landed)
+  DECLARE reporting_tz STRING DEFAULT 'America/New_York';
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 30 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 3 DAY);
+  DECLARE play_window_micros INT64 DEFAULT 30 * 60 * 1000000;
+  
+  WITH base AS (
+    SELECT
+      user_pseudo_id,
+      event_name,
+      event_timestamp,
+      COALESCE(device.category, '(not set)') AS device_cat,
+      items,
+      (SELECT ep.value.int_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'ga_session_id') AS ga_session_id,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'traffic_type') AS traffic_type,
+      (SELECT LOWER(ep.value.string_value) FROM UNNEST(event_params) AS ep WHERE ep.key = 'discovery_source') AS discovery_source,
+      (SELECT NULLIF(COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), '') FROM UNNEST(event_params) AS ep WHERE ep.key = 'content_id') AS content_id,
+      (SELECT NULLIF(COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), '') FROM UNNEST(event_params) AS ep WHERE ep.key = 'content_series_id') AS content_series_id,
+      (SELECT LOWER(ep.value.string_value) FROM UNNEST(event_params) AS ep WHERE ep.key = 'content_type') AS content_type,
+      (SELECT LOWER(ep.value.string_value) FROM UNNEST(event_params) AS ep WHERE ep.key = 'play_trigger') AS play_trigger
+    FROM `your-project.analytics_123456789.events_*`
+    -- Two extra export days on each side cover time zone shifts and plays that land after midnight
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL 2 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL 2 DAY))
+      AND event_name IN ('view_item_list', 'video_start')
+  ),
+  scoped AS (
+    SELECT
+      *,
+      CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING)) AS session_key
+    FROM base
+    WHERE user_pseudo_id IS NOT NULL
+      AND ga_session_id IS NOT NULL
+      -- Internal traffic flagged by the GA4 internal traffic rule (office IP ranges); known bots are removed by GA4 at collection
+      AND COALESCE(traffic_type, '') <> 'internal'
+  ),
+  exposure_items AS (
+    -- One row per title tile impression; episodes roll up to the parent series through content_series_id
+    SELECT
+      s.session_key,
+      s.event_timestamp,
+      s.device_cat,
+      s.discovery_source,
+      COALESCE(
+        (SELECT NULLIF(COALESCE(ip.value.string_value, CAST(ip.value.int_value AS STRING)), '') FROM UNNEST(i.item_params) AS ip WHERE ip.key = 'content_series_id'),
+        i.item_id
+      ) AS title_key,
+      (SELECT LOWER(ip.value.string_value) FROM UNNEST(i.item_params) AS ip WHERE ip.key = 'entitlement_status') AS entitlement_status
+    FROM scoped AS s
+    CROSS JOIN UNNEST(s.items) AS i
+    WHERE s.event_name = 'view_item_list'
+      -- Discovery surfaces only: hero billboard and continue-watching sources are outside this list
+      AND s.discovery_source IN ('search', 'browse', 'recommendation', 'editorial')
+      AND COALESCE(LOWER(i.item_variant), '') NOT IN ('trailer', 'preview')
+      AND i.item_id IS NOT NULL
+  ),
+  exposures AS (
+    -- Denominator grain: distinct session x title, timestamped at the first impression in the session
+    SELECT
+      session_key,
+      title_key,
+      MIN(event_timestamp) AS first_exposure_ts,
+      ARRAY_AGG(STRUCT(device_cat, entitlement_status) ORDER BY event_timestamp LIMIT 1)[OFFSET(0)] AS first_ctx
+    FROM exposure_items
+    GROUP BY session_key, title_key
+  ),
+  plays AS (
+    -- User-initiated main-content starts only
+    SELECT
+      session_key,
+      COALESCE(content_series_id, content_id) AS title_key,
+      event_timestamp AS play_ts
+    FROM scoped
+    WHERE event_name = 'video_start'
+      AND COALESCE(play_trigger, '') NOT IN ('autoplay', 'next_episode')
+      AND COALESCE(content_type, '') NOT IN ('trailer', 'preview')
+      AND COALESCE(content_series_id, content_id) IS NOT NULL
+  ),
+  first_play AS (
+    -- Numerator: first qualifying start of the same title in the same session, from the first exposure up to 30 minutes later; repeat starts count once
+    SELECT
+      e.session_key,
+      e.title_key,
+      MIN(p.play_ts) AS first_play_ts
+    FROM exposures AS e
+    JOIN plays AS p
+      ON p.session_key = e.session_key
+     AND p.title_key = e.title_key
+     AND p.play_ts >= e.first_exposure_ts
+     AND p.play_ts <= e.first_exposure_ts + play_window_micros
+    GROUP BY e.session_key, e.title_key
+  ),
+  title_level AS (
+    SELECT
+      e.session_key,
+      e.title_key,
+      DATE(TIMESTAMP_MICROS(e.first_exposure_ts), reporting_tz) AS report_date,
+      e.first_ctx.device_cat AS device_cat,
+      e.first_ctx.entitlement_status AS entitlement_status,
+      fp.first_play_ts
+    FROM exposures AS e
+    LEFT JOIN first_play AS fp
+      ON fp.session_key = e.session_key
+     AND fp.title_key = e.title_key
+  ),
+  credited_source AS (
+    -- Breakdown credit: the last discovery source that exposed the title at or before the converting play
+    SELECT
+      t.session_key,
+      t.title_key,
+      ARRAY_AGG(x.discovery_source ORDER BY x.event_timestamp DESC LIMIT 1)[OFFSET(0)] AS credited_discovery_source
+    FROM title_level AS t
+    JOIN exposure_items AS x
+      ON x.session_key = t.session_key
+     AND x.title_key = t.title_key
+    WHERE t.first_play_ts IS NOT NULL
+      AND x.event_timestamp <= t.first_play_ts
+    GROUP BY t.session_key, t.title_key
+  ),
+  source_level AS (
+    SELECT DISTINCT
+      session_key,
+      title_key,
+      discovery_source
+    FROM exposure_items
+  ),
+  unified AS (
+    -- Total rows: session x title grain
+    SELECT
+      report_date,
+      'all_sources' AS discovery_source,
+      device_cat,
+      entitlement_status,
+      CONCAT(session_key, '|', title_key) AS exposure_key,
+      first_play_ts IS NOT NULL AS converted
+    FROM title_level
+    UNION ALL
+    -- Breakdown rows: session x title x discovery source grain, so they do not sum to the total
+    SELECT
+      t.report_date,
+      s.discovery_source,
+      t.device_cat,
+      t.entitlement_status,
+      CONCAT(s.session_key, '|', s.title_key, '|', s.discovery_source) AS exposure_key,
+      COALESCE(c.credited_discovery_source = s.discovery_source, FALSE) AS converted
+    FROM source_level AS s
+    JOIN title_level AS t
+      ON t.session_key = s.session_key
+     AND t.title_key = s.title_key
+    LEFT JOIN credited_source AS c
+      ON c.session_key = s.session_key
+     AND c.title_key = s.title_key
+  )
+  SELECT
+    report_date,
+    discovery_source,
+    IF(GROUPING(device_cat) = 1, 'all_devices', device_cat) AS device_category,
+    COUNT(DISTINCT exposure_key) AS exposures,
+    COUNT(DISTINCT IF(converted, exposure_key, NULL)) AS converted_exposures,
+    ROUND(SAFE_DIVIDE(COUNT(DISTINCT IF(converted, exposure_key, NULL)), COUNT(DISTINCT exposure_key)) * 100, 2) AS content_discovery_to_play_rate,
+    COUNT(DISTINCT IF(entitlement_status = 'entitled', exposure_key, NULL)) AS entitled_exposures,
+    COUNT(DISTINCT IF(converted AND entitlement_status = 'entitled', exposure_key, NULL)) AS entitled_converted_exposures,
+    ROUND(SAFE_DIVIDE(COUNT(DISTINCT IF(converted AND entitlement_status = 'entitled', exposure_key, NULL)), COUNT(DISTINCT IF(entitlement_status = 'entitled', exposure_key, NULL))) * 100, 2) AS entitled_discovery_to_play_rate
+  FROM unified
+  WHERE report_date BETWEEN start_date AND end_date
+  GROUP BY GROUPING SETS ((report_date, discovery_source), (report_date, discovery_source, device_cat))
+  ORDER BY 1, 2, 3;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Content Discovery-to-Play Rate = session x title exposures followed by a user-initiated media.sessionStart of the same title within 30 minutes / all eligible session x title exposures x 100
+  -- Set before running: dataset table name (web_experience_events = your Web SDK experience event dataset table), query parameters $start_date and $end_date (YYYY-MM-DD, end at least 3 days ago) and $reporting_tz (for example America/New_York)
+  WITH events AS (
+    -- All experience events: sessionization runs before any event-type filter so playback pings keep sessions alive
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      timestamp,
+      eventType,
+      environment.ipV4 AS ip_v4,
+      environment.browserDetails.userAgent AS user_agent,
+      device.type AS device_type,
+      productListItems AS product_list_items,
+      _tenant.discovery.discoverySource AS discovery_source,
+      mediaTimed.primaryAssetReference._id AS media_asset_id,
+      _tenant.playback.contentId AS play_content_id,
+      _tenant.playback.contentSeriesId AS play_series_id,
+      _tenant.playback.contentType AS play_content_type,
+      _tenant.playback.playTrigger AS play_trigger
+    FROM web_experience_events
+    -- Two extra days on each side cover time zone shifts and plays that land after midnight
+    WHERE timestamp >= to_timestamp(date_sub(to_date('$start_date'), 2))
+      AND timestamp < to_timestamp(date_add(to_date('$end_date'), 3))
+      AND identityMap['ECID'][0].id IS NOT NULL
+  ),
+  sessionized AS (
+    SELECT
+      *,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY ecid
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM events
+  ),
+  scoped AS (
+    SELECT
+      *,
+      CONCAT(ecid, '-', CAST(session.num AS STRING)) AS session_key
+    FROM sessionized
+    -- Internal traffic: same office IP ranges as the GA4 internal traffic rule (use your own office IP ranges)
+    WHERE COALESCE(ip_v4, '') NOT LIKE '203.0.113.%'
+      -- Known bots and crawlers: Web SDK experience events are not bot-filtered by default
+      AND NOT (LOWER(COALESCE(user_agent, '')) RLIKE 'bot|crawl|spider|headless')
+  ),
+  exposure_items AS (
+    -- One row per title tile impression; episodes roll up to the parent series through eVar13 content_series_id
+    SELECT
+      s.session_key,
+      s.timestamp AS event_ts,
+      COALESCE(s.device_type, '(not set)') AS device_cat,
+      LOWER(s.discovery_source) AS discovery_source,
+      COALESCE(NULLIF(pli._experience.analytics.customDimensions.eVars.eVar13, ''), pli.SKU) AS title_key,
+      LOWER(pli._experience.analytics.customDimensions.eVars.eVar14) AS entitlement_status
+    FROM scoped AS s
+    LATERAL VIEW explode(s.product_list_items) pli_table AS pli
+    WHERE s.eventType = 'commerce.productListViews'
+      -- Discovery surfaces only: hero billboard and continue-watching sources are outside this list
+      AND LOWER(s.discovery_source) IN ('search', 'browse', 'recommendation', 'editorial')
+      AND COALESCE(LOWER(pli._experience.analytics.customDimensions.eVars.eVar11), '') NOT IN ('trailer', 'preview')
+      AND pli.SKU IS NOT NULL
+  ),
+  exposures AS (
+    -- Denominator grain: distinct session x title, timestamped at the first impression in the session
+    SELECT
+      session_key,
+      title_key,
+      MIN(event_ts) AS first_exposure_ts,
+      min_by(device_cat, event_ts) AS device_cat,
+      min_by(entitlement_status, event_ts) AS entitlement_status
+    FROM exposure_items
+    GROUP BY session_key, title_key
+  ),
+  plays AS (
+    -- User-initiated main-content starts only
+    SELECT
+      session_key,
+      COALESCE(NULLIF(play_series_id, ''), NULLIF(play_content_id, ''), media_asset_id) AS title_key,
+      timestamp AS play_ts
+    FROM scoped
+    WHERE eventType = 'media.sessionStart'
+      AND COALESCE(LOWER(play_trigger), '') NOT IN ('autoplay', 'next_episode')
+      AND COALESCE(LOWER(play_content_type), '') NOT IN ('trailer', 'preview')
+      AND COALESCE(NULLIF(play_series_id, ''), NULLIF(play_content_id, ''), media_asset_id) IS NOT NULL
+  ),
+  first_play AS (
+    -- Numerator: first qualifying start of the same title in the same session, from the first exposure up to 30 minutes later; repeat starts count once
+    SELECT
+      e.session_key,
+      e.title_key,
+      MIN(p.play_ts) AS first_play_ts
+    FROM exposures AS e
+    JOIN plays AS p
+      ON p.session_key = e.session_key
+     AND p.title_key = e.title_key
+     AND p.play_ts >= e.first_exposure_ts
+     AND p.play_ts <= e.first_exposure_ts + INTERVAL 30 MINUTES
+    GROUP BY e.session_key, e.title_key
+  ),
+  title_level AS (
+    SELECT
+      e.session_key,
+      e.title_key,
+      to_date(from_utc_timestamp(e.first_exposure_ts, '$reporting_tz')) AS report_date,
+      e.device_cat,
+      e.entitlement_status,
+      fp.first_play_ts
+    FROM exposures AS e
+    LEFT JOIN first_play AS fp
+      ON fp.session_key = e.session_key
+     AND fp.title_key = e.title_key
+  ),
+  credited_source AS (
+    -- Breakdown credit: the last discovery source that exposed the title at or before the converting play
+    SELECT
+      t.session_key,
+      t.title_key,
+      max_by(x.discovery_source, x.event_ts) AS credited_discovery_source
+    FROM title_level AS t
+    JOIN exposure_items AS x
+      ON x.session_key = t.session_key
+     AND x.title_key = t.title_key
+    WHERE t.first_play_ts IS NOT NULL
+      AND x.event_ts <= t.first_play_ts
+    GROUP BY t.session_key, t.title_key
+  ),
+  source_level AS (
+    SELECT DISTINCT
+      session_key,
+      title_key,
+      discovery_source
+    FROM exposure_items
+  ),
+  unified AS (
+    -- Total rows: session x title grain
+    SELECT
+      report_date,
+      'all_sources' AS discovery_source,
+      device_cat,
+      entitlement_status,
+      CONCAT(session_key, '|', title_key) AS exposure_key,
+      first_play_ts IS NOT NULL AS converted
+    FROM title_level
+    UNION ALL
+    -- Breakdown rows: session x title x discovery source grain, so they do not sum to the total
+    SELECT
+      t.report_date,
+      s.discovery_source,
+      t.device_cat,
+      t.entitlement_status,
+      CONCAT(s.session_key, '|', s.title_key, '|', s.discovery_source) AS exposure_key,
+      COALESCE(c.credited_discovery_source = s.discovery_source, false) AS converted
+    FROM source_level AS s
+    JOIN title_level AS t
+      ON t.session_key = s.session_key
+     AND t.title_key = s.title_key
+    LEFT JOIN credited_source AS c
+      ON c.session_key = s.session_key
+     AND c.title_key = s.title_key
+  )
+  SELECT
+    report_date,
+    discovery_source,
+    CASE WHEN grouping(device_cat) = 1 THEN 'all_devices' ELSE device_cat END AS device_category,
+    COUNT(DISTINCT exposure_key) AS exposures,
+    COUNT(DISTINCT CASE WHEN converted THEN exposure_key END) AS converted_exposures,
+    ROUND(COUNT(DISTINCT CASE WHEN converted THEN exposure_key END) * 100.0 / NULLIF(COUNT(DISTINCT exposure_key), 0), 2) AS content_discovery_to_play_rate,
+    COUNT(DISTINCT CASE WHEN entitlement_status = 'entitled' THEN exposure_key END) AS entitled_exposures,
+    COUNT(DISTINCT CASE WHEN converted AND entitlement_status = 'entitled' THEN exposure_key END) AS entitled_converted_exposures,
+    ROUND(COUNT(DISTINCT CASE WHEN converted AND entitlement_status = 'entitled' THEN exposure_key END) * 100.0 / NULLIF(COUNT(DISTINCT CASE WHEN entitlement_status = 'entitled' THEN exposure_key END), 0), 2) AS entitled_discovery_to_play_rate
+  FROM unified
+  WHERE report_date BETWEEN to_date('$start_date') AND to_date('$end_date')
+  GROUP BY report_date, discovery_source, device_cat
+    GROUPING SETS ((report_date, discovery_source), (report_date, discovery_source, device_cat))
+  ORDER BY 1, 2, 3;
 
 Calculation Notes: |
-  Use discovery_event_id as the denominator grain. An eligible discovery event is an intentional selection of a playable content item from an approved discovery surface, including search results, browse or category rails, recommendations, editorial collections, watchlists, and promotional content modules. Attribute a conversion when the same session produces a qualified play for the selected content_id within 30 minutes after the discovery event. A qualified play requires successful playback initiation and at least 30 seconds of continuous or cumulative playback; for assets shorter than 30 seconds, require at least 90% completion. For live content, require at least 30 seconds of playback. Count each discovery_event_id no more than once, even when it produces multiple play events. If multiple eligible discovery events for the same content precede one qualified play, credit only the most recent eligible event. Exclude autoplay, background playback, previews, trailers when the selected item was a full program, bot or test traffic, internal QA accounts, unsupported content, entitlement-blocked selections, and events missing session_id, discovery_event_id, content_id, event timestamp, or discovery source. Sessions expire after 30 minutes of inactivity unless a platform-standard authenticated session boundary ends earlier. Calculate numerator and denominator using the discovery event date in the reporting timezone. Reprocess late playback events for 72 hours.
+  1️⃣ Grain: one exposure = one distinct session_id × title pair, timestamped at the first view_item_list impression of that title in the session; the title key is content_series_id, falling back to content_id (item_id in GA4, SKU in Adobe) for films, so episode and season tiles roll up to the parent series and the same title shown on several rails collapses to a single exposure. Trailer and preview tiles (item_variant / content_type = trailer or preview) are excluded from the denominator. When broken down by discovery_source or rail, the grain becomes session × title × surface and credit goes to the last surface exposed before the play, so breakdown rows do not sum to the total.
+  2️⃣ Denominator eligibility: only viewable impressions count, so view_item_list (GA4) / content:impression (Adobe) must fire only when a tile meets the 50%/1s rule (at least 50% of tile pixels in view for at least 1 second on web and mobile; on connected TV, the tile rendered in a row that received focus); lazy-loaded tiles never scrolled into view send nothing, and the queries count every impression sent. Allowed discovery_source values are search, browse, recommendation, editorial, hero, continue_watching and deep_link; only search, browse, recommendation and editorial count, while hero (billboards that play previews), continue_watching (measures resumption rather than discovery) and deep_link are excluded.
+  3️⃣ Numerator: an exposure converts when a user-initiated video_start (media.sessionStart in Adobe; play_trigger such as user_click, never autoplay or next_episode) for the same title key fires on the first rendered frame of main content in the same session, at or after the first exposure and no later than 30 minutes after it. The navigation path between tile and play (select_content / select_item, a view_item detail page or a tile play button) is not checked: the exposure-before-start and same-session rules plus the user-initiated play_trigger define the conversion, and deep-link, push or email starts without an in-app exposure never convert because no exposure exists. Multiple starts against one exposure count once; a video_start that precedes the first exposure never converts it.
+  4️⃣ Exclusions: autoplay and auto-advance starts (play_trigger = autoplay or next_episode), trailer and preview playback (content_type = trailer or preview), internal traffic identified by network (GA4 traffic_type = internal set by the internal traffic IP rule; in AEP the same office IP ranges on environment.ipV4), and bots (removed by the GA4 known-bot filter at collection; in AEP by a bot, crawl, spider or headless user-agent pattern).
+  5️⃣ Session rules: 30-minute inactivity timeout (GA4 default); on connected TV and mobile, playback heartbeats keep the session alive, and an app backgrounded for more than 30 minutes starts a new session. An exposure belongs to the reporting-timezone date of its first impression even if the play lands after midnight, and late-arriving video_start hits are accepted for 72 hours before the day is closed and restated.
+  6️⃣ Entitlement and failures: exposures to titles the viewer cannot play (not in plan, rental not purchased, geo-restricted) remain in the global denominator; publish a separate entitled-only cut. Play attempts that fail before the first frame emit no video_start and stay unconverted, so read the rate alongside Playback Failure Rate before attributing a drop to discovery quality.
+  7️⃣ Keep distinct from Click-to-Play Rate (select_content denominator) and Content Detail-to-Play Rate (view_item denominator): impression-based rates run far lower and are sensitive to tile density, so annotate the trend whenever row count, tiles per row or page layout changes, and suppress rail-level values below 1,000 daily exposures.
 
 Business Use Case: |
-  The Product organization compares this rate by discovery source, device, market, subscription tier, and content rail to identify experiences that generate interest but fail to initiate playback. For example, if a home-page recommendation rail has high selection volume but a materially lower discovery-to-play rate than comparable rails, Product can investigate entitlement messaging, detail-page friction, playback errors, ranking quality, or misleading artwork and then prioritize design, metadata, or recommendation-model changes.
+  1️⃣ Personalisation & Recommendations team: when a ranking-model variant in an A/B test shows a statistically significant drop in the rate on the home recommendation rails versus control, they stop the traffic ramp and roll back to the control model before full release.
+  2️⃣ Content Programming: when a newly launched title sits in the bottom decile of its genre for the rate during its first 72 hours despite heavy exposure, the programming lead commissions an artwork and synopsis refresh and moves the title to a higher-intent editorial collection.
+  3️⃣ Search product team: when the search-surface rate falls week over week after a search index or relevance release, they audit top no-play queries, add synonyms and title aliases, and re-rank results before the next release.
+  4️⃣ Product (TV & Devices): when one device platform or app version trails the cross-platform rate by a sustained margin, the product manager opens a navigation or player-launch defect with the platform engineering squad and gates the next app release on closing the gap.
 
+Dependencies:
+  Events: [view-item-list, video-start]
+  Metrics: [item-list-views, content-start-count]
+  Dimensions: [session-id, content-id, discovery-source, play-trigger, device-category]
+  KPIs: [session]
 
-Source Data: Digital Analytics
+Source Data: Digital Analytics (GA4)
 
 Report Attributes: |
-  ["Discovery Source","Discovery Surface","Discovery Placement","Content ID","Content Title","Content Type","Genre","Device Type","Application Platform","Operating System","Market","Subscription Tier","Authentication Status","Recommendation Algorithm","Editorial Collection","New versus Returning User","Playback Outcome","Event Date"]
+  Discovery Source; Discovery Surface; Rail Name; Tile Position; Content Type; Genre; Device Category; App Platform; App Version; Country; Subscription Tier; Recommendation Model Variant; New vs Returning User
 
-Dashboard Usage: [Content Discovery Performance Dashboard, Streaming Conversion Funnel, Search and Recommendations Dashboard, Home Experience Performance, Playback Health and Conversion Dashboard, Executive Product KPI Scorecard]
+Dashboard Usage: [Content Discovery Performance, Home Experience Performance, Search and Recommendations Performance, Streaming Engagement Funnel, Title Launch Scorecard]
 
 Segment Eligibility: |
   true
 
-Related Metrics: [Content Discovery Interactions, Qualified Plays, Play Start Rate, Search-to-Play Rate, Recommendation-to-Play Rate, Browse-to-Play Rate, Content Detail-to-Play Rate, Time to Play, Playback Failure Rate]
+Related Metrics: [click-to-play-rate, content-detail-to-play-rate, item-list-views, content-start-count, time-to-first-play, playback-failure-rate]
 
-Derived KPIs: [Discovery Conversion Index, Discovery Source Effectiveness, Incremental Plays from Discovery, Discovery-to-Engaged-View Rate, Discovery Funnel Completion Rate]
+Derived KPIs: [search-to-play-rate, recommendation-take-rate, browse-abandonment-rate, session-play-rate, content-discovery-success-rate]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -78,4 +700,5 @@ Created At: 2026-09-05T16:30:20.145035+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-14T08:12:31.905+00:00
 
