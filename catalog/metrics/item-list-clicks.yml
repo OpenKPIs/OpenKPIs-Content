@@ -1,7 +1,7 @@
 # Metric: Item List Clicks
-# Generated: 2026-09-14T06:46:13.041Z
+# Generated: 2026-09-14T06:46:21.481Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Item List Clicks
 Formula: COUNT(select_item events), after 2-second duplicate collapse and standard traffic exclusions; item scope = COUNT(UNNEST(items)) within select_item
@@ -11,30 +11,361 @@ Description: |
 
 Category: Engagement
 
+Tags: [metric, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP), select_item, merchandising, product lists]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  select_item
 
+Adobe Event: |
+  select_item
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "category:womens-running-shoes",
+        "pageType": "category"
+      }
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "select_item",
+          "eventAction": "select_item",
+          "type": "click"
+        },
+        "category": {
+          "primaryCategory": "ecommerce"
+        },
+        "attributes": {
+          "itemListId": "plp_womens_running_shoes",
+          "itemListName": "Category Grid - Womens Running Shoes"
+        }
+      }
+    ],
+    "product": [
+      {
+        "productInfo": {
+          "productID": "SKU-48213",
+          "productName": "Aero Glide 3 Running Shoe"
+        },
+        "category": {
+          "primaryCategory": "Shoes/Running"
+        },
+        "price": {
+          "basePrice": 129.99,
+          "currency": "USD"
+        },
+        "attributes": {
+          "itemListId": "plp_womens_running_shoes",
+          "itemListName": "Category Grid - Womens Running Shoes",
+          "index": 5
+        }
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "select_item",
+    "ecommerce": {
+      "item_list_id": "plp_womens_running_shoes",
+      "item_list_name": "Category Grid - Womens Running Shoes",
+      "items": [
+        {
+          "item_id": "SKU-48213",
+          "item_name": "Aero Glide 3 Running Shoe",
+          "index": 5,
+          "item_category": "Shoes",
+          "item_category2": "Running",
+          "item_brand": "Aero",
+          "item_list_id": "plp_womens_running_shoes",
+          "item_list_name": "Category Grid - Womens Running Shoes",
+          "price": 129.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "select_item",
+    "eventInfo": {
+      "eventName": "select_item",
+      "itemListId": "plp_womens_running_shoes",
+      "itemListName": "Category Grid - Womens Running Shoes"
+    },
+    "ecommerce": {
+      "itemListId": "plp_womens_running_shoes",
+      "itemListName": "Category Grid - Womens Running Shoes",
+      "items": [
+        {
+          "itemId": "SKU-48213",
+          "itemName": "Aero Glide 3 Running Shoe",
+          "index": 5,
+          "itemCategory": "Shoes/Running",
+          "price": 129.99,
+          "currency": "USD"
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "web": {
+      "webInteraction": {
+        "name": "select_item",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-48213",
+        "name": "Aero Glide 3 Running Shoe",
+        "productCategories": [
+          {
+            "categoryID": "Shoes/Running"
+          }
+        ],
+        "priceTotal": 129.99,
+        "currencyCode": "USD",
+        "quantity": 1
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar20": "plp_womens_running_shoes",
+            "eVar21": "Category Grid - Womens Running Shoes",
+            "eVar22": "5"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Item List Clicks: deduplicated select_item events by day and list, GA4 BigQuery export.
+  -- Window: last 30 days, excluding the most recent 72 hours (late-hit processing window).
+  -- The same traffic exclusions must be applied to Item List Views to keep the click-through ratio symmetric.
+  WITH select_item_hits AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      e.user_pseudo_id,
+      e.event_timestamp,
+      e.device.category AS device_category,
+      LOWER(IFNULL(e.device.web_info.hostname, '')) AS hostname,
+      ARRAY_LENGTH(e.items) AS item_count,
+      e.items[SAFE_OFFSET(0)] AS first_item,
+      (
+        SELECT AS STRUCT
+          MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+          MAX(IF(ep.key = 'item_list_id', ep.value.string_value, NULL)) AS item_list_id,
+          MAX(IF(ep.key = 'item_list_name', ep.value.string_value, NULL)) AS item_list_name,
+          MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type,
+          MAX(IF(ep.key = 'debug_mode', COALESCE(CAST(ep.value.int_value AS STRING), ep.value.string_value), NULL)) AS debug_mode
+        FROM UNNEST(e.event_params) AS ep
+      ) AS p
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 33 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
+      AND e.event_name = 'select_item'
+  ),
+  filtered AS (
+    SELECT
+      event_date,
+      user_pseudo_id,
+      p.ga_session_id AS ga_session_id,
+      event_timestamp,
+      device_category,
+      -- Item-level list values take precedence, then event-level, then (not set)
+      COALESCE(NULLIF(first_item.item_list_id, ''), NULLIF(p.item_list_id, ''), '(not set)') AS item_list_id,
+      COALESCE(NULLIF(first_item.item_list_name, ''), NULLIF(p.item_list_name, ''), '(not set)') AS item_list_name,
+      COALESCE(NULLIF(first_item.item_id, ''), '(not set)') AS item_id,
+      COALESCE(NULLIF(first_item.item_name, ''), '(not set)') AS item_name,
+      SAFE_CAST(first_item.item_list_index AS INT64) AS item_index,
+      COALESCE(NULLIF(first_item.item_list_id, ''), NULLIF(p.item_list_id, ''),
+               NULLIF(first_item.item_list_name, ''), NULLIF(p.item_list_name, '')) IS NULL AS list_not_set,
+      IFNULL(item_count, 0) > 1 AS multi_item_payload
+    FROM select_item_hits
+    WHERE COALESCE(p.traffic_type, '') NOT IN ('internal', 'developer')
+      AND p.debug_mode IS NULL
+      AND hostname NOT LIKE 'localhost%'
+      AND hostname NOT LIKE 'staging.%'
+      AND hostname NOT LIKE 'qa.%'
+      AND hostname NOT LIKE 'dev.%'
+  ),
+  flagged AS (
+    SELECT
+      *,
+      LAG(event_timestamp) OVER (
+        PARTITION BY user_pseudo_id, ga_session_id, item_list_id, item_id, item_index
+        ORDER BY event_timestamp
+      ) AS prev_event_timestamp
+    FROM filtered
+  ),
+  deduplicated AS (
+    -- Hits within 2 seconds (2,000,000 microseconds) of an identical click collapse into one
+    SELECT *
+    FROM flagged
+    WHERE prev_event_timestamp IS NULL
+       OR event_timestamp - prev_event_timestamp > 2000000
+  )
+  SELECT
+    event_date,
+    item_list_id,
+    item_list_name,
+    COUNT(*) AS item_list_clicks,
+    COUNT(DISTINCT CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING))) AS sessions_with_list_click,
+    COUNTIF(multi_item_payload) AS multi_item_payload_defects,
+    SUM(COUNT(*)) OVER (PARTITION BY event_date) AS daily_item_list_clicks,
+    SAFE_DIVIDE(
+      SUM(COUNTIF(list_not_set)) OVER (PARTITION BY event_date),
+      SUM(COUNT(*)) OVER (PARTITION BY event_date)
+    ) AS daily_not_set_share
+  FROM deduplicated
+  GROUP BY event_date, item_list_id, item_list_name
+  ORDER BY event_date DESC, item_list_clicks DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Item List Clicks: deduplicated select_item link clicks by day and list, XDM ExperienceEvent dataset.
+  -- Sessions use the 30-minute inactivity timeout over all web events; dates use the reporting time zone.
+  -- The same traffic exclusions must be applied to Item List Views to keep the click-through ratio symmetric.
+  WITH sessionized AS (
+    SELECT
+      timestamp,
+      endUserIDs._experience.ecid.id AS ecid,
+      eventType,
+      web.webInteraction.name AS interaction_name,
+      LOWER(COALESCE(web.webPageDetails.URL, '')) AS page_url,
+      LOWER(COALESCE(environment.browserDetails.userAgent, '')) AS user_agent,
+      productListItems,
+      _experience.analytics.customDimensions.eVars.eVar20 AS evt_item_list_id,
+      _experience.analytics.customDimensions.eVars.eVar21 AS evt_item_list_name,
+      _experience.analytics.customDimensions.eVars.eVar22 AS evt_item_index,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY endUserIDs._experience.ecid.id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM web_experience_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 34)
+      AND timestamp < date_sub(current_date(), 2)
+  ),
+  select_item_hits AS (
+    SELECT
+      to_date(from_utc_timestamp(timestamp, 'America/New_York')) AS event_date,
+      ecid,
+      session.num AS session_num,
+      timestamp,
+      COALESCE(NULLIF(evt_item_list_id, ''), '(not set)') AS item_list_id,
+      COALESCE(NULLIF(evt_item_list_name, ''), '(not set)') AS item_list_name,
+      COALESCE(NULLIF(productListItems[0].SKU, ''), '(not set)') AS item_id,
+      COALESCE(NULLIF(productListItems[0].name, ''), '(not set)') AS item_name,
+      CAST(evt_item_index AS INT) AS item_index,
+      (NULLIF(evt_item_list_id, '') IS NULL AND NULLIF(evt_item_list_name, '') IS NULL) AS list_not_set,
+      size(productListItems) > 1 AS multi_item_payload
+    FROM sessionized
+    WHERE eventType = 'web.webinteraction.linkClicks'
+      AND interaction_name = 'select_item'
+      AND page_url NOT LIKE '%://localhost%'
+      AND page_url NOT LIKE '%://staging.%'
+      AND page_url NOT LIKE '%://qa.%'
+      AND page_url NOT LIKE '%://dev.%'
+      AND user_agent NOT LIKE '%bot%'
+      AND user_agent NOT LIKE '%spider%'
+      AND user_agent NOT LIKE '%crawl%'
+  ),
+  flagged AS (
+    SELECT
+      *,
+      LAG(timestamp) OVER (
+        PARTITION BY ecid, session_num, item_list_id, item_id, item_index
+        ORDER BY timestamp
+      ) AS prev_timestamp
+    FROM select_item_hits
+  ),
+  deduplicated AS (
+    -- Hits within 2 seconds of an identical click collapse into one
+    SELECT *
+    FROM flagged
+    WHERE prev_timestamp IS NULL
+       OR CAST(timestamp AS DOUBLE) - CAST(prev_timestamp AS DOUBLE) > 2
+  )
+  SELECT
+    event_date,
+    item_list_id,
+    item_list_name,
+    COUNT(*) AS item_list_clicks,
+    COUNT(DISTINCT CONCAT(ecid, '.', CAST(session_num AS STRING))) AS sessions_with_list_click,
+    SUM(CASE WHEN multi_item_payload THEN 1 ELSE 0 END) AS multi_item_payload_defects,
+    SUM(COUNT(*)) OVER (PARTITION BY event_date) AS daily_item_list_clicks,
+    SUM(SUM(CASE WHEN list_not_set THEN 1 ELSE 0 END)) OVER (PARTITION BY event_date)
+      / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY event_date), 0) AS daily_not_set_share
+  FROM deduplicated
+  WHERE event_date BETWEEN date_sub(current_date(), 33) AND date_sub(current_date(), 3)
+  GROUP BY event_date, item_list_id, item_list_name
+  ORDER BY event_date DESC, item_list_clicks DESC;
 
+Calculation Notes: |
+  1️⃣ Count only the GA4 unified select_item event (Adobe equivalent: a product-list click custom link carrying list name and position). Exclude select_promotion (internal banner/promo tile clicks), view_item_list impressions, and direct PDP entries from paid, email or organic landings; these belong to Promotion Clicks, Item List Views and Product Detail Views respectively.
+  2️⃣ Grain rule: the event-scoped value is one per select_item hit; when reported by item_id, item_name or index, count at item scope by unnesting items[], which equals the event count on a correct implementation because exactly one item is sent per selection. Payloads carrying more than one item are an implementation defect and must be flagged rather than multiplied.
+  3️⃣ item_list_id and item_list_name resolve item-level first, then fall back to the event-level value, matching GA4 precedence. Hits with both values missing are retained in the total but reported under "(not set)"; they must stay below 2% of volume, otherwise the list taxonomy is broken and Product List Click-Through Rate by list is not trustworthy.
+  4️⃣ Deduplicate accidental double-fires: collapse select_item hits sharing user_pseudo_id, ga_session_id, item_list_id, item_id and index within 2 seconds into one click. Clicks that open the PDP in a new tab still count once; the subsequent view_item is counted separately under Product Detail Views.
+  5️⃣ Apply the standard exclusions used for Item List Views so the click-through ratio stays symmetric: internal and developer traffic filters, known bots and spiders, QA/staging hostnames, and test orders. Never apply a filter to clicks that is not also applied to views.
+  6️⃣ Sessions follow the GA4 30-minute inactivity timeout (no midnight or campaign-change split); a click belongs to the session in which the event fired. Dates are assigned in the property reporting time zone, and daily figures are considered final only after the 72-hour late-hit processing window closes.
+  7️⃣ Index is 1-based position within the rendered list at click time, recorded after sorting, filtering and pagination (page 2 of a 24-item grid starts at 25). Infinite-scroll and lazy-loaded modules must continue the sequence, not restart at 1, otherwise position-level click analysis mixes slots.
 
+Business Use Case: |
+  1️⃣ Merchandising: when clicks on the top four category-grid positions fall more than 15% week over week for a category, the category merchandiser reviews the sort rule and hero product placement and re-pins best-selling, in-stock SKUs to the first row.
+  2️⃣ Site Search product team: when search-results clicks per search drop after a relevance or synonym release, the search product manager compares clicks by index against the prior build and rolls back or retunes the ranking change before the next sprint closes.
+  3️⃣ Personalization team: for each recommendation module (item_list_id), the personalization lead ranks clicks against impressions each week and retires or re-targets placements that sit in the bottom quartile of Product List Click-Through Rate, reallocating the slot to the winning algorithm.
+  4️⃣ E-commerce A/B testing team: when a list-layout experiment (grid density, badge, quick-view) reaches sample size, the experimentation manager uses Item List Clicks per list view as the primary discovery guardrail and blocks rollout if clicks decline even when add-to-cart holds steady.
 
+Dependencies:
+  Events: [select-item]
+  Dimensions: [item-list-id, item-list-name, item-id, item-name]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Item List Name; Item List ID; Item ID / SKU; Item Name; Item Position (Index); Item Category; Item Brand; Device Category; Session Source / Medium; Search Term
 
+Dashboard Usage: [Product Discovery & Merchandising Performance, Site Search Effectiveness, Recommendation Module Performance, Category Page Optimization]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [item-list-views, product-view, search-result-click-through-rate]
 
+Derived KPIs: [product-list-click-through-rate, recommendation-click-through-rate, search-result-click-through-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +375,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-14T06:46:12.654+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-14T06:46:21.219+00:00
 
