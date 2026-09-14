@@ -1,0 +1,331 @@
+# Dimension: Guest Lifecycle Stage
+# Generated: 2026-09-14T18:30:17.176Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Guest Lifecycle Stage
+
+Description: |
+  Guest Lifecycle Stage classifies each digital guest or visitor into the mutually exclusive stage that best represents their current relationship with the hospitality brand. It distinguishes anonymous visitors, known prospects, booking-intent users, upcoming guests, in-stay guests, recent guests, and lapsed guests using identity, booking, and stay-date signals available at the evaluation time.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Travel & Hospitality
+
+Priority: High
+
+Core Area: Generic
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  guest_lifecycle_stage
+
+Adobe Event: |
+  page_view
+
+W3 Data Layer: |
+  {"digitalData":{"user":[{"profile":[{"attributes":{"guestLifecycleStage":"anonymous_visitor"}}]}]}}
+
+GA4 Data Layer: |
+  {"event":"page_view","guest_lifecycle_stage":"anonymous_visitor"}
+
+Adobe Client Data Layer: |
+  {"data":{"user":{"guestLifecycleStage":"anonymous_visitor"}},"event":"page_view"}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"anonymous_visitor"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH extracted_events AS (
+    SELECT
+      e.*,
+      (
+        SELECT AS STRUCT
+          MAX(IF(key = 'guest_lifecycle_stage', value.string_value, NULL)) AS guest_lifecycle_stage,
+          MAX(IF(key = 'page_location', value.string_value, NULL)) AS page_location,
+          MAX(IF(key = 'page_title', value.string_value, NULL)) AS page_title,
+          MAX(IF(key = 'page_referrer', value.string_value, NULL)) AS page_referrer,
+          MAX(IF(key = 'ga_session_id', value.int_value, NULL)) AS ga_session_id,
+          MAX(IF(key = 'ga_session_number', value.int_value, NULL)) AS ga_session_number,
+          MAX(IF(key = 'engagement_time_msec', value.int_value, NULL)) AS engagement_time_msec,
+          MAX(IF(key = 'session_engaged', COALESCE(value.string_value, CAST(value.int_value AS STRING)), NULL)) AS session_engaged,
+          MAX(IF(key = 'entrances', value.int_value, NULL)) AS entrances,
+          MAX(IF(key = 'ignore_referrer', COALESCE(value.string_value, CAST(value.int_value AS STRING)), NULL)) AS ignore_referrer
+        FROM UNNEST(e.event_params)
+      ) AS ep,
+      (
+        SELECT AS STRUCT
+          MAX(IF(key = 'guest_lifecycle_stage', value.string_value, NULL)) AS guest_lifecycle_stage
+        FROM UNNEST(e.user_properties)
+      ) AS up
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE REGEXP_CONTAINS(_TABLE_SUFFIX, r'^\d{8}$')
+  ),
+  staged_events AS (
+    SELECT
+      *,
+      COALESCE(NULLIF(TRIM(ep.guest_lifecycle_stage), ''), NULLIF(TRIM(up.guest_lifecycle_stage), '')) AS stage_raw,
+      REGEXP_REPLACE(
+        LOWER(COALESCE(NULLIF(TRIM(ep.guest_lifecycle_stage), ''), NULLIF(TRIM(up.guest_lifecycle_stage), ''))),
+        r'[^a-z0-9]+',
+        '_'
+      ) AS stage_slug
+    FROM extracted_events
+  ),
+  normalized_events AS (
+    SELECT
+      *,
+      CASE
+        WHEN stage_slug IN ('anonymous', 'anonymous_visitor', 'visitor', 'unknown_visitor', 'unauthenticated_visitor') THEN 'anonymous_visitor'
+        WHEN stage_slug IN ('returning', 'returning_visitor', 'recognized_visitor', 'known_visitor') THEN 'returning_visitor'
+        WHEN stage_slug IN ('registered', 'registered_guest', 'registered_user') THEN 'registered_guest'
+        WHEN stage_slug IN ('authenticated', 'authenticated_guest', 'logged_in', 'logged_in_guest', 'signed_in', 'signed_in_guest') THEN 'authenticated_guest'
+        WHEN stage_slug IN ('customer', 'purchaser', 'first_time_customer') THEN 'customer'
+        WHEN stage_slug IN ('repeat_customer', 'loyal_customer', 'loyal_guest') THEN 'loyal_customer'
+        ELSE TRIM(stage_slug, '_')
+      END AS normalized_stage
+    FROM staged_events
+    WHERE stage_raw IS NOT NULL
+      AND TRIM(stage_raw) <> ''
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT(
+      COALESCE(user_pseudo_id, ''), '|',
+      CAST(event_timestamp AS STRING), '|',
+      event_name, '|',
+      COALESCE(normalized_stage, '')
+    ))) AS lifecycle_event_key,
+    PARSE_DATE('%Y%m%d', event_date) AS event_date,
+    TIMESTAMP_MICROS(event_timestamp) AS event_timestamp_utc,
+    event_name,
+    stage_raw AS guest_lifecycle_stage_raw,
+    normalized_stage AS guest_lifecycle_stage,
+    CASE
+      WHEN normalized_stage IN ('anonymous_visitor', 'returning_visitor') THEN 'prospect'
+      WHEN normalized_stage IN ('registered_guest', 'authenticated_guest') THEN 'registered'
+      WHEN normalized_stage IN ('customer', 'loyal_customer') THEN 'customer'
+      ELSE 'other'
+    END AS lifecycle_stage_group,
+    CASE normalized_stage
+      WHEN 'anonymous_visitor' THEN 1
+      WHEN 'returning_visitor' THEN 2
+      WHEN 'registered_guest' THEN 3
+      WHEN 'authenticated_guest' THEN 4
+      WHEN 'customer' THEN 5
+      WHEN 'loyal_customer' THEN 6
+      ELSE 99
+    END AS lifecycle_stage_rank,
+    normalized_stage IN ('authenticated_guest', 'customer', 'loyal_customer') AS is_authenticated,
+    user_pseudo_id,
+    user_id,
+    ep.ga_session_id,
+    ep.ga_session_number,
+    stream_id,
+    platform,
+    ep.page_location,
+    REGEXP_EXTRACT(ep.page_location, r'^https?://[^/]+(/[^?#]*)') AS page_path,
+    NET.HOST(ep.page_location) AS page_hostname,
+    ep.page_title,
+    ep.page_referrer,
+    ep.engagement_time_msec,
+    ep.session_engaged,
+    ep.entrances,
+    ep.ignore_referrer,
+    IF(event_previous_timestamp > 0, TIMESTAMP_MICROS(event_previous_timestamp), NULL) AS event_previous_timestamp_utc,
+    event_value_in_usd AS event_value_usd,
+    event_bundle_sequence_id,
+    event_server_timestamp_offset,
+    batch_event_index,
+    batch_page_id,
+    batch_ordering_id,
+    collected_traffic_source.manual_campaign_id AS campaign_id,
+    COALESCE(collected_traffic_source.manual_campaign_name, traffic_source.name) AS campaign_name,
+    COALESCE(collected_traffic_source.manual_source, traffic_source.source) AS traffic_source,
+    COALESCE(collected_traffic_source.manual_medium, traffic_source.medium) AS traffic_medium,
+    collected_traffic_source.manual_term AS traffic_term,
+    collected_traffic_source.manual_content AS traffic_content,
+    collected_traffic_source.gclid,
+    collected_traffic_source.dclid,
+    collected_traffic_source.srsltid,
+    device.category AS device_category,
+    device.operating_system,
+    device.operating_system_version,
+    device.web_info.browser,
+    device.web_info.browser_version,
+    device.language AS device_language,
+    geo.country,
+    geo.region,
+    geo.city
+  FROM normalized_events;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH extracted_events AS (
+    SELECT
+      timestamp AS event_timestamp,
+      eventType AS event_name,
+      CAST(_experience.analytics.customDimensions.eVars.eVar1 AS STRING) AS stage_raw,
+      COALESCE(identityMap['ECID'][0].id, identityMap['FPID'][0].id) AS user_pseudo_id,
+      identityMap['CRMID'][0].id AS user_id,
+      web.webPageDetails.URL AS page_location,
+      web.webPageDetails.name AS page_title,
+      web.webReferrer.URL AS page_referrer,
+      device.type AS device_category,
+      environment.operatingSystem AS operating_system,
+      environment.operatingSystemVersion AS operating_system_version,
+      environment.browserDetails.name AS browser,
+      environment.browserDetails.version AS browser_version,
+      environment.language AS device_language,
+      placeContext.geo.countryCode AS country,
+      placeContext.geo.stateProvince AS region,
+      placeContext.geo.city AS city,
+      marketing.trackingCode AS campaign_id,
+      REGEXP_REPLACE(
+        LOWER(TRIM(CAST(_experience.analytics.customDimensions.eVars.eVar1 AS STRING))),
+        '[^a-z0-9]+',
+        '_'
+      ) AS stage_slug
+    FROM your_aep_event_dataset
+    WHERE _experience.analytics.customDimensions.eVars.eVar1 IS NOT NULL
+      AND TRIM(CAST(_experience.analytics.customDimensions.eVars.eVar1 AS STRING)) <> ''
+  ),
+  normalized_events AS (
+    SELECT
+      *,
+      CASE
+        WHEN stage_slug IN ('anonymous', 'anonymous_visitor', 'visitor', 'unknown_visitor', 'unauthenticated_visitor') THEN 'anonymous_visitor'
+        WHEN stage_slug IN ('returning', 'returning_visitor', 'recognized_visitor', 'known_visitor') THEN 'returning_visitor'
+        WHEN stage_slug IN ('registered', 'registered_guest', 'registered_user') THEN 'registered_guest'
+        WHEN stage_slug IN ('authenticated', 'authenticated_guest', 'logged_in', 'logged_in_guest', 'signed_in', 'signed_in_guest') THEN 'authenticated_guest'
+        WHEN stage_slug IN ('customer', 'purchaser', 'first_time_customer') THEN 'customer'
+        WHEN stage_slug IN ('repeat_customer', 'loyal_customer', 'loyal_guest') THEN 'loyal_customer'
+        ELSE TRIM(BOTH '_' FROM stage_slug)
+      END AS normalized_stage
+    FROM extracted_events
+  )
+  SELECT
+    SHA2(CONCAT_WS(
+      '|',
+      COALESCE(user_pseudo_id, ''),
+      CAST(event_timestamp AS STRING),
+      COALESCE(event_name, ''),
+      COALESCE(normalized_stage, '')
+    ), 256) AS lifecycle_event_key,
+    CAST(event_timestamp AS DATE) AS event_date,
+    CAST(event_timestamp AS TIMESTAMP) AS event_timestamp_utc,
+    event_name,
+    stage_raw AS guest_lifecycle_stage_raw,
+    normalized_stage AS guest_lifecycle_stage,
+    CASE
+      WHEN normalized_stage IN ('anonymous_visitor', 'returning_visitor') THEN 'prospect'
+      WHEN normalized_stage IN ('registered_guest', 'authenticated_guest') THEN 'registered'
+      WHEN normalized_stage IN ('customer', 'loyal_customer') THEN 'customer'
+      ELSE 'other'
+    END AS lifecycle_stage_group,
+    CASE normalized_stage
+      WHEN 'anonymous_visitor' THEN 1
+      WHEN 'returning_visitor' THEN 2
+      WHEN 'registered_guest' THEN 3
+      WHEN 'authenticated_guest' THEN 4
+      WHEN 'customer' THEN 5
+      WHEN 'loyal_customer' THEN 6
+      ELSE 99
+    END AS lifecycle_stage_rank,
+    CASE
+      WHEN normalized_stage IN ('authenticated_guest', 'customer', 'loyal_customer') THEN TRUE
+      ELSE FALSE
+    END AS is_authenticated,
+    user_pseudo_id,
+    user_id,
+    CAST(NULL AS BIGINT) AS ga_session_id,
+    CAST(NULL AS BIGINT) AS ga_session_number,
+    CAST(NULL AS STRING) AS stream_id,
+    'WEB' AS platform,
+    page_location,
+    PARSE_URL(page_location, 'PATH') AS page_path,
+    PARSE_URL(page_location, 'HOST') AS page_hostname,
+    page_title,
+    page_referrer,
+    CAST(NULL AS BIGINT) AS engagement_time_msec,
+    CAST(NULL AS STRING) AS session_engaged,
+    CAST(NULL AS BIGINT) AS entrances,
+    CAST(NULL AS STRING) AS ignore_referrer,
+    CAST(NULL AS TIMESTAMP) AS event_previous_timestamp_utc,
+    CAST(NULL AS DOUBLE) AS event_value_usd,
+    CAST(NULL AS BIGINT) AS event_bundle_sequence_id,
+    CAST(NULL AS BIGINT) AS event_server_timestamp_offset,
+    CAST(NULL AS BIGINT) AS batch_event_index,
+    CAST(NULL AS BIGINT) AS batch_page_id,
+    CAST(NULL AS BIGINT) AS batch_ordering_id,
+    campaign_id,
+    CAST(NULL AS STRING) AS campaign_name,
+    PARSE_URL(page_referrer, 'HOST') AS traffic_source,
+    CAST(NULL AS STRING) AS traffic_medium,
+    CAST(NULL AS STRING) AS traffic_term,
+    CAST(NULL AS STRING) AS traffic_content,
+    CAST(NULL AS STRING) AS gclid,
+    CAST(NULL AS STRING) AS dclid,
+    CAST(NULL AS STRING) AS srsltid,
+    device_category,
+    operating_system,
+    operating_system_version,
+    browser,
+    browser_version,
+    device_language,
+    country,
+    region,
+    city
+  FROM normalized_events;
+
+Calculation Notes: |
+  1️⃣ Evaluate stage based on event timestamp to avoid using later learned data.  
+  2️⃣ Prioritize stages: In-Stay Guest > Upcoming Guest > Booking Intent > Recent Guest > Lapsed Guest > Known Prospect > Anonymous Visitor.  
+  3️⃣ Exclude cancelled, test, duplicate, fraudulent, employee, complimentary test, and confirmed no-show bookings.  
+  4️⃣ Use local timezone for arrival/departure boundaries; retain previous stage for delayed booking parameters.  
+  5️⃣ Reprocess events when late digital booking updates fall within the restatement window.  
+  6️⃣ Stitch Anonymous-to-Known history only through approved first-party identity rules and consent.  
+  7️⃣ Do not merge users based on shared devices, email-domain inference, or probabilistic household matching.
+
+Business Use Case: |
+  Marketing and digital product leaders use lifecycle-stage conversion and engagement patterns to suppress acquisition offers for existing bookers, activate pre-arrival experiences for upcoming guests, promote on-property services to in-stay guests, and direct reactivation investment toward lapsed guests.
+
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  ["Event Date","Acquisition Channel","Campaign","Device Category","Platform","Country","Property","Destination","Booking Status","Stay Phase","Loyalty Tier","Days to Arrival"]
+
+Dashboard Usage: [Digital Guest Lifecycle Executive Dashboard, Booking Funnel and Conversion Dashboard, Pre-Arrival Engagement Dashboard, In-Stay Digital Experience Dashboard, Guest Retention and Reactivation Dashboard, Customer Acquisition Efficiency Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Guest Identity Status, Booking Status, Stay Phase, Days to Arrival, Days Since Last Stay, Loyalty Tier, Acquisition Channel, Property, Device Category]
+
+Derived Dimensions: [Guest Lifecycle Transition, Guest Lifecycle Stage Entry Date, Days in Guest Lifecycle Stage, New vs Returning Guest, Guest Reactivation Status]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-14T18:30:16.23719+00:00
+
+Last Modified By: devyendarm
+
+
