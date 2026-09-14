@@ -1,0 +1,527 @@
+# Dimension: Cart Size Band
+# Generated: 2026-09-14T07:33:54.757Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Cart Size Band
+
+Description: |
+  Cart Size Band classifies every cart snapshot and completed order into one of five fixed unit-count bands (1, 2, 3-4, 5-9, 10+) by summing items[].quantity on the view_cart, begin_checkout and purchase payloads. It is the standard basket-size segmentation for comparing cart abandonment, checkout completion and order mix across small and large baskets, and it deliberately excludes order value, which is governed by Cart Value and Average Order Value.
+
+Category: Conversion
+
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "checkout-confirmation",
+        "pageName": "checkout:order confirmation"
+      },
+      "category": {
+        "primaryCategory": "checkout"
+      }
+    },
+    "cart": {
+      "cartID": "C-88412",
+      "price": {
+        "basePrice": 107,
+        "currency": "USD",
+        "cartTotal": 107
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-10432",
+            "productName": "Cotton Crew T-Shirt"
+          },
+          "category": {
+            "primaryCategory": "Apparel"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 24,
+            "currency": "USD"
+          }
+        },
+        {
+          "productInfo": {
+            "productID": "SKU-20977",
+            "productName": "Canvas Sneaker"
+          },
+          "category": {
+            "primaryCategory": "Footwear"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 59,
+            "currency": "USD"
+          }
+        }
+      ]
+    },
+    "transaction": {
+      "transactionID": "T-100245",
+      "total": {
+        "basePrice": 107,
+        "currency": "USD",
+        "transactionTotal": 107
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-10432",
+            "productName": "Cotton Crew T-Shirt"
+          },
+          "category": {
+            "primaryCategory": "Apparel"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 24,
+            "currency": "USD"
+          }
+        },
+        {
+          "productInfo": {
+            "productID": "SKU-20977",
+            "productName": "Canvas Sneaker"
+          },
+          "category": {
+            "primaryCategory": "Footwear"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 59,
+            "currency": "USD"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T-100245",
+      "currency": "USD",
+      "value": 107,
+      "items": [
+        {
+          "item_id": "SKU-10432",
+          "item_name": "Cotton Crew T-Shirt",
+          "item_category": "Apparel",
+          "price": 24,
+          "quantity": 2
+        },
+        {
+          "item_id": "SKU-20977",
+          "item_name": "Canvas Sneaker",
+          "item_category": "Footwear",
+          "price": 59,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "T-100245",
+        "currencyCode": "USD",
+        "priceTotal": 107
+      },
+      "cart": {
+        "cartID": "C-88412"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-10432",
+        "name": "Cotton Crew T-Shirt",
+        "productCategories": [
+          {
+            "categoryName": "Apparel"
+          }
+        ],
+        "quantity": 2,
+        "priceTotal": 48,
+        "currencyCode": "USD"
+      },
+      {
+        "SKU": "SKU-20977",
+        "name": "Canvas Sneaker",
+        "productCategories": [
+          {
+            "categoryName": "Footwear"
+          }
+        ],
+        "quantity": 1,
+        "priceTotal": 59,
+        "currencyCode": "USD"
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100245",
+        "currencyCode": "USD",
+        "priceTotal": 107
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-10432",
+        "name": "Cotton Crew T-Shirt",
+        "quantity": 2,
+        "priceTotal": 48,
+        "currencyCode": "USD"
+      },
+      {
+        "SKU": "SKU-20977",
+        "name": "Canvas Sneaker",
+        "quantity": 1,
+        "priceTotal": 59,
+        "currencyCode": "USD"
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "3-4"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Cart Size Band: units per cart or order event (SUM of items.quantity) banded into 1 / 2 / 3-4 / 5-9 / 10+
+  -- Session band: band on the last begin_checkout in the session, falling back to the last view_cart
+  WITH cart_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      event_timestamp,
+      event_name,
+      user_pseudo_id,
+      CONCAT(user_pseudo_id, '.', CAST((SELECT ep.value.int_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'ga_session_id') AS STRING)) AS session_key,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'traffic_type') AS traffic_type,
+      NULLIF(ecommerce.transaction_id, '(not set)') AS transaction_id,
+      (
+        SELECT SUM(COALESCE(it.quantity, 1))
+        FROM UNNEST(items) AS it
+        WHERE (it.quantity IS NULL OR it.quantity > 0)
+          AND LOWER(COALESCE(it.item_category, '')) NOT IN ('shipping protection', 'gift wrap', 'donation', 'donations', 'extended warranty')
+      ) AS unit_count
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name IN ('view_cart', 'begin_checkout', 'purchase')
+  ),
+  deduplicated AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (PARTITION BY event_name, transaction_id ORDER BY event_timestamp) AS transaction_rank
+    FROM cart_events
+    WHERE COALESCE(traffic_type, '') != 'internal'
+  ),
+  banded AS (
+    SELECT
+      event_date,
+      event_timestamp,
+      event_name,
+      user_pseudo_id,
+      session_key,
+      transaction_id,
+      unit_count,
+      CASE
+        WHEN unit_count IS NULL OR unit_count <= 0 THEN '(not set)'
+        WHEN unit_count = 1 THEN '1'
+        WHEN unit_count = 2 THEN '2'
+        WHEN unit_count BETWEEN 3 AND 4 THEN '3-4'
+        WHEN unit_count BETWEEN 5 AND 9 THEN '5-9'
+        ELSE '10+'
+      END AS cart_size_band,
+      CASE
+        WHEN unit_count IS NULL OR unit_count <= 0 THEN 99
+        WHEN unit_count = 1 THEN 1
+        WHEN unit_count = 2 THEN 2
+        WHEN unit_count BETWEEN 3 AND 4 THEN 3
+        WHEN unit_count BETWEEN 5 AND 9 THEN 4
+        ELSE 5
+      END AS cart_size_band_sort
+    FROM deduplicated
+    WHERE event_name != 'purchase'
+       OR transaction_id IS NULL
+       OR transaction_rank = 1
+  ),
+  session_band AS (
+    SELECT
+      session_key,
+      cart_size_band AS session_cart_size_band,
+      cart_size_band_sort AS session_cart_size_band_sort
+    FROM (
+      SELECT
+        session_key,
+        cart_size_band,
+        cart_size_band_sort,
+        ROW_NUMBER() OVER (
+          PARTITION BY session_key
+          ORDER BY CASE WHEN event_name = 'begin_checkout' THEN 1 ELSE 0 END DESC, event_timestamp DESC
+        ) AS band_rank
+      FROM banded
+      WHERE event_name IN ('begin_checkout', 'view_cart')
+        AND session_key IS NOT NULL
+    ) AS ranked
+    WHERE band_rank = 1
+  )
+  SELECT
+    b.event_date,
+    b.event_name,
+    b.cart_size_band,
+    b.cart_size_band_sort,
+    COALESCE(s.session_cart_size_band, '(not set)') AS session_cart_size_band,
+    COALESCE(s.session_cart_size_band_sort, 99) AS session_cart_size_band_sort,
+    COUNT(*) AS events,
+    COUNT(DISTINCT b.user_pseudo_id) AS users,
+    COUNT(DISTINCT b.session_key) AS sessions,
+    COUNT(DISTINCT b.transaction_id) AS orders,
+    SUM(b.unit_count) AS units,
+    SAFE_DIVIDE(COUNT(*), SUM(COUNT(*)) OVER (PARTITION BY b.event_date, b.event_name)) AS share_of_events
+  FROM banded AS b
+  LEFT JOIN session_band AS s
+    ON b.session_key = s.session_key
+  GROUP BY b.event_date, b.event_name, b.cart_size_band, b.cart_size_band_sort,
+    COALESCE(s.session_cart_size_band, '(not set)'), COALESCE(s.session_cart_size_band_sort, 99)
+  ORDER BY event_date, event_name, cart_size_band_sort, session_cart_size_band_sort;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Cart Size Band: units per cart or order event (SUM of productListItems.quantity) banded into 1 / 2 / 3-4 / 5-9 / 10+
+  -- Session band: band on the last begin_checkout in the session, falling back to the last view_cart
+  WITH sessionized AS (
+    SELECT
+      _id,
+      timestamp,
+      eventType,
+      commerce,
+      identityMap,
+      productListItems,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY identityMap['ECID'][0].id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM aep_web_experience_event_dataset
+    WHERE timestamp >= date_sub(current_date(), 28)
+      AND timestamp < current_date()
+  ),
+  cart_events AS (
+    SELECT
+      _id AS event_id,
+      timestamp AS event_ts,
+      CAST(timestamp AS DATE) AS event_date,
+      CASE eventType
+        WHEN 'commerce.productListViews' THEN 'view_cart'
+        WHEN 'commerce.checkouts' THEN 'begin_checkout'
+        WHEN 'commerce.purchases' THEN 'purchase'
+      END AS event_name,
+      NULLIF(commerce.order.purchaseID, '') AS transaction_id,
+      identityMap['ECID'][0].id AS ecid,
+      CONCAT(identityMap['ECID'][0].id, '.', CAST(session.num AS STRING)) AS session_key,
+      productListItems
+    FROM sessionized
+    WHERE eventType IN ('commerce.productListViews', 'commerce.checkouts', 'commerce.purchases')
+  ),
+  line_items AS (
+    SELECT
+      event_id,
+      explode_outer(productListItems) AS pli
+    FROM cart_events
+  ),
+  event_units AS (
+    SELECT
+      event_id,
+      SUM(
+        CASE
+          WHEN pli IS NULL THEN 0
+          WHEN pli.quantity IS NULL THEN 1
+          WHEN pli.quantity <= 0 THEN 0
+          WHEN CAST(pli.quantity AS DOUBLE) <> FLOOR(CAST(pli.quantity AS DOUBLE)) THEN 1
+          ELSE CAST(pli.quantity AS BIGINT)
+        END
+      ) AS unit_count
+    FROM line_items
+    WHERE pli IS NULL
+       OR LOWER(COALESCE(pli.productCategories[0].categoryName, '')) NOT IN ('shipping protection', 'gift wrap', 'donation', 'donations', 'extended warranty')
+    GROUP BY event_id
+  ),
+  deduplicated AS (
+    SELECT
+      e.event_date,
+      e.event_ts,
+      e.event_name,
+      e.ecid,
+      e.session_key,
+      e.transaction_id,
+      u.unit_count,
+      ROW_NUMBER() OVER (PARTITION BY e.event_name, e.transaction_id ORDER BY e.event_ts) AS transaction_rank
+    FROM cart_events e
+    LEFT JOIN event_units u
+      ON e.event_id = u.event_id
+  ),
+  banded AS (
+    SELECT
+      event_date,
+      event_ts,
+      event_name,
+      ecid,
+      session_key,
+      transaction_id,
+      unit_count,
+      CASE
+        WHEN unit_count IS NULL OR unit_count <= 0 THEN '(not set)'
+        WHEN unit_count = 1 THEN '1'
+        WHEN unit_count = 2 THEN '2'
+        WHEN unit_count BETWEEN 3 AND 4 THEN '3-4'
+        WHEN unit_count BETWEEN 5 AND 9 THEN '5-9'
+        ELSE '10+'
+      END AS cart_size_band,
+      CASE
+        WHEN unit_count IS NULL OR unit_count <= 0 THEN 99
+        WHEN unit_count = 1 THEN 1
+        WHEN unit_count = 2 THEN 2
+        WHEN unit_count BETWEEN 3 AND 4 THEN 3
+        WHEN unit_count BETWEEN 5 AND 9 THEN 4
+        ELSE 5
+      END AS cart_size_band_sort
+    FROM deduplicated
+    WHERE event_name <> 'purchase'
+       OR transaction_id IS NULL
+       OR transaction_rank = 1
+  ),
+  session_band AS (
+    SELECT
+      session_key,
+      cart_size_band AS session_cart_size_band,
+      cart_size_band_sort AS session_cart_size_band_sort
+    FROM (
+      SELECT
+        session_key,
+        cart_size_band,
+        cart_size_band_sort,
+        ROW_NUMBER() OVER (
+          PARTITION BY session_key
+          ORDER BY CASE WHEN event_name = 'begin_checkout' THEN 1 ELSE 0 END DESC, event_ts DESC
+        ) AS band_rank
+      FROM banded
+      WHERE event_name IN ('begin_checkout', 'view_cart')
+        AND session_key IS NOT NULL
+    ) AS ranked
+    WHERE band_rank = 1
+  )
+  SELECT
+    b.event_date,
+    b.event_name,
+    b.cart_size_band,
+    b.cart_size_band_sort,
+    COALESCE(s.session_cart_size_band, '(not set)') AS session_cart_size_band,
+    COALESCE(s.session_cart_size_band_sort, 99) AS session_cart_size_band_sort,
+    COUNT(*) AS events,
+    COUNT(DISTINCT b.ecid) AS visitors,
+    COUNT(DISTINCT b.transaction_id) AS orders,
+    SUM(b.unit_count) AS units,
+    CAST(COUNT(*) AS DOUBLE) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY b.event_date, b.event_name), 0) AS share_of_events
+  FROM banded AS b
+  LEFT JOIN session_band AS s
+    ON b.session_key = s.session_key
+  GROUP BY b.event_date, b.event_name, b.cart_size_band, b.cart_size_band_sort,
+    COALESCE(s.session_cart_size_band, '(not set)'), COALESCE(s.session_cart_size_band_sort, 99)
+  ORDER BY event_date, event_name, cart_size_band_sort, session_cart_size_band_sort;
+
+Calculation Notes: |
+  1️⃣ Unit count = SUM(items[].quantity) across all line items in the event payload; a missing or null quantity is read as 1 (GA4 ecommerce default), lines with quantity <= 0 are dropped, and the result maps to the band labels "1", "2", "3-4", "5-9", "10+" with inclusive integer boundaries. A payload that sums to 0 units returns null and is reported as "(not set)", never forced into the 1 band.
+  2️⃣ The five bands are fixed by this spec and carry a sort key (1 to 5) so reports order them by size rather than alphabetically; ad-hoc re-cuts in dashboards are not permitted, and any boundary change requires a version increment and restatement of historical data.
+  3️⃣ The band is evaluated per event, not per cart ID: a cart holding 2 units at view_cart and 5 units at purchase is reported as "2" on the view_cart row and "5-9" on the purchase row. For session-level abandonment and funnel cuts, the session band is the band on the last begin_checkout in the session (falling back to the last view_cart when no checkout began), with sessions closed after 30 minutes of inactivity.
+  4️⃣ Units are sellable quantities, not distinct SKUs: one line of 6 identical items is 6 units (5-9 band), while 6 different SKUs at quantity 1 is also 6 units. Bundles and kits count as the line items the storefront transmits; non-merchandise lines (shipping protection, gift wrap, donations, extended warranties) are excluded when flagged by item_category, while gift cards count as merchandise units.
+  5️⃣ Purchase rows are deduplicated on transaction_id before banding; refunds, partial returns and post-order edits never re-band the order, because the band records units at the moment the order was placed. Where a server-side order record exists, its line quantities override a conflicting client-side purchase payload.
+  6️⃣ Items sold by weight or length (fractional quantity, e.g. 1.5 kg) count as 1 unit per line so that measure-based products do not inflate the band.
+  7️⃣ Exclude internal, QA and test transactions and known bot traffic. The 10+ band is open-ended and absorbs wholesale-style or reseller orders, so filter or segment by customer type before reading its conversion or abandonment rates as consumer behaviour.
+
+Business Use Case: |
+  1️⃣ Merchandising reviews the weekly purchase mix by Cart Size Band; when the 1 band exceeds its agreed share of orders for two consecutive weeks, the team launches multi-buy offers (e.g. buy 2, save 10%) and adds complementary-product modules to the cart page, then tracks movement of orders into the 2 and 3-4 bands.
+  2️⃣ The Product team owning checkout compares checkout completion rate by band every sprint; when abandonment in the 5-9 or 10+ bands rises more than 3 percentage points against the prior four-week baseline, they audit quantity-edit controls, per-item stock limits and inventory reservation errors for large baskets before the next release.
+  3️⃣ CRM Marketing branches cart-abandonment journeys on the band of the abandoned cart: 1-unit carts receive a single-product reminder with reviews, 3-4 and larger carts receive a saved-basket link with a free-shipping threshold message, and campaign recovery rate is reported per band.
+  4️⃣ Customer Service and fulfilment planners use the forecast share of 5-9 and 10+ orders ahead of peak trading to plan packing capacity, carton mix and split-shipment messaging, raising staffing requests when the large-basket share exceeds last season's peak.
+
+Dependencies:
+  Events: [checkout-initiation, purchase]
+  Metrics: [begin-checkout]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
+
+Report Attributes: |
+  cart-size-band; device-category; traffic-source; customer-status; item-category; promotion-type; payment-method
+
+Dashboard Usage: [Cart & Checkout Funnel Performance, Cart Abandonment Analysis, Basket Composition & Order Mix, Weekly E-commerce Trading Review]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [item-category, device-category, traffic-source, customer-status, promotion-type, payment-method]
+
+Derived Dimensions: [single-item-vs-multi-item-order]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-14T07:33:44.82+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-14T07:33:54.354+00:00
+
