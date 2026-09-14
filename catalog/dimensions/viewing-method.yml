@@ -1,18 +1,18 @@
 # Dimension: Viewing Method
-# Generated: 2026-09-03T14:30:29.930Z
+# Generated: 2026-09-14T08:06:51.556Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Viewing Method
 
 Description: |
-  Identifies the delivery format through which a prospective buyer or renter views a property, such as a private in-person tour, open house, live virtual tour, recorded video, 3D tour, or self-guided physical visit. The value represents the method applicable at the time of each viewing-related event and enables comparison of engagement, booking, attendance, and conversion outcomes by viewing format.
+  Classifies the showing format of a viewing that a prospective buyer or renter booked through a tour request, using the standard brokerage and portal taxonomy: private in-person showing, open house, live video tour, recorded video tour session, 3D virtual walkthrough session and self-guided tour; only viewings booked through a tour request count, while unassisted on-demand video or 3D plays are measured by virtual-tour-start-count, not by this dimension. Captured on the tour request (generate_lead with lead_type tour_request, carrying the booking ID and listing ID) and resolved to the delivered format, attendance, no-show and offer outcomes from the showing scheduling record joined on booking ID, it lets brokerage and marketplace leaders compare tour demand, attendance and offer conversion by requested vs delivered format and decide where agent time and virtual-tour capability are best deployed.
 
 Category: Engagement
 
-Tags: [dimension]
+Tags: [dimension, Real Estate Tech: Property Viewing & Touring]
 
-Industry: Real Estate Tech
+Industry: Real Estate Tech, Other
 
 Priority: High
 
@@ -22,59 +22,302 @@ Scope: Event
 
 Data Type: string
 
-Aggregation Window: Event
+Aggregation Window: Event, Daily, Weekly, Monthly
 
 GA4 Event: |
-  view_item
+  generate_lead
 
 Adobe Event: |
-  view_item
+  tour:request
 
 W3 Data Layer: |
-  {"digitalData":{"event":[{"eventInfo":{"eventName":"view_item"},"attributes":{"viewingMethod":"private_in_person_tour"}}]}}
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "tour:request",
+            "eventAction": "generate_lead"
+          },
+          "category": {
+            "primaryCategory": "lead",
+            "leadType": "tour_request"
+          },
+          "listing": {
+            "listingId": "LST-104233",
+            "viewingMethod": "private_in_person_tour",
+            "bookingId": "BKG-558120"
+          }
+        }
+      ]
+    }
+  }
 
 GA4 Data Layer: |
-  {"event":"view_item","viewing_method":"private_in_person_tour"}
+  {
+    "event": "generate_lead",
+    "lead_type": "tour_request",
+    "viewing_method": "private_in_person_tour",
+    "booking_id": "BKG-558120",
+    "ecommerce": {
+      "items": [
+        {
+          "item_id": "LST-104233"
+        }
+      ]
+    }
+  }
 
 Adobe Client Data Layer: |
-  {"event":"view_item","eventInfo":{"viewingMethod":"private_in_person_tour"}}
+  {
+    "event": "tour:request",
+    "eventInfo": {
+      "leadType": "tour_request"
+    },
+    "listing": {
+      "listingId": "LST-104233",
+      "viewingMethod": "private_in_person_tour",
+      "bookingId": "BKG-558120"
+    }
+  }
 
 XDM Mapping: |
-  {"commerce":{"productViews":{"value":1}},"eventType":"commerce.productViews","_experience":{"analytics":{"customDimensions":{"eVars":{"eVar49":"private_in_person_tour"}}}}}
+  {
+    "eventType": "leadOperation.newLead",
+    "productListItems": [
+      {
+        "SKU": "LST-104233"
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar49": "private_in_person_tour",
+            "eVar50": "BKG-558120",
+            "eVar51": "tour_request",
+            "eVar52": "external"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Viewing Method: deduplicated tour requests (generate_lead, lead_type = tour_request) by requested and delivered viewing method,
+  -- with attendance, no-show and offer outcomes from the showing scheduling table joined on booking_id.
+  -- Set before running: start_date / end_date (inclusive), project, GA4 dataset and showing scheduling table names.
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH tour_requests AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS request_date,
+      event_timestamp,
+      user_pseudo_id,
+      items[SAFE_OFFSET(0)].item_id AS listing_id,
+      (SELECT MAX(IF(ep.key = 'lead_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS lead_type,
+      (SELECT MAX(IF(ep.key = 'booking_id', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS booking_id,
+      REGEXP_REPLACE(LOWER(TRIM((SELECT MAX(IF(ep.key = 'viewing_method', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep))), r'[ -]+', '_') AS viewing_method_raw,
+      (SELECT MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'generate_lead'
+  ),
+  deduplicated_requests AS (
+    SELECT *
+    FROM tour_requests
+    WHERE lead_type = 'tour_request'
+      AND booking_id IS NOT NULL
+      AND IFNULL(traffic_type, '') <> 'internal'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY booking_id ORDER BY event_timestamp DESC) = 1
+  ),
+  showings AS (
+    SELECT
+      booking_id,
+      listing_id AS showing_listing_id,
+      REGEXP_REPLACE(LOWER(TRIM(delivered_viewing_method)), r'[ -]+', '_') AS delivered_raw,
+      appointment_type,
+      showing_status,
+      appointment_start_utc,
+      listing_status_at_appointment,
+      offer_submitted,
+      property_type
+    FROM `your-project.showing_scheduling.showing_appointments`
+    WHERE DATE(appointment_start_utc) >= start_date
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY booking_id ORDER BY updated_at DESC) = 1
+  ),
+  joined AS (
+    SELECT
+      r.request_date,
+      r.booking_id,
+      r.user_pseudo_id,
+      COALESCE(r.listing_id, s.showing_listing_id) AS listing_id,
+      IFNULL(s.property_type, 'unknown') AS property_type,
+      CASE WHEN r.viewing_method_raw IN ('private_in_person_tour', 'open_house', 'live_video_tour', 'recorded_video_tour', '3d_virtual_tour', 'self_guided_tour') THEN r.viewing_method_raw ELSE 'unknown' END AS requested_viewing_method,
+      s.delivered_raw,
+      s.showing_status,
+      IFNULL(s.offer_submitted, FALSE) AS offer_submitted,
+      IFNULL(s.appointment_start_utc <= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 72 HOUR), FALSE) AS outcome_window_closed
+    FROM deduplicated_requests AS r
+    LEFT JOIN showings AS s
+      ON r.booking_id = s.booking_id
+    WHERE IFNULL(s.appointment_type, '') NOT IN ('agent_preview', 'broker_caravan', 'inspection', 'photography')
+      AND IFNULL(s.listing_status_at_appointment, '') NOT IN ('withdrawn', 'sold')
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE WHEN delivered_raw IN ('private_in_person_tour', 'open_house', 'live_video_tour', 'recorded_video_tour', '3d_virtual_tour', 'self_guided_tour') THEN delivered_raw ELSE requested_viewing_method END AS delivered_viewing_method
+    FROM joined
+  )
+  SELECT
+    request_date,
+    requested_viewing_method,
+    delivered_viewing_method,
+    property_type,
+    COUNT(*) AS tour_requests,
+    COUNT(DISTINCT user_pseudo_id) AS requesting_users,
+    COUNT(DISTINCT listing_id) AS listings_requested,
+    COUNTIF(showing_status = 'attended') AS attended_tours,
+    COUNTIF(showing_status = 'no_show' AND outcome_window_closed) AS no_show_tours,
+    COUNTIF(showing_status = 'attended' AND offer_submitted) AS offers_after_tour,
+    ROUND(SAFE_DIVIDE(COUNTIF(showing_status = 'attended'), COUNT(*)), 4) AS request_to_attendance_rate,
+    ROUND(SAFE_DIVIDE(COUNTIF(showing_status = 'no_show' AND outcome_window_closed), COUNTIF(outcome_window_closed AND showing_status IN ('attended', 'no_show'))), 4) AS no_show_rate,
+    ROUND(SAFE_DIVIDE(COUNTIF(showing_status = 'attended' AND offer_submitted), COUNTIF(showing_status = 'attended')), 4) AS tour_to_offer_rate
+  FROM classified
+  GROUP BY request_date, requested_viewing_method, delivered_viewing_method, property_type
+  ORDER BY request_date, tour_requests DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Viewing Method: deduplicated tour requests (leadOperation.newLead, eVar51 = tour_request) by requested and delivered viewing method,
+  -- with attendance, no-show and offer outcomes from the showing scheduling dataset joined on booking_id (eVar50).
+  -- Set before running: $start_date and $end_date query parameters (YYYY-MM-DD, both inclusive) and dataset names.
+  WITH tour_requests AS (
+    SELECT
+      CAST(timestamp AS DATE) AS request_date,
+      timestamp,
+      endUserIDs._experience.ecid.id AS ecid,
+      productListItems[0].SKU AS listing_id,
+      _experience.analytics.customDimensions.eVars.eVar50 AS booking_id,
+      REGEXP_REPLACE(LOWER(TRIM(_experience.analytics.customDimensions.eVars.eVar49)), '[ -]+', '_') AS viewing_method_raw,
+      ROW_NUMBER() OVER (PARTITION BY _experience.analytics.customDimensions.eVars.eVar50 ORDER BY timestamp DESC) AS request_rank
+    FROM web_experience_events
+    WHERE timestamp >= TO_TIMESTAMP('$start_date')
+      AND timestamp < TO_TIMESTAMP(DATE_ADD(TO_DATE('$end_date'), 1))
+      AND eventType = 'leadOperation.newLead'
+      AND _experience.analytics.customDimensions.eVars.eVar51 = 'tour_request'
+      AND _experience.analytics.customDimensions.eVars.eVar50 IS NOT NULL
+      AND COALESCE(_experience.analytics.customDimensions.eVars.eVar52, '') <> 'internal'
+  ),
+  showings AS (
+    SELECT
+      booking_id,
+      listing_id AS showing_listing_id,
+      REGEXP_REPLACE(LOWER(TRIM(delivered_viewing_method)), '[ -]+', '_') AS delivered_raw,
+      appointment_type,
+      showing_status,
+      appointment_start_utc,
+      listing_status_at_appointment,
+      offer_submitted,
+      property_type,
+      ROW_NUMBER() OVER (PARTITION BY booking_id ORDER BY updated_at DESC) AS version_rank
+    FROM showing_appointments
+    WHERE CAST(appointment_start_utc AS DATE) >= TO_DATE('$start_date')
+  ),
+  joined AS (
+    SELECT
+      r.request_date,
+      r.booking_id,
+      r.ecid,
+      COALESCE(r.listing_id, s.showing_listing_id) AS listing_id,
+      COALESCE(s.property_type, 'unknown') AS property_type,
+      CASE WHEN r.viewing_method_raw IN ('private_in_person_tour', 'open_house', 'live_video_tour', 'recorded_video_tour', '3d_virtual_tour', 'self_guided_tour') THEN r.viewing_method_raw ELSE 'unknown' END AS requested_viewing_method,
+      s.delivered_raw,
+      s.showing_status,
+      COALESCE(s.offer_submitted, FALSE) AS offer_submitted,
+      COALESCE(s.appointment_start_utc <= current_timestamp() - INTERVAL 72 HOURS, FALSE) AS outcome_window_closed
+    FROM tour_requests AS r
+    LEFT JOIN showings AS s
+      ON r.booking_id = s.booking_id
+     AND s.version_rank = 1
+    WHERE r.request_rank = 1
+      AND COALESCE(s.appointment_type, '') NOT IN ('agent_preview', 'broker_caravan', 'inspection', 'photography')
+      AND COALESCE(s.listing_status_at_appointment, '') NOT IN ('withdrawn', 'sold')
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE WHEN delivered_raw IN ('private_in_person_tour', 'open_house', 'live_video_tour', 'recorded_video_tour', '3d_virtual_tour', 'self_guided_tour') THEN delivered_raw ELSE requested_viewing_method END AS delivered_viewing_method
+    FROM joined
+  )
+  SELECT
+    request_date,
+    requested_viewing_method,
+    delivered_viewing_method,
+    property_type,
+    COUNT(*) AS tour_requests,
+    COUNT(DISTINCT ecid) AS requesting_users,
+    COUNT(DISTINCT listing_id) AS listings_requested,
+    SUM(CASE WHEN showing_status = 'attended' THEN 1 ELSE 0 END) AS attended_tours,
+    SUM(CASE WHEN showing_status = 'no_show' AND outcome_window_closed THEN 1 ELSE 0 END) AS no_show_tours,
+    SUM(CASE WHEN showing_status = 'attended' AND offer_submitted THEN 1 ELSE 0 END) AS offers_after_tour,
+    ROUND(SUM(CASE WHEN showing_status = 'attended' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 4) AS request_to_attendance_rate,
+    ROUND(SUM(CASE WHEN showing_status = 'no_show' AND outcome_window_closed THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN outcome_window_closed AND showing_status IN ('attended', 'no_show') THEN 1 ELSE 0 END), 0), 4) AS no_show_rate,
+    ROUND(SUM(CASE WHEN showing_status = 'attended' AND offer_submitted THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN showing_status = 'attended' THEN 1 ELSE 0 END), 0), 4) AS tour_to_offer_rate
+  FROM classified
+  GROUP BY request_date, requested_viewing_method, delivered_viewing_method, property_type
+  ORDER BY request_date, tour_requests DESC;
 
 Calculation Notes: |
-  Assign the canonical method explicitly recorded on each viewing-related event. For booking or rescheduling events, use the method requested for that booking version; for attendance, completion, cancellation, feedback, offer, or conversion events, use the method associated with the effective viewing occurrence. If the method changes after initial booking, do not overwrite prior events; subsequent events must carry the revised method. Use the actual delivered method when it is available and differs from the requested method. Do not infer the method from device type, meeting URL, office location, agent notes, or session behavior unless an approved source-mapping rule exists. Multiple methods presented on the same listing remain separate options until one is selected. Session timeout rules do not apply because the value is event-bound and must not be propagated from an earlier event in the session. Map blank, missing, unmapped, or contradictory source values to unknown, and use other only when the source explicitly identifies a valid method outside the governed taxonomy.
+  1️⃣ Controlled vocabulary only: private_in_person_tour, open_house, live_video_tour, recorded_video_tour, 3d_virtual_tour, self_guided_tour, plus unknown for missing or contradictory source values; free-text labels are normalised (lower case, spaces and hyphens to underscores); a requested method outside the list becomes unknown, never passed through raw, while a delivered method that is missing or outside the list falls back to the requested method (see 2️⃣).
+  2️⃣ Requested vs delivered: the tour request (GA4 generate_lead with lead_type = tour_request; Adobe tour:request) carries the requested viewing_method, booking_id and listing ID (item_id / SKU). The delivered method, showing_status (scheduled, attended, no_show, cancelled) and offer_submitted flag (synced from the CRM) come from the latest version of the showing scheduling record, LEFT JOINed on booking_id; when the scheduling record or its delivered method is missing or outside the list, the delivered method falls back to the requested one.
+  3️⃣ Scope: a viewing enters this dimension only through a booked tour request, including agent-hosted recorded video or 3D walkthrough sessions booked through the tour form; listing page loads and unassisted on-demand media plays do not fire the tour request and are measured by virtual-tour-start-count, not here.
+  4️⃣ Deduplicate on booking_id: re-submissions and reschedules of the same booking count once, keeping the latest request; requests without a booking_id are incomplete submissions and are excluded.
+  5️⃣ Rates: request-to-attendance = attended tours ÷ all deduplicated tour requests; no-show rate = no-shows ÷ (attended + no-shows) among appointments whose outcome window has closed; tour-to-offer = attended tours with offer_submitted ÷ attended tours.
+  6️⃣ Exclusions: internal traffic (GA4 traffic_type = internal; the same internal-IP rule sets eVar52 = internal in Adobe), appointment_type agent_preview, broker_caravan, inspection and photography, and bookings whose listing_status_at_appointment is withdrawn or sold.
+  7️⃣ Timing: rows are dated by the tour request date and outcomes are attached to that request cohort; attendance confirmations are accepted for 72 hours after appointment_start_utc, so a no-show is counted only once that window has closed.
 
 Business Use Case: |
-  The Product and Marketplace Operations teams compare booking-to-completion and viewing-to-inquiry or offer conversion by viewing method and market. If live virtual tours produce stronger qualified-lead conversion than recorded tours for remote prospects, leadership can expand agent availability and video infrastructure in markets with high out-of-area demand while reducing investment in underperforming formats.
+  1️⃣ Sales Operations (brokerage) reviews the weekly tour attendance report and, when a market's no-show rate for private in-person tours exceeds its trailing 8-week average, requires confirmation reminders and offers a live video tour alternative to prospects who have not confirmed 24 hours before the appointment.
+  2️⃣ Showing Operations managers review the monthly requested vs delivered viewing format report and, when more than 15% of live video tour requests are delivered in a different format or their request-to-attendance rate falls below that of private in-person tours, add agent video-tour slots to the booking calendar and hold back promoting live video tours until attendance and tour-to-offer conversion recover.
+  3️⃣ The Product team for the tour booking experience compares request-to-attendance and tour-to-offer conversion for self-guided tours against agent-led formats each quarter and expands or pauses self-guided lockbox access by property type based on the result.
+  4️⃣ Sales leadership allocates agent coverage for weekend open houses using the prior month's booked open-house attendance from the showing scheduling record, cut by Geographic Market, moving agents from markets with low booked attendance to scheduled private showings.
 
+Dependencies:
+  Dimensions: [property-type, listing-status]
 
-Source Data: Property viewing booking platform, listing management system, virtual-tour platform, access-control system, CRM, and digital analytics event stream
+Source Data: Digital Analytics (GA4) + CRM + Showing/Tour Scheduling Platform
 
 Report Attributes: |
-  ["Viewing Status","Property Type","Listing Transaction Type","Geographic Market","Lead Source","User Type","Device Type","Agent","Viewing Date","Listing Price Band"]
+  Property Type; Listing Transaction Type; Geographic Market; Listing Price Band; Lead Source; Listing Agent; Device Category; New vs Returning User; Viewing Status; Viewing Date
 
-Dashboard Usage: [Property Viewing Funnel, Tour Booking and Attendance, Listing Engagement Performance, Lead-to-Viewing Conversion, Viewing-to-Offer Conversion, Virtual Tour Adoption, Market Operations Performance]
+Dashboard Usage: [Property Viewing Funnel, Tour Booking and Attendance, Listing Engagement Performance, Viewing-to-Offer Conversion, Requested vs Delivered Viewing Format]
 
 Segment Eligibility: |
   true
 
-Related Dimensions: [Property, Listing, Viewing Status, Viewing Date, Viewing Channel, Property Type, User Type, Lead Source, Geographic Market, Device Type]
+Related Dimensions: [Viewing Status, Viewing Date, Listing ID, Property Type, Listing Transaction Type, Lead Source, Geographic Market, Device Category]
 
-Derived Dimensions: [Viewing Mode Group, Viewing Attendance Mode, Viewing Technology Level, Physical Versus Digital Viewing]
+Derived Dimensions: [Physical vs Virtual Viewing, Agent-Led vs Self-Guided Tour]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
-Status: published
+Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-09-02T19:30:09.387921+00:00
+Created At: 2026-09-14T08:06:38.688+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-14T08:06:51.272+00:00
 
