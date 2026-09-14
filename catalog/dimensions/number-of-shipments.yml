@@ -1,7 +1,7 @@
 # Dimension: Number of Shipments
-# Generated: 2026-09-14T18:46:38.037Z
+# Generated: 2026-09-14T18:46:46.356Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Number of Shipments
 
@@ -10,31 +10,533 @@ Description: |
 
 Category: Operations
 
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Generic
 
+Scope: Event
 
+Data Type: number
 
+Aggregation Window: Event, Daily, Weekly, Monthly
 
+GA4 Event: |
+  page_view
 
+Adobe Event: |
+  page:view
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageName": "order status",
+          "pageType": "order_status"
+        }
+      },
+      "transaction": {
+        "transactionID": "ORD-100482",
+        "attributes": {
+          "shipmentCount": 2
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "page_view",
+            "eventAction": "view",
+            "type": "order_status"
+          },
+          "attributes": {
+            "transactionID": "ORD-100482",
+            "shipmentCount": 2
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_type": "order_status",
+    "transaction_id": "ORD-100482",
+    "shipment_count": 2
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "page:view",
+    "eventInfo": {
+      "eventName": "pageView"
+    },
+    "page": {
+      "pageName": "order status",
+      "pageType": "order_status"
+    },
+    "order": {
+      "transactionId": "ORD-100482",
+      "shipmentCount": 2
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "timestamp": "2026-09-13T10:15:00Z",
+    "web": {
+      "webPageDetails": {
+        "name": "order status",
+        "siteSection": "order_status",
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-100482"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "ORD-100482",
+            "eVar45": "order_status",
+            "eVar58": "2"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Number of Shipments per fully fulfilled order (bands 1 / 2 / 3+) from the OMS fulfillment tables, Split Shipment Rate over all shipped orders,
+  -- and order status page_view behaviour by band from the GA4 export (the OMS count is authoritative; the web shipment_count is only compared)
+  -- oms.* = Shopify fulfillments / Salesforce Order Management FulfillmentOrder + Shipment / Adobe Commerce sales_shipment + sales_shipment_track at order, line, fulfillment and tracking grain
+  WITH shippable_lines AS (
+    SELECT
+      l.order_id,
+      l.line_id,
+      l.quantity_ordered,
+      COALESCE(l.quantity_cancelled, 0) AS quantity_cancelled,
+      l.cancelled_at
+    FROM `your-project.oms.order_lines` AS l
+    WHERE COALESCE(l.requires_shipping, TRUE) = TRUE
+      AND LOWER(COALESCE(l.fulfillment_method, 'ship')) NOT IN ('digital', 'gift_card', 'e_gift_card', 'warranty', 'service', 'pickup_in_store', 'ship_to_store')
+  ),
+  original_orders AS (
+    SELECT
+      o.order_id,
+      o.transaction_id,
+      LOWER(COALESCE(o.fulfillment_channel, 'merchant')) AS fulfillment_channel,
+      DATE(o.created_at) AS order_date
+    FROM `your-project.oms.orders` AS o
+    WHERE DATE(o.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 180 DAY)
+      AND o.cancelled_at IS NULL
+      AND LOWER(COALESCE(o.order_type, 'standard')) NOT IN ('exchange', 'replacement', 'reship')
+  ),
+  -- Outbound fulfillments against original shippable lines; cancelled / failed / voided and reship, replacement, return or exchange fulfillments are removed
+  outbound_fulfillments AS (
+    SELECT
+      f.fulfillment_id,
+      f.order_id,
+      f.created_at,
+      COUNT(DISTINCT NULLIF(TRIM(t.tracking_number), '')) AS tracking_numbers
+    FROM `your-project.oms.fulfillments` AS f
+    LEFT JOIN `your-project.oms.fulfillment_tracking` AS t
+      ON t.fulfillment_id = f.fulfillment_id
+    WHERE f.order_id IN (SELECT order_id FROM original_orders)
+      AND LOWER(COALESCE(f.status, '')) NOT IN ('cancelled', 'canceled', 'error', 'failure', 'voided')
+      AND LOWER(COALESCE(f.fulfillment_reason, 'original')) NOT IN ('reship', 'replacement', 'return', 'exchange')
+      AND f.fulfillment_id IN (
+        SELECT fl.fulfillment_id
+        FROM `your-project.oms.fulfillment_lines` AS fl
+        JOIN shippable_lines AS sl
+          ON sl.line_id = fl.line_id
+      )
+    GROUP BY f.fulfillment_id, f.order_id, f.created_at
+  ),
+  line_progress AS (
+    SELECT
+      sl.order_id,
+      sl.line_id,
+      sl.quantity_ordered,
+      sl.quantity_cancelled,
+      sl.cancelled_at,
+      COALESCE(SUM(shipped.quantity), 0) AS quantity_shipped
+    FROM shippable_lines AS sl
+    LEFT JOIN (
+      SELECT fl.line_id, fl.quantity
+      FROM `your-project.oms.fulfillment_lines` AS fl
+      JOIN outbound_fulfillments AS f
+        ON f.fulfillment_id = fl.fulfillment_id
+    ) AS shipped
+      ON shipped.line_id = sl.line_id
+    GROUP BY sl.order_id, sl.line_id, sl.quantity_ordered, sl.quantity_cancelled, sl.cancelled_at
+  ),
+  order_progress AS (
+    SELECT
+      o.order_id,
+      o.transaction_id,
+      o.fulfillment_channel,
+      o.order_date,
+      COUNT(lp.line_id) AS shippable_lines,
+      COUNTIF(lp.quantity_shipped + lp.quantity_cancelled < lp.quantity_ordered) AS open_lines,
+      COALESCE(SUM(lp.quantity_shipped), 0) AS units_shipped,
+      MAX(IF(lp.quantity_cancelled > 0, lp.cancelled_at, NULL)) AS last_line_cancelled_at
+    FROM original_orders AS o
+    LEFT JOIN line_progress AS lp
+      ON lp.order_id = o.order_id
+    GROUP BY o.order_id, o.transaction_id, o.fulfillment_channel, o.order_date
+  ),
+  fulfillment_counts AS (
+    SELECT
+      order_id,
+      COUNTIF(tracking_numbers > 0) AS tracked_fulfillments,
+      COUNTIF(tracking_numbers = 0) AS untracked_fulfillments,
+      MAX(created_at) AS last_fulfillment_at
+    FROM outbound_fulfillments
+    GROUP BY order_id
+  ),
+  -- Band is fixed only when every shippable line is shipped or cancelled; report_date = final-fulfillment date (pending orders are dated by order date)
+  order_shipments AS (
+    SELECT
+      p.order_id,
+      p.transaction_id,
+      COALESCE(c.tracked_fulfillments, 0) AS number_of_shipments,
+      COALESCE(c.untracked_fulfillments, 0) AS untracked_fulfillments,
+      CASE
+        WHEN p.shippable_lines = 0 THEN '(not applicable)'
+        WHEN p.open_lines > 0 THEN '(pending)'
+        WHEN p.units_shipped = 0 THEN '(not applicable)'
+        WHEN COALESCE(c.tracked_fulfillments, 0) = 0 AND p.fulfillment_channel = 'marketplace' THEN '(not applicable)'
+        WHEN COALESCE(c.tracked_fulfillments, 0) = 0 THEN '(not set)'
+        WHEN c.tracked_fulfillments = 1 THEN '1'
+        WHEN c.tracked_fulfillments = 2 THEN '2'
+        ELSE '3+'
+      END AS shipments_band,
+      COALESCE(
+        CASE
+          WHEN p.open_lines > 0 THEN p.order_date
+          WHEN c.last_fulfillment_at IS NULL THEN DATE(p.last_line_cancelled_at)
+          WHEN p.last_line_cancelled_at IS NULL OR c.last_fulfillment_at >= p.last_line_cancelled_at THEN DATE(c.last_fulfillment_at)
+          ELSE DATE(p.last_line_cancelled_at)
+        END,
+        p.order_date
+      ) AS report_date
+    FROM order_progress AS p
+    LEFT JOIN fulfillment_counts AS c
+      ON c.order_id = p.order_id
+  ),
+  reporting_orders AS (
+    SELECT *
+    FROM order_shipments
+    WHERE report_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+  ),
+  -- Order status page views: event_params pivoted per event with MAX(IF())
+  order_status_page_views AS (
+    SELECT
+      e.user_pseudo_id,
+      e.event_timestamp,
+      MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+      MAX(IF(ep.key = 'page_type', ep.value.string_value, NULL)) AS page_type,
+      MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) AS transaction_id,
+      MAX(IF(ep.key = 'shipment_count', COALESCE(ep.value.int_value, SAFE_CAST(ep.value.double_value AS INT64), SAFE_CAST(ep.value.string_value AS INT64)), NULL)) AS web_shipment_count
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 180 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name = 'page_view'
+    GROUP BY e.user_pseudo_id, e.event_timestamp, e.event_bundle_sequence_id
+  ),
+  web_by_order AS (
+    SELECT
+      transaction_id,
+      COUNT(*) AS order_status_views,
+      COUNT(DISTINCT CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING))) AS order_status_sessions,
+      MAX(web_shipment_count) AS max_web_shipment_count
+    FROM order_status_page_views
+    WHERE page_type = 'order_status'
+      AND transaction_id IS NOT NULL
+    GROUP BY transaction_id
+  ),
+  banded AS (
+    SELECT
+      r.order_id,
+      r.shipments_band,
+      r.number_of_shipments,
+      r.untracked_fulfillments,
+      COALESCE(w.order_status_views, 0) AS order_status_views,
+      COALESCE(w.order_status_sessions, 0) AS order_status_sessions,
+      w.max_web_shipment_count
+    FROM reporting_orders AS r
+    LEFT JOIN web_by_order AS w
+      ON w.transaction_id = r.transaction_id
+  ),
+  -- Split Shipment Rate denominator: every fully fulfilled order with at least one tracked shipment (bands 1, 2 and 3+)
+  shipped_base AS (
+    SELECT
+      COUNTIF(shipments_band IN ('1', '2', '3+')) AS shipped_orders,
+      COUNTIF(shipments_band IN ('2', '3+')) AS split_shipment_orders
+    FROM banded
+  )
+  SELECT
+    b.shipments_band AS number_of_shipments_band,
+    COUNT(DISTINCT b.order_id) AS orders,
+    IF(b.shipments_band IN ('1', '2', '3+'), ROUND(SAFE_DIVIDE(COUNT(DISTINCT b.order_id), MAX(s.shipped_orders)), 4), NULL) AS share_of_shipped_orders,
+    ROUND(SAFE_DIVIDE(MAX(s.split_shipment_orders), MAX(s.shipped_orders)), 4) AS split_shipment_rate,
+    ROUND(AVG(IF(b.shipments_band IN ('1', '2', '3+'), b.number_of_shipments, NULL)), 2) AS avg_shipments_per_order,
+    SUM(b.untracked_fulfillments) AS untracked_fulfillments_for_review,
+    COUNTIF(b.order_status_views > 0) AS orders_with_order_status_view,
+    ROUND(SAFE_DIVIDE(COUNTIF(b.order_status_views > 0), COUNT(DISTINCT b.order_id)), 4) AS order_status_view_rate,
+    ROUND(SAFE_DIVIDE(SUM(b.order_status_views), COUNT(DISTINCT b.order_id)), 2) AS order_status_views_per_order,
+    ROUND(SAFE_DIVIDE(SUM(b.order_status_sessions), COUNT(DISTINCT b.order_id)), 2) AS order_status_sessions_per_order,
+    COUNTIF(b.shipments_band IN ('1', '2', '3+') AND b.max_web_shipment_count > b.number_of_shipments) AS orders_web_count_above_oms
+  FROM banded AS b
+  CROSS JOIN shipped_base AS s
+  GROUP BY b.shipments_band
+  ORDER BY CASE b.shipments_band WHEN '1' THEN 1 WHEN '2' THEN 2 WHEN '3+' THEN 3 WHEN '(not set)' THEN 4 WHEN '(pending)' THEN 5 ELSE 6 END;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Number of Shipments per fully fulfilled order (bands 1 / 2 / 3+) from the OMS fulfillment datasets, Split Shipment Rate over all shipped orders,
+  -- and order status page view behaviour by band from web events (the OMS count is authoritative; eVar58 shipment count is only compared)
+  -- oms_* datasets = Shopify fulfillments / Salesforce Order Management FulfillmentOrder + Shipment / Adobe Commerce sales_shipment + sales_shipment_track at order, line, fulfillment and tracking grain
+  WITH shippable_lines AS (
+    SELECT
+      l.order_id,
+      l.line_id,
+      l.quantity_ordered,
+      COALESCE(l.quantity_cancelled, 0) AS quantity_cancelled,
+      l.cancelled_at
+    FROM oms_order_lines_dataset l
+    WHERE COALESCE(l.requires_shipping, true) = true
+      AND LOWER(COALESCE(l.fulfillment_method, 'ship')) NOT IN ('digital', 'gift_card', 'e_gift_card', 'warranty', 'service', 'pickup_in_store', 'ship_to_store')
+  ),
+  original_orders AS (
+    SELECT
+      o.order_id,
+      o.transaction_id,
+      LOWER(COALESCE(o.fulfillment_channel, 'merchant')) AS fulfillment_channel,
+      to_date(o.created_at) AS order_date
+    FROM oms_orders_dataset o
+    WHERE to_date(o.created_at) >= date_sub(current_date(), 180)
+      AND o.cancelled_at IS NULL
+      AND LOWER(COALESCE(o.order_type, 'standard')) NOT IN ('exchange', 'replacement', 'reship')
+  ),
+  -- Outbound fulfillments against original shippable lines; cancelled / failed / voided and reship, replacement, return or exchange fulfillments are removed
+  outbound_fulfillments AS (
+    SELECT
+      f.fulfillment_id,
+      f.order_id,
+      f.created_at,
+      COUNT(DISTINCT NULLIF(TRIM(t.tracking_number), '')) AS tracking_numbers
+    FROM oms_fulfillments_dataset f
+    LEFT JOIN oms_fulfillment_tracking_dataset t
+      ON t.fulfillment_id = f.fulfillment_id
+    WHERE f.order_id IN (SELECT order_id FROM original_orders)
+      AND LOWER(COALESCE(f.status, '')) NOT IN ('cancelled', 'canceled', 'error', 'failure', 'voided')
+      AND LOWER(COALESCE(f.fulfillment_reason, 'original')) NOT IN ('reship', 'replacement', 'return', 'exchange')
+      AND f.fulfillment_id IN (
+        SELECT fl.fulfillment_id
+        FROM oms_fulfillment_lines_dataset fl
+        JOIN shippable_lines sl
+          ON sl.line_id = fl.line_id
+      )
+    GROUP BY f.fulfillment_id, f.order_id, f.created_at
+  ),
+  line_progress AS (
+    SELECT
+      sl.order_id,
+      sl.line_id,
+      sl.quantity_ordered,
+      sl.quantity_cancelled,
+      sl.cancelled_at,
+      COALESCE(SUM(shipped.quantity), 0) AS quantity_shipped
+    FROM shippable_lines sl
+    LEFT JOIN (
+      SELECT fl.line_id, fl.quantity
+      FROM oms_fulfillment_lines_dataset fl
+      JOIN outbound_fulfillments f
+        ON f.fulfillment_id = fl.fulfillment_id
+    ) shipped
+      ON shipped.line_id = sl.line_id
+    GROUP BY sl.order_id, sl.line_id, sl.quantity_ordered, sl.quantity_cancelled, sl.cancelled_at
+  ),
+  order_progress AS (
+    SELECT
+      o.order_id,
+      o.transaction_id,
+      o.fulfillment_channel,
+      o.order_date,
+      COUNT(lp.line_id) AS shippable_lines,
+      SUM(CASE WHEN lp.quantity_shipped + lp.quantity_cancelled < lp.quantity_ordered THEN 1 ELSE 0 END) AS open_lines,
+      COALESCE(SUM(lp.quantity_shipped), 0) AS units_shipped,
+      MAX(CASE WHEN lp.quantity_cancelled > 0 THEN lp.cancelled_at END) AS last_line_cancelled_at
+    FROM original_orders o
+    LEFT JOIN line_progress lp
+      ON lp.order_id = o.order_id
+    GROUP BY o.order_id, o.transaction_id, o.fulfillment_channel, o.order_date
+  ),
+  fulfillment_counts AS (
+    SELECT
+      order_id,
+      SUM(CASE WHEN tracking_numbers > 0 THEN 1 ELSE 0 END) AS tracked_fulfillments,
+      SUM(CASE WHEN tracking_numbers = 0 THEN 1 ELSE 0 END) AS untracked_fulfillments,
+      MAX(created_at) AS last_fulfillment_at
+    FROM outbound_fulfillments
+    GROUP BY order_id
+  ),
+  -- Band is fixed only when every shippable line is shipped or cancelled; report_date = final-fulfillment date (pending orders are dated by order date)
+  order_shipments AS (
+    SELECT
+      p.order_id,
+      p.transaction_id,
+      COALESCE(c.tracked_fulfillments, 0) AS number_of_shipments,
+      COALESCE(c.untracked_fulfillments, 0) AS untracked_fulfillments,
+      CASE
+        WHEN p.shippable_lines = 0 THEN '(not applicable)'
+        WHEN p.open_lines > 0 THEN '(pending)'
+        WHEN p.units_shipped = 0 THEN '(not applicable)'
+        WHEN COALESCE(c.tracked_fulfillments, 0) = 0 AND p.fulfillment_channel = 'marketplace' THEN '(not applicable)'
+        WHEN COALESCE(c.tracked_fulfillments, 0) = 0 THEN '(not set)'
+        WHEN c.tracked_fulfillments = 1 THEN '1'
+        WHEN c.tracked_fulfillments = 2 THEN '2'
+        ELSE '3+'
+      END AS shipments_band,
+      COALESCE(
+        CASE
+          WHEN p.open_lines > 0 THEN p.order_date
+          WHEN c.last_fulfillment_at IS NULL THEN to_date(p.last_line_cancelled_at)
+          WHEN p.last_line_cancelled_at IS NULL OR c.last_fulfillment_at >= p.last_line_cancelled_at THEN to_date(c.last_fulfillment_at)
+          ELSE to_date(p.last_line_cancelled_at)
+        END,
+        p.order_date
+      ) AS report_date
+    FROM order_progress p
+    LEFT JOIN fulfillment_counts c
+      ON c.order_id = p.order_id
+  ),
+  reporting_orders AS (
+    SELECT *
+    FROM order_shipments
+    WHERE report_date >= date_sub(current_date(), 90)
+      AND report_date < current_date()
+  ),
+  -- Order status page views (web.webPageDetails.siteSection = order_status), sessionised with a 30-minute timeout
+  order_status_page_views AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS ecid,
+      timestamp AS event_ts,
+      commerce.order.purchaseID AS transaction_id,
+      CAST(_experience.analytics.customDimensions.eVars.eVar58 AS INT) AS web_shipment_count,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY endUserIDs._experience.ecid.id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 180)
+      AND timestamp < current_date()
+      AND eventType = 'web.webpagedetails.pageViews'
+      AND web.webPageDetails.siteSection = 'order_status'
+      AND commerce.order.purchaseID IS NOT NULL
+  ),
+  web_by_order AS (
+    SELECT
+      transaction_id,
+      COUNT(*) AS order_status_views,
+      COUNT(DISTINCT CONCAT(ecid, '.', CAST(session.num AS STRING))) AS order_status_sessions,
+      MAX(web_shipment_count) AS max_web_shipment_count
+    FROM order_status_page_views
+    GROUP BY transaction_id
+  ),
+  banded AS (
+    SELECT
+      r.order_id,
+      r.shipments_band,
+      r.number_of_shipments,
+      r.untracked_fulfillments,
+      COALESCE(w.order_status_views, 0) AS order_status_views,
+      COALESCE(w.order_status_sessions, 0) AS order_status_sessions,
+      w.max_web_shipment_count
+    FROM reporting_orders r
+    LEFT JOIN web_by_order w
+      ON w.transaction_id = r.transaction_id
+  ),
+  -- Split Shipment Rate denominator: every fully fulfilled order with at least one tracked shipment (bands 1, 2 and 3+)
+  shipped_base AS (
+    SELECT
+      SUM(CASE WHEN shipments_band IN ('1', '2', '3+') THEN 1 ELSE 0 END) AS shipped_orders,
+      SUM(CASE WHEN shipments_band IN ('2', '3+') THEN 1 ELSE 0 END) AS split_shipment_orders
+    FROM banded
+  )
+  SELECT
+    b.shipments_band AS number_of_shipments_band,
+    COUNT(DISTINCT b.order_id) AS orders,
+    CASE WHEN b.shipments_band IN ('1', '2', '3+')
+         THEN ROUND(CAST(COUNT(DISTINCT b.order_id) AS DOUBLE) / NULLIF(MAX(s.shipped_orders), 0), 4) END AS share_of_shipped_orders,
+    ROUND(CAST(MAX(s.split_shipment_orders) AS DOUBLE) / NULLIF(MAX(s.shipped_orders), 0), 4) AS split_shipment_rate,
+    ROUND(AVG(CASE WHEN b.shipments_band IN ('1', '2', '3+') THEN b.number_of_shipments END), 2) AS avg_shipments_per_order,
+    SUM(b.untracked_fulfillments) AS untracked_fulfillments_for_review,
+    SUM(CASE WHEN b.order_status_views > 0 THEN 1 ELSE 0 END) AS orders_with_order_status_view,
+    ROUND(CAST(SUM(CASE WHEN b.order_status_views > 0 THEN 1 ELSE 0 END) AS DOUBLE) / NULLIF(COUNT(DISTINCT b.order_id), 0), 4) AS order_status_view_rate,
+    ROUND(CAST(SUM(b.order_status_views) AS DOUBLE) / NULLIF(COUNT(DISTINCT b.order_id), 0), 2) AS order_status_views_per_order,
+    ROUND(CAST(SUM(b.order_status_sessions) AS DOUBLE) / NULLIF(COUNT(DISTINCT b.order_id), 0), 2) AS order_status_sessions_per_order,
+    SUM(CASE WHEN b.shipments_band IN ('1', '2', '3+') AND b.max_web_shipment_count > b.number_of_shipments THEN 1 ELSE 0 END) AS orders_web_count_above_oms
+  FROM banded b
+  CROSS JOIN shipped_base s
+  GROUP BY b.shipments_band
+  ORDER BY CASE b.shipments_band WHEN '1' THEN 1 WHEN '2' THEN 2 WHEN '3+' THEN 3 WHEN '(not set)' THEN 4 WHEN '(pending)' THEN 5 ELSE 6 END;
 
+Calculation Notes: |
+  1️⃣ Counting unit: distinct outbound fulfillment records against the order that carry at least one carrier tracking number, i.e. Shopify Fulfillment objects with status success, Salesforce Order Management FulfillmentOrder records linked to a Shipment with a TrackingNumber, and Adobe Commerce sales_shipment rows with at least one sales_shipment_track entry. A multi-piece fulfillment with several tracking numbers counts once, because the piece count belongs to package-level reporting. Fulfillments with no tracking are left out of the count and flagged for data-quality review, and an order whose shipped lines have no tracked fulfillment at all resolves to '(not set)'.
+  2️⃣ Exclusions: cancelled or failed fulfillments (Shopify status cancelled, error or failure; FulfillmentOrder Status Cancelled; Adobe Commerce shipments voided before carrier handover) are removed before counting. Lines that never ship (digital goods, e-gift cards, warranties and services, buy online pick up in store, ship-to-store pickup) are ignored. An order made up only of such lines carries '(not applicable)' and is left out of every shipped-order base.
+  3️⃣ Timing and finality: the value is set only when the order is fully fulfilled, meaning Shopify fulfillment_status fulfilled, every FulfillmentOrder Fulfilled or Cancelled, or every shippable Adobe Commerce order item with qty_shipped + qty_canceled = qty_ordered. Partially fulfilled orders carry '(pending)' and stay out of Split Shipment Rate. When a backorder line is later cancelled, the order becomes final on the date of that cancellation. Trend reports are dated by final-fulfillment date. Order-date cohorts restate until every order in the cohort is final, and they are frozen at order date + 60 days.
+  4️⃣ Storage and banding: the integer count is stored on the order and bucketed at reporting into '1', '2' and '3+'. Split Shipment Rate = orders with Number of Shipments ≥ 2 / all fully fulfilled orders with Number of Shipments ≥ 1. The denominator is the full shipped-order base, including single-shipment orders, and never just the multi-shipment orders or all orders placed.
+  5️⃣ Post-dispatch activity: only fulfillments created against the original order lines count. Return labels, exchange orders, and replacement or reship fulfillments for parcels lost or damaged in transit are excluded, whether they are raised as a new order or flagged with a reship reason code on the original, so carrier failures do not inflate the split count.
+  6️⃣ Channel and network edge cases: drop-ship and vendor-direct fulfillments count as separate shipments when they carry their own tracking. Marketplace orders fulfilled by the marketplace (e.g. Amazon FBA) are counted from the marketplace fulfillment feed or excluded as '(not applicable)' when no tracking is exposed. Several fulfillments that a carrier consolidates under one master tracking number still count separately, because the split decision was made in the OMS. No session timeout applies because the value is order-scoped. When web analytics shows shipment_count on the order status page_view (page_type = order_status), that value is for display only and the OMS count wins.
+  7️⃣ Boundaries: this dimension is not Shipment Volume (the metric counting shipments dispatched in a period), not Items per Order or Units Sold (line and unit quantities), and not Shipment Status (the lifecycle state of each shipment). The node each shipment left from belongs to Distribution Center, and the transport company belongs to Carrier.
 
+Business Use Case: |
+  1️⃣ Fulfillment Operations (network planning): in the weekly network review, when the share of fully fulfilled orders in the '2' and '3+' bands rises more than 2 points above the trailing 8-week baseline for a delivery region, break the split orders down by distribution center and item category and rebalance safety stock for the SKUs that most often force a second origin node.
+  2️⃣ Finance (e-commerce P&L): at the monthly fulfillment cost close, compare carrier cost and packaging cost per order across the 1, 2 and 3+ bands. When the extra cost of 2+ shipment orders exceeds the agreed per-order margin threshold, propose a ship-complete hold rule for orders below a set order value to the operations steering committee.
+  3️⃣ Customer Service leadership: when 'where is my order' contacts per 100 orders for 2+ shipment orders exceed the single-shipment rate by the agreed margin, have the CRM team send proactive partial-shipment notifications and ask Product to show every tracking number on the order status page.
+  4️⃣ Merchandising: at the pre-season assortment and inventory placement review, list the category pairs bought together that most often end up in the '3+' band, and agree co-location of those SKUs in the same distribution centers with the planning team before the peak inventory build.
 
+Dependencies:
+  Events: [purchase]
+  Dimensions: [shipment-status]
 
+Source Data: Order Management Fulfillments (Shopify / Salesforce Order Management / Adobe Commerce)
 
+Report Attributes: |
+  Distribution Center; Carrier; Shipping Tier; Delivery Region; Item Category; Order Value Band; Sales Channel
 
+Dashboard Usage: [Split Shipment Performance, Fulfillment Cost per Order, Post-Purchase Delivery Experience, Inventory Placement and Network Health]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [shipment-status, carrier, distribution-center, shipping-tier, shipment-tracking-view, shipment-notification-open]
 
+Derived Dimensions: [split-shipment-flag]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +544,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-14T18:46:37.637+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-14T18:46:46.02+00:00
 
