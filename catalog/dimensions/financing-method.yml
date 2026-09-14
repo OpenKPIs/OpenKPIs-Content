@@ -1,18 +1,18 @@
 # Dimension: Financing Method
-# Generated: 2026-09-05T14:30:22.387Z
+# Generated: 2026-09-14T08:04:24.750Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Financing Method
 
 Description: |
-  Financing Method classifies the primary funding arrangement selected or confirmed for a real estate purchase, lease-to-own agreement, refinance, or property development transaction. It enables comparison of conversion, approval, closing, revenue, and transaction-cycle outcomes across cash, mortgage, government-backed, seller-funded, and alternative financing methods.
+  Financing Method classifies the primary funding source a buyer uses for a residential property purchase (Cash, Conventional, Jumbo, FHA, VA, USDA, Seller Financing, Other or Unknown), following the RESO Data Dictionary BuyerFinancing vocabulary rolled up to HMDA loan-type conventions. It lets brokerage, marketing and finance teams compare lead-to-offer conversion, contract fall-through, days to close and commission revenue by financing type, so they can steer lender partnerships, campaign mix and pipeline forecasts.
 
 Category: Conversion
 
-Tags: [dimension]
+Tags: [dimension, Real Estate Tech: Transaction & Closing Analytics]
 
-Industry: Real Estate Tech
+Industry: Real Estate Tech, Other
 
 Priority: High
 
@@ -31,41 +31,254 @@ Adobe Event: |
   add_payment_info
 
 W3 Data Layer: |
-  {"digitalData":{"event":[{"eventInfo":{"eventName":"add_payment_info","eventAction":"add_payment_info"},"attributes":{"financingMethod":"mortgage"}}]}}
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "add_payment_info",
+            "eventAction": "add_payment_info"
+          },
+          "attributes": {
+            "financingMethod": "fha",
+            "transactionID": "TXN-20260914-004512"
+          }
+        }
+      ]
+    }
+  }
 
 GA4 Data Layer: |
-  {"event":"add_payment_info","financing_method":"mortgage"}
+  {
+    "event": "add_payment_info",
+    "financing_method": "fha",
+    "transaction_id": "TXN-20260914-004512"
+  }
 
 Adobe Client Data Layer: |
-  {"data":{"financingMethod":"mortgage"},"event":"add_payment_info"}
+  {
+    "data": {
+      "financingMethod": "fha",
+      "transactionID": "TXN-20260914-004512"
+    },
+    "event": "add_payment_info"
+  }
 
 XDM Mapping: |
-  {"commerce":{"order":{"payments":[{"paymentType":"mortgage"}]}}}
+  {
+    "eventType": "add_payment_info",
+    "commerce": {
+      "order": {
+        "purchaseID": "TXN-20260914-004512"
+      }
+    },
+    "_tenant": {
+      "propertyTransaction": {
+        "financingMethod": "fha"
+      },
+      "trafficType": "external"
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Financing Method: event-level volume per normalised financing method, stitched to the CRM / loan origination record on transaction_id.
+  -- Set before running: the _TABLE_SUFFIX date range and the CRM transaction table name.
+  -- The CRM table stores the Closing Disclosure-confirmed value already in the controlled vocabulary (Jumbo assigned against the FHFA county limit).
+  WITH financing_events AS (
+    SELECT
+      e.event_date,
+      e.event_timestamp,
+      e.event_name,
+      e.user_pseudo_id,
+      CONCAT(e.user_pseudo_id, '.', CAST((SELECT ep.value.int_value FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'ga_session_id') AS STRING)) AS session_key,
+      LOWER(TRIM((SELECT ep.value.string_value FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'financing_method'))) AS financing_method_raw,
+      EXISTS (SELECT 1 FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'financing_method') AS has_financing_param,
+      COALESCE(NULLIF(e.ecommerce.transaction_id, ''), (SELECT ep.value.string_value FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'transaction_id')) AS transaction_id,
+      (SELECT ep.value.string_value FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE _TABLE_SUFFIX BETWEEN '20260801' AND '20260831'
+      AND e.event_name IN ('add_payment_info', 'generate_lead', 'submit_form')
+  ),
+  normalised AS (
+    SELECT
+      f.*,
+      CASE
+        WHEN f.financing_method_raw IS NULL OR f.financing_method_raw IN ('', 'unknown', 'not set', '(not set)', 'undecided') THEN 'Unknown'
+        WHEN f.financing_method_raw IN ('cash', 'all cash', 'cash purchase') THEN 'Cash'
+        WHEN f.financing_method_raw IN ('conventional', 'conventional loan', 'conforming') THEN 'Conventional'
+        WHEN f.financing_method_raw IN ('jumbo', 'jumbo loan') THEN 'Jumbo'
+        WHEN f.financing_method_raw IN ('fha', 'fha loan', 'fha 203(b)', 'fha 203(k)', 'fha 203b', 'fha 203k') THEN 'FHA'
+        WHEN f.financing_method_raw IN ('va', 'va loan') THEN 'VA'
+        WHEN f.financing_method_raw IN ('usda', 'usda loan', 'usda rural development') THEN 'USDA'
+        WHEN f.financing_method_raw IN ('seller financing', 'owner will carry', 'contract for deed', 'land contract') THEN 'Seller Financing'
+        WHEN f.financing_method_raw IN ('other', 'assumed', 'assumable', 'lease purchase', 'private', 'private loan', 'hard money') THEN 'Other'
+        ELSE 'Unknown'
+      END AS financing_method
+    FROM financing_events AS f
+    WHERE f.event_name = 'add_payment_info'
+       OR f.has_financing_param
+  ),
+  crm_transactions AS (
+    SELECT
+      t.transaction_id,
+      t.confirmed_financing_method,
+      t.transaction_status,
+      t.is_test_record
+    FROM (
+      SELECT
+        transaction_id,
+        financing_method AS confirmed_financing_method,
+        transaction_status,
+        is_test_record,
+        ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY status_updated_at DESC) AS rn
+      FROM `your-project.crm.property_transactions`
+      WHERE transaction_id IS NOT NULL
+    ) AS t
+    WHERE t.rn = 1
+  )
+  SELECT
+    n.financing_method,
+    COUNT(*) AS events,
+    COUNTIF(n.event_name = 'add_payment_info') AS add_payment_info_events,
+    COUNTIF(n.event_name = 'generate_lead') AS generate_lead_events,
+    COUNTIF(n.event_name = 'submit_form') AS submit_form_events,
+    COUNT(DISTINCT n.user_pseudo_id) AS users,
+    COUNT(DISTINCT n.session_key) AS sessions,
+    COUNT(DISTINCT n.transaction_id) AS transactions_captured,
+    COUNT(DISTINCT c.transaction_id) AS transactions_matched_to_crm,
+    COUNT(DISTINCT IF(c.confirmed_financing_method = n.financing_method, c.transaction_id, NULL)) AS transactions_confirmed_same_method,
+    SAFE_DIVIDE(COUNT(*), SUM(COUNT(*)) OVER ()) AS share_of_events
+  FROM normalised AS n
+  LEFT JOIN crm_transactions AS c
+    ON n.transaction_id IS NOT NULL
+   AND c.transaction_id = n.transaction_id
+  WHERE COALESCE(n.traffic_type, '') <> 'internal'
+    AND COALESCE(c.is_test_record, FALSE) = FALSE
+  GROUP BY n.financing_method
+  ORDER BY events DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Financing Method: event-level volume per normalised financing method, stitched to the CRM / loan origination dataset on transaction_id.
+  -- Set before running: the timestamp range and the CRM backend dataset name.
+  -- Sessions use SESS_TIMEOUT (30 minutes) over all web events in the window before the financing events are filtered.
+  WITH sessionised AS (
+    SELECT
+      w._id AS event_id,
+      w.timestamp,
+      w.eventType AS event_type,
+      w.identityMap['ECID'][0].id AS ecid,
+      SESS_TIMEOUT(w.timestamp, 60 * 30) OVER (PARTITION BY w.identityMap['ECID'][0].id ORDER BY w.timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session,
+      LOWER(TRIM(w._tenant.propertyTransaction.financingMethod)) AS financing_method_raw,
+      w._tenant.propertyTransaction.financingMethod IS NOT NULL AS has_financing_value,
+      NULLIF(w.commerce.order.purchaseID, '') AS transaction_id,
+      w._tenant.trafficType AS traffic_type
+    FROM web_experience_events AS w
+    WHERE w.timestamp >= TIMESTAMP '2026-08-01 00:00:00'
+      AND w.timestamp < TIMESTAMP '2026-09-01 00:00:00'
+  ),
+  normalised AS (
+    SELECT
+      s.event_id,
+      s.event_type,
+      s.ecid,
+      CONCAT(s.ecid, '-', CAST(s.session.num AS STRING)) AS session_key,
+      s.transaction_id,
+      s.traffic_type,
+      CASE
+        WHEN s.financing_method_raw IS NULL OR s.financing_method_raw IN ('', 'unknown', 'not set', '(not set)', 'undecided') THEN 'Unknown'
+        WHEN s.financing_method_raw IN ('cash', 'all cash', 'cash purchase') THEN 'Cash'
+        WHEN s.financing_method_raw IN ('conventional', 'conventional loan', 'conforming') THEN 'Conventional'
+        WHEN s.financing_method_raw IN ('jumbo', 'jumbo loan') THEN 'Jumbo'
+        WHEN s.financing_method_raw IN ('fha', 'fha loan', 'fha 203(b)', 'fha 203(k)', 'fha 203b', 'fha 203k') THEN 'FHA'
+        WHEN s.financing_method_raw IN ('va', 'va loan') THEN 'VA'
+        WHEN s.financing_method_raw IN ('usda', 'usda loan', 'usda rural development') THEN 'USDA'
+        WHEN s.financing_method_raw IN ('seller financing', 'owner will carry', 'contract for deed', 'land contract') THEN 'Seller Financing'
+        WHEN s.financing_method_raw IN ('other', 'assumed', 'assumable', 'lease purchase', 'private', 'private loan', 'hard money') THEN 'Other'
+        ELSE 'Unknown'
+      END AS financing_method
+    FROM sessionised AS s
+    WHERE s.event_type = 'add_payment_info'
+       OR (s.event_type IN ('generate_lead', 'submit_form') AND s.has_financing_value)
+  ),
+  crm_transactions AS (
+    SELECT
+      t.transaction_id,
+      t.confirmed_financing_method,
+      t.transaction_status,
+      t.is_test_record
+    FROM (
+      SELECT
+        transaction_id,
+        financing_method AS confirmed_financing_method,
+        transaction_status,
+        is_test_record,
+        ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY status_updated_at DESC) AS rn
+      FROM aep_crm_property_transactions
+      WHERE transaction_id IS NOT NULL
+    ) AS t
+    WHERE t.rn = 1
+  )
+  SELECT
+    n.financing_method,
+    COUNT(*) AS events,
+    SUM(CASE WHEN n.event_type = 'add_payment_info' THEN 1 ELSE 0 END) AS add_payment_info_events,
+    SUM(CASE WHEN n.event_type = 'generate_lead' THEN 1 ELSE 0 END) AS generate_lead_events,
+    SUM(CASE WHEN n.event_type = 'submit_form' THEN 1 ELSE 0 END) AS submit_form_events,
+    COUNT(DISTINCT n.ecid) AS users,
+    COUNT(DISTINCT n.session_key) AS sessions,
+    COUNT(DISTINCT n.transaction_id) AS transactions_captured,
+    COUNT(DISTINCT c.transaction_id) AS transactions_matched_to_crm,
+    COUNT(DISTINCT CASE WHEN c.confirmed_financing_method = n.financing_method THEN c.transaction_id END) AS transactions_confirmed_same_method,
+    CAST(COUNT(*) AS DOUBLE) / NULLIF(SUM(COUNT(*)) OVER (), 0) AS share_of_events
+  FROM normalised AS n
+  LEFT JOIN crm_transactions AS c
+    ON n.transaction_id IS NOT NULL
+   AND c.transaction_id = n.transaction_id
+  WHERE COALESCE(n.traffic_type, '') <> 'internal'
+    AND COALESCE(c.is_test_record, FALSE) = FALSE
+  GROUP BY n.financing_method
+  ORDER BY events DESC;
 
 Calculation Notes: |
-  Assign the value recorded for the transaction at the applicable event timestamp rather than the latest known value. Financing selections may change between inquiry, offer, application, approval, and closing; preserve each event-level value and use the closing-confirmed value for completed-transaction reporting. For blended financing, classify the method contributing the largest portion of the purchase price as primary and retain additional methods in a transaction-financing bridge table. Use Unknown when financing is expected but unavailable, Other only when a valid method falls outside the controlled vocabulary, and Not Applicable for transactions that do not require buyer financing. Exclude test, duplicate, canceled-before-submission, and internally simulated transactions from production conversion reporting.
+  1️⃣ Controlled vocabulary: Cash, Conventional, Jumbo, FHA, VA, USDA, Seller Financing, Other, Unknown. Map RESO BuyerFinancing source values before reporting: FHA 203(b) and FHA 203(k) → FHA; Owner Will Carry and Contract for Deed → Seller Financing; Assumed, Lease Purchase, Private and hard-money loans → Other. Raw source codes are retained in a separate column for audit, never exposed as report values.
+  2️⃣ Jumbo is confirmed only for conventional first liens whose loan amount exceeds the FHFA conforming loan limit for the property's county in the year of application; the limit table is refreshed every January when the new FHFA limits take effect. A web-captured 'jumbo' selection is a provisional self-reported value until the CRM or loan origination record confirms it on transaction_id. FHA, VA and USDA loans remain in their program bucket regardless of loan amount.
+  3️⃣ Primary source rule: the value reflects the first-lien instrument funding the purchase. A mortgage with a cash down payment is classified by the mortgage type, not Cash; piggyback structures (80/10/10) take the first-lien type; Cash applies only when no purchase-money lien is recorded at closing.
+  4️⃣ Point-in-time attribution: stamp the value on each funnel event (lead form, pre-approval, offer submission, closing) as captured at the event timestamp; do not overwrite historical events with later values. Closed-transaction reporting uses the value confirmed on the Closing Disclosure or settlement statement, which supersedes earlier buyer-reported selections.
+  5️⃣ Digital capture: the selection from mortgage pre-qualification and offer-builder forms travels as the financing_method parameter on generate_lead / submit_form / add_payment_info, normalised server-side to the controlled vocabulary (lower-case, trimmed, synonyms mapped). Web-captured values are treated as self-reported until matched to the CRM or loan origination record on transaction_id.
+  6️⃣ Unknown vs Other vs null: Unknown when a purchase transaction exists but financing has not yet been captured (typically pre-offer leads), or when the captured value is blank or not a recognised financing method; Other when a recognised method falls outside the vocabulary (the explicit Other mappings in 1️⃣); null only on events where financing is not applicable (e.g. rental inquiries). Refinances, HELOCs and cash-out transactions are out of scope and belong to the loan-purpose dimension.
+  7️⃣ Exclusions: test listings, internal agent and QA accounts, and duplicate transaction records (deduplicated on transaction_id, keeping the latest status). Terminated and fall-through contracts are kept so fall-through rate can be analysed by financing type, but are excluded from closed volume and commission revenue totals.
 
 Business Use Case: |
-  The Revenue Management and Mortgage Operations teams compare offer-to-close conversion, approval rates, closing duration, and transaction revenue by financing method and market. If FHA-financed offers show materially lower closing conversion in a specific market, leadership can investigate lender coverage, appraisal delays, property eligibility, or agent training and then adjust lender partnerships and workflow guidance.
+  1️⃣ Sales leadership (brokerage managing brokers): when the monthly offer-to-close review shows FHA or VA contracts in a market falling through at a materially higher rate than Conventional, they route those buyers to preferred lenders with government-loan appraisal experience and brief agents on FHA/VA minimum property requirements before offers are written.
+  2️⃣ Marketing (performance marketing team): when the Cash vs Financed share of new leads in a metro shifts by more than 5 percentage points quarter over quarter, they rebalance paid search and social budget between mortgage pre-qualification campaigns and investor or cash-buyer campaigns.
+  3️⃣ Finance (FP&A): during the quarterly pipeline forecast, they apply financing-type-specific days-to-close curves (cash deals typically closing in two weeks versus 30–45 days for financed deals, longer for FHA/VA/USDA) to open contracts to project the timing of commission revenue.
+  4️⃣ Product (transaction experience team): when Unknown exceeds 15% of offer submissions for two consecutive weeks, they make financing method a required field in the offer builder and pre-populate it from the uploaded pre-approval letter.
 
+Dependencies:
+  Events: [generate-lead, submit-form, add-payment-info]
+  Dimensions: [transaction-type, transaction-status, loan-purpose]
 
-Source Data: Transaction Management Platform, CRM, Loan Origination System, Closing Platform, Digital Analytics
+Source Data: Digital Analytics (GA4) + CRM + Loan Origination Platform + Transaction Management Platform
 
 Report Attributes: |
-  ["Property Market","Property Type","Transaction Type","Transaction Status","Buyer Type","Lender","Loan Program","Sales Channel","Lead Source","Offer Month","Closing Month"]
+  Property Market; Property Type; Transaction Type; Transaction Status; Buyer Type; Lender; Loan Purpose; Lead Source; Sales Channel; Offer Month; Closing Month
 
-Dashboard Usage: [Real Estate Conversion Performance, Offer-to-Close Funnel, Mortgage and Financing Performance, Transaction Revenue Executive Dashboard, Closing Operations Dashboard, Market and Property Performance]
+Dashboard Usage: [Offer-to-Close Funnel, Mortgage and Financing Performance, Contract Fall-Through Analysis, Transaction Revenue Executive Dashboard, Market and Property Performance]
 
 Segment Eligibility: |
   true
 
-Related Dimensions: [Transaction Type, Transaction Status, Property Type, Property Market, Buyer Type, Lender, Loan Program, Loan Purpose, Offer Type, Closing Status, Lead Source, Sales Channel]
+Related Dimensions: [transaction-type, transaction-status, loan-purpose, property-type, buyer-type, lead-source, sales-channel]
 
-Derived Dimensions: [Financing Method Family, Cash vs Financed, Government-Backed Financing Flag, Institutional Financing Flag, Alternative Financing Flag, Financing Risk Tier]
+Derived Dimensions: [Cash vs Financed, Government-Backed vs Conventional]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -77,4 +290,5 @@ Created At: 2026-09-05T14:30:22.050167+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-14T08:04:24.269+00:00
 
