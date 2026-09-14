@@ -1,7 +1,7 @@
 # Dimension: Shipping Tier
-# Generated: 2026-09-14T07:34:44.975Z
+# Generated: 2026-09-14T07:34:53.245Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Shipping Tier
 
@@ -10,31 +10,425 @@ Description: |
 
 Category: Conversion
 
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Checkout
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  add_shipping_info
 
+Adobe Event: |
+  checkout:add_shipping_info
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageName": "checkout:shipping",
+          "pageType": "checkout"
+        }
+      },
+      "cart": {
+        "cartID": "CART-88412",
+        "price": {
+          "basePrice": 129.98,
+          "voucherCode": "SUMMER10",
+          "voucherDiscount": 13,
+          "currency": "USD",
+          "shipping": 12.95,
+          "shippingMethod": "Express (2-3 business days)",
+          "cartTotal": 129.93
+        },
+        "attributes": {
+          "shippingTier": "Express (2-3 business days)",
+          "checkoutStep": "shipping"
+        }
+      },
+      "transaction": {
+        "transactionID": "T-100482",
+        "total": {
+          "currency": "USD",
+          "basePrice": 129.98,
+          "voucherCode": "SUMMER10",
+          "voucherDiscount": 13,
+          "shipping": 12.95,
+          "shippingMethod": "Express (2-3 business days)",
+          "transactionTotal": 129.93
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "add_shipping_info",
+            "eventAction": "shipping_option_selected",
+            "type": "checkout"
+          },
+          "attributes": {
+            "shippingTier": "Express (2-3 business days)"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "add_shipping_info",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 116.98,
+      "coupon": "SUMMER10",
+      "shipping_tier": "Express (2-3 business days)",
+      "items": [
+        {
+          "item_id": "SKU-20431",
+          "item_name": "Trail Running Shoe",
+          "item_brand": "Northpeak",
+          "item_category": "Footwear",
+          "item_variant": "Blue / 10",
+          "price": 89.99,
+          "quantity": 1
+        },
+        {
+          "item_id": "SKU-11872",
+          "item_name": "Merino Running Socks",
+          "item_brand": "Northpeak",
+          "item_category": "Accessories",
+          "price": 39.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "checkout:add_shipping_info",
+    "eventInfo": {
+      "eventName": "add_shipping_info",
+      "checkoutStep": "shipping"
+    },
+    "page": {
+      "pageName": "checkout:shipping",
+      "pageType": "checkout"
+    },
+    "commerce": {
+      "cartID": "CART-88412",
+      "currency": "USD",
+      "cartValue": 116.98,
+      "coupon": "SUMMER10",
+      "shipping": {
+        "shippingTier": "Express (2-3 business days)",
+        "shippingAmount": 12.95
+      },
+      "products": [
+        {
+          "SKU": "SKU-20431",
+          "name": "Trail Running Shoe",
+          "category": "Footwear",
+          "priceTotal": 89.99,
+          "quantity": 1
+        },
+        {
+          "SKU": "SKU-11872",
+          "name": "Merino Running Socks",
+          "category": "Accessories",
+          "priceTotal": 39.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.checkouts",
+    "commerce": {
+      "checkouts": {
+        "value": 1
+      },
+      "cart": {
+        "cartID": "CART-88412"
+      }
+    },
+    "shipping": {
+      "shippingMethod": "Express (2-3 business days)",
+      "shippingAmount": 12.95,
+      "currencyCode": "USD"
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar42": "Express (2-3 business days)"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Shipping Tier by order: shipping_tier on the purchase if sent, otherwise the last add_shipping_info selection in the same session before the purchase
+  WITH shipping_selections AS (
+    SELECT
+      e.user_pseudo_id,
+      e.event_timestamp,
+      MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+      MAX(IF(ep.key = 'shipping_tier', ep.value.string_value, NULL)) AS shipping_tier
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name = 'add_shipping_info'
+    GROUP BY e.user_pseudo_id, e.event_timestamp, e.event_bundle_sequence_id
+  ),
+  purchases AS (
+    SELECT
+      e.user_pseudo_id,
+      e.event_date,
+      e.event_timestamp,
+      MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+      COALESCE(
+        NULLIF(MAX(e.ecommerce.transaction_id), '(not set)'),
+        MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL))
+      ) AS transaction_id,
+      MAX(IF(ep.key = 'shipping_tier', ep.value.string_value, NULL)) AS purchase_shipping_tier,
+      MAX(e.ecommerce.purchase_revenue) AS purchase_revenue
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name = 'purchase'
+    GROUP BY e.user_pseudo_id, e.event_date, e.event_timestamp, e.event_bundle_sequence_id
+  ),
+  unique_purchases AS (
+    SELECT *
+    FROM purchases
+    WHERE transaction_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1
+  ),
+  last_selection_before_purchase AS (
+    SELECT
+      p.transaction_id,
+      s.shipping_tier
+    FROM unique_purchases AS p
+    JOIN shipping_selections AS s
+      ON s.user_pseudo_id = p.user_pseudo_id
+     AND s.ga_session_id = p.ga_session_id
+     AND s.event_timestamp <= p.event_timestamp
+    WHERE s.shipping_tier IS NOT NULL
+      AND TRIM(s.shipping_tier) != ''
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY p.transaction_id ORDER BY s.event_timestamp DESC) = 1
+  ),
+  orders AS (
+    SELECT
+      p.transaction_id,
+      p.event_date,
+      p.purchase_revenue,
+      COALESCE(NULLIF(TRIM(p.purchase_shipping_tier), ''), TRIM(l.shipping_tier)) AS shipping_tier_raw,
+      CASE
+        WHEN NULLIF(TRIM(p.purchase_shipping_tier), '') IS NOT NULL THEN 'purchase_event'
+        WHEN l.shipping_tier IS NOT NULL THEN 'session_last_add_shipping_info'
+        ELSE 'unresolved'
+      END AS tier_source
+    FROM unique_purchases AS p
+    LEFT JOIN last_selection_before_purchase AS l
+      ON l.transaction_id = p.transaction_id
+  ),
+  -- Canonical tier mapping (keyword baseline for the governed lookup); 'multiple' requires the OMS shipment-line join
+  tiered AS (
+    SELECT
+      o.*,
+      CASE
+        WHEN o.label IS NULL THEN '(not set)'
+        WHEN o.label LIKE '%pickup%' OR o.label LIKE '%pick up%' OR o.label LIKE '%in store%' OR o.label LIKE '%in-store%' OR o.label LIKE '%to store%' OR o.label LIKE '%digital%' OR o.label LIKE '%e-gift%' THEN '(not applicable)'
+        WHEN o.label LIKE '%same day%' OR o.label LIKE '%same-day%' THEN 'same_day'
+        WHEN o.label LIKE '%next day%' OR o.label LIKE '%next-day%' OR o.label LIKE '%overnight%' THEN 'next_day'
+        WHEN o.label LIKE '%express%' THEN 'express'
+        WHEN o.label LIKE '%expedited%' OR o.label LIKE '%priority%' THEN 'expedited'
+        WHEN o.label LIKE '%free%' THEN 'free'
+        WHEN o.label LIKE '%standard%' OR o.label LIKE '%ground%' OR o.label LIKE '%economy%' THEN 'standard'
+        ELSE '(other)'
+      END AS shipping_tier
+    FROM (SELECT *, LOWER(shipping_tier_raw) AS label FROM orders) AS o
+  )
+  SELECT
+    shipping_tier,
+    COUNT(DISTINCT transaction_id) AS orders,
+    ROUND(SUM(purchase_revenue), 2) AS purchase_revenue,
+    ROUND(SAFE_DIVIDE(SUM(purchase_revenue), COUNT(DISTINCT transaction_id)), 2) AS average_order_value,
+    IF(shipping_tier = '(not applicable)', NULL,
+       ROUND(SAFE_DIVIDE(COUNT(DISTINCT transaction_id), SUM(IF(shipping_tier = '(not applicable)', 0, COUNT(DISTINCT transaction_id))) OVER ()), 4)) AS share_of_shipped_orders,
+    COUNTIF(tier_source = 'purchase_event') AS orders_tier_from_purchase_event,
+    COUNTIF(tier_source = 'session_last_add_shipping_info') AS orders_tier_from_session_selection
+  FROM tiered
+  GROUP BY shipping_tier
+  ORDER BY orders DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Shipping Tier by order: shipping.shippingMethod on the purchase if sent, otherwise the last commerce.checkouts selection in the same 30-minute session before the purchase
+  WITH sessionized AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS ecid,
+      timestamp AS event_ts,
+      eventType AS event_type,
+      TRIM(shipping.shippingMethod) AS shipping_method,
+      commerce.order.purchaseID AS purchase_id,
+      commerce.order.priceTotal AS order_total,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY endUserIDs._experience.ecid.id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 30)
+      AND timestamp < current_date()
+      AND endUserIDs._experience.ecid.id IS NOT NULL
+  ),
+  shipping_selections AS (
+    SELECT
+      ecid,
+      session.num AS session_num,
+      event_ts,
+      shipping_method
+    FROM sessionized
+    WHERE event_type = 'commerce.checkouts'
+      AND shipping_method IS NOT NULL
+      AND shipping_method <> ''
+  ),
+  unique_purchases AS (
+    SELECT ecid, session_num, event_ts, purchase_id, order_total, purchase_shipping_method
+    FROM (
+      SELECT
+        ecid,
+        session.num AS session_num,
+        event_ts,
+        purchase_id,
+        order_total,
+        NULLIF(shipping_method, '') AS purchase_shipping_method,
+        ROW_NUMBER() OVER (PARTITION BY purchase_id ORDER BY event_ts) AS rn
+      FROM sessionized
+      WHERE event_type = 'commerce.purchases'
+        AND purchase_id IS NOT NULL
+    ) p
+    WHERE rn = 1
+  ),
+  last_selection_before_purchase AS (
+    SELECT purchase_id, shipping_method
+    FROM (
+      SELECT
+        p.purchase_id,
+        s.shipping_method,
+        ROW_NUMBER() OVER (PARTITION BY p.purchase_id ORDER BY s.event_ts DESC) AS rn
+      FROM unique_purchases p
+      JOIN shipping_selections s
+        ON s.ecid = p.ecid
+       AND s.session_num = p.session_num
+       AND s.event_ts <= p.event_ts
+    ) ranked
+    WHERE rn = 1
+  ),
+  orders AS (
+    SELECT
+      p.purchase_id,
+      p.order_total,
+      COALESCE(p.purchase_shipping_method, l.shipping_method) AS shipping_tier_raw,
+      CASE
+        WHEN p.purchase_shipping_method IS NOT NULL THEN 'purchase_event'
+        WHEN l.shipping_method IS NOT NULL THEN 'session_last_checkout_selection'
+        ELSE 'unresolved'
+      END AS tier_source
+    FROM unique_purchases p
+    LEFT JOIN last_selection_before_purchase l
+      ON l.purchase_id = p.purchase_id
+  ),
+  -- Canonical tier mapping (keyword baseline for the governed lookup); 'multiple' requires the OMS shipment-line join
+  tiered AS (
+    SELECT
+      o.*,
+      CASE
+        WHEN o.label IS NULL THEN '(not set)'
+        WHEN o.label LIKE '%pickup%' OR o.label LIKE '%pick up%' OR o.label LIKE '%in store%' OR o.label LIKE '%in-store%' OR o.label LIKE '%to store%' OR o.label LIKE '%digital%' OR o.label LIKE '%e-gift%' THEN '(not applicable)'
+        WHEN o.label LIKE '%same day%' OR o.label LIKE '%same-day%' THEN 'same_day'
+        WHEN o.label LIKE '%next day%' OR o.label LIKE '%next-day%' OR o.label LIKE '%overnight%' THEN 'next_day'
+        WHEN o.label LIKE '%express%' THEN 'express'
+        WHEN o.label LIKE '%expedited%' OR o.label LIKE '%priority%' THEN 'expedited'
+        WHEN o.label LIKE '%free%' THEN 'free'
+        WHEN o.label LIKE '%standard%' OR o.label LIKE '%ground%' OR o.label LIKE '%economy%' THEN 'standard'
+        ELSE '(other)'
+      END AS shipping_tier
+    FROM (SELECT *, LOWER(shipping_tier_raw) AS label FROM orders) o
+  ),
+  totals AS (
+    SELECT COUNT(DISTINCT CASE WHEN shipping_tier <> '(not applicable)' THEN purchase_id END) AS shipped_orders
+    FROM tiered
+  )
+  SELECT
+    o.shipping_tier,
+    COUNT(DISTINCT o.purchase_id) AS orders,
+    ROUND(SUM(o.order_total), 2) AS order_revenue,
+    ROUND(SUM(o.order_total) / NULLIF(COUNT(DISTINCT o.purchase_id), 0), 2) AS average_order_value,
+    CASE WHEN o.shipping_tier = '(not applicable)' THEN NULL
+         ELSE ROUND(CAST(COUNT(DISTINCT o.purchase_id) AS DOUBLE) / NULLIF(MAX(t.shipped_orders), 0), 4) END AS share_of_shipped_orders,
+    SUM(CASE WHEN o.tier_source = 'purchase_event' THEN 1 ELSE 0 END) AS orders_tier_from_purchase_event,
+    SUM(CASE WHEN o.tier_source = 'session_last_checkout_selection' THEN 1 ELSE 0 END) AS orders_tier_from_session_selection
+  FROM tiered o
+  CROSS JOIN totals t
+  GROUP BY o.shipping_tier
+  ORDER BY orders DESC;
 
+Calculation Notes: |
+  1️⃣ Capture and precedence: the value is the label of the option selected when add_shipping_info fires; the purchase inherits the last add_shipping_info value recorded for the same checkout. For purchase-level reporting the order record is authoritative when the two disagree (Shopify shipping_lines.title, Salesforce Commerce Cloud shipment shipping method display name, Adobe Commerce shipping_description), which also covers wallet express checkouts (Apple Pay, Google Pay, Shop Pay, PayPal) where the option is chosen inside the payment sheet and add_shipping_info often never fires.
+  2️⃣ Re-selection: add_shipping_info fires on every change of option, so the raw event distribution is not the tier mix. Tier mix and tier conversion use only the final selection per checkout; earlier selections are retained solely for option-switching analysis (e.g. Express to Standard after the charge is displayed).
+  3️⃣ Session and timing rules: attribution follows the GA4 30-minute inactivity timeout. When the purchase lands in a later session than the shipping selection, the tier is resolved by joining transaction_id to the order record rather than by any cross-session lookback; values are never carried from an abandoned checkout into a subsequent order.
+  4️⃣ Normalisation: labels are trimmed, case-folded and mapped through a governed lookup to a canonical tier code, so localised labels, date-bearing labels ('Express (2-3 business days)', 'Arrives by Friday') and A/B-tested wording roll up to one value (standard, expedited, express, next_day, same_day, free; the reference SQL applies this as a keyword CASE baseline). The raw presented label is kept in a separate field; unmapped labels resolve to '(other)' and are reviewed weekly rather than being set to null.
+  5️⃣ Not applicable: orders without a ship-to-customer leg (digital goods, e-gift cards, buy online pick up in store, ship-to-store, in-store POS sales) carry '(not applicable)' and are excluded from tier-share denominators. Ship versus pickup is analysed with Fulfillment Strategy, not this dimension. In GA4 and AEP event data this is detectable only when the presented label names pickup, store or digital delivery; orders that skip shipping selection resolve to '(not set)' until joined to the order record (OMS).
+  6️⃣ Split shipments: when one order holds shipments with different tiers (multiple addresses, or backordered lines sent at a different speed), the order-level value is 'multiple' and line-level analysis uses the tier on each shipment. Tier is never inferred from whichever shipment dispatched first. Web events carry one tier per order, so 'multiple' requires the OMS shipment-line join and is not produced by the event-level SQL.
+  7️⃣ Boundaries: the dimension holds the customer's choice only. Carrier service level, transport mode and carrier are separate dimensions, and shipping charges belong to the Shipping Revenue metric. A threshold promotion that zeroes the Standard charge leaves the tier as presented, and post-purchase upgrades or carrier substitutions made by customer service or the warehouse do not overwrite the original value.
 
+Business Use Case: |
+  1️⃣ Checkout Product Manager: when the add_shipping_info to add_payment_info progression for one tier drops more than 3 points below its trailing 4-week baseline, run an A/B test on default option, option order and delivery-date wording for that tier, and roll back any release that shipped the change.
+  2️⃣ Finance (e-commerce P&L): at the monthly margin review, when Free Shipping and Express share of orders rises while Shipping Revenue per order falls, model contribution margin by tier and recommend a revised free-shipping threshold or Express price point to the pricing committee.
+  3️⃣ Merchandising and Marketing: ahead of peak-season carrier cutoffs, compare Next Day and Express share and average order value by tier against the prior year, then schedule cutoff-date banners and gift-messaging promotions for the categories where premium-tier demand concentrates.
+  4️⃣ Customer Service leadership: when 'where is my order' contacts per 100 orders for a premium tier exceed the Standard rate by an agreed margin, escalate to Operations with the affected tier and region so delivery-promise copy or cutoff times are corrected at checkout.
 
+Dependencies:
+  Events: [purchase]
 
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
 
+Report Attributes: |
+  Device Category; Traffic Source; Delivery Region; Payment Method; Customer Status; Promotion Type; Item Category
 
+Dashboard Usage: [Checkout Funnel Performance, Shipping Option Mix and Conversion, Order Economics by Delivery Option, Peak Season Delivery Readiness]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [service-level, shipment-mode, carrier, fulfillment-strategy, payment-method, delivery-region]
 
+Derived Dimensions: [free-shipping-flag, expedited-shipping-flag]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +436,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-14T07:34:44.747+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-14T07:34:53.005+00:00
 
