@@ -1,7 +1,7 @@
 # Metric: Filter Applications
-# Generated: 2026-09-14T06:45:57.887Z
+# Generated: 2026-09-14T06:46:06.600Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Filter Applications
 Formula: COUNT(filter_apply events WHERE filter_action = 'apply') — one event per committed filter change: each auto-applied facet selection = 1; a multi-select batch confirmed with a single Apply control = 1 regardless of the number of values; after 2-second duplicate collapse and standard traffic exclusions
@@ -11,30 +11,470 @@ Description: |
 
 Category: Engagement
 
+Tags: [metric, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  filter_apply
 
+Adobe Event: |
+  filter_apply
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageName": "category:womens-running-shoes",
+          "pageType": "category"
+        },
+        "category": {
+          "primaryCategory": "Shoes/Running"
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "filter_apply",
+            "eventAction": "apply",
+            "type": "filter"
+          },
+          "category": {
+            "primaryCategory": "product discovery"
+          },
+          "attributes": {
+            "filterName": "size",
+            "filterValue": "8|8.5",
+            "filterAction": "apply",
+            "itemListId": "plp_womens_running_shoes",
+            "itemListName": "Category Grid - Womens Running Shoes",
+            "searchTerm": null,
+            "searchResultsCount": 37
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "filter_apply",
+    "filter_name": "size",
+    "filter_value": "8|8.5",
+    "filter_action": "apply",
+    "item_list_id": "plp_womens_running_shoes",
+    "item_list_name": "Category Grid - Womens Running Shoes",
+    "search_term": null,
+    "search_results_count": 37
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "filter_apply",
+    "eventInfo": {
+      "eventName": "filter_apply",
+      "eventAction": "apply"
+    },
+    "filter": {
+      "name": "size",
+      "value": "8|8.5",
+      "action": "apply"
+    },
+    "ecommerce": {
+      "itemListId": "plp_womens_running_shoes",
+      "itemListName": "Category Grid - Womens Running Shoes"
+    },
+    "search": {
+      "term": null,
+      "resultsCount": 37
+    },
+    "page": {
+      "pageInfo": {
+        "pageName": "category:womens-running-shoes",
+        "pageType": "category"
+      }
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "web": {
+      "webPageDetails": {
+        "name": "category:womens-running-shoes",
+        "siteSection": "category"
+      },
+      "webInteraction": {
+        "name": "filter_apply",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "_tenant": {
+      "productFilter": {
+        "filterName": "size",
+        "filterValue": "8|8.5",
+        "filterAction": "apply",
+        "itemListId": "plp_womens_running_shoes",
+        "itemListName": "Category Grid - Womens Running Shoes",
+        "searchTerm": null,
+        "resultsCount": 37
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar20": "plp_womens_running_shoes",
+            "eVar21": "Category Grid - Womens Running Shoes",
+            "eVar23": "size",
+            "eVar24": "8|8.5",
+            "eVar25": "apply"
+          },
+          "props": {
+            "prop2": "37"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Filter Applications: one count per committed filter change (filter_apply whose filter_action contains 'apply'; a mixed add/remove batch counts once).
+  -- Window: 30 complete days ending 4 days ago, so every day has cleared the T+3 late-hit window; event_date is already in the property reporting time zone.
+  -- Traffic exclusions mirror Item List Views; the export holds observed events only and known bots are excluded by GA4 at collection.
+  -- Pre-filtered landings: a filter_apply on the unchanged session landing URL whose query string already carries that filter_name is not a shopper application.
+  WITH raw_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      e.event_name,
+      e.event_timestamp,
+      e.user_pseudo_id,
+      e.device.category AS device_category,
+      LOWER(e.device.web_info.hostname) AS hostname,
+      (
+        SELECT AS STRUCT
+          MAX(IF(p.key = 'ga_session_id', p.value.int_value, NULL)) AS ga_session_id,
+          MAX(IF(p.key = 'page_location', p.value.string_value, NULL)) AS page_location,
+          MAX(IF(p.key = 'traffic_type', p.value.string_value, NULL)) AS traffic_type,
+          MAX(IF(p.key = 'debug_mode', COALESCE(CAST(p.value.int_value AS STRING), p.value.string_value), NULL)) AS debug_mode,
+          MAX(IF(p.key = 'filter_name', p.value.string_value, NULL)) AS filter_name,
+          MAX(IF(p.key = 'filter_value', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING), CAST(p.value.double_value AS STRING)), NULL)) AS filter_value,
+          MAX(IF(p.key = 'filter_action', p.value.string_value, NULL)) AS filter_action,
+          MAX(IF(p.key = 'item_list_id', p.value.string_value, NULL)) AS item_list_id,
+          MAX(IF(p.key = 'item_list_name', p.value.string_value, NULL)) AS item_list_name,
+          MAX(IF(p.key = 'page_type', p.value.string_value, NULL)) AS page_type,
+          MAX(IF(p.key = 'search_term', p.value.string_value, NULL)) AS search_term,
+          MAX(IF(p.key = 'search_results_count', COALESCE(CAST(p.value.int_value AS STRING), CAST(p.value.double_value AS STRING), CAST(p.value.float_value AS STRING), p.value.string_value), NULL)) AS search_results_count_raw
+        FROM UNNEST(e.event_params) AS p
+      ) AS ep
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 34 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 4 DAY))
+      AND e.event_name IN ('page_view', 'filter_apply')
+  ),
+  qualified AS (
+    SELECT
+      event_date,
+      event_name,
+      event_timestamp,
+      user_pseudo_id,
+      ep.ga_session_id,
+      COALESCE(device_category, '(not set)') AS device_category,
+      ep.page_location,
+      ep.filter_name,
+      ep.filter_value,
+      ep.filter_action,
+      ep.item_list_id,
+      ep.item_list_name,
+      ep.page_type,
+      ep.search_term,
+      ep.search_results_count_raw
+    FROM raw_events
+    WHERE COALESCE(ep.traffic_type, '') NOT IN ('internal', 'developer')
+      AND COALESCE(ep.debug_mode, '0') IN ('0', 'false')
+      AND NOT REGEXP_CONTAINS(COALESCE(hostname, ''), r'localhost|(^|[.])(staging|stage|dev|qa|uat|test)[.]')
+  ),
+  session_landings AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      ARRAY_AGG(page_location IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS landing_page_location
+    FROM qualified
+    WHERE event_name = 'page_view'
+      AND user_pseudo_id IS NOT NULL
+      AND ga_session_id IS NOT NULL
+    GROUP BY user_pseudo_id, ga_session_id
+  ),
+  applications AS (
+    SELECT
+      q.event_date,
+      q.event_timestamp,
+      q.user_pseudo_id,
+      q.ga_session_id,
+      q.device_category,
+      COALESCE(q.filter_name, '(not set)') AS filter_name,
+      COALESCE(q.filter_value, '(not set)') AS filter_value,
+      COALESCE(q.item_list_id, '(not set)') AS item_list_id,
+      COALESCE(q.item_list_name, '(not set)') AS item_list_name,
+      CASE
+        WHEN REGEXP_CONTAINS(LOWER(COALESCE(q.page_type, '')), r'search')
+          OR NULLIF(TRIM(q.search_term), '') IS NOT NULL
+          OR REGEXP_CONTAINS(LOWER(CONCAT(COALESCE(q.item_list_id, ''), ' ', COALESCE(q.item_list_name, ''))), r'search') THEN 'Search Results'
+        WHEN REGEXP_CONTAINS(LOWER(COALESCE(q.page_type, '')), r'category|collection|listing|plp')
+          OR COALESCE(q.item_list_id, q.item_list_name) IS NOT NULL THEN 'Product Listing'
+        ELSE '(not set)'
+      END AS page_type,
+      SAFE_CAST(SAFE_CAST(q.search_results_count_raw AS FLOAT64) AS INT64) AS search_results_count,
+      SAFE_CAST(q.search_results_count_raw AS FLOAT64) IS NULL AS results_count_invalid,
+      COALESCE(
+        q.page_location = l.landing_page_location
+        AND CONCAT('&', LOWER(COALESCE(REGEXP_EXTRACT(l.landing_page_location, r'[?]([^#]*)'), ''))) LIKE CONCAT('%&', LOWER(q.filter_name), '=%'),
+        FALSE
+      ) AS is_prefiltered_landing
+    FROM qualified AS q
+    LEFT JOIN session_landings AS l
+      ON l.user_pseudo_id = q.user_pseudo_id
+     AND l.ga_session_id = q.ga_session_id
+    WHERE q.event_name = 'filter_apply'
+      AND 'apply' IN UNNEST(SPLIT(REGEXP_REPLACE(LOWER(COALESCE(q.filter_action, '')), r'[ ,;]', '|'), '|'))
+      AND q.event_date BETWEEN DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 33 DAY)
+                           AND DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 4 DAY)
+  ),
+  flagged AS (
+    SELECT
+      *,
+      LAG(event_timestamp) OVER (
+        PARTITION BY user_pseudo_id, ga_session_id, item_list_id, filter_name, filter_value, is_prefiltered_landing
+        ORDER BY event_timestamp
+      ) AS prev_application_timestamp
+    FROM applications
+  ),
+  counted AS (
+    SELECT
+      *,
+      NOT is_prefiltered_landing
+        AND (user_pseudo_id IS NULL OR prev_application_timestamp IS NULL OR event_timestamp - prev_application_timestamp > 2000000) AS is_counted
+    FROM flagged
+  ),
+  daily AS (
+    SELECT
+      event_date,
+      COUNTIF(is_counted) AS daily_filter_applications,
+      COUNTIF(is_counted AND page_type = '(not set)') AS daily_not_set_applications
+    FROM counted
+    GROUP BY event_date
+  )
+  SELECT
+    c.event_date,
+    c.page_type,
+    c.item_list_name,
+    c.filter_name,
+    c.device_category,
+    COUNTIF(c.is_counted) AS filter_applications,
+    COUNTIF(NOT c.is_prefiltered_landing) AS apply_events_observed,
+    COUNTIF(NOT c.is_prefiltered_landing AND NOT c.is_counted) AS duplicates_collapsed,
+    COUNTIF(c.is_prefiltered_landing) AS prefiltered_landings_excluded,
+    COUNTIF(c.is_counted AND c.search_results_count = 0) AS zero_result_applications,
+    COUNTIF(c.is_counted AND c.results_count_invalid) AS invalid_results_count_applications,
+    SAFE_DIVIDE(COUNTIF(c.is_counted AND c.results_count_invalid), COUNTIF(c.is_counted)) AS invalid_results_count_share,
+    COUNT(DISTINCT IF(c.is_counted, CONCAT(c.user_pseudo_id, '.', CAST(c.ga_session_id AS STRING)), NULL)) AS sessions_with_filter_application,
+    d.daily_filter_applications,
+    SAFE_DIVIDE(d.daily_not_set_applications, d.daily_filter_applications) AS daily_not_set_share,
+    CASE
+      WHEN d.daily_filter_applications = 0 THEN 'NO DATA'
+      WHEN SAFE_DIVIDE(d.daily_not_set_applications, d.daily_filter_applications) < 0.02 THEN 'PASS'
+      ELSE 'FAIL'
+    END AS not_set_check
+  FROM counted AS c
+  JOIN daily AS d
+    ON d.event_date = c.event_date
+  GROUP BY c.event_date, c.page_type, c.item_list_name, c.filter_name, c.device_category, d.daily_filter_applications, d.daily_not_set_applications
+  ORDER BY c.event_date, filter_applications DESC
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Filter Applications from XDM ExperienceEvents: one count per committed filter change (web.webInteraction.name = 'filter_apply', action containing 'apply').
+  -- Window: 30 complete local days ending 4 days ago (T+3 late-data window); set the time zone to the reporting property zone.
+  -- Sessions: 30-minute inactivity timeout with no midnight split, computed over all web events before the filter selection.
+  -- Fields read from _yourtenant.productFilter with the Analytics mapping as fallback (eVar20 list id, eVar21 list name, eVar23 name, eVar24 value, eVar25 action, prop2 results count).
+  WITH web_events AS (
+    SELECT
+      COALESCE(identityMap['ECID'][0].id, endUserIDs._experience.ecid.id) AS ecid,
+      timestamp AS event_ts,
+      to_date(from_utc_timestamp(timestamp, 'America/New_York')) AS event_date,
+      web.webInteraction.name AS interaction_name,
+      CASE WHEN COALESCE(web.webPageDetails.pageViews.value, 0) > 0 THEN 1 ELSE 0 END AS is_page_view,
+      web.webPageDetails.URL AS page_url,
+      lower(regexp_extract(web.webPageDetails.URL, '^https?://([^/:?#]+)', 1)) AS hostname,
+      lower(environment.browserDetails.userAgent) AS user_agent,
+      device.type AS device_type,
+      web.webPageDetails.siteSection AS site_section,
+      COALESCE(_yourtenant.productFilter.filterName, _experience.analytics.customDimensions.eVars.eVar23) AS filter_name,
+      COALESCE(_yourtenant.productFilter.filterValue, _experience.analytics.customDimensions.eVars.eVar24) AS filter_value,
+      COALESCE(_yourtenant.productFilter.filterAction, _experience.analytics.customDimensions.eVars.eVar25) AS filter_action,
+      COALESCE(_yourtenant.productFilter.itemListId, _experience.analytics.customDimensions.eVars.eVar20) AS item_list_id,
+      COALESCE(_yourtenant.productFilter.itemListName, _experience.analytics.customDimensions.eVars.eVar21) AS item_list_name,
+      _yourtenant.productFilter.searchTerm AS search_term,
+      trim(COALESCE(CAST(_yourtenant.productFilter.resultsCount AS STRING), _experience.analytics.customDimensions.props.prop2)) AS results_count_raw
+    FROM your_aep_web_events_dataset
+    WHERE timestamp >= to_timestamp(date_sub(current_date(), 35))
+      AND timestamp < to_timestamp(date_sub(current_date(), 2))
+  ),
+  sessionized AS (
+    SELECT
+      *,
+      SESS_TIMEOUT(event_ts, 60 * 30) OVER (
+        PARTITION BY ecid
+        ORDER BY event_ts
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM web_events
+    WHERE ecid IS NOT NULL
+      AND COALESCE(hostname, '') NOT RLIKE 'localhost|(^|[.])(staging|stage|dev|qa|uat|test)[.]'
+      AND COALESCE(user_agent, '') NOT RLIKE '(bot|spider|crawler|headless|lighthouse)'
+  ),
+  landed AS (
+    SELECT
+      *,
+      session.num AS session_num,
+      first(CASE WHEN is_page_view = 1 THEN page_url END, true) OVER (
+        PARTITION BY ecid, session.num
+        ORDER BY event_ts
+        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+      ) AS landing_page_url
+    FROM sessionized
+  ),
+  applications AS (
+    SELECT
+      event_date,
+      event_ts,
+      ecid,
+      session_num,
+      COALESCE(device_type, '(not set)') AS device_type,
+      COALESCE(filter_name, '(not set)') AS filter_name_key,
+      COALESCE(filter_value, '(not set)') AS filter_value_key,
+      COALESCE(item_list_id, '(not set)') AS item_list_id_key,
+      COALESCE(item_list_name, '(not set)') AS item_list_name_key,
+      CASE
+        WHEN lower(COALESCE(site_section, '')) RLIKE 'search'
+          OR NULLIF(trim(search_term), '') IS NOT NULL
+          OR lower(concat_ws(' ', item_list_id, item_list_name)) RLIKE 'search' THEN 'Search Results'
+        WHEN lower(COALESCE(site_section, '')) RLIKE 'category|collection|listing|plp'
+          OR COALESCE(item_list_id, item_list_name) IS NOT NULL THEN 'Product Listing'
+        ELSE '(not set)'
+      END AS page_type,
+      CASE WHEN results_count_raw RLIKE '^[0-9]+([.]0+)?$' THEN CAST(CAST(results_count_raw AS DOUBLE) AS BIGINT) END AS search_results_count,
+      CASE WHEN COALESCE(results_count_raw, '') RLIKE '^[0-9]+([.]0+)?$' THEN 0 ELSE 1 END AS results_count_invalid,
+      CASE
+        WHEN page_url IS NOT NULL
+          AND page_url = landing_page_url
+          AND filter_name IS NOT NULL
+          AND concat('&', lower(COALESCE(regexp_extract(landing_page_url, '[?]([^#]*)', 1), ''))) LIKE concat('%&', lower(filter_name), '=%')
+        THEN 1 ELSE 0
+      END AS is_prefiltered_landing
+    FROM landed
+    WHERE interaction_name = 'filter_apply'
+      AND array_contains(split(regexp_replace(lower(COALESCE(filter_action, '')), '[ ,;]', '|'), '[|]'), 'apply')
+      AND event_date BETWEEN date_sub(current_date(), 33) AND date_sub(current_date(), 4)
+  ),
+  flagged AS (
+    SELECT
+      *,
+      LAG(event_ts) OVER (
+        PARTITION BY ecid, session_num, item_list_id_key, filter_name_key, filter_value_key, is_prefiltered_landing
+        ORDER BY event_ts
+      ) AS prev_application_ts
+    FROM applications
+  ),
+  counted AS (
+    SELECT
+      *,
+      CASE
+        WHEN is_prefiltered_landing = 0
+          AND (prev_application_ts IS NULL OR CAST(event_ts AS DOUBLE) - CAST(prev_application_ts AS DOUBLE) > 2)
+        THEN 1 ELSE 0
+      END AS is_counted
+    FROM flagged
+  ),
+  daily AS (
+    SELECT
+      event_date,
+      SUM(is_counted) AS daily_filter_applications,
+      SUM(CASE WHEN is_counted = 1 AND page_type = '(not set)' THEN 1 ELSE 0 END) AS daily_not_set_applications
+    FROM counted
+    GROUP BY event_date
+  )
+  SELECT
+    c.event_date,
+    c.page_type,
+    c.item_list_name_key AS item_list_name,
+    c.filter_name_key AS filter_name,
+    c.device_type,
+    SUM(c.is_counted) AS filter_applications,
+    SUM(1 - c.is_prefiltered_landing) AS apply_events_observed,
+    SUM(CASE WHEN c.is_prefiltered_landing = 0 AND c.is_counted = 0 THEN 1 ELSE 0 END) AS duplicates_collapsed,
+    SUM(c.is_prefiltered_landing) AS prefiltered_landings_excluded,
+    SUM(CASE WHEN c.is_counted = 1 AND c.search_results_count = 0 THEN 1 ELSE 0 END) AS zero_result_applications,
+    SUM(c.is_counted * c.results_count_invalid) AS invalid_results_count_applications,
+    CAST(SUM(c.is_counted * c.results_count_invalid) AS DOUBLE) / NULLIF(SUM(c.is_counted), 0) AS invalid_results_count_share,
+    COUNT(DISTINCT CASE WHEN c.is_counted = 1 THEN concat_ws('-', c.ecid, CAST(c.session_num AS STRING)) END) AS sessions_with_filter_application,
+    d.daily_filter_applications,
+    CAST(d.daily_not_set_applications AS DOUBLE) / NULLIF(d.daily_filter_applications, 0) AS daily_not_set_share,
+    CASE
+      WHEN d.daily_filter_applications = 0 THEN 'NO DATA'
+      WHEN CAST(d.daily_not_set_applications AS DOUBLE) / d.daily_filter_applications < 0.02 THEN 'PASS'
+      ELSE 'FAIL'
+    END AS not_set_check
+  FROM counted AS c
+  JOIN daily AS d
+    ON d.event_date = c.event_date
+  GROUP BY c.event_date, c.page_type, c.item_list_name_key, c.filter_name_key, c.device_type, d.daily_filter_applications, d.daily_not_set_applications
+  ORDER BY c.event_date, filter_applications DESC
 
+Calculation Notes: |
+  1️⃣ Counted unit: one committed filter change carrying filter_name, filter_value, filter_action = 'apply', item_list_id, item_list_name, search_term (search results pages only) and search_results_count measured after the filter is applied. On auto-apply facets (checkbox or swatch reloads the grid immediately) each selection is one application; on Apply-button drawers (typical mobile pattern) the whole batch is one application, with the selected values sent pipe-delimited in filter_value. Range sliders (price, size, rating) count on release/commit, never on drag.,2️⃣ Exclusions: filter_action = 'remove', individual chip removal and 'Clear all' are not counted and are reported separately as Filter Removals; a batch that both adds and removes values counts once as an application when at least one value is added. Sort changes (sort_apply, reported under the Sort Option dimension), pagination, infinite-scroll loads, page refreshes and back/forward navigation to a filtered URL do not count. Pre-filtered landings reached from navigation menus, campaigns, email or organic results (filters encoded in the URL on arrival) are not shopper applications and are excluded.,3️⃣ Page-type separation: applications are split by item_list_name and page type into Product Listing Page (category/collection grids) and Search Results Page. A filter applied on a results page never creates a new search and is never added into Site Searches or Search Results Views; search_term is populated only for the search results page context and must be null on category listings. Hits with no resolvable list context stay in the total under '(not set)' and must remain below 2% of daily volume.,4️⃣ Zero-result filters are retained: an application returning search_results_count = 0 stays in the count because it identifies filter dead ends and attribute combinations with no sellable stock. Facet values rendered with a zero count should be disabled in the UI; applications against them indicate a front-end defect. Null or non-numeric search_results_count is counted but flagged as an instrumentation defect.,5️⃣ Duplicate and traffic hygiene: filter_apply hits sharing user_pseudo_id, ga_session_id, item_list_id, filter_name and filter_value within 2 seconds collapse into one application (double-bound click and change handlers). Internal IP ranges, QA and staging hostnames, debug_mode traffic, known bots and synthetic monitoring are removed, using the same exclusions applied to Item List Views so per-list ratios stay symmetric. GA4 has no recommended filter event, so filter_apply is maintained as a governed custom event with fixed parameter names across web and app.,6️⃣ Timing and sessions: events are dated by client timestamp in the property reporting time zone; sessions follow the GA4 30-minute inactivity timeout (Adobe Analytics: 30-minute visit timeout) with no midnight split in session-level reporting. Daily totals are provisional until T+3 to absorb late-arriving app and Measurement Protocol hits.,7️⃣ Value action by industry: E-commerce/Retail — facet or refinement applied on a category grid or product search results page (filter_apply with item_list_name); Travel — fare, stops or amenity filter on availability results; Media — genre, format or date filter on a content library; SaaS — filter applied on a marketplace, integration or template gallery; Education — subject, level or format filter on a course catalog. Filters on internal tools such as order history or account tables are excluded from this metric.
 
+Business Use Case: |
+  1️⃣ Category merchandisers review Filter Applications by filter_name for each top-20 category every month; facets that receive less than 1% of the category's applications are moved below the fold or removed, and the most-applied attributes (size, price, brand, colour) are pinned to the first visible positions on mobile and desktop, in line with Baymard filtering guidance.,2️⃣ The Product Information Management team monitors applications that return search_results_count = 0 or fewer than three products each week; when a filter value repeatedly dead-ends, they correct missing or inconsistent attribute values on the affected SKUs and normalise the facet taxonomy (for example merging 'Navy' and 'Dark Blue') before the next catalog sync.,3️⃣ The Site Search product manager tracks search-results-page Filter Applications per 100 Site Searches after every relevance, synonym or ranking release; a sustained rise of more than 20% against the pre-release baseline signals that shoppers are compensating for weaker ranking with manual narrowing, and triggers a retune or rollback of the release.,4️⃣ The Buying and Assortment planning team pulls high-volume filter values (price bands, sizes, materials) with low post-filter results counts each quarter and feeds them into range reviews as evidence of demand the current assortment does not cover.
 
+Dependencies:
+  Events: [filter-apply]
+  Dimensions: [filter-value, item-list-name, item-list-id, internal-search-term]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Filter Name; Filter Value; Page Type (Product Listing / Search Results); Item List Name; Item List ID; Search Term; Search Results Count (Post-Filter); Device Category; Session Source / Medium; Date
 
+Dashboard Usage: [Product Discovery & Merchandising Overview, Faceted Navigation Performance, Site Search Performance, Category Page Optimization]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [site-searches, search-results-views, item-list-views, item-list-clicks]
 
+Derived KPIs: [product-list-click-through-rate, search-to-purchase-conversion-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +484,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-14T06:45:57.113+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-14T06:46:06.275+00:00
 
