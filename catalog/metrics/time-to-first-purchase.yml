@@ -1,7 +1,7 @@
 # Metric: Time to First Purchase
-# Generated: 2026-09-14T06:46:55.892Z
+# Generated: 2026-09-14T06:47:04.025Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Time to First Purchase
 Formula: MEDIAN(TIMESTAMP_DIFF(first_purchase_ts, sign_up_ts, HOUR)) and AVG(TIMESTAMP_DIFF(first_purchase_ts, sign_up_ts, HOUR)) over customers where sign_up_ts IS NOT NULL AND first_purchase_ts >= sign_up_ts, with sign_up_ts = MIN(sign_up event or customers.created_at) and first_purchase_ts = MIN(completed purchase timestamp per customer); days = hours / 24
@@ -11,30 +11,556 @@ Description: |
 
 Category: Conversion
 
+Tags: [metric, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP), E-commerce: Customer Retention, Loyalty & LTV]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Onboarding
 
+Scope: User
 
+Measure Type: Average
 
+Aggregation Window: Weekly, Monthly, Quarterly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "u_8f3a2c91",
+              "userName": "",
+              "returningStatus": "new"
+            },
+            "attributes": {
+              "signUpMethod": "email",
+              "signUpTimestamp": "2026-09-01T14:05:12Z"
+            }
+          }
+        ]
+      }
+    ],
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "sign_up",
+          "eventAction": "account_created",
+          "timeStamp": "2026-09-01T14:05:12Z"
+        },
+        "category": {
+          "primaryCategory": "account"
+        },
+        "attributes": {
+          "method": "email",
+          "userID": "u_8f3a2c91"
+        }
+      },
+      {
+        "eventInfo": {
+          "eventName": "purchase",
+          "eventAction": "order_completed",
+          "timeStamp": "2026-09-03T09:41:37Z"
+        },
+        "category": {
+          "primaryCategory": "commerce"
+        },
+        "attributes": {
+          "transactionID": "T-100482",
+          "userID": "u_8f3a2c91"
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "T-100482",
+      "profile": {
+        "profileInfo": {
+          "profileID": "u_8f3a2c91"
+        }
+      },
+      "total": {
+        "basePrice": 88.99,
+        "currency": "USD",
+        "transactionTotal": 88.99
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-20931",
+            "productName": "Merino Crew Sweater"
+          },
+          "category": {
+            "primaryCategory": "Apparel",
+            "subCategory1": "Knitwear"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 49.99,
+            "currency": "USD"
+          }
+        },
+        {
+          "productInfo": {
+            "productID": "SKU-11807",
+            "productName": "Cotton Ankle Socks"
+          },
+          "category": {
+            "primaryCategory": "Apparel",
+            "subCategory1": "Socks"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 19.5,
+            "currency": "USD"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "sign_up": {
+      "event": "sign_up",
+      "method": "email",
+      "user_id": "u_8f3a2c91"
+    },
+    "purchase": {
+      "event": "purchase",
+      "user_id": "u_8f3a2c91",
+      "ecommerce": {
+        "transaction_id": "T-100482",
+        "value": 88.99,
+        "currency": "USD",
+        "items": [
+          {
+            "item_id": "SKU-20931",
+            "item_name": "Merino Crew Sweater",
+            "item_category": "Apparel",
+            "item_category2": "Knitwear",
+            "price": 49.99,
+            "quantity": 1
+          },
+          {
+            "item_id": "SKU-11807",
+            "item_name": "Cotton Ankle Socks",
+            "item_category": "Apparel",
+            "item_category2": "Socks",
+            "price": 19.5,
+            "quantity": 2
+          }
+        ]
+      }
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "sign_up": {
+      "event": "sign_up",
+      "eventInfo": {
+        "method": "email"
+      },
+      "user": {
+        "userID": "u_8f3a2c91",
+        "authState": "authenticated"
+      }
+    },
+    "purchase": {
+      "event": "purchase",
+      "user": {
+        "userID": "u_8f3a2c91",
+        "authState": "authenticated"
+      },
+      "commerce": {
+        "order": {
+          "transactionID": "T-100482",
+          "value": 88.99,
+          "currency": "USD"
+        },
+        "items": [
+          {
+            "SKU": "SKU-20931",
+            "name": "Merino Crew Sweater",
+            "category": "Apparel/Knitwear",
+            "price": 49.99,
+            "quantity": 1
+          },
+          {
+            "SKU": "SKU-11807",
+            "name": "Cotton Ankle Socks",
+            "category": "Apparel/Socks",
+            "price": 19.5,
+            "quantity": 2
+          }
+        ]
+      }
+    }
+  }
 
+XDM Mapping: |
+  {
+    "sign_up": {
+      "eventType": "userAccount.createProfile",
+      "timestamp": "2026-09-01T14:05:12Z",
+      "identityMap": {
+        "CRMID": [
+          {
+            "id": "u_8f3a2c91",
+            "authenticatedState": "authenticated",
+            "primary": true
+          }
+        ]
+      },
+      "_experience": {
+        "analytics": {
+          "customDimensions": {
+            "eVars": {
+              "eVar10": "email",
+              "eVar11": "u_8f3a2c91"
+            }
+          }
+        }
+      }
+    },
+    "purchase": {
+      "eventType": "commerce.purchases",
+      "timestamp": "2026-09-03T09:41:37Z",
+      "identityMap": {
+        "CRMID": [
+          {
+            "id": "u_8f3a2c91",
+            "authenticatedState": "authenticated",
+            "primary": true
+          }
+        ]
+      },
+      "commerce": {
+        "purchases": {
+          "value": 1
+        },
+        "order": {
+          "purchaseID": "T-100482",
+          "priceTotal": 88.99,
+          "currencyCode": "USD"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-20931",
+          "name": "Merino Crew Sweater",
+          "productCategories": [
+            {
+              "categoryName": "Apparel/Knitwear"
+            }
+          ],
+          "priceTotal": 49.99,
+          "quantity": 1,
+          "currencyCode": "USD"
+        },
+        {
+          "SKU": "SKU-11807",
+          "name": "Cotton Ankle Socks",
+          "productCategories": [
+            {
+              "categoryName": "Apparel/Socks"
+            }
+          ],
+          "priceTotal": 39,
+          "quantity": 2,
+          "currencyCode": "USD"
+        }
+      ],
+      "_experience": {
+        "analytics": {
+          "customDimensions": {
+            "eVars": {
+              "eVar11": "u_8f3a2c91"
+            }
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Time to First Purchase: hours per registered customer from first sign_up to first completed purchase,
+  -- reported per weekly sign-up cohort as median (headline), mean, P75 and P90.
+  -- Population: customers (user_id) with both a sign_up and a completed purchase. Negative intervals are excluded
+  -- and their share of the population is reported. Cohorts mature after 90 days; purchases beyond that window are not counted.
+  WITH base_events AS (
+    SELECT
+      user_id,
+      event_name,
+      TIMESTAMP_MICROS(event_timestamp) AS event_ts,
+      COALESCE(
+        NULLIF(ecommerce.transaction_id, '(not set)'),
+        (SELECT MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep)
+      ) AS transaction_id,
+      COALESCE(
+        (SELECT MAX(IF(ep.key = 'value', COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64)), NULL)) FROM UNNEST(event_params) AS ep),
+        ecommerce.purchase_revenue
+      ) AS order_value,
+      (SELECT MAX(IF(ep.key = 'method', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS sign_up_method,
+      (SELECT MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS traffic_type,
+      (SELECT MAX(IF(ep.key = 'debug_mode', 1, 0)) FROM UNNEST(event_params) AS ep) AS is_debug,
+      (SELECT MAX(IF(up.key = 'account_type', up.value.string_value, NULL)) FROM UNNEST(user_properties) AS up) AS account_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 455 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name IN ('sign_up', 'purchase')
+      AND user_id IS NOT NULL
+  ),
+  
+  -- Internal traffic, debug hits and staff, test, marketplace or B2B bulk-imported accounts
+  excluded_users AS (
+    SELECT DISTINCT user_id
+    FROM base_events
+    WHERE traffic_type = 'internal'
+       OR is_debug = 1
+       OR LOWER(account_type) IN ('staff', 'internal', 'test', 'marketplace_import', 'b2b_import')
+  ),
+  
+  -- Anchor: earliest sign_up per customer
+  sign_ups AS (
+    SELECT
+      user_id,
+      MIN(event_ts) AS sign_up_ts,
+      ARRAY_AGG(sign_up_method IGNORE NULLS ORDER BY event_ts LIMIT 1)[SAFE_OFFSET(0)] AS sign_up_method
+    FROM base_events
+    WHERE event_name = 'sign_up'
+    GROUP BY user_id
+  ),
+  
+  -- Duplicate purchase hits collapsed to the first occurrence of each transaction_id; value after discounts must be > 0
+  purchases_dedup AS (
+    SELECT
+      user_id,
+      transaction_id,
+      event_ts AS purchase_ts
+    FROM base_events
+    WHERE event_name = 'purchase'
+      AND transaction_id IS NOT NULL
+      AND transaction_id != ''
+      AND order_value > 0
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_ts) = 1
+  ),
+  
+  -- Completed orders only: drop test orders and orders voided, fraud-declined or cancelled before capture.
+  -- A later refund does not disqualify the order.
+  completed_purchases AS (
+    SELECT
+      p.user_id,
+      p.transaction_id,
+      p.purchase_ts
+    FROM purchases_dedup AS p
+    LEFT JOIN `your-project.commerce.orders` AS o
+      ON o.order_number = p.transaction_id
+    WHERE COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(LOWER(o.financial_status), '') != 'voided'
+      AND COALESCE(LOWER(o.cancel_reason), '') != 'fraud'
+      AND NOT (o.cancelled_at IS NOT NULL AND (o.captured_at IS NULL OR o.cancelled_at < o.captured_at))
+  ),
+  
+  -- End: earliest completed purchase per customer
+  first_purchases AS (
+    SELECT
+      user_id,
+      MIN(purchase_ts) AS first_purchase_ts
+    FROM completed_purchases
+    GROUP BY user_id
+  ),
+  
+  -- Customers with both events; purchases beyond the 90-day maturity window are not counted
+  customer_intervals AS (
+    SELECT
+      s.user_id,
+      s.sign_up_method,
+      DATE_TRUNC(DATE(s.sign_up_ts), ISOWEEK) AS sign_up_cohort_week,
+      s.sign_up_ts,
+      f.first_purchase_ts,
+      f.first_purchase_ts >= s.sign_up_ts AS is_valid_interval,
+      TIMESTAMP_DIFF(f.first_purchase_ts, s.sign_up_ts, HOUR) AS hours_to_first_purchase
+    FROM sign_ups AS s
+    INNER JOIN first_purchases AS f
+      ON f.user_id = s.user_id
+    LEFT JOIN excluded_users AS x
+      ON x.user_id = s.user_id
+    WHERE x.user_id IS NULL
+      AND DATE(s.sign_up_ts) >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 364 DAY), ISOWEEK)
+      AND f.first_purchase_ts <= TIMESTAMP_ADD(s.sign_up_ts, INTERVAL 90 DAY)
+  )
+  
+  SELECT
+    sign_up_cohort_week,
+    IF(DATE_ADD(sign_up_cohort_week, INTERVAL 6 DAY) <= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY), 'final', 'provisional') AS cohort_status,
+    COUNT(*) AS customers_with_sign_up_and_purchase,
+    COUNTIF(NOT is_valid_interval) AS negative_interval_customers,
+    ROUND(SAFE_DIVIDE(COUNTIF(NOT is_valid_interval), COUNT(*)) * 100, 2) AS negative_interval_share_pct,
+    COUNTIF(is_valid_interval) AS measured_customers,
+    APPROX_QUANTILES(IF(is_valid_interval, hours_to_first_purchase, NULL), 100)[SAFE_OFFSET(50)] AS median_hours_to_first_purchase,
+    ROUND(AVG(IF(is_valid_interval, hours_to_first_purchase, NULL)), 2) AS avg_hours_to_first_purchase,
+    APPROX_QUANTILES(IF(is_valid_interval, hours_to_first_purchase, NULL), 100)[SAFE_OFFSET(75)] AS p75_hours_to_first_purchase,
+    APPROX_QUANTILES(IF(is_valid_interval, hours_to_first_purchase, NULL), 100)[SAFE_OFFSET(90)] AS p90_hours_to_first_purchase,
+    ROUND(APPROX_QUANTILES(IF(is_valid_interval, hours_to_first_purchase, NULL), 100)[SAFE_OFFSET(50)] / 24, 2) AS median_days_to_first_purchase,
+    ROUND(AVG(IF(is_valid_interval, hours_to_first_purchase, NULL)) / 24, 2) AS avg_days_to_first_purchase
+  FROM customer_intervals
+  GROUP BY sign_up_cohort_week, cohort_status
+  ORDER BY sign_up_cohort_week DESC
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Time to First Purchase: hours per registered customer from first sign_up (userAccount.createProfile) to first
+  -- completed purchase (commerce.purchases), per weekly sign-up cohort: median (headline), mean, P75 and P90.
+  -- Population: authenticated customers (CRMID) with both events. Negative intervals are excluded and their share reported.
+  -- Cohorts mature after 90 days; purchases beyond that window are not counted.
+  WITH base_events AS (
+    SELECT
+      identityMap['CRMID'][0].id AS customer_id,
+      eventType AS event_type,
+      timestamp AS event_ts,
+      commerce.order.purchaseID AS transaction_id,
+      commerce.order.priceTotal AS order_value
+    FROM web_experience_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 455)
+      AND timestamp < current_date()
+      AND eventType IN ('userAccount.createProfile', 'commerce.purchases')
+      AND identityMap['CRMID'][0].id IS NOT NULL
+  ),
+  
+  -- Staff, internal, test, marketplace or B2B bulk-imported accounts
+  excluded_customers AS (
+    SELECT DISTINCT customer_id
+    FROM crm_customer_profile_dataset
+    WHERE is_internal = TRUE
+       OR LOWER(account_type) IN ('staff', 'internal', 'test', 'marketplace_import', 'b2b_import')
+  ),
+  
+  -- Anchor: earliest sign_up per customer
+  sign_ups AS (
+    SELECT
+      customer_id,
+      MIN(event_ts) AS sign_up_ts
+    FROM base_events
+    WHERE event_type = 'userAccount.createProfile'
+    GROUP BY customer_id
+  ),
+  
+  -- Duplicate purchase hits collapsed to the first occurrence of each purchaseID; value after discounts must be > 0
+  purchases_ranked AS (
+    SELECT
+      customer_id,
+      transaction_id,
+      event_ts AS purchase_ts,
+      ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_ts) AS hit_rank
+    FROM base_events
+    WHERE event_type = 'commerce.purchases'
+      AND transaction_id IS NOT NULL
+      AND transaction_id <> ''
+      AND order_value > 0
+  ),
+  
+  -- Completed orders only: drop test orders and orders voided, fraud-declined or cancelled before capture.
+  -- A later refund does not disqualify the order.
+  completed_purchases AS (
+    SELECT
+      p.customer_id,
+      p.transaction_id,
+      p.purchase_ts
+    FROM purchases_ranked AS p
+    LEFT JOIN commerce_orders_dataset AS o
+      ON o.order_number = p.transaction_id
+    WHERE p.hit_rank = 1
+      AND COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(LOWER(o.financial_status), '') <> 'voided'
+      AND COALESCE(LOWER(o.cancel_reason), '') <> 'fraud'
+      AND NOT (o.cancelled_at IS NOT NULL AND (o.captured_at IS NULL OR o.cancelled_at < o.captured_at))
+  ),
+  
+  -- End: earliest completed purchase per customer
+  first_purchases AS (
+    SELECT
+      customer_id,
+      MIN(purchase_ts) AS first_purchase_ts
+    FROM completed_purchases
+    GROUP BY customer_id
+  ),
+  
+  -- Customers with both events; purchases beyond the 90-day maturity window are not counted
+  customer_intervals AS (
+    SELECT
+      s.customer_id,
+      CAST(date_trunc('WEEK', s.sign_up_ts) AS DATE) AS sign_up_cohort_week,
+      s.sign_up_ts,
+      f.first_purchase_ts,
+      CASE WHEN f.first_purchase_ts >= s.sign_up_ts THEN 1 ELSE 0 END AS is_valid_interval,
+      CAST(FLOOR((unix_timestamp(f.first_purchase_ts) - unix_timestamp(s.sign_up_ts)) / 3600) AS BIGINT) AS hours_to_first_purchase
+    FROM sign_ups AS s
+    INNER JOIN first_purchases AS f
+      ON f.customer_id = s.customer_id
+    LEFT JOIN excluded_customers AS x
+      ON x.customer_id = s.customer_id
+    WHERE x.customer_id IS NULL
+      AND CAST(s.sign_up_ts AS DATE) >= CAST(date_trunc('WEEK', date_sub(current_date(), 364)) AS DATE)
+      AND f.first_purchase_ts <= s.sign_up_ts + INTERVAL 90 DAYS
+  )
+  
+  SELECT
+    sign_up_cohort_week,
+    CASE WHEN date_add(sign_up_cohort_week, 6) <= date_sub(current_date(), 90) THEN 'final' ELSE 'provisional' END AS cohort_status,
+    COUNT(*) AS customers_with_sign_up_and_purchase,
+    SUM(1 - is_valid_interval) AS negative_interval_customers,
+    ROUND(SUM(1 - is_valid_interval) * 100.0 / NULLIF(COUNT(*), 0), 2) AS negative_interval_share_pct,
+    SUM(is_valid_interval) AS measured_customers,
+    percentile_approx(CASE WHEN is_valid_interval = 1 THEN hours_to_first_purchase END, 0.5) AS median_hours_to_first_purchase,
+    ROUND(AVG(CASE WHEN is_valid_interval = 1 THEN hours_to_first_purchase END), 2) AS avg_hours_to_first_purchase,
+    percentile_approx(CASE WHEN is_valid_interval = 1 THEN hours_to_first_purchase END, 0.75) AS p75_hours_to_first_purchase,
+    percentile_approx(CASE WHEN is_valid_interval = 1 THEN hours_to_first_purchase END, 0.9) AS p90_hours_to_first_purchase,
+    ROUND(percentile_approx(CASE WHEN is_valid_interval = 1 THEN hours_to_first_purchase END, 0.5) / 24.0, 2) AS median_days_to_first_purchase,
+    ROUND(AVG(CASE WHEN is_valid_interval = 1 THEN hours_to_first_purchase END) / 24.0, 2) AS avg_days_to_first_purchase
+  FROM customer_intervals
+  GROUP BY sign_up_cohort_week
+  ORDER BY sign_up_cohort_week DESC
 
+Calculation Notes: |
+  1️⃣ Population is customers with both a sign_up and at least one completed purchase, joined on the authenticated user_id (web) or customer_id (backend). Guest checkouts with no account are excluded. Customers who signed up but never bought are not counted as zero; track them separately in the cohort's sign-up-to-purchase conversion rate.,2️⃣ Anchor and end timestamps: the start is the customer's earliest sign_up event, or customers.created_at in the order platform. The end is the earliest purchase with a distinct transaction_id, or MIN(orders.created_at). Duplicate purchase hits for the same transaction_id are collapsed to the first occurrence before taking the minimum.,3️⃣ A completed purchase has value > 0 after discounts, and its order status was not voided, fraud-declined or cancelled before payment capture. A later refund does not disqualify the order. Test orders, internal or staff accounts and marketplace or B2B bulk-imported customers are filtered out.,4️⃣ Negative intervals are excluded. This happens when a guest order placed before registration is later linked to the new account, for example through the post-purchase "create an account" prompt. Report their share alongside the metric so that guest-to-account conversion does not quietly shrink the population.,5️⃣ Right-censoring: cohorts are keyed to sign-up date, not purchase date. A cohort is reported as final only after a fixed maturity window, typically 90 days. Purchases after that window are excluded so a recent cohort is not flattered by counting only its fastest buyers. Immature cohorts are labelled provisional.,6️⃣ The interval spans sessions and devices, so no 30-minute session timeout applies. Cross-device accuracy depends on user_id being set at both sign_up and purchase. Compute all timestamps in UTC, and use the median as the headline value because the distribution is heavily right-skewed. Publish the mean, P75 and P90 alongside it.,7️⃣ Source precedence: use web/app analytics (GA4 sign_up with method; purchase with transaction_id, value, currency, items[]) when user_id coverage is at least 95% of orders. Otherwise, or for customers created through POS, call centre or account import, use the order platform's customers and orders tables as the system of record.
 
+Business Use Case: |
+  1️⃣ Lifecycle Marketing (CRM team): when the median for a weekly sign-up cohort rises more than 20% above the trailing 8-week baseline, move the welcome-series first-order incentive earlier so it lands before the median hour mark, then re-measure the next mature cohort.,2️⃣ Performance Marketing: at the monthly channel review, rank acquisition channels and sign-up methods by median time to first purchase together with cohort conversion. Shift budget away from channels whose registrants take much longer to buy, because that delay extends CAC payback.,3️⃣ Merchandising: when first-purchase P75 is high for customers whose first viewed category is a considered-purchase range, add curated best-seller and review-led modules to the post-registration landing experience and PDP recommendations for that category.,4️⃣ Product (Account & Checkout squad): after a change to the registration or checkout flow, such as social login or saved payment at sign-up, compare median time to first purchase between control and variant sign-up cohorts before rolling the change out to all traffic.
 
+Dependencies:
+  Events: [sign-up, purchase]
+  Dimensions: [acquisition-cohort, transaction-id]
 
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Adobe Commerce)
 
+Report Attributes: |
+  Acquisition Cohort (Sign-Up Week / Month); Sign-Up Method; First Touch Channel Grouping; Session Source / Medium at Sign-Up; Device Category; Country/Region; Item Category of First Purchase; Coupon Code on First Order
 
+Dashboard Usage: [New Customer Acquisition & Activation, Lifecycle Marketing Welcome Journey Performance, Sign-Up Cohort Conversion Analysis, Channel CAC Payback Review]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [time-to-first-value, days-since-last-purchase, orders-per-customer, new-users]
 
+Derived KPIs: [new-customer-conversion-rate, second-purchase-conversion-rate, time-between-purchases]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +570,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-14T06:46:55.623+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-14T06:47:03.757+00:00
 
