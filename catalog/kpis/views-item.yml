@@ -1,73 +1,541 @@
 # KPI: Views Item
-# Generated: 2026-05-30T04:02:50.685Z
+# Generated: 2026-09-14T07:46:33.806Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 KPI Name: Views Item
-Formula: COUNT(view_item events or item occurrences within view_item events)
+Formula: Item Views = COUNT(DISTINCT view instances), where one view instance = one parent item_id in a view_item event rendering product detail content, with repeats of the same user_pseudo_id + ga_session_id + item_id within 30 seconds collapsed to one and bot-flagged or internal traffic removed
 
 Description: |
-  Views Item counts how many times users viewed a product detail or item impression that is tracked as a product view. It indicates product interest and is the denominator for several product conversion KPIs.
+  Views Item (canonically Product Detail Views) counts how often shoppers are shown the full detail content of a specific product, measured at item_id grain from the unified view_item event after bot exclusion and refresh deduplication, and explicitly excluding list and grid impressions. It is the standard measure of product-level demand interest and the base for Cart-to-View Rate (also reported as Item View to Cart Rate; its denominator is users_with_item_view, the user-based count of shoppers with a detail view, not item_views) and Item Purchase Conversion Rate, so one stable definition must govern merchandising, search and site-experience reporting.
 
 Category: Engagement
 
-Tags: [product, view-item, pdp, engagement, merchandising]
+Tags: [kpi, E-commerce: Product Discovery & Merchandising, product-detail-page, view_item, merchandising]
 
-Industry: [["Retail","E-commerce"]]
+Industry: [["Retail"]]
 
 Priority: High
 
-Core Area: Digital Analytics
+Core Area: Discovery
 
 Scope: Event
 
-Measure Type: count
+Measure Type: Counter
 
-Aggregation Window: Event, Item, Session, User, Time based - Hourly/Daily/Monthly/Yearly
+Aggregation Window: Event, Item, Session, User, Time based - Hourly/Daily/Monthly/Yearly, Hourly, Daily, Weekly, Monthly
 
 GA4 Event: |
   view_item
 
 Adobe Event: |
-  prodView
+  commerce.productViews
 
 W3 Data Layer: |
-  {"digitalData":{"event":[{"eventInfo":{"eventName":"view_item"}}],"product":[{"productInfo":{"sku":"SKU_123","productName":"Example Product","productURL":"https://www.example.com/product/sku-123"},"category":{"primaryCategory":"Category"}}]}}
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageID": "SKU-10482",
+          "pageName": "product:footwear:running-shoes:SKU-10482",
+          "destinationURL": "https://www.example.com/p/trailpeak-waterproof-running-shoe/SKU-10482",
+          "language": "en-US"
+        },
+        "category": {
+          "primaryCategory": "Footwear",
+          "subCategory1": "Running Shoes",
+          "pageType": "product"
+        },
+        "attributes": {
+          "viewContext": "pdp"
+        }
+      },
+      "product": [
+        {
+          "productInfo": {
+            "productID": "SKU-10482",
+            "sku": "SKU-10482",
+            "productName": "Trailpeak Waterproof Running Shoe",
+            "manufacturer": "Trailpeak",
+            "productURL": "https://www.example.com/p/trailpeak-waterproof-running-shoe/SKU-10482",
+            "color": "Navy",
+            "size": "US 10"
+          },
+          "category": {
+            "primaryCategory": "Footwear",
+            "subCategory1": "Running Shoes",
+            "productType": "Shoes"
+          },
+          "price": {
+            "basePrice": 129,
+            "currency": "USD"
+          },
+          "attributes": {
+            "variant": "Navy / US 10",
+            "listID": "search_results",
+            "listName": "Search Results"
+          }
+        }
+      ],
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "commerce.productViews",
+            "eventAction": "view_item"
+          },
+          "category": {
+            "primaryCategory": "ecommerce"
+          },
+          "attributes": {
+            "viewContext": "pdp"
+          }
+        }
+      ]
+    }
+  }
 
 GA4 Data Layer: |
-  {"event":"view_item","ecommerce":{"currency":"USD","value":99.99,"items":[{"item_id":"SKU_123","item_name":"Example Product","item_category":"Category","price":99.99}]}}
+  {
+    "event": "view_item",
+    "view_context": "pdp",
+    "page_type": "product",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 129,
+      "items": [
+        {
+          "item_id": "SKU-10482",
+          "item_name": "Trailpeak Waterproof Running Shoe",
+          "item_brand": "Trailpeak",
+          "item_category": "Footwear",
+          "item_category2": "Running Shoes",
+          "item_variant": "Navy / US 10",
+          "item_list_id": "search_results",
+          "item_list_name": "Search Results",
+          "price": 129,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
 Adobe Client Data Layer: |
-  {"event":"commerce.productViews","commerce":{"productViews":{"value":1},"productListItems":[{"SKU":"SKU_123","name":"Example Product","priceTotal":99.99}]}}
+  {
+    "event": "commerce.productViews",
+    "viewContext": "pdp",
+    "trafficType": "external",
+    "web": {
+      "webPageDetails": {
+        "name": "product:footwear:running-shoes:SKU-10482",
+        "URL": "https://www.example.com/p/trailpeak-waterproof-running-shoe/SKU-10482",
+        "siteSection": "product"
+      }
+    },
+    "commerce": {
+      "productViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-10482",
+        "name": "Trailpeak Waterproof Running Shoe",
+        "priceTotal": 129,
+        "quantity": 1,
+        "currencyCode": "USD",
+        "productCategories": [
+          {
+            "categoryID": "footwear",
+            "categoryName": "Footwear"
+          },
+          {
+            "categoryID": "running-shoes",
+            "categoryName": "Running Shoes"
+          }
+        ],
+        "selectedOptions": [
+          {
+            "attribute": "color",
+            "value": "Navy"
+          },
+          {
+            "attribute": "size",
+            "value": "US 10"
+          }
+        ]
+      }
+    ],
+    "product": {
+      "brand": "Trailpeak",
+      "variant": "Navy / US 10",
+      "listID": "search_results",
+      "listName": "Search Results"
+    }
+  }
 
 XDM Mapping: |
-  {"eventType":"commerce.productViews","commerce.productViews.value":"1","productListItems.SKU":"item_id","productListItems.name":"item_name","productListItems.category":"item_category","productListItems.priceTotal":"price"}
+  {
+    "eventType": "commerce.productViews",
+    "timestamp": "2026-09-13T14:05:22.000Z",
+    "channel": {
+      "typeAtSource": "search"
+    },
+    "commerce": {
+      "productViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-10482",
+        "name": "Trailpeak Waterproof Running Shoe",
+        "priceTotal": 129,
+        "quantity": 1,
+        "currencyCode": "USD",
+        "productCategories": [
+          {
+            "categoryID": "footwear",
+            "categoryName": "Footwear"
+          },
+          {
+            "categoryID": "running-shoes",
+            "categoryName": "Running Shoes"
+          }
+        ],
+        "selectedOptions": [
+          {
+            "attribute": "color",
+            "value": "Navy"
+          },
+          {
+            "attribute": "size",
+            "value": "US 10"
+          }
+        ]
+      }
+    ],
+    "web": {
+      "webPageDetails": {
+        "name": "product:footwear:running-shoes:SKU-10482",
+        "URL": "https://www.example.com/p/trailpeak-waterproof-running-shoe/SKU-10482",
+        "siteSection": "product"
+      }
+    },
+    "_tenant": {
+      "viewContext": "pdp",
+      "pageType": "product",
+      "productBrand": "Trailpeak",
+      "productVariant": "Navy / US 10",
+      "itemListID": "search_results",
+      "itemListName": "Search Results",
+      "trafficType": "external"
+    }
+  }
 
-SQL Query: |
-  SELECT item.item_id, item.item_name, COUNT(*) AS views_item FROM `project.dataset.events_*`, UNNEST(items) AS item WHERE event_name='view_item' GROUP BY item.item_id, item.item_name ORDER BY views_item DESC;
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Views Item (Product Detail Views): unified view_item, detail contexts only (pdp, quick_view), parent item_id grain,
+  -- 30-second refresh dedupe per user_pseudo_id + ga_session_id + item_id, internal / staging / bot-rate sessions removed.
+  -- Re-run the trailing 3 days daily to restate late-arriving hits; event_date is already in the property reporting time zone.
+  -- Channel = session_traffic_source_last_click.cross_channel_campaign.default_channel_group (session-scoped); list origin = items.item_list_name.
+  WITH detail_view_events AS (
+    SELECT
+      e.event_date,
+      e.event_timestamp,
+      e.event_bundle_sequence_id,
+      e.user_pseudo_id,
+      (SELECT MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS ga_session_id,
+      (SELECT MAX(IF(ep.key = 'view_context', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS view_context,
+      (SELECT MAX(IF(ep.key = 'page_type', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS page_type,
+      (SELECT MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS traffic_type,
+      e.session_traffic_source_last_click.cross_channel_campaign.default_channel_group AS session_default_channel_group,
+      e.device.category AS device_category,
+      e.device.web_info.hostname AS hostname,
+      e.geo.country AS country,
+      e.items
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 35 DAY))
+                              AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name = 'view_item'
+  ),
+  item_views AS (
+    SELECT
+      d.event_date,
+      d.event_timestamp,
+      d.user_pseudo_id,
+      d.ga_session_id,
+      item.item_id,
+      ANY_VALUE(item.item_name) AS item_name,
+      ANY_VALUE(item.item_category) AS item_category,
+      ANY_VALUE(item.item_brand) AS item_brand,
+      ANY_VALUE(item.item_variant) AS item_variant,
+      ANY_VALUE(item.item_list_name) AS item_list_name,
+      ANY_VALUE(d.view_context) AS view_context,
+      ANY_VALUE(d.page_type) AS page_type,
+      ANY_VALUE(d.session_default_channel_group) AS session_default_channel_group,
+      ANY_VALUE(d.device_category) AS device_category,
+      ANY_VALUE(d.country) AS country
+    FROM detail_view_events AS d
+    CROSS JOIN UNNEST(d.items) AS item
+    WHERE d.view_context IN ('pdp', 'quick_view')
+      AND COALESCE(d.traffic_type, '') NOT IN ('internal', 'developer')
+      AND NOT REGEXP_CONTAINS(LOWER(COALESCE(d.hostname, '')), r'^(staging|stg|qa|uat|dev|test)[.-]')
+      AND item.item_id IS NOT NULL
+      AND item.item_id <> ''
+    GROUP BY d.event_date, d.event_timestamp, d.event_bundle_sequence_id, d.user_pseudo_id, d.ga_session_id, item.item_id
+  ),
+  bot_sessions AS (
+    SELECT DISTINCT user_pseudo_id, ga_session_id
+    FROM (
+      SELECT
+        user_pseudo_id,
+        ga_session_id,
+        TIMESTAMP_TRUNC(TIMESTAMP_MICROS(event_timestamp), MINUTE) AS view_minute,
+        COUNT(*) AS views_in_minute
+      FROM item_views
+      GROUP BY user_pseudo_id, ga_session_id, view_minute
+    )
+    WHERE views_in_minute > 30
+  ),
+  sequenced AS (
+    SELECT
+      v.*,
+      LAG(v.event_timestamp) OVER (
+        PARTITION BY v.user_pseudo_id, v.ga_session_id, v.item_id
+        ORDER BY v.event_timestamp
+      ) AS prev_view_timestamp
+    FROM item_views AS v
+    LEFT JOIN bot_sessions AS b
+      ON b.user_pseudo_id = v.user_pseudo_id
+     AND b.ga_session_id = v.ga_session_id
+    WHERE b.user_pseudo_id IS NULL
+  )
+  SELECT
+    PARSE_DATE('%Y%m%d', event_date) AS event_date,
+    item_id,
+    item_name,
+    item_category,
+    item_brand,
+    item_variant,
+    item_list_name,
+    view_context,
+    page_type,
+    session_default_channel_group,
+    device_category,
+    country,
+    COUNT(*) AS item_views,
+    COUNT(DISTINCT CONCAT(user_pseudo_id, '.', COALESCE(CAST(ga_session_id AS STRING), ''))) AS sessions_with_item_view,
+    COUNT(DISTINCT user_pseudo_id) AS users_with_item_view
+  FROM sequenced
+  WHERE prev_view_timestamp IS NULL
+     OR event_timestamp - prev_view_timestamp > 30 * 1000000
+  GROUP BY event_date, item_id, item_name, item_category, item_brand, item_variant, item_list_name, view_context, page_type, session_default_channel_group, device_category, country
+  ORDER BY event_date DESC, item_views DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Views Item (Product Detail Views): XDM commerce.productViews, _tenant.viewContext in (pdp, quick_view), productListItems SKU grain.
+  -- 30-minute inactivity sessions are built from ALL ExperienceEvents per ECID first, then filtered to product views (mirrors GA4 ga_session_id);
+  -- 30-second refresh dedupe per ECID + session + SKU; internal traffic (_tenant.trafficType IN ('internal', 'developer')), bot user agents,
+  -- staging hostnames and bot-rate sessions (> 30 detail views per minute) removed.
+  -- Channel = session entry channel.typeAtSource (session_default_channel_group); list origin = _tenant.itemListName (item_list_name).
+  -- Set before running: your_aep_web_events_dataset (web ExperienceEvent dataset), _tenant (tenant namespace), reporting_tz in the params CTE
+  -- (set to the GA4 property reporting time zone; 'America/New_York' is only an example). Date bounds are applied in reporting_tz.
+  -- Re-run the trailing 3 days daily to restate late-arriving hits.
+  WITH params AS (
+    SELECT 'America/New_York' AS reporting_tz
+  ),
+  all_events AS (
+    SELECT
+      e._id AS event_id,
+      e.timestamp AS event_ts,
+      e.eventType AS event_type,
+      e.endUserIDs._experience.ecid.id AS ecid,
+      e.commerce.productViews.value AS product_views_value,
+      e._tenant.viewContext AS view_context,
+      e._tenant.pageType AS page_type,
+      e._tenant.productBrand AS item_brand,
+      e._tenant.productVariant AS item_variant,
+      e._tenant.itemListName AS item_list_name,
+      e._tenant.trafficType AS traffic_type,
+      e.channel.typeAtSource AS channel_type,
+      e.device.type AS device_category,
+      e.placeContext.geo.countryCode AS country,
+      e.environment.browserDetails.userAgent AS user_agent,
+      e.web.webPageDetails.URL AS page_url,
+      e.productListItems AS product_list_items,
+      p.reporting_tz
+    FROM your_aep_web_events_dataset AS e
+    CROSS JOIN params AS p
+    WHERE e.endUserIDs._experience.ecid.id IS NOT NULL
+      AND e.timestamp >= date_sub(current_date(), 37)
+      AND e.timestamp < date_add(current_date(), 1)
+  ),
+  session_flags AS (
+    SELECT
+      a.*,
+      CASE
+        WHEN LAG(a.event_ts) OVER (PARTITION BY a.ecid ORDER BY a.event_ts) IS NULL THEN 1
+        WHEN unix_timestamp(a.event_ts) - unix_timestamp(LAG(a.event_ts) OVER (PARTITION BY a.ecid ORDER BY a.event_ts)) > 1800 THEN 1
+        ELSE 0
+      END AS new_session
+    FROM all_events AS a
+  ),
+  sessionized AS (
+    SELECT
+      s.*,
+      SUM(s.new_session) OVER (
+        PARTITION BY s.ecid
+        ORDER BY s.event_ts
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session_seq
+    FROM session_flags AS s
+  ),
+  session_context AS (
+    SELECT
+      z.*,
+      first_value(z.channel_type, true) OVER (
+        PARTITION BY z.ecid, z.session_seq
+        ORDER BY z.event_ts
+        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+      ) AS session_default_channel_group
+    FROM sessionized AS z
+  ),
+  detail_view_events AS (
+    SELECT
+      c.event_id,
+      c.event_ts,
+      c.ecid,
+      c.session_seq,
+      c.reporting_tz,
+      to_date(from_utc_timestamp(c.event_ts, c.reporting_tz)) AS event_date,
+      c.view_context,
+      c.page_type,
+      c.item_brand,
+      c.item_variant,
+      c.item_list_name,
+      c.session_default_channel_group,
+      c.device_category,
+      c.country,
+      explode(c.product_list_items) AS pli
+    FROM session_context AS c
+    WHERE c.event_type = 'commerce.productViews'
+      AND COALESCE(c.product_views_value, 1) > 0
+      AND c.view_context IN ('pdp', 'quick_view')
+      AND COALESCE(c.traffic_type, '') NOT IN ('internal', 'developer')
+      AND NOT (LOWER(COALESCE(c.user_agent, '')) RLIKE '(bot|crawler|spider|headlesschrome|phantomjs|lighthouse)')
+      AND NOT (LOWER(COALESCE(c.page_url, '')) RLIKE '^https?://(staging|stg|qa|uat|dev|test)[.-]')
+  ),
+  item_views AS (
+    SELECT
+      d.event_date,
+      d.event_id,
+      d.event_ts,
+      d.ecid,
+      d.session_seq,
+      d.pli.SKU AS item_id,
+      MAX(d.pli.name) AS item_name,
+      MAX(d.pli.productCategories[0].categoryName) AS item_category,
+      MAX(d.item_brand) AS item_brand,
+      MAX(d.item_variant) AS item_variant,
+      MAX(d.item_list_name) AS item_list_name,
+      MAX(d.view_context) AS view_context,
+      MAX(d.page_type) AS page_type,
+      MAX(d.session_default_channel_group) AS session_default_channel_group,
+      MAX(d.device_category) AS device_category,
+      MAX(d.country) AS country
+    FROM detail_view_events AS d
+    WHERE d.pli.SKU IS NOT NULL
+      AND d.pli.SKU <> ''
+      AND d.event_date >= date_sub(to_date(from_utc_timestamp(current_timestamp(), d.reporting_tz)), 35)
+      AND d.event_date < to_date(from_utc_timestamp(current_timestamp(), d.reporting_tz))
+    GROUP BY d.event_date, d.event_id, d.event_ts, d.ecid, d.session_seq, d.pli.SKU
+  ),
+  bot_sessions AS (
+    SELECT DISTINCT ecid, session_seq
+    FROM (
+      SELECT
+        ecid,
+        session_seq,
+        date_trunc('MINUTE', event_ts) AS view_minute,
+        COUNT(*) AS views_in_minute
+      FROM item_views
+      GROUP BY ecid, session_seq, date_trunc('MINUTE', event_ts)
+    ) m
+    WHERE views_in_minute > 30
+  ),
+  sequenced AS (
+    SELECT
+      v.*,
+      LAG(v.event_ts) OVER (
+        PARTITION BY v.ecid, v.session_seq, v.item_id
+        ORDER BY v.event_ts
+      ) AS prev_view_ts
+    FROM item_views AS v
+    LEFT JOIN bot_sessions AS b
+      ON b.ecid = v.ecid
+     AND b.session_seq = v.session_seq
+    WHERE b.ecid IS NULL
+  )
+  SELECT
+    event_date,
+    item_id,
+    item_name,
+    item_category,
+    item_brand,
+    item_variant,
+    item_list_name,
+    view_context,
+    page_type,
+    session_default_channel_group,
+    device_category,
+    country,
+    COUNT(*) AS item_views,
+    COUNT(DISTINCT concat(ecid, '.', CAST(session_seq AS STRING))) AS sessions_with_item_view,
+    COUNT(DISTINCT ecid) AS users_with_item_view
+  FROM sequenced
+  WHERE prev_view_ts IS NULL
+     OR unix_timestamp(event_ts) - unix_timestamp(prev_view_ts) > 30
+  GROUP BY event_date, item_id, item_name, item_category, item_brand, item_variant, item_list_name, view_context, page_type, session_default_channel_group, device_category, country
+  ORDER BY event_date DESC, item_views DESC;
 
 Calculation Notes: |
-  For product detail pages, count one item view per item in the view_item event. Do not mix list impressions with product detail views unless explicitly defined. Filter bot traffic and duplicate page refresh inflation where needed.
+  1️⃣ Detail views only: count view_item fired when the product detail content (price, variant selector, add-to-cart) renders; list and grid impressions (view_item_list), carousel tiles and select_item clicks are excluded and belong to Item List Views, never blended into this KPI.
+  2️⃣ Item grain: count one view per distinct parent item_id per qualifying view_item event; bundle or set pages carrying several items count each distinct parent item_id once, and duplicated rows for the same item_id inside one items array are collapsed.
+  3️⃣ Refresh and re-render dedupe: repeated view_item for the same user_pseudo_id + ga_session_id + item_id within 30 seconds collapses to one view, which neutralises page reloads, back/forward cache restores and single-page-app route re-renders.
+  4️⃣ Variant switches: changing colour, size or pack on the same detail page updates item_variant and must not fire or count a new view; a new view is counted only when the parent item_id changes, and variant demand is analysed through the item_variant breakdown.
+  5️⃣ Quick-view modals: count a modal only when it renders full detail content and sends view_item with view_context = 'quick_view'; hover previews and tooltip cards are excluded, and view_context is retained so the PDP-only trend can be isolated after a quick-view launch.
+  6️⃣ Bot and internal traffic: exclude known-bot traffic, sessions flagged by bot management (data-centre IPs, headless user agents, more than 30 detail views per minute), internal and employee IP ranges, and staging or QA hostnames before counting.
+  7️⃣ Timing: attribute each view to event_timestamp in the property reporting time zone, apply the 30-minute inactivity session timeout for session-level cuts, and restate daily totals for hits arriving up to 72 hours late.
 
 Business Use Case: |
-  A merchandising team identifies products with rising item views to adjust inventory, promote trending items, or optimize product detail pages.
+  1️⃣ Merchandising buyers review the weekly item report and, when a SKU's detail views rise more than 25% week over week while inventory cover falls below four weeks, raise a replenishment order or reallocate stock from low-demand regions.
+  2️⃣ The E-commerce Merchandising team takes items in the top decile of detail views but the bottom quartile of Cart-to-View Rate (add-to-cart users over users_with_item_view) into a PDP content review (price position, imagery, reviews, size guidance) and launches an A/B test on the weakest element.
+  3️⃣ Digital Marketing shifts shopping and paid-social budget toward products whose organic detail views are growing, and pauses campaigns that drive detail views without a matching lift in add-to-cart.
+  4️⃣ The Search & Discovery product team monitors detail views originating from internal search after every ranking or boosting change and rolls the rule back when views for the affected categories drop more than 10% against the control period.
 
-Dependencies: |
-  view_item event; item_id; item_name; product category; page URL; product catalog mapping
+Dependencies:
+  Events: [product-view]
+  Metrics: [product-view]
+  Dimensions: [product-name, item-category, page-type, device-category]
 
-Source Data: Digital Analytics; Product Catalog
+Source Data: Digital Analytics (GA4) + Product Catalog (PIM)
 
 Report Attributes: |
-  Dimensions: item_id, item_name, category, brand, device, channel. Metrics: item views, add-to-carts, purchases, item revenue.
+  item_id; item_name; item_category; item_brand; item_variant; item_list_name; view_context; page_type; device_category; session_default_channel_group; country
 
-Dashboard Usage: [Product Performance, Merchandising, Content Performance, Ecommerce Performance]
+Dashboard Usage: [Product Performance, Merchandising, Product Discovery Funnel, Content Performance, Ecommerce Performance]
 
 Segment Eligibility: |
   true
 
-Related KPIs: [Item View to Cart Rate, Item purchase conversion rate, Item revenue, Pages Per Session]
+Related KPIs: [cart-to-view-rate, item-purchase-conversion-rate, add-to-cart-rate, item-revenue]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -79,4 +547,5 @@ Created At: 2026-05-30T04:02:50.343713+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-14T07:46:33.281+00:00
 
