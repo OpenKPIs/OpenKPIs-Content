@@ -1,7 +1,7 @@
 # Dimension: Order Status
-# Generated: 2026-09-14T18:47:11.814Z
+# Generated: 2026-09-14T18:47:21.418Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Order Status
 
@@ -10,31 +10,434 @@ Description: |
 
 Category: Operations
 
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Generic
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Daily, Weekly, Monthly
 
+GA4 Event: |
+  page_view
 
+Adobe Event: |
+  page:view
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageName": "order status",
+          "pageType": "order_status"
+        }
+      },
+      "transaction": {
+        "transactionID": "ORD-100482",
+        "attributes": {
+          "orderStatus": "processing",
+          "daysSinceOrder": 1
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "page_view",
+            "eventAction": "view",
+            "type": "order_status"
+          },
+          "attributes": {
+            "orderStatus": "processing",
+            "transactionID": "ORD-100482"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_type": "order_status",
+    "transaction_id": "ORD-100482",
+    "order_status": "processing",
+    "days_since_order": 1
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "page:view",
+    "eventInfo": {
+      "eventName": "pageView"
+    },
+    "page": {
+      "pageName": "order status",
+      "pageType": "order_status"
+    },
+    "order": {
+      "transactionId": "ORD-100482",
+      "orderStatus": "processing",
+      "daysSinceOrder": 1
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "timestamp": "2026-09-13T10:15:00Z",
+    "web": {
+      "webPageDetails": {
+        "name": "order status",
+        "siteSection": "order_status",
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-100482"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "ORD-100482",
+            "eVar41": "processing",
+            "eVar45": "order_status"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Order Status at check time (order_status on page_view with page_type = order_status), with each checked order's current status from the latest sales_order_status_history row
+  WITH order_status_page_views AS (
+    SELECT
+      e.user_pseudo_id,
+      TIMESTAMP_MICROS(e.event_timestamp) AS check_ts,
+      MAX(IF(ep.key = 'page_type', ep.value.string_value, NULL)) AS page_type,
+      MAX(IF(ep.key = 'transaction_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS transaction_id,
+      MAX(IF(ep.key = 'order_status', REGEXP_REPLACE(LOWER(TRIM(ep.value.string_value)), '[ -]+', '_'), NULL)) AS order_status_raw,
+      MAX(IF(ep.key = 'days_since_order', COALESCE(ep.value.int_value, CAST(FLOOR(ep.value.double_value) AS INT64), SAFE_CAST(ep.value.string_value AS INT64)), NULL)) AS days_since_order
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name = 'page_view'
+    GROUP BY e.user_pseudo_id, e.event_timestamp, e.event_bundle_sequence_id
+  ),
+  -- Event-time value normalised to the governed list; shipment-level values roll up to Shipped/Complete; SFCC created/failed are not valid orders
+  order_status_checks AS (
+    SELECT
+      user_pseudo_id,
+      check_ts,
+      NULLIF(TRIM(transaction_id), '') AS transaction_id,
+      days_since_order,
+      CASE
+        WHEN order_status_raw IS NULL OR order_status_raw = '' THEN '(not set)'
+        WHEN order_status_raw IN ('canceled', 'cancelled', 'replaced') THEN 'Cancelled'
+        WHEN order_status_raw IN ('closed', 'restocked') THEN 'Closed'
+        WHEN order_status_raw IN ('holded', 'on_hold', 'hold') THEN 'On Hold'
+        WHEN order_status_raw IN ('complete', 'completed', 'shipped', 'fulfilled', 'in_transit', 'out_for_delivery', 'delivered', 'picked_up', 'collected') THEN 'Shipped/Complete'
+        WHEN order_status_raw IN ('processing', 'open', 'partshipped', 'partially_shipped', 'partially_fulfilled', 'in_progress', 'scheduled', 'pending_fulfillment') THEN 'Processing'
+        WHEN order_status_raw IN ('new', 'pending', 'pending_payment', 'payment_review', 'unfulfilled') THEN 'Pending'
+        ELSE '(other)'
+      END AS order_status_at_check
+    FROM order_status_page_views
+    WHERE page_type = 'order_status'
+      AND (order_status_raw IS NULL OR order_status_raw NOT IN ('created', 'failed'))
+  ),
+  checked_orders AS (
+    SELECT
+      so.entity_id,
+      so.increment_id,
+      so.state,
+      so.created_at,
+      so.relation_child_id
+    FROM `your-project.commerce.sales_order` AS so
+    WHERE so.increment_id IN (SELECT DISTINCT transaction_id FROM order_status_checks WHERE transaction_id IS NOT NULL)
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY so.increment_id ORDER BY so.entity_id DESC) = 1
+  ),
+  -- Current state: latest status history row per parent_id, ordered by created_at then entity_id
+  latest_status_history AS (
+    SELECT
+      h.parent_id,
+      h.status
+    FROM `your-project.commerce.sales_order_status_history` AS h
+    JOIN checked_orders AS o
+      ON o.entity_id = h.parent_id
+    WHERE h.status IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY h.parent_id ORDER BY h.created_at DESC, h.entity_id DESC) = 1
+  ),
+  -- Custom statuses resolve to their parent state through sales_order_status_state, never by label text
+  resolved_state AS (
+    SELECT
+      l.parent_id,
+      ss.state
+    FROM latest_status_history AS l
+    JOIN checked_orders AS o
+      ON o.entity_id = l.parent_id
+    JOIN `your-project.commerce.sales_order_status_state` AS ss
+      ON ss.status = l.status
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY l.parent_id ORDER BY IF(ss.state = o.state, 0, 1), ss.is_default DESC, ss.state) = 1
+  ),
+  current_order_status AS (
+    SELECT
+      o.increment_id AS transaction_id,
+      o.created_at AS order_created_at,
+      o.relation_child_id IS NOT NULL AS is_order_edit_original,
+      CASE COALESCE(r.state, IF(l.parent_id IS NULL, o.state, NULL))
+        WHEN 'new' THEN 'Pending'
+        WHEN 'pending_payment' THEN 'Pending'
+        WHEN 'payment_review' THEN 'Pending'
+        WHEN 'processing' THEN 'Processing'
+        WHEN 'holded' THEN 'On Hold'
+        WHEN 'complete' THEN 'Shipped/Complete'
+        WHEN 'canceled' THEN 'Cancelled'
+        WHEN 'closed' THEN 'Closed'
+        ELSE '(other)'
+      END AS current_order_status
+    FROM checked_orders AS o
+    LEFT JOIN latest_status_history AS l
+      ON l.parent_id = o.entity_id
+    LEFT JOIN resolved_state AS r
+      ON r.parent_id = o.entity_id
+  ),
+  checks_enriched AS (
+    SELECT
+      c.transaction_id,
+      c.order_status_at_check,
+      s.current_order_status,
+      s.is_order_edit_original,
+      CASE
+        WHEN s.order_created_at IS NOT NULL THEN TIMESTAMP_DIFF(c.check_ts, s.order_created_at, MINUTE) < 1440
+        WHEN c.days_since_order IS NOT NULL THEN c.days_since_order < 1
+        ELSE FALSE
+      END AS is_first_24h_check
+    FROM order_status_checks AS c
+    LEFT JOIN current_order_status AS s
+      ON s.transaction_id = c.transaction_id
+  )
+  SELECT
+    order_status_at_check,
+    COUNT(*) AS order_status_checks,
+    COUNT(DISTINCT transaction_id) AS orders_checked,
+    ROUND(SAFE_DIVIDE(COUNT(*), SUM(COUNT(*)) OVER ()), 4) AS share_of_all_order_status_checks,
+    ROUND(SAFE_DIVIDE(COUNTIF(transaction_id IS NOT NULL), COUNT(DISTINCT transaction_id)), 2) AS checks_per_order,
+    COUNTIF(is_first_24h_check) AS checks_first_24h,
+    ROUND(SAFE_DIVIDE(COUNTIF(is_first_24h_check), SUM(COUNTIF(is_first_24h_check)) OVER ()), 4) AS share_of_all_first_24h_checks,
+    COUNT(DISTINCT IF(current_order_status IN ('Pending', 'Processing', 'On Hold'), transaction_id, NULL)) AS orders_now_open,
+    COUNT(DISTINCT IF(current_order_status = 'Shipped/Complete', transaction_id, NULL)) AS orders_now_shipped_complete,
+    COUNT(DISTINCT IF(current_order_status = 'Cancelled', transaction_id, NULL)) AS orders_now_cancelled,
+    COUNT(DISTINCT IF(current_order_status = 'Cancelled' AND is_order_edit_original, transaction_id, NULL)) AS orders_now_cancelled_by_order_edit,
+    COUNT(DISTINCT IF(current_order_status = 'Closed', transaction_id, NULL)) AS orders_now_closed,
+    COUNT(DISTINCT IF(current_order_status = '(other)', transaction_id, NULL)) AS orders_now_unmapped_status,
+    COUNT(DISTINCT IF(transaction_id IS NOT NULL AND current_order_status IS NULL, transaction_id, NULL)) AS orders_not_in_order_record
+  FROM checks_enriched
+  GROUP BY order_status_at_check
+  ORDER BY order_status_checks DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Order Status at check time (eVar41 on order status page views, siteSection = order_status), with each checked order's current status from the latest sales_order_status_history row
+  WITH page_views AS (
+    SELECT
+      _id AS event_id,
+      timestamp AS check_ts,
+      NULLIF(TRIM(COALESCE(commerce.order.purchaseID, _experience.analytics.customDimensions.eVars.eVar40)), '') AS transaction_id,
+      regexp_replace(lower(trim(_experience.analytics.customDimensions.eVars.eVar41)), '[ -]+', '_') AS order_status_raw,
+      ROW_NUMBER() OVER (PARTITION BY _id ORDER BY timestamp) AS rn
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 30)
+      AND timestamp < current_date()
+      AND eventType = 'web.webpagedetails.pageViews'
+      AND (web.webPageDetails.siteSection = 'order_status'
+           OR _experience.analytics.customDimensions.eVars.eVar45 = 'order_status')
+  ),
+  -- Event-time value normalised to the governed list; shipment-level values roll up to Shipped/Complete; SFCC created/failed are not valid orders
+  order_status_checks AS (
+    SELECT
+      event_id,
+      check_ts,
+      transaction_id,
+      CASE
+        WHEN order_status_raw IS NULL OR order_status_raw = '' THEN '(not set)'
+        WHEN order_status_raw IN ('canceled', 'cancelled', 'replaced') THEN 'Cancelled'
+        WHEN order_status_raw IN ('closed', 'restocked') THEN 'Closed'
+        WHEN order_status_raw IN ('holded', 'on_hold', 'hold') THEN 'On Hold'
+        WHEN order_status_raw IN ('complete', 'completed', 'shipped', 'fulfilled', 'in_transit', 'out_for_delivery', 'delivered', 'picked_up', 'collected') THEN 'Shipped/Complete'
+        WHEN order_status_raw IN ('processing', 'open', 'partshipped', 'partially_shipped', 'partially_fulfilled', 'in_progress', 'scheduled', 'pending_fulfillment') THEN 'Processing'
+        WHEN order_status_raw IN ('new', 'pending', 'pending_payment', 'payment_review', 'unfulfilled') THEN 'Pending'
+        ELSE '(other)'
+      END AS order_status_at_check
+    FROM page_views
+    WHERE rn = 1
+      AND (order_status_raw IS NULL OR order_status_raw NOT IN ('created', 'failed'))
+  ),
+  checked_orders AS (
+    SELECT entity_id, increment_id, state, created_at, relation_child_id
+    FROM (
+      SELECT
+        so.entity_id,
+        so.increment_id,
+        so.state,
+        so.created_at,
+        so.relation_child_id,
+        ROW_NUMBER() OVER (PARTITION BY so.increment_id ORDER BY so.entity_id DESC) AS rn
+      FROM aep_backend_sales_order so
+      WHERE so.increment_id IN (SELECT DISTINCT transaction_id FROM order_status_checks WHERE transaction_id IS NOT NULL)
+    ) ranked_orders
+    WHERE rn = 1
+  ),
+  -- Current state: latest status history row per parent_id, ordered by created_at then entity_id
+  latest_status_history AS (
+    SELECT parent_id, status
+    FROM (
+      SELECT
+        h.parent_id,
+        h.status,
+        ROW_NUMBER() OVER (PARTITION BY h.parent_id ORDER BY h.created_at DESC, h.entity_id DESC) AS rn
+      FROM aep_backend_sales_order_status_history h
+      JOIN checked_orders o
+        ON o.entity_id = h.parent_id
+      WHERE h.status IS NOT NULL
+    ) ranked_history
+    WHERE rn = 1
+  ),
+  -- Custom statuses resolve to their parent state through sales_order_status_state, never by label text
+  resolved_state AS (
+    SELECT parent_id, state
+    FROM (
+      SELECT
+        l.parent_id,
+        ss.state,
+        ROW_NUMBER() OVER (
+          PARTITION BY l.parent_id
+          ORDER BY CASE WHEN ss.state = o.state THEN 0 ELSE 1 END, ss.is_default DESC, ss.state
+        ) AS rn
+      FROM latest_status_history l
+      JOIN checked_orders o
+        ON o.entity_id = l.parent_id
+      JOIN aep_backend_sales_order_status_state ss
+        ON ss.status = l.status
+    ) ranked_states
+    WHERE rn = 1
+  ),
+  current_order_status AS (
+    SELECT
+      o.increment_id AS transaction_id,
+      o.created_at AS order_created_at,
+      CASE WHEN o.relation_child_id IS NOT NULL THEN 1 ELSE 0 END AS is_order_edit_original,
+      CASE COALESCE(r.state, CASE WHEN l.parent_id IS NULL THEN o.state END)
+        WHEN 'new' THEN 'Pending'
+        WHEN 'pending_payment' THEN 'Pending'
+        WHEN 'payment_review' THEN 'Pending'
+        WHEN 'processing' THEN 'Processing'
+        WHEN 'holded' THEN 'On Hold'
+        WHEN 'complete' THEN 'Shipped/Complete'
+        WHEN 'canceled' THEN 'Cancelled'
+        WHEN 'closed' THEN 'Closed'
+        ELSE '(other)'
+      END AS current_order_status
+    FROM checked_orders o
+    LEFT JOIN latest_status_history l
+      ON l.parent_id = o.entity_id
+    LEFT JOIN resolved_state r
+      ON r.parent_id = o.entity_id
+  ),
+  checks_enriched AS (
+    SELECT
+      c.event_id,
+      c.transaction_id,
+      c.order_status_at_check,
+      s.current_order_status,
+      s.is_order_edit_original,
+      CASE
+        WHEN s.order_created_at IS NOT NULL
+         AND (unix_timestamp(c.check_ts) - unix_timestamp(s.order_created_at)) < 86400 THEN 1
+        ELSE 0
+      END AS is_first_24h_check
+    FROM order_status_checks c
+    LEFT JOIN current_order_status s
+      ON s.transaction_id = c.transaction_id
+  ),
+  totals AS (
+    SELECT
+      COUNT(*) AS total_checks,
+      SUM(is_first_24h_check) AS total_first_24h_checks
+    FROM checks_enriched
+  )
+  SELECT
+    e.order_status_at_check,
+    COUNT(*) AS order_status_checks,
+    COUNT(DISTINCT e.transaction_id) AS orders_checked,
+    ROUND(CAST(COUNT(*) AS DOUBLE) / NULLIF(MAX(t.total_checks), 0), 4) AS share_of_all_order_status_checks,
+    ROUND(CAST(SUM(CASE WHEN e.transaction_id IS NOT NULL THEN 1 ELSE 0 END) AS DOUBLE) / NULLIF(COUNT(DISTINCT e.transaction_id), 0), 2) AS checks_per_order,
+    SUM(e.is_first_24h_check) AS checks_first_24h,
+    ROUND(CAST(SUM(e.is_first_24h_check) AS DOUBLE) / NULLIF(MAX(t.total_first_24h_checks), 0), 4) AS share_of_all_first_24h_checks,
+    COUNT(DISTINCT CASE WHEN e.current_order_status IN ('Pending', 'Processing', 'On Hold') THEN e.transaction_id END) AS orders_now_open,
+    COUNT(DISTINCT CASE WHEN e.current_order_status = 'Shipped/Complete' THEN e.transaction_id END) AS orders_now_shipped_complete,
+    COUNT(DISTINCT CASE WHEN e.current_order_status = 'Cancelled' THEN e.transaction_id END) AS orders_now_cancelled,
+    COUNT(DISTINCT CASE WHEN e.current_order_status = 'Cancelled' AND e.is_order_edit_original = 1 THEN e.transaction_id END) AS orders_now_cancelled_by_order_edit,
+    COUNT(DISTINCT CASE WHEN e.current_order_status = 'Closed' THEN e.transaction_id END) AS orders_now_closed,
+    COUNT(DISTINCT CASE WHEN e.current_order_status = '(other)' THEN e.transaction_id END) AS orders_now_unmapped_status,
+    COUNT(DISTINCT CASE WHEN e.transaction_id IS NOT NULL AND e.current_order_status IS NULL THEN e.transaction_id END) AS orders_not_in_order_record
+  FROM checks_enriched e
+  CROSS JOIN totals t
+  GROUP BY e.order_status_at_check
+  ORDER BY order_status_checks DESC;
 
+Calculation Notes: |
+  1️⃣ Value list and precedence: each order has exactly one value at any point in time. Pending = placed but not yet released to fulfillment (authorisation, fraud review or OMS export still outstanding). Processing = released to fulfillment with at least one fulfillable line not yet shipped, including partially fulfilled orders. On Hold = fulfillment deliberately suspended by a merchant action or platform rule. Shipped/Complete = every fulfillable line shipped, delivered or collected. Cancelled = voided before fulfillment finished. Closed = ended after invoicing or fulfillment through a full credit memo, refund-and-archive or restock. When source fields conflict, precedence is Cancelled > Closed > On Hold > Shipped/Complete > Processing > Pending.
+  2️⃣ Adobe Commerce mapping: sales_order.state is authoritative and sales_order.status is its merchant-facing label. new and status pending → Pending; pending_payment and payment_review → Pending (only the lifecycle position is kept, not the payment detail); processing → Processing; holded → On Hold; complete → Shipped/Complete; canceled → Cancelled; closed → Closed. Custom statuses resolve to their parent state through sales_order_status_state and are never mapped by label text.
+  3️⃣ Salesforce Commerce Cloud mapping: NEW → Pending; OPEN → Processing, or Shipped/Complete once shippingStatus = SHIPPED (PARTSHIPPED stays Processing); COMPLETED → Shipped/Complete; CANCELLED → Cancelled; REPLACED → Cancelled, flagged as an order edit. CREATED (created but never placed) and FAILED (placement failed and the basket was reopened) are not valid orders and are excluded from status distributions and denominators. B2C Commerce has no native On Hold or Closed state, so those values appear only when Salesforce Order Management or a downstream OMS supplies them.
+  4️⃣ Shopify mapping: order status (open, closed/archived, cancelled) is combined with fulfillment status. cancelled_at set → Cancelled; displayFulfillmentStatus ON_HOLD → On Hold; FULFILLED → Shipped/Complete whether the order is open or archived; PARTIALLY_FULFILLED, IN_PROGRESS, SCHEDULED and PENDING_FULFILLMENT → Processing; UNFULFILLED (legacy fulfillment_status null) on an open order → Pending; a closed order that is RESTOCKED, or archived with no fulfillment and not cancelled → Closed. Unfulfilled, Partially Fulfilled and Fulfilled are inputs to this mapping and never reporting values, which is why Fulfillment Status is an alias here and not a separate dimension.
+  5️⃣ Time basis: for journey analysis, use the value at event time, i.e. the order_status parameter on order-status-check and order_status_at_cancel on order-cancellation, and never back-fill it with today's state. Shipment-level values on that parameter (out_for_delivery, delivered) roll up to Shipped/Complete at order level. Current-state reporting takes the latest sales_order_status_history row per parent_id, ordered by created_at then entity_id (in Shopify the latest orders/updated payload; in SFCC the latest order export by lastModified). Backlog and ageing trends use end-of-day snapshots in the store's reporting time zone so past periods are not restated. Status changes happen server-side and never start or extend a session; the 30-minute inactivity timeout applies only to the customer event carrying the value.
+  6️⃣ Exclusions and edge cases: test, draft and deleted orders are removed. In an Adobe Commerce order edit the original is cancelled and reissued with a -1 increment_id; that original, like an SFCC REPLACED order, stays Cancelled but can be excluded through order-cancellation-reason = order_edit. Split shipments stay Processing at order level until the last fulfillable line ships. Digital goods reach Shipped/Complete on delivery of the entitlement, and pickup orders on collection. Post-delivery returns do not change the value unless the platform closes the order. Unmapped custom statuses resolve to '(other)' and are reviewed weekly rather than set to null.
+  7️⃣ Boundaries: payment and financial status (authorised, paid, partially refunded, voided) is out of scope. Per-shipment carrier states (label created, in transit, out for delivery, delivered) belong to shipment-status, where the order is the parent and each shipment a child; carrier failures belong to delivery-exception-type. Cancellation reasons belong to order-cancellation-reason, and the customer action of checking status is the order-status-check event. Ship versus pickup is fulfillment-strategy, not a status.
 
+Business Use Case: |
+  1️⃣ Fulfillment Operations manager: at the daily 9:00 backlog review, when Processing orders older than two business days exceed 3% of the prior seven days' orders, escalate the affected fulfillment nodes to the warehouse lead and trigger proactive delay emails to those orders before WISMO contacts arrive.
+  2️⃣ Customer Service team lead: when any order has been On Hold for more than 24 hours, add it to the agent review queue so the hold (address verification, stock allocation, merchant review) is released or the order cancelled within the service-level target, and report the remaining hold volume at the weekly operations meeting.
+  3️⃣ Post-purchase Product Manager: each week, review order-status-check volume by the status shown at check time; when more than 40% of checks in the first 24 hours land on Pending orders, add an expected-dispatch date to the order status page and the order confirmation email, then measure the change in repeat checks per order.
+  4️⃣ Finance (FP&A): at month-end close, reconcile order counts and value by status against gross demand, report Cancelled and Closed orders as deductions from net demand, and investigate any order still Pending or Processing past 30 days before it is carried into the next period's open-order balance.
 
+Dependencies:
+  Events: [purchase]
+  Dimensions: [transaction-id]
 
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Adobe Commerce / Salesforce Commerce Cloud / Shopify)
 
+Report Attributes: |
+  Fulfillment Strategy; Shipping Tier; Order Date; Days Since Order; Delivery Region; Sales Channel; Item Category; Device Category
 
+Dashboard Usage: [Order Backlog and Fulfillment Ageing, Post-Purchase Experience & WISMO Dashboard, Order Management & Fulfillment Operations, Daily Revenue Flash (Gross vs. Net Demand)]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [shipment-status, order-cancellation-reason, delivery-exception-type, fulfillment-strategy, transaction-id, shipping-tier]
 
+Derived Dimensions: [order-cancellation-reason, cancel-initiator]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +445,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-14T18:47:10.686+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-14T18:47:21.067+00:00
 
