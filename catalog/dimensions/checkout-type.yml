@@ -1,0 +1,385 @@
+# Dimension: Checkout Type
+# Generated: 2026-09-14T07:34:24.197Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Checkout Type
+
+Description: |
+  Labels each checkout and order as Guest or Registered, based on whether the shopper was signed in to a merchant account (a login state or a populated user_id) at begin_checkout and at purchase. Baymard's checkout research and the order reports in Shopify, Salesforce Commerce Cloud and Adobe Commerce all use this split to show how much revenue relies on guest checkout and where forced sign-in loses conversions.
+
+Category: Conversion
+
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "checkout-confirmation",
+        "pageName": "checkout:order confirmation"
+      },
+      "category": {
+        "primaryCategory": "checkout"
+      }
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "CUST-000482193"
+            },
+            "attributes": {
+              "loginStatus": "logged_in"
+            }
+          }
+        ]
+      }
+    ],
+    "transaction": {
+      "transactionID": "T-100245",
+      "total": {
+        "basePrice": 119.9,
+        "shipping": 10,
+        "transactionTotal": 129.9,
+        "currency": "USD"
+      },
+      "attributes": {
+        "checkoutType": "registered",
+        "checkoutStepEvaluated": "purchase",
+        "paymentMethod": "credit_card"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "user_id": "CUST-000482193",
+    "login_status": "logged_in",
+    "checkout_type": "registered",
+    "ecommerce": {
+      "transaction_id": "T-100245",
+      "value": 129.9,
+      "currency": "USD",
+      "shipping": 10,
+      "payment_type": "credit_card",
+      "items": [
+        {
+          "item_id": "SKU-20931",
+          "item_name": "Merino Crew Sweater",
+          "item_category": "Apparel",
+          "price": 119.9,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "path": "transaction"
+    },
+    "user": {
+      "profileID": "CUST-000482193",
+      "loginStatus": "logged_in"
+    },
+    "transaction": {
+      "transactionID": "T-100245",
+      "checkoutType": "registered",
+      "total": 129.9,
+      "currency": "USD",
+      "paymentMethod": "credit_card",
+      "items": [
+        {
+          "sku": "SKU-20931",
+          "name": "Merino Crew Sweater",
+          "category": "Apparel",
+          "price": 119.9,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100245",
+        "priceTotal": 129.9,
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-20931",
+        "name": "Merino Crew Sweater",
+        "priceTotal": 119.9,
+        "quantity": 1
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar21": "registered",
+            "eVar22": "logged_in"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Checkout Type (guest / registered / unknown) at begin_checkout (first per session) and at purchase (latest per transaction_id)
+  WITH checkout_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      event_name,
+      event_timestamp,
+      user_pseudo_id,
+      NULLIF(user_id, '') AS user_id,
+      MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+      LOWER(MAX(IF(ep.key = 'checkout_type', ep.value.string_value, NULL))) AS checkout_type_param,
+      LOWER(MAX(IF(ep.key = 'login_status', ep.value.string_value, NULL))) AS login_status,
+      ANY_VALUE(ecommerce.transaction_id) AS transaction_id,
+      ANY_VALUE(ecommerce.purchase_revenue) AS purchase_revenue
+    FROM `your-project.analytics_123456789.events_*`
+    LEFT JOIN UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name IN ('begin_checkout', 'purchase')
+    GROUP BY event_date, event_name, event_timestamp, user_pseudo_id, user_id, event_bundle_sequence_id
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN checkout_type_param IN ('guest', 'registered') THEN checkout_type_param
+        WHEN login_status = 'logged_in' OR user_id IS NOT NULL THEN 'registered'
+        WHEN login_status IN ('logged_out', 'guest') THEN 'guest'
+        ELSE 'unknown'
+      END AS checkout_type
+    FROM checkout_events
+  ),
+  checkout_starts AS (
+    SELECT
+      event_date,
+      'begin_checkout' AS checkout_step,
+      checkout_type,
+      CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING)) AS unit_key,
+      CAST(0 AS FLOAT64) AS revenue
+    FROM classified
+    WHERE event_name = 'begin_checkout'
+      AND ga_session_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY user_pseudo_id, ga_session_id ORDER BY event_timestamp) = 1
+  ),
+  orders AS (
+    SELECT
+      event_date,
+      'purchase' AS checkout_step,
+      checkout_type,
+      transaction_id AS unit_key,
+      COALESCE(purchase_revenue, 0) AS revenue
+    FROM classified
+    WHERE event_name = 'purchase'
+      AND transaction_id IS NOT NULL
+      AND transaction_id NOT IN ('', '(not set)')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp DESC) = 1
+  ),
+  combined AS (
+    SELECT * FROM checkout_starts
+    UNION ALL
+    SELECT * FROM orders
+  )
+  SELECT
+    event_date,
+    checkout_step,
+    checkout_type,
+    COUNT(DISTINCT unit_key) AS checkouts_or_orders,
+    ROUND(SUM(revenue), 2) AS revenue,
+    SAFE_DIVIDE(
+      COUNT(DISTINCT unit_key),
+      SUM(COUNT(DISTINCT unit_key)) OVER (PARTITION BY event_date, checkout_step)
+    ) AS share_of_step_total
+  FROM combined
+  GROUP BY event_date, checkout_step, checkout_type
+  ORDER BY event_date, checkout_step, checkout_type;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Checkout Type (guest / registered / unknown) at checkout start (first per session) and at purchase (latest per purchaseID)
+  WITH checkout_events AS (
+    SELECT
+      timestamp,
+      CAST(timestamp AS DATE) AS event_date,
+      eventType,
+      endUserIDs._experience.ecid.id AS ecid,
+      NULLIF(identityMap['CRMID'][0].id, '') AS crm_id,
+      LOWER(_experience.analytics.customDimensions.eVars.eVar21) AS checkout_type_param,
+      LOWER(_experience.analytics.customDimensions.eVars.eVar22) AS login_status,
+      commerce.order.purchaseID AS purchase_id,
+      commerce.order.priceTotal AS order_total,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY endUserIDs._experience.ecid.id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 30)
+      AND timestamp < current_date()
+      AND (commerce.checkouts.value > 0 OR commerce.purchases.value > 0)
+  ),
+  classified AS (
+    SELECT
+      timestamp,
+      event_date,
+      ecid,
+      session.num AS session_num,
+      purchase_id,
+      order_total,
+      CASE WHEN eventType = 'commerce.purchases' THEN 'purchase' ELSE 'begin_checkout' END AS checkout_step,
+      CASE
+        WHEN checkout_type_param IN ('guest', 'registered') THEN checkout_type_param
+        WHEN login_status = 'logged_in' OR crm_id IS NOT NULL THEN 'registered'
+        WHEN login_status IN ('logged_out', 'guest') THEN 'guest'
+        ELSE 'unknown'
+      END AS checkout_type
+    FROM checkout_events
+  ),
+  checkout_starts AS (
+    SELECT event_date, checkout_step, checkout_type, unit_key, CAST(0 AS DOUBLE) AS revenue
+    FROM (
+      SELECT
+        event_date,
+        checkout_step,
+        checkout_type,
+        CONCAT(ecid, '.', CAST(session_num AS STRING)) AS unit_key,
+        ROW_NUMBER() OVER (PARTITION BY ecid, session_num ORDER BY timestamp) AS rn
+      FROM classified
+      WHERE checkout_step = 'begin_checkout'
+        AND ecid IS NOT NULL
+    ) s
+    WHERE rn = 1
+  ),
+  orders AS (
+    SELECT event_date, checkout_step, checkout_type, unit_key, revenue
+    FROM (
+      SELECT
+        event_date,
+        checkout_step,
+        checkout_type,
+        purchase_id AS unit_key,
+        CAST(COALESCE(order_total, 0) AS DOUBLE) AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY purchase_id ORDER BY timestamp DESC) AS rn
+      FROM classified
+      WHERE checkout_step = 'purchase'
+        AND purchase_id IS NOT NULL
+        AND purchase_id <> ''
+    ) o
+    WHERE rn = 1
+  ),
+  combined AS (
+    SELECT * FROM checkout_starts
+    UNION ALL
+    SELECT * FROM orders
+  ),
+  summary AS (
+    SELECT
+      event_date,
+      checkout_step,
+      checkout_type,
+      COUNT(DISTINCT unit_key) AS checkouts_or_orders,
+      ROUND(SUM(revenue), 2) AS revenue
+    FROM combined
+    GROUP BY event_date, checkout_step, checkout_type
+  )
+  SELECT
+    event_date,
+    checkout_step,
+    checkout_type,
+    checkouts_or_orders,
+    revenue,
+    CAST(checkouts_or_orders AS DOUBLE)
+      / NULLIF(SUM(checkouts_or_orders) OVER (PARTITION BY event_date, checkout_step), 0) AS share_of_step_total
+  FROM summary
+  ORDER BY event_date, checkout_step, checkout_type;
+
+Calculation Notes: |
+  1️⃣ Classification rule: the value is 'registered' when the checkout step or order was carried out in an authenticated session (login_status = logged_in, or user_id populated with the merchant customer ID). Otherwise it is 'guest'. Values are the lowercase literals guest / registered. If the authentication signal is missing, record 'unknown'. Never default it to guest, because that inflates guest share whenever tagging breaks.
+  2️⃣ Evaluation points and precedence: the value is captured on begin_checkout (checkout type at start) and on purchase (checkout type at order). For order-level reporting, the purchase value wins. A shopper who starts as a guest and signs in mid-checkout counts as registered for the order and stays guest on the begin_checkout row, so step-to-step funnels show the switch instead of hiding it.
+  3️⃣ Post-purchase account creation (the 'save your details' prompt on the confirmation page) does not reclassify the order. It stays guest, and the new account is attributed through Registration Type. A recognised-but-unauthenticated shopper (a remembered cookie or soft login that asks for a password at checkout) counts as guest unless the order is placed while authenticated.
+  4️⃣ Express and wallet checkouts (Apple Pay, Google Pay, PayPal, Shop Pay) started from the product page or cart without a merchant sign-in count as guest. A wallet or payment-provider identity is not a merchant account. user_id must be set only after merchant authentication. A hashed email collected in the guest contact step must never fill user_id, or guest orders will be misclassified as registered.
+  5️⃣ Source of truth: the commerce platform's order record decides the order-level value (Adobe Commerce sales_order.customer_is_guest; SFCC Customer.isAuthenticated() / isRegistered() at order placement; for Shopify, whether the order was placed while signed in to a customer account). The GA4 purchase value is joined on transaction_id and used only for session and journey analysis. If the two disagree, keep the platform value and track the mismatch rate as a tagging-quality control.
+  6️⃣ Exclusions and filters: exclude test orders, orders placed by internal staff accounts, and orders keyed in by call-centre or store associates on the shopper's behalf (assisted orders count toward neither value in the digital split). Cancelled and fraud-declined orders keep their classification but follow the purchase filters used by the downstream KPI. Checkouts with no purchase keep the begin_checkout value so abandonment can be split by checkout type.
+  7️⃣ Session and timing: evaluation uses the GA4 30-minute inactivity timeout. If a session expires mid-checkout and the shopper resumes, the new session's begin_checkout is re-evaluated independently. Scope boundaries: this dimension does not describe lifecycle stage (a guest can be a returning customer matched on email, which Customer Status covers), how the account was created (Registration Type) or loyalty tier. Guest Checkout Rate (guest orders ÷ total orders) is built on this dimension but governed as its own KPI.
+
+Business Use Case: |
+  1️⃣ Product (Checkout Experience lead): when the registered share of begin_checkout rises while checkout completion falls for first-time visitors, run an A/B test that makes guest checkout the default path and moves the sign-in prompt below it. Forced account creation is one of the most-cited abandonment reasons in Baymard's research.
+  2️⃣ Marketing (CRM & Lifecycle team): every week, pull guest orders with email marketing consent and enrol them in a post-purchase account-invitation journey (order tracking, saved addresses, faster reorder). Success is measured as guest-to-registered conversion within 30 days.
+  3️⃣ Finance (Commercial Planning): each quarter, compare average order value, discount depth and 90-day repeat purchase rate for guest and registered orders. Feed the gap into customer lifetime value and retention forecasts so guest-heavy traffic sources are not overvalued.
+  4️⃣ Customer Service (Contact Centre manager): when 'where is my order' contacts from guest orders exceed their share of order volume, ask Product to add self-service order lookup by email and order number, then track the drop in guest-order contacts per 1,000 orders.
+
+Dependencies:
+  Events: [checkout-initiation, purchase]
+  Metrics: [begin-checkout]
+
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
+
+Report Attributes: |
+  Device Category; Traffic Source; Payment Method; Customer Status; Checkout Step; Order Date
+
+Dashboard Usage: [Checkout Funnel Performance, Guest vs Registered Checkout Analysis, Customer Account Growth, Order Revenue Mix]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [registration-type, customer-status, customer-loyalty-tier, payment-method, device-category]
+
+Derived Dimensions: [registration-type]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-14T07:34:15.699+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-14T07:34:23.867+00:00
+
