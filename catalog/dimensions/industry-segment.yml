@@ -1,0 +1,570 @@
+# Dimension: Industry Segment
+# Generated: 2026-09-15T19:48:32.794Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Industry Segment
+
+Description: |
+  Industry classification of the B2B buyer account: the NAICS sector (or the SIC code / CRM industry picklist value mapped to NAICS) held on the company record in the CRM and the B2B commerce platform (Salesforce B2B Commerce Account, Adobe Commerce B2B Company, Shopify B2B Company), inherited by every buyer user, session and order tied to that account. It is the standard firmographic breakdown for comparing revenue, conversion, order value and retention across the verticals a B2B storefront sells into, and it drives sector-specific pricing, assortment and account-based marketing decisions.
+
+Category: Identity
+
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Generic
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
+
+GA4 Event: |
+  login
+
+Adobe Event: |
+  login
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "login",
+            "eventAction": "login"
+          },
+          "category": {
+            "primaryCategory": "authentication"
+          },
+          "attributes": {
+            "loginMethod": "password"
+          }
+        }
+      ],
+      "user": [
+        {
+          "segment": {
+            "customerType": "B2B",
+            "companyAccountID": "001Hs00002kLm9QIAS",
+            "industryNaicsCode": "42",
+            "industrySegment": "Wholesale Trade"
+          },
+          "profile": [
+            {
+              "profileInfo": {
+                "profileID": "9b74c9897bac770ffc029102a200c5de7a4d6c4e1f0b8e2a3d5c7f9e1b3a5c7d",
+                "authState": "authenticated"
+              },
+              "attributes": {
+                "companyAccountID": "001Hs00002kLm9QIAS",
+                "industryNaicsCode": "42",
+                "industrySegment": "Wholesale Trade"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "login",
+    "method": "password",
+    "user_id": "9b74c9897bac770ffc029102a200c5de7a4d6c4e1f0b8e2a3d5c7f9e1b3a5c7d",
+    "company_account_id": "001Hs00002kLm9QIAS",
+    "industry_naics_code": "42",
+    "industry_segment": "Wholesale Trade"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "login",
+    "eventInfo": {
+      "eventName": "login",
+      "loginMethod": "password"
+    },
+    "user": {
+      "userID": "9b74c9897bac770ffc029102a200c5de7a4d6c4e1f0b8e2a3d5c7f9e1b3a5c7d",
+      "authState": "authenticated",
+      "account": {
+        "accountID": "001Hs00002kLm9QIAS",
+        "industryNaicsCode": "42",
+        "industrySegment": "Wholesale Trade"
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "userAccount.login",
+    "timestamp": "2026-09-15T14:14:00.000Z",
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "72834915608327461230458721963045871230",
+          "authenticatedState": "ambiguous",
+          "primary": true
+        }
+      ],
+      "CRMID": [
+        {
+          "id": "9b74c9897bac770ffc029102a200c5de7a4d6c4e1f0b8e2a3d5c7f9e1b3a5c7d",
+          "authenticatedState": "authenticated",
+          "primary": false
+        }
+      ]
+    },
+    "userAccount": {
+      "login": {
+        "value": 1
+      }
+    },
+    "_tenant": {
+      "b2b": {
+        "account": {
+          "accountID": "001Hs00002kLm9QIAS",
+          "industryNaicsCode": "42",
+          "industrySegment": "Wholesale Trade"
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Industry Segment (NAICS 2022 sector) by order date: orders, revenue, active buying accounts and the Unclassified tolerance check.
+  -- Attribution: as-was (industry version valid at the order timestamp). Account link: backend order-to-company table first,
+  -- fallback to the company context of the latest authenticated login earlier in the same session. Window: last 90 closed days (T+1).
+  WITH purchases AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS order_date,
+      TIMESTAMP_MICROS(event_timestamp) AS order_ts,
+      ecommerce.transaction_id AS transaction_id,
+      user_id,
+      user_pseudo_id,
+      (SELECT ep.value.int_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'ga_session_id') AS ga_session_id,
+      ecommerce.purchase_revenue_in_usd AS revenue_usd
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+      AND ecommerce.transaction_id NOT IN ('', '(not set)')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY ecommerce.transaction_id ORDER BY event_timestamp) = 1
+  ),
+  internal_sessions AS (
+    SELECT DISTINCT
+      user_pseudo_id,
+      (SELECT ep.value.int_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'ga_session_id') AS ga_session_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 91 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND EXISTS (SELECT 1 FROM UNNEST(event_params) AS ep WHERE ep.key = 'traffic_type' AND ep.value.string_value = 'internal')
+  ),
+  logins AS (
+    SELECT
+      e.user_pseudo_id,
+      TIMESTAMP_MICROS(e.event_timestamp) AS login_ts,
+      MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+      COALESCE(
+        MAX(IF(ep.key = 'company_account_id', ep.value.string_value, NULL)),
+        MAX(IF(up.key = 'company_account_id', up.value.string_value, NULL))
+      ) AS company_account_id
+    FROM `your-project.analytics_123456789.events_*` AS e
+    CROSS JOIN UNNEST(e.event_params) AS ep
+    LEFT JOIN UNNEST(e.user_properties) AS up
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 91 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name = 'login'
+      AND e.user_id IS NOT NULL
+    GROUP BY e.user_pseudo_id, e.user_id, e.event_timestamp, e.event_bundle_sequence_id
+  ),
+  purchase_login_context AS (
+    SELECT
+      p.transaction_id,
+      l.company_account_id
+    FROM purchases AS p
+    JOIN logins AS l
+      ON l.user_pseudo_id = p.user_pseudo_id
+     AND l.ga_session_id = p.ga_session_id
+     AND l.login_ts <= p.order_ts
+     AND l.company_account_id IS NOT NULL
+    WHERE p.user_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY p.transaction_id ORDER BY l.login_ts DESC) = 1
+  ),
+  orders_linked AS (
+    SELECT
+      p.order_date,
+      p.order_ts,
+      p.transaction_id,
+      p.revenue_usd,
+      CASE WHEN bo.order_id IS NOT NULL THEN bo.crm_account_id ELSE lc.company_account_id END AS company_account_id
+    FROM purchases AS p
+    LEFT JOIN `your-project.commerce.b2b_order_company_link` AS bo
+      ON bo.order_id = p.transaction_id
+    LEFT JOIN purchase_login_context AS lc
+      ON lc.transaction_id = p.transaction_id
+    LEFT JOIN internal_sessions AS s
+      ON s.user_pseudo_id = p.user_pseudo_id
+     AND s.ga_session_id = p.ga_session_id
+    WHERE s.user_pseudo_id IS NULL
+      AND NOT COALESCE(bo.is_internal_account, FALSE)
+      AND NOT COALESCE(bo.is_impersonated_session, FALSE)
+      AND NOT COALESCE(bo.is_sales_rep_assisted, FALSE)
+  ),
+  industry_as_was AS (
+    SELECT
+      o.transaction_id,
+      NULLIF(TRIM(h.naics_code), '') AS naics_code,
+      NULLIF(TRIM(h.sic_code), '') AS sic_code,
+      NULLIF(TRIM(h.industry_picklist), '') AS industry_picklist
+    FROM orders_linked AS o
+    JOIN `your-project.crm.account_industry_history` AS h
+      ON h.account_id = o.company_account_id
+     AND o.order_ts >= h.valid_from
+     AND (h.valid_to IS NULL OR o.order_ts < h.valid_to)
+    WHERE COALESCE(NULLIF(TRIM(h.naics_code), ''), NULLIF(TRIM(h.sic_code), ''), NULLIF(TRIM(h.industry_picklist), '')) IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY o.transaction_id
+      ORDER BY CASE h.industry_source
+                 WHEN 'crm_verified' THEN 1
+                 WHEN 'third_party_enrichment' THEN 2
+                 WHEN 'self_declared' THEN 3
+                 ELSE 4
+               END,
+               h.valid_from DESC
+    ) = 1
+  ),
+  sector_mapped AS (
+    SELECT
+      i.transaction_id,
+      CASE
+        WHEN i.naics_code IS NOT NULL THEN n_naics.sector_code
+        WHEN i.sic_code IS NOT NULL THEN n_sic.sector_code
+        ELSE n_pick.sector_code
+      END AS sector_code,
+      CASE
+        WHEN i.naics_code IS NOT NULL THEN n_naics.sector_label
+        WHEN i.sic_code IS NOT NULL THEN n_sic.sector_label
+        ELSE n_pick.sector_label
+      END AS sector_label
+    FROM industry_as_was AS i
+    LEFT JOIN `your-project.reference.naics_2022_codes` AS n_naics
+      ON n_naics.naics_code = i.naics_code
+    LEFT JOIN `your-project.reference.sic_to_naics_2022_crosswalk` AS sx
+      ON sx.sic_code = i.sic_code
+     AND sx.is_primary_mapping
+    LEFT JOIN `your-project.reference.naics_2022_codes` AS n_sic
+      ON n_sic.naics_code = sx.naics_code
+    LEFT JOIN `your-project.reference.crm_industry_picklist_to_naics` AS pk
+      ON pk.industry_picklist = i.industry_picklist
+    LEFT JOIN `your-project.reference.naics_2022_codes` AS n_pick
+      ON n_pick.naics_code = pk.naics_code
+  ),
+  classified AS (
+    SELECT
+      o.order_date,
+      o.transaction_id,
+      o.company_account_id,
+      o.revenue_usd,
+      o.company_account_id IS NOT NULL AS is_b2b_order,
+      CASE
+        WHEN o.company_account_id IS NULL THEN 'N/A'
+        WHEN m.sector_code IS NULL THEN 'UNCLASSIFIED'
+        ELSE m.sector_code
+      END AS industry_sector_code,
+      CASE
+        WHEN o.company_account_id IS NULL THEN 'Not Applicable – Consumer'
+        WHEN m.sector_code IS NULL THEN 'Unclassified'
+        ELSE CONCAT(m.sector_code, ' ', m.sector_label)
+      END AS industry_segment
+    FROM orders_linked AS o
+    LEFT JOIN sector_mapped AS m
+      ON m.transaction_id = o.transaction_id
+  ),
+  daily AS (
+    SELECT
+      order_date,
+      industry_sector_code,
+      industry_segment,
+      is_b2b_order,
+      COUNT(DISTINCT transaction_id) AS orders,
+      SUM(revenue_usd) AS revenue_usd,
+      COUNT(DISTINCT company_account_id) AS active_buying_accounts
+    FROM classified
+    GROUP BY order_date, industry_sector_code, industry_segment, is_b2b_order
+  )
+  SELECT
+    order_date,
+    industry_sector_code,
+    industry_segment,
+    is_b2b_order,
+    orders,
+    ROUND(revenue_usd, 2) AS revenue_usd,
+    active_buying_accounts,
+    SAFE_DIVIDE(revenue_usd, SUM(revenue_usd) OVER (PARTITION BY order_date)) AS share_of_total_revenue,
+    IF(is_b2b_order, SAFE_DIVIDE(revenue_usd, SUM(IF(is_b2b_order, revenue_usd, 0)) OVER (PARTITION BY order_date)), NULL) AS share_of_b2b_revenue,
+    SAFE_DIVIDE(
+      SUM(IF(industry_sector_code = 'UNCLASSIFIED', revenue_usd, 0)) OVER (PARTITION BY order_date),
+      SUM(IF(is_b2b_order, revenue_usd, 0)) OVER (PARTITION BY order_date)
+    ) AS unclassified_share_of_b2b_revenue,
+    COALESCE(SAFE_DIVIDE(
+      SUM(IF(industry_sector_code = 'UNCLASSIFIED', revenue_usd, 0)) OVER (PARTITION BY order_date),
+      SUM(IF(is_b2b_order, revenue_usd, 0)) OVER (PARTITION BY order_date)
+    ) >= 0.05, FALSE) AS unclassified_tolerance_breached
+  FROM daily
+  ORDER BY order_date, revenue_usd DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Industry Segment (NAICS 2022 sector) by order date: orders, revenue, active buying accounts and the Unclassified tolerance check.
+  -- Attribution: as-was (industry version valid at the order timestamp). Account link: backend order-to-company dataset first,
+  -- fallback to the company context of the latest authenticated login earlier in the same 30-minute session. Window: last 90 closed days (T+1).
+  -- Replace _tenant with the organisation tenant namespace.
+  WITH web_events AS (
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      identityMap['CRMID'][0].id AS crm_id,
+      timestamp AS event_ts,
+      eventType AS event_type,
+      commerce.order.purchaseID AS purchase_id,
+      commerce.order.priceTotal AS price_total,
+      _tenant.b2b.account.accountID AS login_account_id,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY identityMap['ECID'][0].id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM aep_web_experience_events
+    WHERE timestamp >= CAST(date_sub(current_date(), 91) AS TIMESTAMP)
+      AND timestamp < CAST(current_date() AS TIMESTAMP)
+  ),
+  purchases AS (
+    SELECT order_date, order_ts, purchase_id, ecid, crm_id, session_num, revenue
+    FROM (
+      SELECT
+        to_date(event_ts) AS order_date,
+        event_ts AS order_ts,
+        purchase_id,
+        ecid,
+        crm_id,
+        session.num AS session_num,
+        price_total AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY purchase_id ORDER BY event_ts) AS rn
+      FROM web_events
+      WHERE event_type = 'commerce.purchases'
+        AND purchase_id IS NOT NULL
+        AND purchase_id <> ''
+        AND event_ts >= CAST(date_sub(current_date(), 90) AS TIMESTAMP)
+    ) dedup
+    WHERE rn = 1
+  ),
+  logins AS (
+    SELECT
+      ecid,
+      session.num AS session_num,
+      event_ts AS login_ts,
+      login_account_id AS company_account_id
+    FROM web_events
+    WHERE event_type = 'userAccount.login'
+      AND crm_id IS NOT NULL
+      AND login_account_id IS NOT NULL
+  ),
+  purchase_login_context AS (
+    SELECT purchase_id, company_account_id
+    FROM (
+      SELECT
+        p.purchase_id,
+        l.company_account_id,
+        ROW_NUMBER() OVER (PARTITION BY p.purchase_id ORDER BY l.login_ts DESC) AS rn
+      FROM purchases p
+      JOIN logins l
+        ON l.ecid = p.ecid
+       AND l.session_num = p.session_num
+       AND l.login_ts <= p.order_ts
+      WHERE p.crm_id IS NOT NULL
+    ) ctx
+    WHERE rn = 1
+  ),
+  orders_linked AS (
+    SELECT
+      p.order_date,
+      p.order_ts,
+      p.purchase_id,
+      p.revenue,
+      CASE WHEN bo.order_id IS NOT NULL THEN bo.crm_account_id ELSE lc.company_account_id END AS company_account_id
+    FROM purchases p
+    LEFT JOIN b2b_order_company_link bo
+      ON bo.order_id = p.purchase_id
+    LEFT JOIN purchase_login_context lc
+      ON lc.purchase_id = p.purchase_id
+    WHERE NOT COALESCE(bo.is_internal_account, false)
+      AND NOT COALESCE(bo.is_impersonated_session, false)
+      AND NOT COALESCE(bo.is_sales_rep_assisted, false)
+  ),
+  industry_as_was AS (
+    SELECT purchase_id, naics_code, sic_code, industry_picklist
+    FROM (
+      SELECT
+        o.purchase_id,
+        NULLIF(TRIM(h.naics_code), '') AS naics_code,
+        NULLIF(TRIM(h.sic_code), '') AS sic_code,
+        NULLIF(TRIM(h.industry_picklist), '') AS industry_picklist,
+        ROW_NUMBER() OVER (
+          PARTITION BY o.purchase_id
+          ORDER BY CASE h.industry_source
+                     WHEN 'crm_verified' THEN 1
+                     WHEN 'third_party_enrichment' THEN 2
+                     WHEN 'self_declared' THEN 3
+                     ELSE 4
+                   END,
+                   h.valid_from DESC
+        ) AS rn
+      FROM orders_linked o
+      JOIN crm_account_industry_history h
+        ON h.account_id = o.company_account_id
+       AND o.order_ts >= h.valid_from
+       AND (h.valid_to IS NULL OR o.order_ts < h.valid_to)
+      WHERE COALESCE(NULLIF(TRIM(h.naics_code), ''), NULLIF(TRIM(h.sic_code), ''), NULLIF(TRIM(h.industry_picklist), '')) IS NOT NULL
+    ) v
+    WHERE rn = 1
+  ),
+  sector_mapped AS (
+    SELECT
+      i.purchase_id,
+      CASE
+        WHEN i.naics_code IS NOT NULL THEN n_naics.sector_code
+        WHEN i.sic_code IS NOT NULL THEN n_sic.sector_code
+        ELSE n_pick.sector_code
+      END AS sector_code,
+      CASE
+        WHEN i.naics_code IS NOT NULL THEN n_naics.sector_label
+        WHEN i.sic_code IS NOT NULL THEN n_sic.sector_label
+        ELSE n_pick.sector_label
+      END AS sector_label
+    FROM industry_as_was i
+    LEFT JOIN naics_2022_codes n_naics
+      ON n_naics.naics_code = i.naics_code
+    LEFT JOIN sic_to_naics_2022_crosswalk sx
+      ON sx.sic_code = i.sic_code
+     AND sx.is_primary_mapping = true
+    LEFT JOIN naics_2022_codes n_sic
+      ON n_sic.naics_code = sx.naics_code
+    LEFT JOIN crm_industry_picklist_to_naics pk
+      ON pk.industry_picklist = i.industry_picklist
+    LEFT JOIN naics_2022_codes n_pick
+      ON n_pick.naics_code = pk.naics_code
+  ),
+  classified AS (
+    SELECT
+      o.order_date,
+      o.purchase_id,
+      o.company_account_id,
+      o.revenue,
+      o.company_account_id IS NOT NULL AS is_b2b_order,
+      CASE
+        WHEN o.company_account_id IS NULL THEN 'N/A'
+        WHEN m.sector_code IS NULL THEN 'UNCLASSIFIED'
+        ELSE m.sector_code
+      END AS industry_sector_code,
+      CASE
+        WHEN o.company_account_id IS NULL THEN 'Not Applicable – Consumer'
+        WHEN m.sector_code IS NULL THEN 'Unclassified'
+        ELSE CONCAT(m.sector_code, ' ', m.sector_label)
+      END AS industry_segment
+    FROM orders_linked o
+    LEFT JOIN sector_mapped m
+      ON m.purchase_id = o.purchase_id
+  ),
+  daily AS (
+    SELECT
+      order_date,
+      industry_sector_code,
+      industry_segment,
+      is_b2b_order,
+      COUNT(DISTINCT purchase_id) AS orders,
+      SUM(revenue) AS revenue,
+      COUNT(DISTINCT company_account_id) AS active_buying_accounts
+    FROM classified
+    GROUP BY order_date, industry_sector_code, industry_segment, is_b2b_order
+  ),
+  shares AS (
+    SELECT
+      d.*,
+      SUM(revenue) OVER (PARTITION BY order_date) AS total_revenue_day,
+      SUM(CASE WHEN is_b2b_order THEN revenue ELSE 0 END) OVER (PARTITION BY order_date) AS b2b_revenue_day,
+      SUM(CASE WHEN industry_sector_code = 'UNCLASSIFIED' THEN revenue ELSE 0 END) OVER (PARTITION BY order_date) AS unclassified_revenue_day
+    FROM daily d
+  )
+  SELECT
+    order_date,
+    industry_sector_code,
+    industry_segment,
+    is_b2b_order,
+    orders,
+    ROUND(revenue, 2) AS revenue,
+    active_buying_accounts,
+    CASE WHEN total_revenue_day > 0 THEN revenue / total_revenue_day END AS share_of_total_revenue,
+    CASE WHEN is_b2b_order AND b2b_revenue_day > 0 THEN revenue / b2b_revenue_day END AS share_of_b2b_revenue,
+    CASE WHEN b2b_revenue_day > 0 THEN unclassified_revenue_day / b2b_revenue_day END AS unclassified_share_of_b2b_revenue,
+    COALESCE(b2b_revenue_day > 0 AND unclassified_revenue_day / b2b_revenue_day >= 0.05, false) AS unclassified_tolerance_breached
+  FROM shares
+  ORDER BY order_date, revenue DESC;
+
+Calculation Notes: |
+  1️⃣ Value list: a controlled vocabulary at NAICS 2022 two-digit sector grain (20 sectors, stored as code + label, e.g. "31-33 Manufacturing", "62 Health Care and Social Assistance"); SIC codes and the Salesforce Account.Industry picklist are mapped through a maintained crosswalk based on the Census SIC-to-NAICS concordance. The full 3–6 digit NAICS code is retained on the account record for drill-down, and free-text industry values typed into registration forms are never reported raw.
+  2️⃣ Account-vs-user resolution: the attribute belongs to the buyer company (Adobe Commerce B2B company, Salesforce B2B Commerce buyer account, Shopify B2B company), not to the individual shopper; every buyer user and contact inherits it through the user-to-company relationship. Where one login belongs to several companies (supported natively in Adobe Commerce B2B), the value comes from the active company context at the time of the event or order, never from a "primary" company.
+  3️⃣ Unknown handling: B2B accounts with a null, retired or unmappable code resolve to "Unclassified"; consumer users, guest checkouts and orders without a company linkage resolve to "Not Applicable – Consumer". Both buckets stay in totals, are never dropped or imputed from email domain in the reporting layer, and the Unclassified share of B2B revenue is monitored against a < 5% tolerance.
+  4️⃣ Source precedence: CRM-verified value > third-party firmographic enrichment (D&B, ZoomInfo) written back to the CRM with source and confidence > value self-declared at company registration; the highest-precedence non-null value wins and overridden conflicts are logged on the account.
+  5️⃣ Change over time: reclassifications and M&A-driven changes are versioned as a Type 2 slowly changing attribute (valid_from / valid_to). Order, revenue and conversion reports attribute each transaction to the industry valid at the order timestamp (as-was), while account-portfolio, CLV and coverage views use the current value (as-is); each report states which convention it applies.
+  6️⃣ Digital hit attribution: the value is attached only once the session is authenticated and the company context resolved; anonymous pre-login hits are not back-filled unless cross-device identity stitching (GA4 User-ID, AEP identity graph) is active, in which case they inherit it within the stitching lookback. Internal, employee-impersonation ("login as customer") and sales-rep-assisted sessions are excluded from buyer-behaviour reporting.
+  7️⃣ Timing and hierarchy: the CRM-to-commerce account sync runs daily, so changes surface in reporting at T+1 and are not applied retroactively to closed periods. Subsidiaries keep their own classification; roll-up to the ultimate parent's industry is applied only in explicit parent-account views.
+
+Business Use Case: |
+  1️⃣ Sales (Key Account Management): during quarterly business review planning, when revenue per active account in a sector falls more than 10% quarter over quarter, the Sales Operations lead reallocates account-manager coverage to that sector and launches a reorder outreach play for its lapsed accounts.
+  2️⃣ Merchandising: in the monthly assortment review, when category penetration within a sector trails the sector average (e.g. Health Care accounts buying PPE but not janitorial supplies), the B2B merchandising team builds an industry-specific shared catalog and recommended-products list for that sector's accounts.
+  3️⃣ Marketing (Account-Based Marketing): when planning each campaign flight, the ABM manager ranks sectors by B2B conversion rate and average order value, builds paid-social and email audiences from the top sectors, and suppresses "Not Applicable – Consumer" and "Unclassified" records.
+  4️⃣ Revenue Management: at the semi-annual price-list review, when gross margin on contract pricing for a sector drops below the floor set by Finance, the pricing team revises that sector's negotiated price lists and volume-tier discounts before renewal.
+
+Dependencies:
+  Events: [purchase]
+
+Source Data: Digital Analytics (GA4) + CRM (Salesforce)
+
+Report Attributes: |
+  Customer Account Tier; Customer Role; Acquisition Cohort; Country/Region; Default Channel Grouping; Item Category; Payment Type; Device Category
+
+Dashboard Usage: [B2B Account Performance, Revenue by Industry Vertical, B2B Customer Retention & Cohorts, Account-Based Marketing Performance, B2B Assortment Penetration by Sector]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [customer-account-tier, customer-role, customer-status, acquisition-cohort, rfm-segment, user-demographics]
+
+Derived Dimensions: [B2B vs Consumer, Parent Account Industry]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-05-29T23:20:06.757633+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-15T19:48:32.071+00:00
+
