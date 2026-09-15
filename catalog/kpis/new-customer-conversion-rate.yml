@@ -1,10 +1,10 @@
 # KPI: New Customer Conversion Rate
-# Generated: 2026-09-13T22:53:52.376Z
+# Generated: 2026-09-15T13:48:24.186Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 KPI Name: New Customer Conversion Rate
-Formula: (New Users Placing a Verified First-Ever Order within the Conversion Window / Total New Users Acquired in the Period) × 100
+Formula: (Verified New Users Placing a First Non-Cancelled, Non-Test Order within 30 Days of First Visit / Verified New Users Acquired in the Period, excluding CRM-matched returning customers and staff/test accounts) × 100
 
 Description: |
   E-commerce specialisation of Conversion Rate: the percentage of new users acquired in a period who place their first-ever order, where "first-ever" is confirmed against stitched CRM order history rather than inferred from browser cookies alone. It measures how efficiently acquisition traffic is turned into genuinely net-new customers, separating true customer growth from repeat buyers arriving on new devices or cleared cookies.
@@ -17,7 +17,7 @@ Industry: [["E-commerce"]]
 
 Priority: High
 
-Core Area: Discovery
+Core Area: Checkout
 
 Scope: User
 
@@ -88,14 +88,14 @@ GA4 Data Layer: |
   {
     "event": "purchase",
     "user_id": "CUST-000123456",
+    "customer_type": "new",
+    "first_order": true,
     "ecommerce": {
       "transaction_id": "ORD-2026-0001234",
       "value": 84.99,
       "tax": 7.49,
       "shipping": 0,
       "currency": "USD",
-      "customer_type": "new",
-      "first_order": true,
       "items": [
         {
           "item_id": "SKU-10045",
@@ -141,10 +141,16 @@ XDM Mapping: |
   {
     "eventType": "commerce.purchases",
     "identityMap": {
+      "ECID": [
+        {
+          "id": "64118536192342117385827316839502147236",
+          "primary": true
+        }
+      ],
       "CRMID": [
         {
           "id": "CUST-000123456",
-          "primary": true
+          "primary": false
         }
       ]
     },
@@ -179,6 +185,12 @@ XDM Mapping: |
           }
         }
       }
+    },
+    "_yourtenant": {
+      "commerce": {
+        "customerType": "new",
+        "firstOrder": true
+      }
     }
   }
 
@@ -189,6 +201,7 @@ Google Analytics SQL: |
   DECLARE start_date DATE DEFAULT DATE '2026-08-01';
   DECLARE end_date DATE DEFAULT DATE '2026-08-31';
   DECLARE conversion_window_days INT64 DEFAULT 30;
+  DECLARE lookback_days INT64 DEFAULT 395;
   
   WITH ga4_events AS (
     SELECT
@@ -205,7 +218,7 @@ Google Analytics SQL: |
       (SELECT LOWER(COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)))
          FROM UNNEST(event_params) AS ep WHERE ep.key = 'first_order') AS ga4_first_order_flag
     FROM `your-project.analytics_123456789.events_*`
-    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date)
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL lookback_days DAY))
                             AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL conversion_window_days DAY))
       AND user_pseudo_id IS NOT NULL
   ),
@@ -223,7 +236,7 @@ Google Analytics SQL: |
     GROUP BY user_pseudo_id
   ),
   crm_valid_orders AS (
-    SELECT order_id, customer_id, order_timestamp, order_status, is_first_order
+    SELECT order_id, customer_id, order_timestamp, order_status
     FROM `your-project.crm.orders`
     WHERE order_status NOT IN ('test', 'fraud_cancelled')
       AND COALESCE(is_test_order, FALSE) = FALSE
@@ -248,7 +261,6 @@ Google Analytics SQL: |
       SELECT user_pseudo_id, MIN(event_ts) AS first_visit_ts, MIN(event_dt) AS first_visit_dt
       FROM ga4_events
       WHERE event_name IN ('first_visit', 'first_open')
-        AND event_dt BETWEEN start_date AND end_date
       GROUP BY user_pseudo_id
     ) AS d
     LEFT JOIN identity_map AS im USING (user_pseudo_id)
@@ -264,6 +276,7 @@ Google Analytics SQL: |
       MIN(first_visit_dt) AS cohort_date
     FROM device_first_visits
     GROUP BY person_id
+    HAVING MIN(first_visit_dt) BETWEEN start_date AND end_date
   ),
   excluded_accounts AS (
     SELECT DISTINCT customer_id
@@ -291,16 +304,19 @@ Google Analytics SQL: |
     WHERE x.customer_id IS NULL
   ),
   earliest_orders AS (
+    -- rank only qualifying orders placed on or after first visit; cancelled orders (any reason) never block a later valid order
     SELECT
       c.person_id,
       o.order_id,
       o.order_timestamp,
-      o.is_first_order,
+      o.order_status,
       ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY o.order_timestamp, o.order_id) AS order_rank
     FROM classified_new_users AS c
     JOIN crm_valid_orders AS o
       ON o.customer_id = c.customer_id
     WHERE c.is_returning_customer = FALSE
+      AND o.order_timestamp >= c.first_visit_ts
+      AND LOWER(o.order_status) NOT LIKE '%cancel%'
   ),
   ga4_flagged_transactions AS (
     SELECT DISTINCT transaction_id
@@ -318,8 +334,7 @@ Google Analytics SQL: |
      AND eo.order_rank = 1
     LEFT JOIN ga4_flagged_transactions AS f
       ON f.transaction_id = eo.order_id
-    WHERE eo.is_first_order = TRUE
-      AND eo.order_timestamp >= c.first_visit_ts
+    WHERE eo.order_timestamp >= c.first_visit_ts
       AND eo.order_timestamp < TIMESTAMP_ADD(c.first_visit_ts, INTERVAL conversion_window_days DAY)
   )
   SELECT
@@ -384,7 +399,7 @@ AEP Query Service SQL: |
     GROUP BY ecid
   ),
   crm_valid_orders AS (
-    SELECT order_id, customer_id, order_timestamp, order_status, is_first_order
+    SELECT order_id, customer_id, order_timestamp, order_status
     FROM crm_orders_dataset
     WHERE order_status NOT IN ('test', 'fraud_cancelled')
       AND COALESCE(is_test_order, FALSE) = FALSE
@@ -455,16 +470,19 @@ AEP Query Service SQL: |
     WHERE x.customer_id IS NULL
   ),
   earliest_orders AS (
+    -- rank only qualifying orders placed on or after first visit; cancelled orders (any reason) never block a later valid order
     SELECT
       c.person_id,
       o.order_id,
       o.order_timestamp,
-      o.is_first_order,
+      o.order_status,
       ROW_NUMBER() OVER (PARTITION BY c.person_id ORDER BY o.order_timestamp, o.order_id) AS order_rank
     FROM classified_new_users AS c
     JOIN crm_valid_orders AS o
       ON o.customer_id = c.customer_id
     WHERE c.is_returning_customer = FALSE
+      AND o.order_timestamp >= c.first_visit_ts
+      AND LOWER(o.order_status) NOT LIKE '%cancel%'
   ),
   verified_first_orders AS (
     SELECT c.person_id
@@ -473,8 +491,7 @@ AEP Query Service SQL: |
       ON eo.person_id = c.person_id
      AND eo.order_rank = 1
     CROSS JOIN params AS p
-    WHERE eo.is_first_order = TRUE
-      AND eo.order_timestamp >= c.first_visit_ts
+    WHERE eo.order_timestamp >= c.first_visit_ts
       AND unix_timestamp(eo.order_timestamp) < unix_timestamp(c.first_visit_ts) + p.conversion_window_days * 86400
   )
   SELECT
@@ -499,12 +516,12 @@ AEP Query Service SQL: |
   ORDER BY first_visit_date;
 
 Calculation Notes: |
-  1️⃣ Denominator is every new user whose first_visit / first_open falls in the reporting period, deduplicated to one person via user_id where a login or checkout identity exists and user_pseudo_id otherwise; non-converting new users remain in the base.
+  1️⃣ Denominator is every new user whose first_visit / first_open falls in the reporting period, deduplicated to one person via user_id where a login or checkout identity exists and user_pseudo_id otherwise, with the earliest first_visit taken over a 395-day lookback so a person first seen on another device before the period is not counted as new; non-converting new users remain in the base.
   2️⃣ A GA4 new user whose stitched identity (customer ID or hashed email) matches a CRM customer with a completed order dated before their first_visit is reclassified as returning and removed from both numerator and denominator, so cookie resets and new devices do not inflate the rate.
-  3️⃣ Numerator counts a user once when their earliest purchase carries a CRM first-order flag (no prior order of any status other than test or fraud-cancelled); second and later orders in the window never add to the count.
-  4️⃣ Cohort timing: the first order must occur within 30 days of first_visit and is credited to the first_visit date, so the latest 30 days of cohorts are immature and must be labelled provisional rather than compared against closed periods.
-  5️⃣ Sessions expire after 30 minutes of inactivity and at the property's midnight boundary; a midnight split never creates a second first_visit, and app plus web activity for the same user_id collapses into one new user.
-  6️⃣ Exclude internal IP ranges, known bots and spiders, staff and test accounts, and orders flagged test or fraud-cancelled in the order management record; orders later returned or refunded still count as a first conversion.
+  3️⃣ Numerator counts a user once, on their first order: the earliest order placed on or after first_visit, excluding cancelled (any reason) and test orders, is ranked as the first qualifying order; pending orders count provisionally (see 4️⃣). Orders before first_visit only make a user returning when their status is completed, returned or refunded (see 2️⃣). Second and later orders in the window never add to the count.
+  4️⃣ Cohort timing: the first order must occur within 30 days of first_visit and is credited to the first_visit date, so the latest 30 days of cohorts, and any cohort whose first orders are still pending, are immature and must be labelled provisional rather than compared against closed periods.
+  5️⃣ The KPI is user-scoped, not session-scoped: app and web activity for the same user_id collapses into one new user, resolved as the SQL does it (latest logged-in user_id per device, else the CRM customer on a matched purchase, else user_pseudo_id); aep_sql instead uses the CRMID present on the ECID's events (MAX when several) and treats an ECID's earliest event in the lookback as its first visit.
+  6️⃣ A first conversion is the earliest placed order in the 30-day window whose status is not cancelled (any cancellation reason) and not a test order; pending orders count provisionally under the provisional-cohort label in 4️⃣, and orders later returned or refunded still count. The ga4_tagged_first_orders column (from the data-layer first_order flag) is a tagging-coverage check only and does not drive the KPI. Internal IP ranges, known bots and spiders, and staff and test accounts are excluded.
   7️⃣ First orders placed offline (store pickup, call centre) by a digitally acquired new user count in the numerator only when the CRM order links to that user's stitched identity; offline-only customers with no web or app first_visit are out of scope.
 
 Business Use Case: |
@@ -514,11 +531,11 @@ Business Use Case: |
   4️⃣ The CRM and Lifecycle Marketing team uses the gap between new users and verified first orders to size the welcome-journey audience, and escalates to the identity team when the share of new users reclassified as returning exceeds 10%, signalling a stitching or consent-mode gap.
 
 Dependencies:
-  Events: [first-visit, session-start, purchase]
-  Metrics: [new-users, first-time-purchasers]
-  Dimensions: [new-vs-returning-customer, customer-id, first-user-source-medium, transaction-id]
+  Events: [purchase]
+  Metrics: [unique-visitors, time-to-first-purchase]
+  Dimensions: [first-touch-channel-grouping, traffic-source, device-category, customer-status, order-status, acquisition-cohort]
 
-Source Data: Digital Analytics (GA4) + CRM order history (Salesforce Commerce)
+Source Data: Digital Analytics (GA4, Adobe AEP) + Order management (Salesforce Commerce Cloud)
 
 Report Attributes: |
   First User Default Channel Group; First User Source / Medium; First User Campaign; Landing Page; Device Category; Platform (Web / App); Country; First Visit Date (Cohort); Product Category of First Order
@@ -542,5 +559,5 @@ Created At: 2026-09-13T22:53:43.614+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-13T22:53:52.11+00:00
+Last Modified At: 2026-09-15T13:48:23.898+00:00
 
