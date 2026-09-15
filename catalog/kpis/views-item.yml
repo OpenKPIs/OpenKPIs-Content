@@ -1,5 +1,5 @@
 # KPI: Views Item
-# Generated: 2026-09-14T07:46:33.806Z
+# Generated: 2026-09-15T01:22:18.425Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -7,7 +7,7 @@ KPI Name: Views Item
 Formula: Item Views = COUNT(DISTINCT view instances), where one view instance = one parent item_id in a view_item event rendering product detail content, with repeats of the same user_pseudo_id + ga_session_id + item_id within 30 seconds collapsed to one and bot-flagged or internal traffic removed
 
 Description: |
-  Views Item (canonically Product Detail Views) counts how often shoppers are shown the full detail content of a specific product, measured at item_id grain from the unified view_item event after bot exclusion and refresh deduplication, and explicitly excluding list and grid impressions. It is the standard measure of product-level demand interest and the base for Cart-to-View Rate (also reported as Item View to Cart Rate; its denominator is users_with_item_view, the user-based count of shoppers with a detail view, not item_views) and Item Purchase Conversion Rate, so one stable definition must govern merchandising, search and site-experience reporting.
+  Views Item (canonically Product Detail Views) counts how often shoppers are shown the full detail content of a specific product, measured at item_id grain from the unified view_item event after bot exclusion and refresh deduplication, and explicitly excluding list and grid impressions. It is the standard measure of product-level demand interest and the base for Cart-to-View Rate and Item Purchase Conversion Rate, so one stable definition must govern merchandising, search and site-experience reporting.
 
 Category: Engagement
 
@@ -23,7 +23,7 @@ Scope: Event
 
 Measure Type: Counter
 
-Aggregation Window: Event, Item, Session, User, Time based - Hourly/Daily/Monthly/Yearly, Hourly, Daily, Weekly, Monthly
+Aggregation Window: Event, Session, User, Hourly, Daily, Weekly, Monthly
 
 GA4 Event: |
   view_item
@@ -325,9 +325,7 @@ Google Analytics SQL: |
     session_default_channel_group,
     device_category,
     country,
-    COUNT(*) AS item_views,
-    COUNT(DISTINCT CONCAT(user_pseudo_id, '.', COALESCE(CAST(ga_session_id AS STRING), ''))) AS sessions_with_item_view,
-    COUNT(DISTINCT user_pseudo_id) AS users_with_item_view
+    COUNT(*) AS item_views
   FROM sequenced
   WHERE prev_view_timestamp IS NULL
      OR event_timestamp - prev_view_timestamp > 30 * 1000000
@@ -494,9 +492,7 @@ AEP Query Service SQL: |
     session_default_channel_group,
     device_category,
     country,
-    COUNT(*) AS item_views,
-    COUNT(DISTINCT concat(ecid, '.', CAST(session_seq AS STRING))) AS sessions_with_item_view,
-    COUNT(DISTINCT ecid) AS users_with_item_view
+    COUNT(*) AS item_views
   FROM sequenced
   WHERE prev_view_ts IS NULL
      OR unix_timestamp(event_ts) - unix_timestamp(prev_view_ts) > 30
@@ -514,7 +510,7 @@ Calculation Notes: |
 
 Business Use Case: |
   1️⃣ Merchandising buyers review the weekly item report and, when a SKU's detail views rise more than 25% week over week while inventory cover falls below four weeks, raise a replenishment order or reallocate stock from low-demand regions.
-  2️⃣ The E-commerce Merchandising team takes items in the top decile of detail views but the bottom quartile of Cart-to-View Rate (add-to-cart users over users_with_item_view) into a PDP content review (price position, imagery, reviews, size guidance) and launches an A/B test on the weakest element.
+  2️⃣ The E-commerce Merchandising team takes items in the top decile of detail views but the bottom quartile of Cart-to-View Rate (a low Cart-to-View Rate despite strong demand) into a PDP content review (price position, imagery, reviews, size guidance) and launches an A/B test on the weakest element.
   3️⃣ Digital Marketing shifts shopping and paid-social budget toward products whose organic detail views are growing, and pauses campaigns that drive detail views without a matching lift in add-to-cart.
   4️⃣ The Search & Discovery product team monitors detail views originating from internal search after every ranking or boosting change and rolls the rule back when views for the affected categories drop more than 10% against the control period.
 
@@ -547,5 +543,5 @@ Created At: 2026-05-30T04:02:50.343713+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-14T07:46:33.281+00:00
+Last Modified At: 2026-09-15T01:22:17.793+00:00
 
