@@ -1,5 +1,5 @@
 # KPI: Landing Page Conversion Rate
-# Generated: 2026-09-13T22:53:37.442Z
+# Generated: 2026-09-15T13:45:48.175Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -7,7 +7,7 @@ KPI Name: Landing Page Conversion Rate
 Formula: (Entrance Sessions on Landing Page with ≥ 1 Purchase / Total Entrance Sessions on Landing Page) × 100
 
 Description: |
-  E-commerce specialisation of Conversion Rate: the percentage of sessions that entered the site on a given landing page and completed at least one purchase within that same session, measured against every entrance session on that page. Because the session is keyed to its first page_view (the GA4 Landing page and Adobe Entry Page dimension) rather than to site-wide traffic, it isolates how effectively each campaign destination, SEO entry point and page template turns arriving demand into orders.
+  The landing-page-scoped form of Conversion Rate: the percentage of sessions that entered the site on a given landing page and completed at least one purchase within that same session, measured against every entrance session on that page. Because the session is keyed to its first page_view (the GA4 Landing page and Adobe Entry Page dimension) rather than to site-wide traffic, it isolates how effectively each campaign destination, SEO entry point and page template turns arriving demand into orders.
 
 Category: Conversion
 
@@ -43,12 +43,6 @@ W3 Data Layer: |
       "category": {
         "primaryCategory": "checkout",
         "pageType": "order-confirmation"
-      },
-      "attributes": {
-        "landingPageURL": "https://www.example.com/lp/summer-sale",
-        "landingPagePath": "/lp/summer-sale",
-        "landingPageGroup": "campaign-landing",
-        "sessionEntranceTimestamp": "2026-09-13T10:02:11Z"
       }
     },
     "transaction": {
@@ -57,7 +51,7 @@ W3 Data Layer: |
         "basePrice": 129.98,
         "shipping": 5.99,
         "taxRate": 0.08,
-        "transactionTotal": 146.39,
+        "transactionTotal": 146.37,
         "currency": "USD"
       },
       "item": [
@@ -83,12 +77,9 @@ W3 Data Layer: |
 GA4 Data Layer: |
   {
     "event": "purchase",
-    "landing_page_location": "https://www.example.com/lp/summer-sale",
-    "landing_page_path": "/lp/summer-sale",
-    "landing_page_group": "campaign-landing",
     "ecommerce": {
       "transaction_id": "T-100045872",
-      "value": 146.39,
+      "value": 146.37,
       "tax": 10.4,
       "shipping": 5.99,
       "currency": "USD",
@@ -112,14 +103,11 @@ Adobe Client Data Layer: |
     },
     "page": {
       "pageName": "checkout:order-confirmation",
-      "pageURL": "https://www.example.com/checkout/confirmation",
-      "landingPageURL": "https://www.example.com/lp/summer-sale",
-      "landingPagePath": "/lp/summer-sale",
-      "landingPageGroup": "campaign-landing"
+      "pageURL": "https://www.example.com/checkout/confirmation"
     },
     "transaction": {
       "purchaseID": "T-100045872",
-      "revenue": 146.39,
+      "revenue": 146.37,
       "currency": "USD",
       "products": [
         {
@@ -148,7 +136,7 @@ XDM Mapping: |
       },
       "order": {
         "purchaseID": "T-100045872",
-        "priceTotal": 146.39,
+        "priceTotal": 146.37,
         "currencyCode": "USD"
       }
     },
@@ -165,15 +153,8 @@ XDM Mapping: |
         "priceTotal": 129.98
       }
     ],
-    "_experience": {
-      "analytics": {
-        "customDimensions": {
-          "eVars": {
-            "eVar1": "https://www.example.com/lp/summer-sale",
-            "eVar2": "campaign-landing"
-          }
-        }
-      }
+    "_tenant": {
+      "trafficType": "external"
     }
   }
 
@@ -286,6 +267,7 @@ AEP Query Service SQL: |
   -- ==========================================
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
+  -- _tenant.trafficType is the tenant internal-traffic flag: replace _tenant with your tenant namespace.
   WITH hits AS (
     SELECT
       identityMap['ECID'][0].id AS ecid,
@@ -294,6 +276,7 @@ AEP Query Service SQL: |
       web.webPageDetails.URL AS page_url,
       commerce.order.purchaseID AS purchase_id,
       commerce.purchases.value AS purchases,
+      _tenant.trafficType AS traffic_type,
       SESS_TIMEOUT(timestamp, 60 * 30) OVER (
         PARTITION BY identityMap['ECID'][0].id
         ORDER BY timestamp
@@ -313,7 +296,8 @@ AEP Query Service SQL: |
       eventType,
       page_url,
       purchase_id,
-      purchases
+      purchases,
+      traffic_type
     FROM hits
   ),
   
@@ -354,7 +338,8 @@ AEP Query Service SQL: |
   sessions AS (
     SELECT
       session_key,
-      to_date(MIN(timestamp)) AS session_start_date
+      to_date(MIN(timestamp)) AS session_start_date,
+      MAX(CASE WHEN LOWER(COALESCE(traffic_type, '')) = 'internal' THEN 1 ELSE 0 END) AS is_internal
     FROM session_hits
     GROUP BY session_key
   ),
@@ -363,6 +348,7 @@ AEP Query Service SQL: |
     SELECT
       s.session_key,
       s.session_start_date,
+      s.is_internal,
       COALESCE(
         NULLIF(
           regexp_replace(
@@ -394,7 +380,8 @@ AEP Query Service SQL: |
       COUNT(*) AS entrance_sessions,
       SUM(has_purchase) AS purchase_sessions
     FROM session_landing
-    WHERE session_start_date BETWEEN date_sub(current_date(), 32)
+    WHERE is_internal = 0
+      AND session_start_date BETWEEN date_sub(current_date(), 32)
                                  AND date_sub(current_date(), 4)
     GROUP BY ROLLUP (landing_page)
   )
@@ -410,13 +397,13 @@ AEP Query Service SQL: |
   ORDER BY is_site_total DESC, entrance_sessions DESC
 
 Calculation Notes: |
-  1️⃣ The landing page is the page_location of the first page_view in the session (GA4 landingPagePlusQueryString, Adobe Entry Page); sessions with no page_view, such as Measurement Protocol-only or app-only sessions, resolve to (not set) and are kept in the site total but excluded from page-level ranking.
+  1️⃣ The landing page is the page_location of the first page_view in the session (GA4 landingPagePlusQueryString, Adobe Entry Page); sessions with no page_view, such as Measurement Protocol-only or app-only sessions, resolve to (not set) and are kept in the site total but excluded from page-level ranking. GA4 selects the page_view with entrances = 1, while AEP takes the first page view of the session, so small differences between the two sources are expected.
   2️⃣ The numerator counts distinct sessions containing at least one purchase with a non-null transaction_id; multiple orders in one session count once, and duplicate purchase hits from confirmation-page reloads are removed by transaction_id before counting.
   3️⃣ The denominator is every entrance session on the landing page, including bounced and non-engaged sessions; restricting it to engaged sessions produces a different measure and must not be labelled with this KPI.
   4️⃣ Sessions close after 30 minutes of inactivity and are not restarted by a mid-session campaign change or midnight rollover, so each session keeps its original landing page; purchases completed in a later session are out of scope and belong to user-scoped attribution KPIs.
-  5️⃣ Normalise the page key before grouping: lowercase the path, strip trailing slashes and tracking parameters (utm_*, gclid, fbclid, msclkid, session tokens), retain only governed functional parameters, and map localised or templated URLs to a landing page group for cross-market comparison.
-  6️⃣ Exclude internal traffic, known bots and spiders, and test or fraud-cancelled orders; later customer refunds do not reverse the conversion, keeping the rate reconcilable with GA4 and Adobe standard reports.
-  7️⃣ Attribute every session to its session start date so sessions spanning midnight count once, treat GA4 intraday tables as provisional and restate after 72 hours, and suppress page-level comparisons below 200 entrance sessions in the reporting window.
+  5️⃣ Normalise the page key before grouping: lowercase the path, strip trailing slashes and tracking parameters (utm_*, gclid, fbclid, msclkid, session tokens), retain only governed functional parameters, and map localised or templated URLs to a landing page group for cross-market comparison; the landing page group is a reporting-layer mapping of landing page paths (lookup table or BI calculated field) and is not built in either SQL query.
+  6️⃣ Exclude internal traffic (GA4 traffic_type = internal, AEP tenant trafficType = internal), known bots and spiders, and test orders whose transaction ID starts with test; fraud-cancelled orders are not removed, so the rate reconciles with GA4 and Adobe standard reports; any fraud adjustment belongs to a separate order-system KPI, and later customer refunds do not reverse the conversion.
+  7️⃣ Attribute every session to its session start date so sessions spanning midnight count once, treat GA4 intraday tables as provisional and restate after 72 hours, and suppress page-level comparisons below 200 entrance sessions in the reporting window. AEP session start dates derive from UTC timestamps while GA4 event_date uses the property time zone, so align time zones before reconciling daily figures.
 
 Business Use Case: |
   1️⃣ Performance marketing managers review the rate weekly by landing page and campaign; when a paid destination falls more than 20% below its landing page group median at stable traffic volume, they repoint ad final URLs to the stronger page and raise a conversion optimisation ticket.
@@ -426,10 +413,10 @@ Business Use Case: |
 
 Dependencies:
   Events: [page-view, purchase]
-  Dimensions: [landing-page, traffic-source, device-category]
+  Dimensions: [page-url, traffic-source, device-category]
   KPIs: [session, conversion-rate]
 
-Source Data: Digital Analytics (GA4)
+Source Data: Digital Analytics (GA4, Adobe AEP)
 
 Report Attributes: |
   Landing Page; Landing Page Group; Session Default Channel Group; Session Source / Medium; Session Campaign; Device Category; Country; New vs Returning User; Session Start Date
@@ -453,5 +440,5 @@ Created At: 2026-09-13T22:53:28.648+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-13T22:53:37.133+00:00
+Last Modified At: 2026-09-15T13:45:47.743+00:00
 
