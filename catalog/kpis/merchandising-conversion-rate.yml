@@ -1,38 +1,941 @@
 # KPI: Merchandising Conversion Rate
-# Generated: 2026-06-17T20:58:22.201Z
+# Generated: 2026-09-15T14:02:39.536Z
 # Contributed by: swapnamagantius
-
+# Last modified by: devyendarm
 
 KPI Name: Merchandising Conversion Rate
-Formula: (Purchasing Sessions Attributed to Merchandising Exposure / Eligible Sessions with Merchandising Exposure) × 100
+Formula: (Purchased Item Lines Credited to the Merchandising Placement / Item Views Credited to the Same Merchandising Placement) × 100
 
 Description: |
-  Merchandising Conversion Rate measures the percentage of sessions or users exposed to a merchandising element, product listing, recommendation module, collection page, or promotional placement that result in a purchase of the merchandised product or any product within the defined attribution scope. It matters because it quantifies how effectively digital merchandising tactics turn product exposure into revenue-generating outcomes.
+  Merchandising Conversion Rate breaks down the canonical Item Purchase Conversion Rate by merchandising placement: it is the percentage of item views carrying a placement value (item list, category grid, internal search results, recommendation module or onsite promotion) that are matched by purchased lines of items carrying the same placement value, showing which merchandising surfaces turn product interest into orders separately from a slot's click-through rate and from site-wide purchase-to-view performance. It is kept as a separate spec from Item Purchase Conversion Rate because the implementation differs in substance: placement values must be bound on select_item / select_promotion and carried by the site onto every view_item and purchase item (GA4 item_list_* / promotion_* / creative_slot fields, Adobe merchandising eVar20-eVar23 on productListItems), and both SQLs group by those values.
 
 Category: Conversion
 
+Tags: [kpi, E-commerce: Product Discovery & Merchandising]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "checkout-confirmation",
+        "pageName": "checkout:order confirmation"
+      },
+      "category": {
+        "pageType": "order_confirmation"
+      }
+    },
+    "transaction": {
+      "transactionID": "ORD-2026-0915-48213",
+      "total": {
+        "basePrice": 291,
+        "currency": "USD",
+        "taxRate": 0.08,
+        "shipping": 0,
+        "priceWithTax": 314.28,
+        "transactionTotal": 314.28
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-10482",
+            "productName": "Linen Relaxed Shirt"
+          },
+          "category": {
+            "primaryCategory": "Shirts"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 59,
+            "currency": "USD"
+          },
+          "attributes": {
+            "itemListId": "complete_the_look",
+            "itemListName": "Complete the Look",
+            "promotionId": null,
+            "promotionName": null,
+            "creativeSlot": null,
+            "searchTerm": null
+          }
+        },
+        {
+          "productInfo": {
+            "productID": "SKU-20931",
+            "productName": "Leather Chelsea Boot"
+          },
+          "category": {
+            "primaryCategory": "Footwear"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 149,
+            "currency": "USD"
+          },
+          "attributes": {
+            "itemListId": null,
+            "itemListName": null,
+            "promotionId": "P_AUTUMN_BOOTS",
+            "promotionName": "Autumn Boots Hero",
+            "creativeSlot": "homepage_hero_1",
+            "searchTerm": null
+          }
+        },
+        {
+          "productInfo": {
+            "productID": "SKU-31077",
+            "productName": "Merino Crew Sock 3-Pack"
+          },
+          "category": {
+            "primaryCategory": "Accessories"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 24,
+            "currency": "USD"
+          },
+          "attributes": {
+            "itemListId": "search_results",
+            "itemListName": "Search Results",
+            "promotionId": null,
+            "promotionName": null,
+            "creativeSlot": null,
+            "searchTerm": "merino socks"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "ORD-2026-0915-48213",
+      "currency": "USD",
+      "value": 291,
+      "tax": 23.28,
+      "shipping": 0,
+      "items": [
+        {
+          "item_id": "SKU-10482",
+          "item_name": "Linen Relaxed Shirt",
+          "item_brand": "Northfold",
+          "item_category": "Shirts",
+          "price": 59,
+          "quantity": 2,
+          "index": 1,
+          "item_list_id": "complete_the_look",
+          "item_list_name": "Complete the Look"
+        },
+        {
+          "item_id": "SKU-20931",
+          "item_name": "Leather Chelsea Boot",
+          "item_brand": "Northfold",
+          "item_category": "Footwear",
+          "price": 149,
+          "quantity": 1,
+          "index": 1,
+          "promotion_id": "P_AUTUMN_BOOTS",
+          "promotion_name": "Autumn Boots Hero",
+          "creative_slot": "homepage_hero_1"
+        },
+        {
+          "item_id": "SKU-31077",
+          "item_name": "Merino Crew Sock 3-Pack",
+          "item_brand": "Northfold",
+          "item_category": "Accessories",
+          "price": 24,
+          "quantity": 1,
+          "index": 4,
+          "item_list_id": "search_results",
+          "item_list_name": "Search Results"
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD-2026-0915-48213",
+        "currencyCode": "USD",
+        "priceTotal": 314.28,
+        "taxAmount": 23.28,
+        "shippingAmount": 0
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-10482",
+        "name": "Linen Relaxed Shirt",
+        "quantity": 2,
+        "priceTotal": 118,
+        "currencyCode": "USD",
+        "merchandising": {
+          "eVar20": "complete_the_look",
+          "eVar21": "Complete the Look"
+        }
+      },
+      {
+        "SKU": "SKU-20931",
+        "name": "Leather Chelsea Boot",
+        "quantity": 1,
+        "priceTotal": 149,
+        "currencyCode": "USD",
+        "merchandising": {
+          "eVar20": "P_AUTUMN_BOOTS",
+          "eVar21": "Autumn Boots Hero",
+          "eVar22": "homepage_hero_1"
+        }
+      },
+      {
+        "SKU": "SKU-31077",
+        "name": "Merino Crew Sock 3-Pack",
+        "quantity": 1,
+        "priceTotal": 24,
+        "currencyCode": "USD",
+        "merchandising": {
+          "eVar20": "search_results",
+          "eVar21": "Search Results",
+          "eVar23": "merino socks"
+        }
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "_id": "b7e4c2a1-5d93-4f0e-9a61-3c2d8e7f1a45",
+    "timestamp": "2026-09-15T14:32:08.000Z",
+    "eventType": "commerce.purchases",
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "48291736504918273645019283746501928374",
+          "authenticatedState": "ambiguous",
+          "primary": true
+        }
+      ]
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD-2026-0915-48213",
+        "currencyCode": "USD",
+        "priceTotal": 314.28,
+        "taxAmount": 23.28
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-10482",
+        "name": "Linen Relaxed Shirt",
+        "quantity": 2,
+        "priceTotal": 118,
+        "currencyCode": "USD",
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "eVar20": "complete_the_look",
+                "eVar21": "Complete the Look"
+              }
+            }
+          }
+        }
+      },
+      {
+        "SKU": "SKU-20931",
+        "name": "Leather Chelsea Boot",
+        "quantity": 1,
+        "priceTotal": 149,
+        "currencyCode": "USD",
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "eVar20": "P_AUTUMN_BOOTS",
+                "eVar21": "Autumn Boots Hero",
+                "eVar22": "homepage_hero_1"
+              }
+            }
+          }
+        }
+      },
+      {
+        "SKU": "SKU-31077",
+        "name": "Merino Crew Sock 3-Pack",
+        "quantity": 1,
+        "priceTotal": 24,
+        "currencyCode": "USD",
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "eVar20": "search_results",
+                "eVar21": "Search Results",
+                "eVar23": "merino socks"
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Merchandising Conversion Rate, item level, by merchandising placement
+  -- (distinct purchased item lines transaction_id x item_id carrying a placement
+  --  / item views carrying the same placement) x 100
+  -- Every view and purchase line is credited by its own item_list_id / item_list_name / promotion_id /
+  -- promotion_name / creative_slot values sent on that hit (the site carries them from select_item / select_promotion).
+  -- Numerator and denominator are aggregated separately per period x row_type x placement, then joined.
+  -- Reference tables: commerce_reference.merch_placement_lookup (taxonomy mapping + first-party ownership),
+  -- commerce_reference.product_catalog (seller type), commerce_reference.order_exclusions (test orders, cancellations, full refunds).
+  DECLARE report_tz STRING DEFAULT 'America/New_York';
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(report_tz), INTERVAL 1 DAY);
+  DECLARE start_date DATE DEFAULT DATE_SUB(end_date, INTERVAL 27 DAY);
+  DECLARE grain STRING DEFAULT 'WEEK';
+  DECLARE min_attributed_views INT64 DEFAULT 100;
+  DECLARE restatement_days INT64 DEFAULT 7;
+  
+  WITH raw_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      e.event_timestamp,
+      e.event_name,
+      e.user_pseudo_id,
+      NULLIF(NULLIF(TRIM(e.ecommerce.transaction_id), ''), '(not set)') AS transaction_id,
+      e.items,
+      (SELECT MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS ga_session_id,
+      (SELECT MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS traffic_type,
+      (SELECT MAX(IF(ep.key = 'debug_mode', COALESCE(ep.value.int_value, SAFE_CAST(ep.value.string_value AS INT64)), NULL)) FROM UNNEST(e.event_params) AS ep) AS debug_mode
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE _TABLE_SUFFIX NOT LIKE 'intraday%'
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date)
+                            AND FORMAT_DATE('%Y%m%d', LEAST(DATE_ADD(end_date, INTERVAL restatement_days DAY), DATE_SUB(CURRENT_DATE(report_tz), INTERVAL 1 DAY)))
+      AND e.event_name IN ('view_item', 'purchase', 'refund')
+  ),
+  
+  -- Internal / developer traffic (data filter in testing mode) and debug hits are removed from both counts;
+  -- known-bot exclusion is applied by GA4 before export
+  clean_events AS (
+    SELECT *
+    FROM raw_events
+    WHERE COALESCE(traffic_type, '') NOT IN ('internal', 'developer')
+      AND COALESCE(debug_mode, 0) = 0
+  ),
+  
+  item_lines AS (
+    SELECT
+      ce.event_date,
+      ce.event_timestamp,
+      ce.event_name,
+      ce.user_pseudo_id,
+      ce.ga_session_id,
+      ce.transaction_id,
+      NULLIF(NULLIF(TRIM(it.item_id), ''), '(not set)') AS item_id,
+      it.price AS item_price,
+      NULLIF(NULLIF(TRIM(it.item_list_id), ''), '(not set)') AS item_list_id,
+      NULLIF(NULLIF(TRIM(it.item_list_name), ''), '(not set)') AS item_list_name,
+      NULLIF(NULLIF(TRIM(it.promotion_id), ''), '(not set)') AS promotion_id,
+      NULLIF(NULLIF(TRIM(it.promotion_name), ''), '(not set)') AS promotion_name,
+      NULLIF(NULLIF(TRIM(it.creative_slot), ''), '(not set)') AS creative_slot
+    FROM clean_events AS ce, UNNEST(ce.items) AS it
+    WHERE ce.event_name IN ('view_item', 'purchase')
+  ),
+  
+  -- Zero-price lines (gift-with-purchase, samples, free bundle components) are excluded from every count
+  keyed_lines AS (
+    SELECT
+      il.*,
+      COALESCE(il.item_list_id, il.item_list_name, il.promotion_id, il.promotion_name, il.creative_slot) IS NOT NULL AS is_bound,
+      CONCAT(COALESCE(il.item_list_id, ''), '|', COALESCE(il.item_list_name, ''), '|', COALESCE(il.promotion_id, ''), '|',
+             COALESCE(il.promotion_name, ''), '|', COALESCE(il.creative_slot, '')) AS raw_placement_key
+    FROM item_lines AS il
+    WHERE il.item_id IS NOT NULL
+      AND (il.item_price IS NULL OR il.item_price > 0)
+  ),
+  
+  placement_lookup AS (
+    SELECT raw_placement_key, item_list_id, item_list_name, promotion_id, promotion_name, creative_slot, is_first_party_owned
+    FROM `your-project.commerce_reference.merch_placement_lookup`
+    WHERE platform = 'ga4'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY raw_placement_key ORDER BY updated_at DESC) = 1
+  ),
+  
+  seller_catalog AS (
+    SELECT item_id, LOGICAL_OR(seller_type IN ('marketplace', 'third_party')) AS is_marketplace_item
+    FROM `your-project.commerce_reference.product_catalog`
+    GROUP BY item_id
+  ),
+  
+  test_orders AS (
+    SELECT DISTINCT transaction_id
+    FROM `your-project.commerce_reference.order_exclusions`
+    WHERE exclusion_reason = 'test_order'
+  ),
+  
+  -- Views from test-order traffic are removed by session
+  test_sessions AS (
+    SELECT DISTINCT ce.user_pseudo_id, ce.ga_session_id
+    FROM clean_events AS ce
+    JOIN test_orders AS t ON t.transaction_id = ce.transaction_id
+    WHERE ce.event_name = 'purchase'
+  ),
+  
+  full_refunds AS (
+    SELECT transaction_id, MIN(event_timestamp) AS refund_timestamp
+    FROM clean_events
+    WHERE event_name = 'refund'
+      AND transaction_id IS NOT NULL
+      AND COALESCE(ARRAY_LENGTH(items), 0) = 0
+    GROUP BY transaction_id
+  ),
+  
+  backend_cancellations AS (
+    SELECT transaction_id, MIN(excluded_at) AS excluded_at
+    FROM `your-project.commerce_reference.order_exclusions`
+    WHERE exclusion_reason IN ('cancelled', 'full_refund')
+    GROUP BY transaction_id
+  ),
+  
+  -- One row per transaction_id x item_id: units ignored, duplicate purchase hits collapsed, credit never split.
+  -- The kept hit prefers a line that carries its own placement values.
+  purchase_lines AS (
+    SELECT
+      kl.transaction_id,
+      kl.item_id,
+      kl.is_bound,
+      kl.raw_placement_key,
+      kl.item_list_id,
+      kl.item_list_name,
+      kl.promotion_id,
+      kl.promotion_name,
+      kl.creative_slot,
+      MIN(kl.event_timestamp) OVER (PARTITION BY kl.transaction_id, kl.item_id) AS purchase_timestamp,
+      FIRST_VALUE(kl.event_date) OVER (PARTITION BY kl.transaction_id, kl.item_id ORDER BY kl.event_timestamp) AS order_date,
+      ROW_NUMBER() OVER (PARTITION BY kl.transaction_id, kl.item_id ORDER BY IF(kl.is_bound, 0, 1), kl.event_timestamp DESC) AS rn
+    FROM keyed_lines AS kl
+    WHERE kl.event_name = 'purchase'
+      AND kl.transaction_id IS NOT NULL
+  ),
+  
+  -- Test orders removed; orders fully cancelled or refunded within the restatement window removed on rerun
+  valid_purchase_lines AS (
+    SELECT
+      pl.transaction_id, pl.item_id, pl.is_bound, pl.raw_placement_key,
+      pl.item_list_id, pl.item_list_name, pl.promotion_id, pl.promotion_name, pl.creative_slot,
+      pl.purchase_timestamp, pl.order_date
+    FROM purchase_lines AS pl
+    LEFT JOIN test_orders AS t ON t.transaction_id = pl.transaction_id
+    LEFT JOIN full_refunds AS fr ON fr.transaction_id = pl.transaction_id
+    LEFT JOIN backend_cancellations AS bc ON bc.transaction_id = pl.transaction_id
+    WHERE pl.rn = 1
+      AND pl.order_date BETWEEN start_date AND end_date
+      AND t.transaction_id IS NULL
+      AND NOT COALESCE(TIMESTAMP_MICROS(fr.refund_timestamp) <= TIMESTAMP_ADD(TIMESTAMP_MICROS(pl.purchase_timestamp), INTERVAL restatement_days DAY), FALSE)
+      AND NOT COALESCE(bc.excluded_at <= TIMESTAMP_ADD(TIMESTAMP_MICROS(pl.purchase_timestamp), INTERVAL restatement_days DAY), FALSE)
+  ),
+  
+  -- Purchase lines credited by their own placement values; lines without values become (not set)
+  credited_purchases AS (
+    SELECT
+      CASE grain WHEN 'DAY' THEN vp.order_date WHEN 'MONTH' THEN DATE_TRUNC(vp.order_date, MONTH)
+           ELSE DATE_TRUNC(vp.order_date, WEEK(MONDAY)) END AS period_start,
+      IF(vp.is_bound, 'placement', '(not set)') AS row_type,
+      vp.transaction_id,
+      vp.item_id,
+      (NOT vp.is_bound) OR lk.raw_placement_key IS NOT NULL AS is_mapped,
+      IF(lk.raw_placement_key IS NOT NULL, lk.item_list_id, vp.item_list_id) AS item_list_id,
+      IF(lk.raw_placement_key IS NOT NULL, lk.item_list_name, vp.item_list_name) AS item_list_name,
+      IF(lk.raw_placement_key IS NOT NULL, lk.promotion_id, vp.promotion_id) AS promotion_id,
+      IF(lk.raw_placement_key IS NOT NULL, lk.promotion_name, vp.promotion_name) AS promotion_name,
+      IF(lk.raw_placement_key IS NOT NULL, lk.creative_slot, vp.creative_slot) AS creative_slot,
+      COALESCE(sc.is_marketplace_item, FALSE) AND COALESCE(lk.is_first_party_owned, TRUE) AS is_marketplace_excluded
+    FROM valid_purchase_lines AS vp
+    LEFT JOIN placement_lookup AS lk ON vp.is_bound AND lk.raw_placement_key = vp.raw_placement_key
+    LEFT JOIN seller_catalog AS sc ON sc.item_id = vp.item_id
+  ),
+  
+  -- View lines credited by their own placement values; lines without values become (not set)
+  credited_views AS (
+    SELECT
+      CASE grain WHEN 'DAY' THEN kl.event_date WHEN 'MONTH' THEN DATE_TRUNC(kl.event_date, MONTH)
+           ELSE DATE_TRUNC(kl.event_date, WEEK(MONDAY)) END AS period_start,
+      IF(kl.is_bound, 'placement', '(not set)') AS row_type,
+      (NOT kl.is_bound) OR lk.raw_placement_key IS NOT NULL AS is_mapped,
+      IF(lk.raw_placement_key IS NOT NULL, lk.item_list_id, kl.item_list_id) AS item_list_id,
+      IF(lk.raw_placement_key IS NOT NULL, lk.item_list_name, kl.item_list_name) AS item_list_name,
+      IF(lk.raw_placement_key IS NOT NULL, lk.promotion_id, kl.promotion_id) AS promotion_id,
+      IF(lk.raw_placement_key IS NOT NULL, lk.promotion_name, kl.promotion_name) AS promotion_name,
+      IF(lk.raw_placement_key IS NOT NULL, lk.creative_slot, kl.creative_slot) AS creative_slot,
+      COALESCE(sc.is_marketplace_item, FALSE) AND COALESCE(lk.is_first_party_owned, TRUE) AS is_marketplace_excluded
+    FROM keyed_lines AS kl
+    LEFT JOIN test_sessions AS ts ON ts.user_pseudo_id = kl.user_pseudo_id AND ts.ga_session_id = kl.ga_session_id
+    LEFT JOIN placement_lookup AS lk ON kl.is_bound AND lk.raw_placement_key = kl.raw_placement_key
+    LEFT JOIN seller_catalog AS sc ON sc.item_id = kl.item_id
+    WHERE kl.event_name = 'view_item'
+      AND kl.event_date BETWEEN start_date AND end_date
+      AND ts.user_pseudo_id IS NULL
+  ),
+  
+  -- Marketplace exclusion applied identically to placement and (not set) lines
+  placement_numerator AS (
+    SELECT
+      period_start,
+      row_type,
+      CONCAT(COALESCE(item_list_id, ''), '|', COALESCE(item_list_name, ''), '|', COALESCE(promotion_id, ''), '|',
+             COALESCE(promotion_name, ''), '|', COALESCE(creative_slot, '')) AS placement_key,
+      ANY_VALUE(item_list_id) AS item_list_id,
+      ANY_VALUE(item_list_name) AS item_list_name,
+      ANY_VALUE(promotion_id) AS promotion_id,
+      ANY_VALUE(promotion_name) AS promotion_name,
+      ANY_VALUE(creative_slot) AS creative_slot,
+      LOGICAL_AND(is_mapped) AS is_mapped,
+      COUNT(DISTINCT CONCAT(transaction_id, '|', item_id)) AS purchased_item_lines
+    FROM credited_purchases
+    WHERE NOT is_marketplace_excluded
+    GROUP BY period_start, row_type, placement_key
+  ),
+  
+  placement_denominator AS (
+    SELECT
+      period_start,
+      row_type,
+      CONCAT(COALESCE(item_list_id, ''), '|', COALESCE(item_list_name, ''), '|', COALESCE(promotion_id, ''), '|',
+             COALESCE(promotion_name, ''), '|', COALESCE(creative_slot, '')) AS placement_key,
+      ANY_VALUE(item_list_id) AS item_list_id,
+      ANY_VALUE(item_list_name) AS item_list_name,
+      ANY_VALUE(promotion_id) AS promotion_id,
+      ANY_VALUE(promotion_name) AS promotion_name,
+      ANY_VALUE(creative_slot) AS creative_slot,
+      LOGICAL_AND(is_mapped) AS is_mapped,
+      COUNT(*) AS item_views
+    FROM credited_views
+    WHERE NOT is_marketplace_excluded
+    GROUP BY period_start, row_type, placement_key
+  ),
+  
+  -- Placement rows plus (not set) sum to the site total, which uses the same exclusions
+  site_numerator AS (
+    SELECT period_start, COUNT(DISTINCT CONCAT(transaction_id, '|', item_id)) AS purchased_item_lines
+    FROM credited_purchases
+    WHERE NOT is_marketplace_excluded
+    GROUP BY period_start
+  ),
+  
+  -- Placement rows plus (not set) sum to the site total, which uses the same exclusions
+  site_denominator AS (
+    SELECT period_start, COUNT(*) AS item_views
+    FROM credited_views
+    WHERE NOT is_marketplace_excluded
+    GROUP BY period_start
+  ),
+  
+  combined AS (
+    SELECT
+      COALESCE(d.period_start, n.period_start) AS period_start,
+      COALESCE(d.row_type, n.row_type) AS row_type,
+      COALESCE(d.item_list_id, n.item_list_id) AS item_list_id,
+      COALESCE(d.item_list_name, n.item_list_name) AS item_list_name,
+      COALESCE(d.promotion_id, n.promotion_id) AS promotion_id,
+      COALESCE(d.promotion_name, n.promotion_name) AS promotion_name,
+      COALESCE(d.creative_slot, n.creative_slot) AS creative_slot,
+      COALESCE(n.purchased_item_lines, 0) AS purchased_item_lines,
+      COALESCE(d.item_views, 0) AS item_views,
+      COALESCE(d.is_mapped, n.is_mapped) AS taxonomy_mapped
+    FROM placement_denominator AS d
+    FULL OUTER JOIN placement_numerator AS n
+      ON n.period_start = d.period_start
+     AND n.row_type = d.row_type
+     AND n.placement_key = d.placement_key
+    UNION ALL
+    SELECT
+      COALESCE(d.period_start, n.period_start),
+      'site_total',
+      CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(NULL AS STRING),
+      COALESCE(n.purchased_item_lines, 0),
+      COALESCE(d.item_views, 0),
+      TRUE
+    FROM site_denominator AS d
+    FULL OUTER JOIN site_numerator AS n
+      ON n.period_start = d.period_start
+  )
+  
+  SELECT
+    period_start,
+    row_type,
+    item_list_id,
+    item_list_name,
+    promotion_id,
+    promotion_name,
+    creative_slot,
+    purchased_item_lines,
+    item_views,
+    CASE
+      WHEN row_type = 'placement' AND item_views < min_attributed_views THEN NULL
+      ELSE ROUND(100 * SAFE_DIVIDE(purchased_item_lines, item_views), 2)
+    END AS merchandising_conversion_rate_pct,
+    CASE
+      WHEN row_type = 'placement' AND item_views < min_attributed_views THEN 'suppressed_below_min_views'
+      WHEN SAFE_DIVIDE(purchased_item_lines, item_views) > 1 THEN 'above_100_pct_binding_review'
+      WHEN NOT taxonomy_mapped THEN 'unmapped_placement_taxonomy'
+      ELSE 'ok'
+    END AS quality_flag
+  FROM combined
+  ORDER BY period_start, row_type, item_views DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Merchandising Conversion Rate, item level, by merchandising eVar placement
+  -- (distinct purchased item lines purchaseID x SKU carrying a placement
+  --  / item views carrying the same placement) x 100
+  -- Placement binding on productListItems: eVar20 placement id, eVar21 placement name, eVar22 creative slot, eVar23 search term.
+  -- Every view and purchase line is credited by its own eVar20-eVar22 values sent on that hit (the site carries them from
+  -- select_item / select_promotion); eVar23 splits rows only when split_by_search_term is TRUE; lines with no eVar20-eVar22 value are reported as (not set).
+  -- Numerator and denominator are aggregated separately per period x row_type x placement, then joined.
+  -- Reference tables: commerce_reference.merch_placement_lookup, commerce_reference.product_catalog, commerce_reference.order_exclusions.
+  WITH params AS (
+    SELECT
+      'America/New_York' AS report_tz,
+      date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 28) AS start_date,
+      date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 1) AS end_date,
+      'WEEK' AS grain,
+      100 AS min_attributed_views,
+      7 AS restatement_days,
+      FALSE AS split_by_search_term
+  ),
+  
+  events AS (
+    SELECT
+      e._id AS event_id,
+      e.timestamp AS event_ts,
+      to_date(from_utc_timestamp(e.timestamp, p.report_tz)) AS event_date,
+      e.eventType AS event_type,
+      e.identityMap['ECID'][0].id AS ecid,
+      NULLIF(NULLIF(TRIM(e.commerce.order.purchaseID), ''), '(not set)') AS purchase_id,
+      e.productListItems AS product_list_items
+    FROM aep_web_experience_events AS e
+    CROSS JOIN params AS p
+    WHERE e.eventType IN ('commerce.productViews', 'commerce.purchases')
+      AND e.timestamp >= to_timestamp(date_sub(p.start_date, 1))
+      AND e.timestamp < to_timestamp(date_add(p.end_date, 2))
+  ),
+  
+  item_lines AS (
+    SELECT
+      x.event_id,
+      x.event_ts,
+      x.event_date,
+      x.event_type,
+      x.ecid,
+      x.purchase_id,
+      x.line_pos,
+      NULLIF(NULLIF(TRIM(x.pli.SKU), ''), '(not set)') AS sku,
+      x.pli.priceTotal AS price_total,
+      NULLIF(NULLIF(TRIM(x.pli._experience.analytics.customDimensions.eVars.eVar20), ''), '(not set)') AS placement_id,
+      NULLIF(NULLIF(TRIM(x.pli._experience.analytics.customDimensions.eVars.eVar21), ''), '(not set)') AS placement_name,
+      NULLIF(NULLIF(TRIM(x.pli._experience.analytics.customDimensions.eVars.eVar22), ''), '(not set)') AS creative_slot,
+      NULLIF(NULLIF(TRIM(x.pli._experience.analytics.customDimensions.eVars.eVar23), ''), '(not set)') AS search_term
+    FROM (
+      SELECT ev.*, posexplode(ev.product_list_items) AS (line_pos, pli)
+      FROM events AS ev
+    ) AS x
+  ),
+  
+  -- Zero-price lines (gift-with-purchase, samples, free bundle components) are excluded from every count.
+  -- A line is bound only when it carries eVar20, eVar21 or eVar22 (the GA4 list / promotion equivalents).
+  -- The lookup key is built from eVar20-eVar22 only, so search-results lines map to one list like GA4;
+  -- eVar23-only lines are already (not set) and are never looked up. eVar23 enters placement_key only when split_by_search_term is TRUE.
+  keyed_lines AS (
+    SELECT
+      il.*,
+      COALESCE(il.placement_id, il.placement_name, il.creative_slot) IS NOT NULL AS is_bound,
+      concat_ws('|', COALESCE(il.placement_id, ''), COALESCE(il.placement_name, ''), COALESCE(il.creative_slot, '')) AS raw_placement_key
+    FROM item_lines AS il
+    WHERE il.sku IS NOT NULL
+      AND (il.price_total IS NULL OR il.price_total > 0)
+  ),
+  
+  placement_lookup AS (
+    SELECT raw_placement_key, placement_id, placement_name, creative_slot, is_first_party_owned
+    FROM (
+      SELECT
+        lk.raw_placement_key, lk.placement_id, lk.placement_name, lk.creative_slot, lk.is_first_party_owned,
+        ROW_NUMBER() OVER (PARTITION BY lk.raw_placement_key ORDER BY lk.updated_at DESC) AS rn
+      FROM commerce_reference.merch_placement_lookup AS lk
+      WHERE lk.platform = 'adobe'
+    ) AS l
+    WHERE l.rn = 1
+  ),
+  
+  seller_catalog AS (
+    SELECT sku, MAX(CASE WHEN seller_type IN ('marketplace', 'third_party') THEN 1 ELSE 0 END) = 1 AS is_marketplace_item
+    FROM commerce_reference.product_catalog
+    GROUP BY sku
+  ),
+  
+  test_orders AS (
+    SELECT DISTINCT transaction_id
+    FROM commerce_reference.order_exclusions
+    WHERE exclusion_reason = 'test_order'
+  ),
+  
+  -- Cancellations and full refunds come only from the exclusions table
+  backend_cancellations AS (
+    SELECT transaction_id, MIN(excluded_at) AS excluded_at
+    FROM commerce_reference.order_exclusions
+    WHERE exclusion_reason IN ('cancelled', 'full_refund')
+    GROUP BY transaction_id
+  ),
+  
+  -- Views from test-order traffic are removed by visitor (ECID) + day: the defined XDM has no session id
+  test_visitors AS (
+    SELECT DISTINCT ev.ecid, ev.event_date
+    FROM events AS ev
+    JOIN test_orders AS t ON t.transaction_id = ev.purchase_id
+    WHERE ev.event_type = 'commerce.purchases'
+      AND ev.ecid IS NOT NULL
+  ),
+  
+  -- One row per purchaseID x SKU: units ignored, duplicate purchase hits collapsed, credit never split.
+  -- The kept hit prefers a line that carries its own placement values.
+  purchase_lines AS (
+    SELECT
+      kl.purchase_id,
+      kl.sku,
+      kl.is_bound,
+      kl.raw_placement_key,
+      kl.placement_id,
+      kl.placement_name,
+      kl.creative_slot,
+      kl.search_term,
+      MIN(kl.event_ts) OVER (PARTITION BY kl.purchase_id, kl.sku) AS purchase_ts,
+      FIRST_VALUE(kl.event_date) OVER (PARTITION BY kl.purchase_id, kl.sku ORDER BY kl.event_ts) AS order_date,
+      ROW_NUMBER() OVER (PARTITION BY kl.purchase_id, kl.sku ORDER BY CASE WHEN kl.is_bound THEN 0 ELSE 1 END, kl.event_ts DESC) AS rn
+    FROM keyed_lines AS kl
+    WHERE kl.event_type = 'commerce.purchases'
+      AND kl.purchase_id IS NOT NULL
+  ),
+  
+  -- Purchase lines credited by their own eVar values; test orders removed; orders fully cancelled or refunded
+  -- within the restatement window removed on rerun
+  credited_purchases AS (
+    SELECT
+      CASE p.grain WHEN 'DAY' THEN pl.order_date WHEN 'MONTH' THEN trunc(pl.order_date, 'MM')
+           ELSE trunc(pl.order_date, 'WEEK') END AS period_start,
+      CASE WHEN pl.is_bound THEN 'placement' ELSE '(not set)' END AS row_type,
+      pl.purchase_id,
+      pl.sku,
+      (NOT pl.is_bound) OR lk.raw_placement_key IS NOT NULL AS is_mapped,
+      CASE WHEN lk.raw_placement_key IS NOT NULL THEN lk.placement_id ELSE pl.placement_id END AS placement_id,
+      CASE WHEN lk.raw_placement_key IS NOT NULL THEN lk.placement_name ELSE pl.placement_name END AS placement_name,
+      CASE WHEN lk.raw_placement_key IS NOT NULL THEN lk.creative_slot ELSE pl.creative_slot END AS creative_slot,
+      CASE WHEN p.split_by_search_term AND pl.is_bound THEN pl.search_term END AS search_term,
+      COALESCE(sc.is_marketplace_item, FALSE) AND COALESCE(lk.is_first_party_owned, TRUE) AS is_marketplace_excluded
+    FROM purchase_lines AS pl
+    CROSS JOIN params AS p
+    LEFT JOIN test_orders AS t ON t.transaction_id = pl.purchase_id
+    LEFT JOIN backend_cancellations AS bc ON bc.transaction_id = pl.purchase_id
+    LEFT JOIN placement_lookup AS lk ON pl.is_bound AND lk.raw_placement_key = pl.raw_placement_key
+    LEFT JOIN seller_catalog AS sc ON sc.sku = pl.sku
+    WHERE pl.rn = 1
+      AND pl.order_date BETWEEN p.start_date AND p.end_date
+      AND t.transaction_id IS NULL
+      AND NOT COALESCE(unix_timestamp(bc.excluded_at) <= unix_timestamp(pl.purchase_ts) + p.restatement_days * 86400, FALSE)
+  ),
+  
+  -- View lines credited by their own eVar values; lines without values become (not set)
+  credited_views AS (
+    SELECT
+      CASE p.grain WHEN 'DAY' THEN kl.event_date WHEN 'MONTH' THEN trunc(kl.event_date, 'MM')
+           ELSE trunc(kl.event_date, 'WEEK') END AS period_start,
+      CASE WHEN kl.is_bound THEN 'placement' ELSE '(not set)' END AS row_type,
+      kl.event_id,
+      kl.line_pos,
+      (NOT kl.is_bound) OR lk.raw_placement_key IS NOT NULL AS is_mapped,
+      CASE WHEN lk.raw_placement_key IS NOT NULL THEN lk.placement_id ELSE kl.placement_id END AS placement_id,
+      CASE WHEN lk.raw_placement_key IS NOT NULL THEN lk.placement_name ELSE kl.placement_name END AS placement_name,
+      CASE WHEN lk.raw_placement_key IS NOT NULL THEN lk.creative_slot ELSE kl.creative_slot END AS creative_slot,
+      CASE WHEN p.split_by_search_term AND kl.is_bound THEN kl.search_term END AS search_term,
+      COALESCE(sc.is_marketplace_item, FALSE) AND COALESCE(lk.is_first_party_owned, TRUE) AS is_marketplace_excluded
+    FROM keyed_lines AS kl
+    CROSS JOIN params AS p
+    LEFT JOIN test_visitors AS tv ON tv.ecid = kl.ecid AND tv.event_date = kl.event_date
+    LEFT JOIN placement_lookup AS lk ON kl.is_bound AND lk.raw_placement_key = kl.raw_placement_key
+    LEFT JOIN seller_catalog AS sc ON sc.sku = kl.sku
+    WHERE kl.event_type = 'commerce.productViews'
+      AND kl.event_date BETWEEN p.start_date AND p.end_date
+      AND tv.ecid IS NULL
+  ),
+  
+  -- Marketplace exclusion applied identically to placement and (not set) lines
+  placement_numerator AS (
+    SELECT
+      period_start,
+      row_type,
+      concat_ws('|', COALESCE(placement_id, ''), COALESCE(placement_name, ''), COALESCE(creative_slot, ''), COALESCE(search_term, '')) AS placement_key,
+      MAX(placement_id) AS placement_id,
+      MAX(placement_name) AS placement_name,
+      MAX(creative_slot) AS creative_slot,
+      MAX(search_term) AS search_term,
+      MIN(CASE WHEN is_mapped THEN 1 ELSE 0 END) = 1 AS is_mapped,
+      COUNT(DISTINCT concat_ws('|', purchase_id, sku)) AS purchased_item_lines
+    FROM credited_purchases
+    WHERE NOT is_marketplace_excluded
+    GROUP BY period_start, row_type,
+      concat_ws('|', COALESCE(placement_id, ''), COALESCE(placement_name, ''), COALESCE(creative_slot, ''), COALESCE(search_term, ''))
+  ),
+  
+  placement_denominator AS (
+    SELECT
+      period_start,
+      row_type,
+      concat_ws('|', COALESCE(placement_id, ''), COALESCE(placement_name, ''), COALESCE(creative_slot, ''), COALESCE(search_term, '')) AS placement_key,
+      MAX(placement_id) AS placement_id,
+      MAX(placement_name) AS placement_name,
+      MAX(creative_slot) AS creative_slot,
+      MAX(search_term) AS search_term,
+      MIN(CASE WHEN is_mapped THEN 1 ELSE 0 END) = 1 AS is_mapped,
+      COUNT(DISTINCT concat_ws('|', event_id, CAST(line_pos AS STRING))) AS item_views
+    FROM credited_views
+    WHERE NOT is_marketplace_excluded
+    GROUP BY period_start, row_type,
+      concat_ws('|', COALESCE(placement_id, ''), COALESCE(placement_name, ''), COALESCE(creative_slot, ''), COALESCE(search_term, ''))
+  ),
+  
+  -- Placement rows plus (not set) sum to the site total, which uses the same exclusions
+  site_numerator AS (
+    SELECT period_start, COUNT(DISTINCT concat_ws('|', purchase_id, sku)) AS purchased_item_lines
+    FROM credited_purchases
+    WHERE NOT is_marketplace_excluded
+    GROUP BY period_start
+  ),
+  
+  -- Placement rows plus (not set) sum to the site total, which uses the same exclusions
+  site_denominator AS (
+    SELECT period_start, COUNT(DISTINCT concat_ws('|', event_id, CAST(line_pos AS STRING))) AS item_views
+    FROM credited_views
+    WHERE NOT is_marketplace_excluded
+    GROUP BY period_start
+  ),
+  
+  combined AS (
+    SELECT
+      COALESCE(d.period_start, n.period_start) AS period_start,
+      COALESCE(d.row_type, n.row_type) AS row_type,
+      COALESCE(d.placement_id, n.placement_id) AS placement_id,
+      COALESCE(d.placement_name, n.placement_name) AS placement_name,
+      COALESCE(d.creative_slot, n.creative_slot) AS creative_slot,
+      COALESCE(d.search_term, n.search_term) AS search_term,
+      COALESCE(n.purchased_item_lines, 0) AS purchased_item_lines,
+      COALESCE(d.item_views, 0) AS item_views,
+      COALESCE(d.is_mapped, n.is_mapped) AS taxonomy_mapped
+    FROM placement_denominator AS d
+    FULL OUTER JOIN placement_numerator AS n
+      ON n.period_start = d.period_start
+     AND n.row_type = d.row_type
+     AND n.placement_key = d.placement_key
+    UNION ALL
+    SELECT
+      COALESCE(d.period_start, n.period_start),
+      'site_total',
+      CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(NULL AS STRING),
+      COALESCE(n.purchased_item_lines, 0),
+      COALESCE(d.item_views, 0),
+      TRUE
+    FROM site_denominator AS d
+    FULL OUTER JOIN site_numerator AS n
+      ON n.period_start = d.period_start
+  )
+  
+  SELECT
+    c.period_start,
+    c.row_type,
+    c.placement_id,
+    c.placement_name,
+    c.creative_slot,
+    c.search_term,
+    c.purchased_item_lines,
+    c.item_views,
+    CASE
+      WHEN c.row_type = 'placement' AND c.item_views < p.min_attributed_views THEN NULL
+      ELSE ROUND(100.0 * c.purchased_item_lines / NULLIF(c.item_views, 0), 2)
+    END AS merchandising_conversion_rate_pct,
+    CASE
+      WHEN c.row_type = 'placement' AND c.item_views < p.min_attributed_views THEN 'suppressed_below_min_views'
+      WHEN c.item_views > 0 AND c.purchased_item_lines > c.item_views THEN 'above_100_pct_binding_review'
+      WHEN NOT c.taxonomy_mapped THEN 'unmapped_placement_taxonomy'
+      ELSE 'ok'
+    END AS quality_flag
+  FROM combined AS c
+  CROSS JOIN params AS p
+  ORDER BY c.period_start, c.row_type, c.item_views DESC;
 
+Calculation Notes: |
+  1️⃣ Placement binding happens at item level, not session level. The site must send the placement fields on every view_item / commerce.productViews item and on every purchase item, carrying the values captured on select_item or select_promotion: item_list_id / item_list_name and promotion_id / promotion_name / creative_slot in GA4, and merchandising eVar20 (placement id), eVar21 (placement name), eVar22 (creative slot) and eVar23 (search term) on productListItems in Adobe. view_item / commerce.productViews items carry the same placement fields as the purchase example. The BigQuery and AEP exports only hold the values sent on that hit, so both SQLs credit each line by its own values. Session-level exposure counts ("sessions that saw a carousel and bought anything") are not this KPI and must not be mixed into the same trend.
+  2️⃣ Numerator = distinct purchased line items (transaction_id × item_id) whose own placement values equal the reported placement, taken from purchase events with a non-null, deduplicated transaction_id. Units are not used, so a quantity-5 order counts once. Denominator = item-level view_item records whose own placement values equal the same placement. Lines with no placement values (direct PDP landings, paid search or email deep links to a PDP, Adobe lines carrying only eVar23) are reported in an explicit "(not set)" row. Placement rows plus (not set) sum to the site total, which uses the same exclusions.
+  3️⃣ One placement per line: each purchased line and each view line is credited only to the placement values it carries on that hit, so credit is never split or duplicated across placements. When the site re-binds an item after a later select_item from a different module, the carried values change and later view and purchase lines take the new placement. Last-touch allocation across hits, expiry and cross-visit credit apply only in Analytics Workspace and GA4 UI reports, not in these SQLs. Fractional or position-weighted placement attribution is a separate analysis.
+  4️⃣ Attribution window and session rules: in GA4 UI reports item-list and promotion attribution persists only within the session, and in Analytics Workspace merchandising eVars commonly expire on purchase or after the visit. These settings shape GA4 UI and Workspace numbers only; the SQL outputs use the own-line rule on both platforms. Document the configured expiry next to any UI or Workspace dashboard, and never compare GA4 UI and Workspace placement rates until expiry is aligned, because purchase-expiry configurations report materially higher rates.
+  5️⃣ Exclusions apply to numerator, denominator and site total alike: test and QA orders, zero-price lines (gift-with-purchase, auto-added samples, free bundle components), marketplace or third-party seller items on first-party-owned placements and on (not set) lines, and orders fully cancelled or refunded within 7 days of purchase (removed on the weekly restatement). Internal IP and bot filtering rely on filters applied before the SQL: GA4 known-bot exclusion plus the internal-traffic data filter; AEP Web SDK experience-event datasets are not filtered by Analytics bot rules, so AEP relies on upstream (collection-time) or dataset-level bot and internal-IP filtering. GA4 removes views from test-order traffic by session; AEP removes them by visitor (ECID) + day because the defined XDM has no session id. GA4 cancellations and full refunds come from refund events and commerce_reference.order_exclusions; AEP cancellations and full refunds come only from commerce_reference.order_exclusions.
+  6️⃣ Rates can exceed 100% in these SQLs when purchase lines carry a placement that their views did not (for example a view sent without placement fields while the purchase item carries them). Such values are not capped. They are flagged above_100_pct_binding_review for binding review. In Analytics Workspace and GA4 UI reports, rates above 100% can also come from a long eVar expiry, which these SQLs do not apply. Suppress placement rows with fewer than 100 item views in the window, since low-volume slots swing too much to act on.
+  7️⃣ Timing: both counts are grouped by their own event date in the property reporting time zone, so late-night views that convert after midnight shift numerator and denominator into different days. Report daily values with a 1-day lag, and use weekly and monthly windows for placement decisions. Placement taxonomy changes (renamed lists, new creative_slot values) must be mapped in the lookup table before a week is published, or history splits into orphaned rows.
 
+Business Use Case: |
+  1️⃣ Category Managers (Merchandising) review the weekly placement report every Monday. When a category grid or collection page drops more than 20% below its trailing 8-week median, they re-rank the default sort order, swap out low-converting hero products and check for stock-outs on the top-viewed SKUs in that list.
+  2️⃣ The Onsite Promotions Manager (E-commerce Marketing) reviews each homepage hero or promotional banner after 7 days live. Promotion names with high select_promotion click-through but a Merchandising Conversion Rate below the site purchase-to-view benchmark are retired, and the slot goes to the next creative in the promotion calendar.
+  3️⃣ The Personalisation Product Owner (Product) reads each recommendation-module A/B test at placement level. The winning algorithm or placement position is rolled out only when the test cell's rate beats control with statistical significance, and the change is logged against the item_list_id / eVar20 value of the recommendation module.
+  4️⃣ Merchandise Planners (Merchandising) join monthly placement rates with sell-through during the pre-season line review. SKUs that convert well in search and recommendation placements but get little category-grid exposure are nominated for featured collection slots and deeper inventory buys.
 
+Dependencies:
+  Events: [product-view, purchase]
+  Metrics: [product-view, item-list-views, item-list-clicks]
+  Dimensions: [item-category, promotion-type, product-name]
+  KPIs: [item-purchase-conversion-rate]
 
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
 
+Report Attributes: |
+  Item List Name; Item List ID; Promotion Name; Creative Slot; Item Category; Promotion Type; Item Brand; Device Category; Default Channel Grouping; Page Type
 
+Dashboard Usage: [Merchandising Placement Performance, Onsite Promotion Effectiveness, Category Management Weekly Review, Recommendation Test Readout, E-commerce Conversion Funnel]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [item-purchase-conversion-rate, item-view-to-cart-rate, cart-to-view-rate, add-to-cart-rate, purchase-conversion-rate, item-revenue, conversion-rate]
+
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -42,5 +945,7 @@ Contributed By: swapnamagantius
 
 Created At: 2026-06-17T20:58:21.465+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-15T14:02:39.097+00:00
 
