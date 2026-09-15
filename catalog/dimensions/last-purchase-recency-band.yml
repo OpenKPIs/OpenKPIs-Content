@@ -1,7 +1,7 @@
 # Dimension: Last Purchase Recency Band
-# Generated: 2026-09-15T13:35:29.829Z
+# Generated: 2026-09-15T13:35:40.607Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Last Purchase Recency Band
 
@@ -10,6 +10,19 @@ Description: |
 
 Category: Retention
 
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV, retention, churn, win-back]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User, Daily, Weekly, Monthly, Quarterly
 
 
 
@@ -17,24 +30,326 @@ Category: Retention
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Last Purchase Recency Band per registered customer and snapshot date, rolled up to the band distribution over all registered customers in scope.
+  -- Backend source: commerce order table + CRM customer master (no GA4 events export).
+  -- Single analysis date: snapshot_start_date = snapshot_end_date. Trend rebuild: widen the range; each snapshot only uses orders placed on or before it.
+  -- Rerun the latest 3 snapshot dates daily so late POS and marketplace orders restate them; older snapshots stay frozen.
+  WITH params AS (
+    SELECT
+      DATE '2026-09-14' AS snapshot_start_date,
+      DATE '2026-09-14' AS snapshot_end_date,
+      'America/New_York' AS reporting_tz
+  ),
+  snapshots AS (
+    SELECT snapshot_date
+    FROM params AS p,
+      UNNEST(GENERATE_DATE_ARRAY(p.snapshot_start_date, p.snapshot_end_date, INTERVAL 1 DAY)) AS snapshot_date
+  ),
+  customer_master AS (
+    SELECT
+      c.customer_id AS source_customer_id,
+      COALESCE(m.resolved_customer_id, c.customer_id) AS customer_id,
+      c.registered_at,
+      c.email_sha256,
+      c.email_verified,
+      c.erased_at,
+      c.is_test_account
+    FROM `your-project.crm.customers` AS c
+    LEFT JOIN `your-project.crm.customer_id_map` AS m
+      ON m.source_customer_id = c.customer_id
+    WHERE c.account_type = 'registered'
+  ),
+  registered_customers AS (
+    SELECT
+      cm.customer_id,
+      DATE(MIN(cm.registered_at), p.reporting_tz) AS registered_date
+    FROM customer_master AS cm
+    CROSS JOIN params AS p
+    GROUP BY cm.customer_id, p.reporting_tz
+    HAVING COUNTIF(cm.erased_at IS NOT NULL) = 0
+      AND COUNTIF(COALESCE(cm.is_test_account, FALSE)) = 0
+  ),
+  verified_emails AS (
+    SELECT
+      email_sha256,
+      MIN(customer_id) AS customer_id
+    FROM customer_master
+    WHERE email_verified = TRUE
+      AND email_sha256 IS NOT NULL
+      AND erased_at IS NULL
+    GROUP BY email_sha256
+    HAVING COUNT(DISTINCT customer_id) = 1
+  ),
+  qualifying_orders AS (
+    SELECT
+      COALESCE(m.resolved_customer_id, o.customer_id, ve.customer_id) AS customer_id,
+      DATE(o.order_placed_at, p.reporting_tz) AS order_date
+    FROM `your-project.commerce.orders` AS o
+    CROSS JOIN params AS p
+    LEFT JOIN `your-project.crm.customer_id_map` AS m
+      ON m.source_customer_id = o.customer_id
+    LEFT JOIN verified_emails AS ve
+      ON o.customer_id IS NULL
+      AND ve.email_sha256 = o.customer_email_sha256
+    WHERE DATE(o.order_placed_at, p.reporting_tz) <= p.snapshot_end_date
+      AND (o.order_status = 'completed' OR o.financial_status IN ('paid', 'partially_refunded', 'refunded'))
+      AND COALESCE(o.order_status, '') NOT IN ('cancelled', 'voided', 'draft')
+      AND o.cancelled_at IS NULL
+      AND COALESCE(o.fraud_status, 'not_reviewed') != 'rejected'
+      AND COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_staff_order, FALSE) = FALSE
+      AND NOT (o.total_price = 0 AND COALESCE(o.order_type, '') IN ('replacement', 'warranty_reship'))
+      -- Optional win-back view only (document on the dashboard): AND COALESCE(o.order_source, '') != 'subscription_renewal'
+  ),
+  customer_snapshot AS (
+    SELECT
+      s.snapshot_date,
+      rc.customer_id,
+      rc.registered_date,
+      MAX(qo.order_date) AS last_order_date
+    FROM snapshots AS s
+    CROSS JOIN registered_customers AS rc
+    LEFT JOIN qualifying_orders AS qo
+      ON qo.customer_id = rc.customer_id
+      AND qo.order_date <= s.snapshot_date
+    GROUP BY s.snapshot_date, rc.customer_id, rc.registered_date
+  ),
+  customer_days AS (
+    SELECT
+      snapshot_date,
+      customer_id,
+      last_order_date,
+      DATE_DIFF(snapshot_date, last_order_date, DAY) AS days_since_last_purchase
+    FROM customer_snapshot
+    WHERE registered_date <= snapshot_date
+      OR last_order_date IS NOT NULL
+  ),
+  customer_band AS (
+    SELECT
+      snapshot_date,
+      customer_id,
+      last_order_date,
+      days_since_last_purchase,
+      CASE
+        WHEN last_order_date IS NULL THEN 'No purchase'
+        WHEN days_since_last_purchase <= 30 THEN '0-30 days'
+        WHEN days_since_last_purchase <= 90 THEN '31-90 days'
+        WHEN days_since_last_purchase <= 180 THEN '91-180 days'
+        WHEN days_since_last_purchase <= 365 THEN '181-365 days'
+        ELSE '366+ days'
+      END AS last_purchase_recency_band,
+      CASE
+        WHEN last_order_date IS NULL THEN 6
+        WHEN days_since_last_purchase <= 30 THEN 1
+        WHEN days_since_last_purchase <= 90 THEN 2
+        WHEN days_since_last_purchase <= 180 THEN 3
+        WHEN days_since_last_purchase <= 365 THEN 4
+        ELSE 5
+      END AS band_sort_key
+    FROM customer_days
+  ),
+  band_counts AS (
+    SELECT
+      snapshot_date,
+      band_sort_key,
+      last_purchase_recency_band,
+      COUNT(DISTINCT customer_id) AS customers
+    FROM customer_band
+    GROUP BY snapshot_date, band_sort_key, last_purchase_recency_band
+  )
+  -- Customer-level rows for audiences and joins: SELECT * FROM customer_band
+  SELECT
+    snapshot_date,
+    band_sort_key,
+    last_purchase_recency_band,
+    customers,
+    SUM(customers) OVER (PARTITION BY snapshot_date) AS registered_customers_in_scope,
+    ROUND(100 * SAFE_DIVIDE(customers, SUM(customers) OVER (PARTITION BY snapshot_date)), 2) AS pct_of_registered_customers,
+    SUM(IF(band_sort_key <= 4, customers, 0)) OVER (PARTITION BY snapshot_date) AS active_customers_0_365_days
+  FROM band_counts
+  ORDER BY snapshot_date, band_sort_key;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Last Purchase Recency Band per registered customer and snapshot date, rolled up to the band distribution over all registered customers in scope.
+  -- Backend datasets: commerce_orders_dataset + crm_customer_profile_dataset + crm_customer_id_map_dataset (no web ExperienceEvent data).
+  -- Single analysis date: snapshot_start_date = snapshot_end_date. Trend rebuild: widen the range; each snapshot only uses orders placed on or before it.
+  -- Rerun the latest 3 snapshot dates daily so late POS and marketplace orders restate them; older snapshots stay frozen.
+  WITH params AS (
+    SELECT
+      CAST('2026-09-14' AS DATE) AS snapshot_start_date,
+      CAST('2026-09-14' AS DATE) AS snapshot_end_date,
+      'America/New_York' AS reporting_tz
+  ),
+  snapshots AS (
+    SELECT explode(sequence(p.snapshot_start_date, p.snapshot_end_date, INTERVAL 1 DAY)) AS snapshot_date
+    FROM params AS p
+  ),
+  customer_master AS (
+    SELECT
+      c.customer_id AS source_customer_id,
+      COALESCE(m.resolved_customer_id, c.customer_id) AS customer_id,
+      c.registered_at,
+      c.email_sha256,
+      c.email_verified,
+      c.erased_at,
+      c.is_test_account
+    FROM crm_customer_profile_dataset AS c
+    LEFT JOIN crm_customer_id_map_dataset AS m
+      ON m.source_customer_id = c.customer_id
+    WHERE c.account_type = 'registered'
+  ),
+  registered_customers AS (
+    SELECT
+      cm.customer_id,
+      to_date(from_utc_timestamp(MIN(cm.registered_at), p.reporting_tz)) AS registered_date
+    FROM customer_master AS cm
+    CROSS JOIN params AS p
+    GROUP BY cm.customer_id, p.reporting_tz
+    HAVING SUM(CASE WHEN cm.erased_at IS NOT NULL THEN 1 ELSE 0 END) = 0
+      AND SUM(CASE WHEN COALESCE(cm.is_test_account, false) THEN 1 ELSE 0 END) = 0
+  ),
+  verified_emails AS (
+    SELECT
+      email_sha256,
+      MIN(customer_id) AS customer_id
+    FROM customer_master
+    WHERE email_verified = true
+      AND email_sha256 IS NOT NULL
+      AND erased_at IS NULL
+    GROUP BY email_sha256
+    HAVING COUNT(DISTINCT customer_id) = 1
+  ),
+  qualifying_orders AS (
+    SELECT
+      COALESCE(m.resolved_customer_id, o.customer_id, ve.customer_id) AS customer_id,
+      to_date(from_utc_timestamp(o.order_placed_at, p.reporting_tz)) AS order_date
+    FROM commerce_orders_dataset AS o
+    CROSS JOIN params AS p
+    LEFT JOIN crm_customer_id_map_dataset AS m
+      ON m.source_customer_id = o.customer_id
+    LEFT JOIN verified_emails AS ve
+      ON o.customer_id IS NULL
+      AND ve.email_sha256 = o.customer_email_sha256
+    WHERE to_date(from_utc_timestamp(o.order_placed_at, p.reporting_tz)) <= p.snapshot_end_date
+      AND (o.order_status = 'completed' OR o.financial_status IN ('paid', 'partially_refunded', 'refunded'))
+      AND COALESCE(o.order_status, '') NOT IN ('cancelled', 'voided', 'draft')
+      AND o.cancelled_at IS NULL
+      AND COALESCE(o.fraud_status, 'not_reviewed') <> 'rejected'
+      AND COALESCE(o.is_test_order, false) = false
+      AND COALESCE(o.is_staff_order, false) = false
+      AND NOT (o.total_price = 0 AND COALESCE(o.order_type, '') IN ('replacement', 'warranty_reship'))
+      -- Optional win-back view only (document on the dashboard): AND COALESCE(o.order_source, '') <> 'subscription_renewal'
+  ),
+  customer_snapshot AS (
+    SELECT
+      s.snapshot_date,
+      rc.customer_id,
+      rc.registered_date,
+      MAX(qo.order_date) AS last_order_date
+    FROM snapshots AS s
+    CROSS JOIN registered_customers AS rc
+    LEFT JOIN qualifying_orders AS qo
+      ON qo.customer_id = rc.customer_id
+      AND qo.order_date <= s.snapshot_date
+    GROUP BY s.snapshot_date, rc.customer_id, rc.registered_date
+  ),
+  customer_days AS (
+    SELECT
+      snapshot_date,
+      customer_id,
+      last_order_date,
+      datediff(snapshot_date, last_order_date) AS days_since_last_purchase
+    FROM customer_snapshot
+    WHERE registered_date <= snapshot_date
+      OR last_order_date IS NOT NULL
+  ),
+  customer_band AS (
+    SELECT
+      snapshot_date,
+      customer_id,
+      last_order_date,
+      days_since_last_purchase,
+      CASE
+        WHEN last_order_date IS NULL THEN 'No purchase'
+        WHEN days_since_last_purchase <= 30 THEN '0-30 days'
+        WHEN days_since_last_purchase <= 90 THEN '31-90 days'
+        WHEN days_since_last_purchase <= 180 THEN '91-180 days'
+        WHEN days_since_last_purchase <= 365 THEN '181-365 days'
+        ELSE '366+ days'
+      END AS last_purchase_recency_band,
+      CASE
+        WHEN last_order_date IS NULL THEN 6
+        WHEN days_since_last_purchase <= 30 THEN 1
+        WHEN days_since_last_purchase <= 90 THEN 2
+        WHEN days_since_last_purchase <= 180 THEN 3
+        WHEN days_since_last_purchase <= 365 THEN 4
+        ELSE 5
+      END AS band_sort_key
+    FROM customer_days
+  ),
+  band_counts AS (
+    SELECT
+      snapshot_date,
+      band_sort_key,
+      last_purchase_recency_band,
+      COUNT(DISTINCT customer_id) AS customers
+    FROM customer_band
+    GROUP BY snapshot_date, band_sort_key, last_purchase_recency_band
+  )
+  -- Customer-level rows for audiences and joins: SELECT * FROM customer_band
+  SELECT
+    snapshot_date,
+    band_sort_key,
+    last_purchase_recency_band,
+    customers,
+    SUM(customers) OVER (PARTITION BY snapshot_date) AS registered_customers_in_scope,
+    ROUND(100.0 * customers / NULLIF(SUM(customers) OVER (PARTITION BY snapshot_date), 0), 2) AS pct_of_registered_customers,
+    SUM(CASE WHEN band_sort_key <= 4 THEN customers ELSE 0 END) OVER (PARTITION BY snapshot_date) AS active_customers_0_365_days
+  FROM band_counts
+  ORDER BY snapshot_date, band_sort_key;
 
+Calculation Notes: |
+  1️⃣ Calculation: days_since_last_purchase = DATE_DIFF(analysis_date, DATE(last_qualifying_order_placed_at), DAY). Both dates are converted to the store reporting time zone (for example, the Shopify store time zone) before the calendar-day difference is taken, so a customer who ordered on the analysis date is day 0. Elapsed 24-hour periods are not used. Band edges include both ends and do not overlap: "0-30 days" (0 to 30), "31-90 days", "91-180 days", "181-365 days", "366+ days" and "No purchase". Sort keys run 1 to 6 so reports list the bands by recency instead of alphabetically. The input is the Days Since Last Purchase metric, so the band always matches that metric for the same customer and analysis date.
+  2️⃣ Qualifying order: an order placed on any storefront (web, app, or POS stitched to the same customer) with a completed or paid financial status. Recency is based on the order placed timestamp, not the fulfilment, delivery or payment-capture date. Excluded: cancelled, voided and fraud-rejected orders, test and staff orders, unconverted draft orders, and zero-value replacement or warranty re-ship orders. Returned or refunded orders still count, because the customer did buy on that date. Marketplace orders count only when they can be matched to the same customer ID.
+  3️⃣ Customer key and population: the resolved customer ID from the commerce platform or CRM customer master. For merged or de-duplicated accounts, use the latest qualifying order across every source ID. Guest orders are assigned to a customer only through a deterministic match on a verified, hashed email. Unmatched guest orders are left out of the population. "No purchase" applies only to registered accounts with zero qualifying orders, never to anonymous visitors or guests. Accounts removed under GDPR or CCPA erasure requests are taken out of the population and are not left in "No purchase".
+  4️⃣ Point-in-time rule: the band is a snapshot evaluated at the analysis date. It is not stored on the customer record. Trend reports rebuild it for each snapshot date (daily, week-end or month-end) using only orders placed on or before that date. This avoids look-ahead bias, where a later repeat order would move a customer out of a band they really held at the time. Late-arriving orders, such as offline POS uploads or marketplace syncs, restate snapshots within a 3-day reprocessing window. Snapshots older than that are frozen.
+  5️⃣ Configurable thresholds: 30, 90, 180 and 365 days are the documented defaults. They match the standard win-back and lapsed-flow windows and the 12-month active-customer window. Businesses with long natural buying cycles (furniture, appliances, mattresses) may change the edges through governed configuration. Any change requires a version increment, restated history, and band labels that show the new day ranges. Dashboard-level re-cuts are not permitted. The 365-day edge is a fixed day count, not a calendar year, so leap years do not move customers between bands.
+  6️⃣ Guardrail: this is a raw elapsed-time band, not a churn or lifecycle judgment. The union of the four bands from 0-30 to 181-365 must reconcile to the Active Customers count (at least one qualifying order in the trailing 365 days) and to the active base used by Customer Retention Rate. The churn threshold is defined only by Customer Churn Rate. A customer in "181-365 days" is not churned just because of the band. Read the band next to Time Between Purchases, because 120 days without an order is normal for some categories and a warning sign for consumables.
+  7️⃣ Distinction: Customer Status (customer-status) gives rule-based lifecycle labels such as New, Active, At Risk and Churned. RFM Segment (rfm-segment) combines recency with frequency and monetary value, so this band is only one of its three inputs. Purchase Count Band (purchase-count-band) buckets order frequency. None of these may be relabelled or used in place of this dimension. Subscription auto-renewal orders count as qualifying orders by default. Win-back programmes that target discretionary purchases may filter them out using the order-source flag, and must document that filter on the dashboard.
 
+Business Use Case: |
+  1️⃣ CRM and Lifecycle Marketing refresh the band daily in Klaviyo or Shopify segments. When a customer crosses from "31-90 days" into "91-180 days", they enter a three-message win-back flow that starts with personalised replenishment and category recommendations, with no discount. Customers who cross into "181-365 days" get an escalated incentive. Recovery rate (share of customers placing a qualifying order within 30 days of entry) is reported for each band's cohort.
+  2️⃣ Paid Media sync the "0-30 days" band to Google Ads and Meta customer-match lists nightly as a suppression audience for prospecting and discount campaigns. They sync "366+ days" and "No purchase" as re-engagement audiences with separate bids. They cut spend on a re-engagement audience when its return on ad spend falls below the prospecting benchmark for two consecutive weeks.
+  3️⃣ The Head of Retention (Marketing) reviews the month-end distribution of the customer base by band. If the "181-365 days" share grows more than 2 percentage points quarter over quarter, while "0-30 days" and "31-90 days" shrink, they move budget from acquisition to retention. They also brief Merchandising on replenishment ranges and new-arrival drops aimed at the lapsing cohort.
+  4️⃣ Finance uses band shares at quarter end as an input to the repeat-revenue forecast and the Customer Lifetime Value model. Customers in "366+ days" get a reduced expected repeat-order probability. When the shift in band mix moves forecast repeat revenue by more than the agreed tolerance, Finance restates the quarterly retention revenue outlook.
 
+Dependencies:
+  Events: [purchase]
 
+Source Data: Commerce Platform Orders (Shopify / Adobe Commerce) + CRM Customer Master
 
+Report Attributes: |
+  last-purchase-recency-band; customer-status; rfm-segment; purchase-count-band; acquisition-channel; loyalty-tier; country
 
+Dashboard Usage: [Customer Retention & Win-back Performance, Active Customer Base Health, Customer Lifetime Value & Cohort Analysis, Monthly CRM Lifecycle Review]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [customer-status, rfm-segment, purchase-count-band]
 
+Derived Dimensions: [active-customer-flag, lapsed-customer-flag, win-back-eligibility-flag]
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +357,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-15T13:35:29.377+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-15T13:35:40.307+00:00
 
