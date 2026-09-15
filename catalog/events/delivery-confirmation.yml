@@ -1,5 +1,5 @@
 # Event: Delivery Confirmation
-# Generated: 2026-09-14T05:57:22.164Z
+# Generated: 2026-09-15T21:32:50.861Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -7,7 +7,7 @@ Event Name: Delivery Confirmation
 Event Serialization: always
 
 Description: |
-  E-commerce specialisation of Proof of Delivery Confirmation: records the moment a customer order shipment reaches carrier-confirmed "delivered" status, sourced from commerce-platform fulfillment events (e.g. Shopify FulfillmentEvent status = delivered) and carrier tracking webhooks reconciled in the order management system, rather than the signature or photo evidence captured in carrier and freight delivery systems. Because the payload is order- and shipment-level (transaction_id, shipment_id, promised versus actual delivery dates) and the source tables are fulfillment and tracking records, it is the system of record for On-Time Delivery Rate, Days to Delivery and Orders Delivered.
+  E-commerce shipment-level event that specialises the canonical event Proof of Delivery Confirmation (proof-of-delivery-confirmation): records the moment a customer order shipment reaches carrier-confirmed "delivered" status, sourced from commerce-platform fulfillment events (e.g. Shopify FulfillmentEvent status = delivered) and carrier tracking webhooks reconciled in the order management system, rather than the signature or photo evidence captured in carrier and freight delivery systems. Because the payload is order- and shipment-level (transaction_id, shipment_id, promised versus actual delivery dates) and the source tables are fulfillment and tracking records, it is the system of record for Shipment On-Time Delivery Rate, Orders Delivered and Average Delivery Time (fed by the per-shipment Days to Delivery measure).
 
 Category: Operations
 
@@ -31,7 +31,21 @@ Aggregation Window: Event, Daily, Weekly, Monthly
 
 
 Parameters: |
-  {"transaction_id":"string - Order identifier matching the purchase event transaction_id","shipment_id":"string - Unique fulfillment or shipment identifier; deduplication key","customer_id":"string - Pseudonymous customer identifier from the commerce platform","carrier":"string - Carrier name as normalised in the OMS (e.g. UPS, FedEx, USPS, DHL)","tracking_number":"string - Carrier tracking number for the shipment","service_level":"string - Shipping service purchased (e.g. standard, expedited, next_day)","promised_delivery_date":"date - Delivery date promised to the customer at checkout (destination local date)","ship_timestamp":"datetime - UTC timestamp of the first carrier acceptance scan","delivered_timestamp":"datetime - UTC timestamp of the carrier delivered scan","delivery_location_type":"string - Where the parcel was left (e.g. front_door, mailroom, parcel_locker, access_point, neighbour)"}
+  {
+    "transaction_id": "string - Order identifier matching the purchase event transaction_id",
+    "shipment_id": "string - Unique fulfillment or shipment identifier; deduplication key",
+    "customer_id": "string - Pseudonymous customer identifier from the commerce platform",
+    "carrier": "string - Carrier name as normalised in the OMS (e.g. UPS, FedEx, USPS, DHL)",
+    "tracking_number": "string - Carrier tracking number for the shipment",
+    "service_level": "string - Shipping service purchased (e.g. standard, expedited, next_day)",
+    "promised_delivery_date": "date - Delivery date promised to the customer at checkout (destination local date)",
+    "ship_timestamp": "datetime - UTC timestamp of the first carrier acceptance scan",
+    "delivered_timestamp": "datetime - UTC timestamp of the carrier delivered scan",
+    "delivery_location_type": "string - Where the parcel was left (e.g. front_door, mailroom, parcel_locker, access_point, neighbour)",
+    "destination_region": "string - Destination state/province or region code of the shipping address",
+    "fulfillment_location": "string - Warehouse, store or 3PL node that shipped the parcel",
+    "destination_timezone": "string - IANA time zone of the delivery address (e.g. America/Chicago), used to derive the destination local delivered date"
+  }
 
 Calculation Notes: |
   1️⃣ Deduplication: one event per shipment_id. Carriers frequently emit repeated "delivered" scans or re-send webhooks; keep the earliest delivered_timestamp per shipment_id and discard subsequent duplicates, including replays after OMS resyncs.
@@ -49,7 +63,6 @@ Business Use Case: |
   4️⃣ CRM and Lifecycle Marketing team: on receipt of delivery_confirmation they schedule the post-delivery review request and replenishment or cross-sell journey a fixed number of days after delivery rather than after purchase, suppressing sends for flagged reversals.
 
 Dependencies:
-  Events: [purchase]
   Dimensions: [carrier, service-level]
 
 Source Data: Backend Fulfillment Events (Shopify) + OMS / Carrier Tracking Webhooks
@@ -62,13 +75,13 @@ Source Data: Backend Fulfillment Events (Shopify) + OMS / Carrier Tracking Webho
     Segment Eligibility: |
   true
 
-    Related Dimensions: [carrier, service-level, delivery-location-type, promised-delivery-date]
+    Related Dimensions: [carrier, service-level, delivery-location, delivery-promise-date, delivery-region]
 
     Derived Dimensions: [delivery-timeliness-status, delivered-date]
 
-    Derived Metrics: [orders-delivered, days-to-delivery]
+    Derived Metrics: [orders-delivered, average-delivery-time]
 
-    Derived KPIs: [on-time-delivery-rate]
+    Derived KPIs: [shipment-on-time-delivery-rate]
 
     Data Sensitivity: Restricted
 
@@ -82,5 +95,5 @@ Source Data: Backend Fulfillment Events (Shopify) + OMS / Carrier Tracking Webho
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-09-14T05:57:21.644+00:00
+    Last Modified At: 2026-09-15T21:32:50.482+00:00
 
