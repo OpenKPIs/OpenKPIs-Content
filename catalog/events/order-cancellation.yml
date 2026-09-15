@@ -1,5 +1,5 @@
 # Event: Order Cancellation
-# Generated: 2026-09-14T05:57:27.239Z
+# Generated: 2026-09-15T21:35:14.185Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -7,7 +7,7 @@ Event Name: Order Cancellation
 Event Serialization: always
 
 Description: |
-  Fires when an entire e-commerce order is cancelled before any item ships, whether the customer cancels through web or app self-service or the merchant or order management platform cancels it (such as Shopify orders/cancelled or a Salesforce Commerce Cloud order cancel), and is sent as the GA4 recommended refund event (a full refund for the transaction_id) with refund_type = order_cancellation because GA4 has no cancel event. It captures order-level cancellations only, excludes refunds that are not cancellations from this spec's rate, and is distinct from shipment cancellation (voiding a carrier freight booking), post-delivery returns and refunds, and payment declines that never create an order.
+  Fires when an entire e-commerce order is cancelled before any item ships, whether the customer cancels through web or app self-service or the merchant or order management platform cancels it (such as Shopify orders/cancelled or a Salesforce Commerce Cloud order cancel), and is sent as the GA4 recommended refund event (a full refund for the transaction_id) with refund_type = order_cancellation because GA4 has no cancel event. It captures order-level cancellations only and feeds the Order Cancellation Rate KPI; it is distinct from shipment cancellation (voiding a carrier freight booking), post-delivery returns and refunds, and payment declines that never create an order, and refund events without refund_type = order_cancellation are never counted as cancellations.
 
 Category: Operations
 
@@ -31,19 +31,189 @@ Adobe Event: |
   order:cancel
 
 W3 Data Layer: |
-  {"event":[{"eventInfo":{"eventName":"order:cancel","eventAction":"order:cancel","type":"commerce","effect":"order cancelled before shipment","timeStamp":"2026-09-13T10:42:00Z"},"category":{"primaryCategory":"ecommerce"},"attributes":{"refund_type":"order_cancellation","cancel_initiator":"customer","cancellation_reason":"customer_changed_mind","order_status_at_cancel":"awaiting_fulfillment","fulfillment_type":"ship_to_home","payment_type":"credit_card","minutes_since_order":38}}],"transaction":{"transactionID":"ORD-100482","total":{"currency":"USD","shipping":5.99,"transactionTotal":129.97},"attributes":{"tax":8.99,"refund_type":"order_cancellation","cancel_initiator":"customer","cancellation_reason":"customer_changed_mind","order_status_at_cancel":"awaiting_fulfillment","fulfillment_type":"ship_to_home","payment_type":"credit_card","minutes_since_order":38},"item":[{"productInfo":{"productID":"SKU-24817","productName":"Trail Running Shoe"},"category":{"primaryCategory":"Footwear"},"price":{"basePrice":114.99,"currency":"USD"},"quantity":1}]}}
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "order:cancel",
+          "eventAction": "order:cancel",
+          "type": "commerce",
+          "effect": "order cancelled before shipment",
+          "timeStamp": "2026-09-13T10:42:00Z"
+        },
+        "category": {
+          "primaryCategory": "ecommerce"
+        },
+        "attributes": {
+          "refund_type": "order_cancellation",
+          "cancel_initiator": "customer",
+          "cancellation_reason": "customer_changed_mind",
+          "order_status_at_cancel": "awaiting_fulfillment",
+          "fulfillment_type": "ship_to_home",
+          "payment_type": "credit_card",
+          "minutes_since_order": 38
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "ORD-100482",
+      "total": {
+        "currency": "USD",
+        "tax": 8.99,
+        "shipping": 5.99,
+        "transactionTotal": 129.97
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-24817",
+            "productName": "Trail Running Shoe"
+          },
+          "category": {
+            "primaryCategory": "Footwear"
+          },
+          "price": {
+            "basePrice": 114.99,
+            "currency": "USD"
+          },
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
 GA4 Data Layer: |
-  {"event":"refund","ecommerce":{"transaction_id":"ORD-100482","value":129.97,"currency":"USD","tax":8.99,"shipping":5.99,"items":[{"item_id":"SKU-24817","item_name":"Trail Running Shoe","item_category":"Footwear","price":114.99,"quantity":1}]},"refund_type":"order_cancellation","cancel_initiator":"customer","cancellation_reason":"customer_changed_mind","order_status_at_cancel":"awaiting_fulfillment","fulfillment_type":"ship_to_home","payment_type":"credit_card","minutes_since_order":38}
+  {
+    "event": "refund",
+    "ecommerce": {
+      "transaction_id": "ORD-100482",
+      "value": 129.97,
+      "currency": "USD",
+      "tax": 8.99,
+      "shipping": 5.99,
+      "items": [
+        {
+          "item_id": "SKU-24817",
+          "item_name": "Trail Running Shoe",
+          "item_category": "Footwear",
+          "price": 114.99,
+          "quantity": 1
+        }
+      ]
+    },
+    "refund_type": "order_cancellation",
+    "cancel_initiator": "customer",
+    "cancellation_reason": "customer_changed_mind",
+    "order_status_at_cancel": "awaiting_fulfillment",
+    "fulfillment_type": "ship_to_home",
+    "payment_type": "credit_card",
+    "minutes_since_order": 38
+  }
 
 Adobe Client Data Layer: |
-  {"event":"order:cancel","eventInfo":{"eventName":"order:cancel","linkName":"order:cancel","linkType":"o"},"transaction":{"transaction_id":"ORD-100482","value":129.97,"currency":"USD","tax":8.99,"shipping":5.99,"refund_type":"order_cancellation","cancel_initiator":"customer","cancellation_reason":"customer_changed_mind","order_status_at_cancel":"awaiting_fulfillment","fulfillment_type":"ship_to_home","payment_type":"credit_card","minutes_since_order":38,"items":[{"item_id":"SKU-24817","item_name":"Trail Running Shoe","item_category":"Footwear","price":114.99,"quantity":1}]}}
+  {
+    "event": "order:cancel",
+    "eventInfo": {
+      "eventName": "order:cancel"
+    },
+    "transaction": {
+      "transaction_id": "ORD-100482",
+      "value": 129.97,
+      "currency": "USD",
+      "tax": 8.99,
+      "shipping": 5.99,
+      "refund_type": "order_cancellation",
+      "cancel_initiator": "customer",
+      "cancellation_reason": "customer_changed_mind",
+      "order_status_at_cancel": "awaiting_fulfillment",
+      "fulfillment_type": "ship_to_home",
+      "payment_type": "credit_card",
+      "minutes_since_order": 38,
+      "items": [
+        {
+          "item_id": "SKU-24817",
+          "item_name": "Trail Running Shoe",
+          "item_category": "Footwear",
+          "price": 114.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
 XDM Mapping: |
-  {"eventType":"commerce.backofficeOrderCancelled (customer self-service cancels are sent by the Web/Mobile SDK from the order:cancel data layer event (GA4 refund with refund_type = order_cancellation); merchant and system cancels are sent server-side from the OMS via the Edge Network Server API and deduplicated on commerce.order.purchaseID)","commerce":{"order":{"purchaseID":"transaction_id","priceTotal":"value","currencyCode":"currency","taxAmount":"tax","cancelDate":"event timestamp (cancellation time)","payments":[{"paymentType":"payment_type","currencyCode":"currency"}]},"shipping":{"shippingAmount":"shipping"}},"productListItems":[{"SKU":"items[].item_id","name":"items[].item_name","productCategories":[{"categoryName":"items[].item_category"}],"priceTotal":"items[].price * items[].quantity","quantity":"items[].quantity"}],"_tenant":{"orderCancellation":{"refundType":"refund_type","cancelInitiator":"cancel_initiator","cancellationReason":"cancellation_reason","orderStatusAtCancel":"order_status_at_cancel","fulfillmentType":"fulfillment_type","minutesSinceOrder":"minutes_since_order"}},"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"transaction_id","eVar2":"cancel_initiator","eVar3":"cancellation_reason"}}}}}
+  {
+    "eventType": "commerce.backofficeOrderCancelled",
+    "commerce": {
+      "order": {
+        "purchaseID": "transaction_id",
+        "priceTotal": "value",
+        "currencyCode": "currency",
+        "taxAmount": "tax",
+        "cancelDate": "event timestamp (cancellation time)",
+        "payments": [
+          {
+            "paymentType": "payment_type",
+            "currencyCode": "currency"
+          }
+        ]
+      },
+      "shipping": {
+        "shippingAmount": "shipping"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "items[].item_id",
+        "name": "items[].item_name",
+        "productCategories": [
+          {
+            "categoryName": "items[].item_category"
+          }
+        ],
+        "priceTotal": "items[].price * items[].quantity",
+        "quantity": "items[].quantity"
+      }
+    ],
+    "_tenant": {
+      "orderCancellation": {
+        "refundType": "refund_type",
+        "cancelInitiator": "cancel_initiator",
+        "cancellationReason": "cancellation_reason",
+        "orderStatusAtCancel": "order_status_at_cancel",
+        "fulfillmentType": "fulfillment_type",
+        "minutesSinceOrder": "minutes_since_order"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "transaction_id",
+            "eVar2": "cancel_initiator",
+            "eVar3": "cancellation_reason"
+          }
+        }
+      }
+    }
+  }
 
 Parameters: |
-  {"transaction_id":"string - Order identifier matching the transaction_id of the originating purchase event; deduplication and join key","value":"number - Order value cancelled, defined consistently with the purchase event and net of any partial refunds already issued","currency":"string - ISO 4217 currency code of value","tax":"number - Tax amount on the cancelled order","shipping":"number - Shipping amount on the cancelled order","items":"array - Line items on the cancelled order (item_id, item_name, item_category, price, quantity)","refund_type":"string - Refund context; always order_cancellation for this event, separating pre-shipment cancellations from post-delivery refunds and returns sent on the same GA4 refund event","cancel_initiator":"string - Party that initiated the cancellation: customer, merchant or system","cancellation_reason":"string - Normalised reason code, e.g. customer_changed_mind, duplicate_order, out_of_stock, fraud, payment_declined, address_unserviceable, order_edit, other","order_status_at_cancel":"string - Fulfilment status at the moment of cancellation, e.g. pending_payment, processing, awaiting_fulfillment, ready_for_pickup","fulfillment_type":"string - Fulfilment method of the order: ship_to_home, ship_from_store, bopis, curbside, same_day_delivery","payment_type":"string - Payment method used on the order, e.g. credit_card, paypal, bnpl, gift_card","minutes_since_order":"number - Elapsed minutes between order placement and cancellation"}
+  {
+    "transaction_id": "string - Order identifier matching the transaction_id of the originating purchase event; deduplication and join key",
+    "value": "number - Order value cancelled, defined consistently with the purchase event and net of any partial refunds already issued",
+    "currency": "string - ISO 4217 currency code of value",
+    "tax": "number - Tax amount on the cancelled order",
+    "shipping": "number - Shipping amount on the cancelled order",
+    "items": "array - Line items on the cancelled order (item_id, item_name, item_category, price, quantity)",
+    "refund_type": "string - Refund context; always order_cancellation for this event, separating pre-shipment cancellations from post-delivery refunds and returns sent on the same GA4 refund event",
+    "cancel_initiator": "string - Party that initiated the cancellation: customer, merchant or system",
+    "cancellation_reason": "string - Normalised reason code, e.g. customer_changed_mind, duplicate_order, out_of_stock, fraud, payment_declined, address_unserviceable, order_edit, other",
+    "order_status_at_cancel": "string - Fulfilment status at the moment of cancellation, e.g. pending_payment, processing, awaiting_fulfillment, ready_for_pickup",
+    "fulfillment_type": "string - Fulfilment method of the order: ship_to_home, ship_from_store, bopis, curbside, same_day_delivery",
+    "payment_type": "string - Payment method used on the order, e.g. credit_card, paypal, bnpl, gift_card",
+    "minutes_since_order": "number - Elapsed minutes between order placement and cancellation"
+  }
 
 Calculation Notes: |
   1️⃣ Scope: record one GA4 refund event with refund_type = order_cancellation (Adobe order:cancel) per transaction_id when the whole order moves to a cancelled status before any fulfilment line has shipped; partial line-item cancellations and cancellations after shipment (returns to origin, refused deliveries) are excluded and belong to refund / return tracking; refund events without refund_type = order_cancellation are never counted.
@@ -73,9 +243,9 @@ Source Data: Web/App Digital Analytics (GA4) + Order Management (Shopify, Salesf
     Segment Eligibility: |
   true
 
-    Related Dimensions: [fulfillment-type, payment-type, order-status]
+    Related Dimensions: [fulfillment-strategy, payment-method, order-status]
 
-    Derived Dimensions: [cancel-initiator, cancellation-reason]
+    Derived Dimensions: [cancel-initiator, order-cancellation-reason]
 
     Derived Metrics: [orders-cancelled, cancelled-revenue]
 
@@ -93,5 +263,5 @@ Source Data: Web/App Digital Analytics (GA4) + Order Management (Shopify, Salesf
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-09-14T05:57:26.959+00:00
+    Last Modified At: 2026-09-15T21:35:13.845+00:00
 
