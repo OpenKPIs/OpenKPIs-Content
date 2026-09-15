@@ -1,36 +1,928 @@
 # Dimension: Product Category and Sport
-# Generated: 2026-06-09T06:36:48.411Z
+# Generated: 2026-09-15T19:41:56.768Z
 # Contributed by: swapnamagantius
-# Last modified by: swapnamagantius
+# Last modified by: devyendarm
 
 Dimension Name: Product Category and Sport
 
+Description: |
+  Sporting-goods retail specialisation of Item Category: the merchandise category a product belongs to (Footwear, Apparel, Equipment, Accessories) paired with the sport or activity it serves (Running, Soccer, Basketball, Golf), carried on every ecommerce item as item_category and item_category2 and resolved against the governed product information hierarchy. It is the primary lens category managers, planners and marketers use to read demand, conversion and sell-through from list view to purchase, so every item-scoped view, cart and revenue figure reconciles by department and sport across web, app and store.
 
+Category: Monetization
 
+Tags: [dimension, E-commerce: Product Discovery & Merchandising (Search / Filters / PDP)]
 
+Industry: Retail
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Daily, Weekly, Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  view_item
 
+Adobe Event: |
+  productView
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageName": "pdp:footwear:running:mens-cushioned-road-running-shoe",
+          "pageType": "product detail"
+        },
+        "category": {
+          "primaryCategory": "Footwear",
+          "subCategory1": "Running"
+        }
+      },
+      "product": [
+        {
+          "productInfo": {
+            "productID": "SKU-FW-RUN-10482",
+            "sku": "SKU-FW-RUN-10482",
+            "productName": "Men's Cushioned Road Running Shoe",
+            "manufacturer": "Stride Athletics"
+          },
+          "category": {
+            "primaryCategory": "Footwear",
+            "subCategory1": "Running",
+            "subCategory2": "Road Running Shoes",
+            "subCategory3": "Men's",
+            "subCategory4": "Road",
+            "productType": "Road Running Shoes"
+          },
+          "price": {
+            "basePrice": 129.99,
+            "currency": "USD"
+          },
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "view_item",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 129.99,
+      "items": [
+        {
+          "item_id": "SKU-FW-RUN-10482",
+          "item_name": "Men's Cushioned Road Running Shoe",
+          "item_brand": "Stride Athletics",
+          "item_category": "Footwear",
+          "item_category2": "Running",
+          "item_category3": "Road Running Shoes",
+          "item_category4": "Men's",
+          "item_category5": "Road",
+          "item_list_id": "footwear_running",
+          "item_list_name": "Footwear | Running",
+          "index": 0,
+          "price": 129.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "productView",
+    "eventInfo": {
+      "eventName": "productView"
+    },
+    "product": [
+      {
+        "productInfo": {
+          "productID": "SKU-FW-RUN-10482",
+          "sku": "SKU-FW-RUN-10482",
+          "productName": "Men's Cushioned Road Running Shoe",
+          "brand": "Stride Athletics"
+        },
+        "category": {
+          "primaryCategory": "Footwear",
+          "subCategory1": "Running",
+          "subCategory2": "Road Running Shoes",
+          "subCategory3": "Men's",
+          "subCategory4": "Road",
+          "categoryPath": "Footwear/Running"
+        },
+        "price": {
+          "basePrice": 129.99,
+          "currency": "USD"
+        },
+        "quantity": 1
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.productViews",
+    "commerce": {
+      "productViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-FW-RUN-10482",
+        "name": "Men's Cushioned Road Running Shoe",
+        "quantity": 1,
+        "priceTotal": 129.99,
+        "currencyCode": "USD",
+        "productCategories": [
+          {
+            "categoryID": "footwear",
+            "categoryName": "Footwear",
+            "categoryPath": "Footwear"
+          },
+          {
+            "categoryID": "footwear-running",
+            "categoryName": "Running",
+            "categoryPath": "Footwear/Running"
+          }
+        ],
+        "_tenant": {
+          "productHierarchy": {
+            "merchandiseCategory": "Footwear",
+            "sport": "Running",
+            "productClass": "Road Running Shoes",
+            "genderAgeGroup": "Men's",
+            "subDiscipline": "Road",
+            "categorySportPair": "Footwear | Running"
+          }
+        }
+      }
+    ]
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Product Category and Sport: daily item-scoped funnel and item revenue by
+  -- Level 1 merchandise category (item_category) x Level 2 sport (item_category2).
+  -- Grain: event_date x reporting_basis x channel x item_category x item_category2.
+  -- Only item-scoped measures are produced; sessions, users and orders are never split by this dimension.
+  -- Basis: set reporting_basis in params to 'as_was' (pair captured on the event) or 'as_is'
+  -- (current catalog mapping by item_id). The basis is returned on every row.
+  -- Complete days only: the numeric _TABLE_SUFFIX range reads daily export tables and excludes events_intraday_*.
+  -- Day boundaries: GA4 event_date follows the property time zone; POS business_date is the store's local trading day.
+  -- Title-casing: INITCAP lower-cases the rest of each word, so acronyms change (BMX becomes Bmx); take display labels from the catalog's original casing.
+  -- day_lines_missing_fx_rate is always 0 here because the GA4 export already converts item revenue to USD.
+  WITH params AS (
+    SELECT
+      'as_was' AS reporting_basis,
+      DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY) AS start_date,
+      DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY) AS end_date
+  ),
+  
+  -- Effective-dated product hierarchy (SCD Type 2), primary merchandising node only:
+  -- one primary sport per SKU; 'Multi-Sport' only when the catalog has no primary sport.
+  catalog_history AS (
+    SELECT
+      TRIM(item_id) AS item_id,
+      valid_from,
+      COALESCE(valid_to, TIMESTAMP '9999-12-31 00:00:00+00') AS valid_to_excl,
+      valid_to IS NULL AS is_current,
+      COALESCE(is_non_merchandise, FALSE) AS is_non_merchandise,
+      LEFT(INITCAP(REGEXP_REPLACE(TRIM(merchandise_category), r'\s+', ' '), ' -'), 100) AS catalog_l1,
+      LEFT(INITCAP(REGEXP_REPLACE(TRIM(COALESCE(NULLIF(TRIM(primary_sport), ''), 'Multi-Sport')), r'\s+', ' '), ' -'), 100) AS catalog_l2
+    FROM `your-project.pim.product_hierarchy_history`
+    WHERE is_primary_merchandising_node = TRUE
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY TRIM(item_id), valid_from ORDER BY loaded_at DESC) = 1
+  ),
+  
+  catalog_current AS (
+    SELECT item_id, catalog_l1, catalog_l2, is_non_merchandise
+    FROM catalog_history
+    WHERE is_current
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY valid_from DESC) = 1
+  ),
+  
+  -- 150-day scan so refunds in the reporting window can recover the pair from the original purchase.
+  -- Full-order GA4 refunds sent without items[] are dropped by ARRAY_LENGTH(items) > 0, and duplicate refund hits are not de-duplicated.
+  ga4_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS event_ts,
+      event_timestamp,
+      user_pseudo_id,
+      event_name,
+      COALESCE(
+        NULLIF(ecommerce.transaction_id, '(not set)'),
+        (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'transaction_id')
+      ) AS transaction_id,
+      items
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 150 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name IN ('view_item_list', 'select_item', 'view_item', 'add_to_wishlist',
+                         'add_to_cart', 'begin_checkout', 'purchase', 'refund')
+      AND ARRAY_LENGTH(items) > 0
+  ),
+  
+  -- Duplicate purchase hits for the same transaction are counted once.
+  purchase_events AS (
+    SELECT *
+    FROM ga4_events
+    WHERE event_name = 'purchase'
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY COALESCE(transaction_id, CONCAT(user_pseudo_id, '-', CAST(event_timestamp AS STRING)))
+      ORDER BY event_timestamp
+    ) = 1
+  ),
+  
+  funnel_event_rows AS (
+    SELECT * FROM ga4_events WHERE event_name <> 'purchase'
+    UNION ALL
+    SELECT * FROM purchase_events
+  ),
+  
+  -- One row per items[] entry. Captured values are trimmed, whitespace-collapsed, title-cased and capped at 100 chars.
+  -- '(not set)', empty values and breadcrumb / URL-built values ('/', '>', '|', http) are treated as unmapped.
+  item_lines AS (
+    SELECT
+      f.event_date,
+      f.event_ts,
+      f.event_name,
+      f.transaction_id,
+      NULLIF(TRIM(i.item_id), '') AS item_id,
+      CASE
+        WHEN i.item_category IS NULL OR LOWER(TRIM(i.item_category)) IN ('', '(not set)', 'not set', 'undefined', 'null') THEN NULL
+        WHEN REGEXP_CONTAINS(i.item_category, r'[/>|]|https?:') THEN NULL
+        ELSE LEFT(INITCAP(REGEXP_REPLACE(TRIM(i.item_category), r'\s+', ' '), ' -'), 100)
+      END AS captured_l1,
+      CASE
+        WHEN i.item_category2 IS NULL OR LOWER(TRIM(i.item_category2)) IN ('', '(not set)', 'not set', 'undefined', 'null') THEN NULL
+        WHEN REGEXP_CONTAINS(i.item_category2, r'[/>|]|https?:') THEN NULL
+        ELSE LEFT(INITCAP(REGEXP_REPLACE(TRIM(i.item_category2), r'\s+', ' '), ' -'), 100)
+      END AS captured_l2,
+      COALESCE(i.quantity, 0) AS quantity,
+      COALESCE(i.item_revenue_in_usd, 0) AS item_revenue_usd,
+      COALESCE(i.item_refund_in_usd, 0) AS item_refund_usd
+    FROM funnel_event_rows AS f
+    CROSS JOIN UNNEST(f.items) AS i
+  ),
+  
+  -- Pair from the original purchase payload, one row per transaction_id x item_id (no fan-out on the refund join).
+  purchase_pairs AS (
+    SELECT
+      transaction_id,
+      item_id,
+      ARRAY_AGG(STRUCT(captured_l1 AS l1, captured_l2 AS l2, event_ts AS ts) ORDER BY event_ts LIMIT 1)[OFFSET(0)] AS p
+    FROM item_lines
+    WHERE event_name = 'purchase' AND transaction_id IS NOT NULL AND item_id IS NOT NULL
+    GROUP BY transaction_id, item_id
+  ),
+  
+  -- Refunds take the pair and mapping time from the original purchase when it is inside the 150-day scan.
+  -- Otherwise the pair comes from the effective-dated catalog at refund time, because the GA4 refund event carries no order timestamp.
+  digital_lines AS (
+    SELECT
+      l.event_date,
+      'digital' AS channel,
+      l.event_name,
+      l.item_id,
+      IF(l.event_name = 'refund', pp.p.l1, l.captured_l1) AS captured_l1,
+      IF(l.event_name = 'refund', pp.p.l2, l.captured_l2) AS captured_l2,
+      IF(pp.transaction_id IS NOT NULL, pp.p.ts, l.event_ts) AS mapping_ts,
+      l.quantity,
+      l.item_revenue_usd,
+      l.item_refund_usd
+    FROM item_lines AS l
+    LEFT JOIN purchase_pairs AS pp
+      ON l.event_name = 'refund'
+     AND pp.transaction_id = l.transaction_id
+     AND pp.item_id = l.item_id
+    WHERE l.event_date BETWEEN (SELECT start_date FROM params) AND (SELECT end_date FROM params)
+  ),
+  
+  -- Store sales and returns joined on SKU. Returns are mapped at the original sale time.
+  -- BOPIS orders placed online are already counted once from the GA4 purchase, so POS lines carrying an online order id are excluded.
+  pos_lines AS (
+    SELECT
+      s.business_date AS event_date,
+      'store' AS channel,
+      IF(s.line_type = 'return', 'refund', 'purchase') AS event_name,
+      NULLIF(TRIM(s.sku), '') AS item_id,
+      CAST(NULL AS STRING) AS captured_l1,
+      CAST(NULL AS STRING) AS captured_l2,
+      IF(s.line_type = 'return', COALESCE(s.original_sale_ts, s.sale_ts), s.sale_ts) AS mapping_ts,
+      ABS(COALESCE(s.quantity, 0)) AS quantity,
+      IF(s.line_type = 'return', 0, COALESCE(s.net_amount_usd, 0)) AS item_revenue_usd,
+      IF(s.line_type = 'return', ABS(COALESCE(s.net_amount_usd, 0)), 0) AS item_refund_usd
+    FROM `your-project.pos.store_sales_lines` AS s
+    WHERE s.business_date BETWEEN (SELECT start_date FROM params) AND (SELECT end_date FROM params)
+      AND s.online_order_id IS NULL
+  ),
+  
+  all_lines AS (
+    SELECT event_date, channel, event_name, item_id, captured_l1, captured_l2, mapping_ts, quantity, item_revenue_usd, item_refund_usd
+    FROM digital_lines
+    UNION ALL
+    SELECT event_date, channel, event_name, item_id, captured_l1, captured_l2, mapping_ts, quantity, item_revenue_usd, item_refund_usd
+    FROM pos_lines
+  ),
+  
+  joined AS (
+    SELECT
+      a.*,
+      h.catalog_l1 AS eff_l1,
+      h.catalog_l2 AS eff_l2,
+      COALESCE(h.is_non_merchandise, FALSE) OR a.captured_l1 = 'Non-Merchandise' AS eff_non_merch,
+      c.catalog_l1 AS cur_l1,
+      c.catalog_l2 AS cur_l2,
+      COALESCE(c.is_non_merchandise, FALSE) AS cur_non_merch,
+      (a.channel = 'digital' AND (a.captured_l1 IS NULL OR a.captured_l2 IS NULL)) AS collected_unmapped,
+      -- The captured pair is kept unless it is incomplete, or it says 'Multi-Sport' while the catalog holds a primary sport.
+      (a.captured_l1 IS NOT NULL AND a.captured_l2 IS NOT NULL
+        AND NOT (a.captured_l2 = 'Multi-Sport' AND h.catalog_l1 IS NOT NULL AND h.catalog_l2 <> 'Multi-Sport')) AS use_captured
+    FROM all_lines AS a
+    LEFT JOIN catalog_history AS h
+      ON h.item_id = a.item_id
+     AND a.mapping_ts >= h.valid_from
+     AND a.mapping_ts < h.valid_to_excl
+    LEFT JOIN catalog_current AS c
+      ON c.item_id = a.item_id
+  ),
+  
+  resolved AS (
+    SELECT
+      j.*,
+      CASE WHEN j.eff_non_merch THEN 'Non-Merchandise'
+           WHEN j.use_captured THEN j.captured_l1
+           WHEN j.eff_l1 IS NOT NULL THEN j.eff_l1
+           ELSE 'Unmapped' END AS as_was_l1,
+      CASE WHEN j.eff_non_merch THEN 'Services'
+           WHEN j.use_captured THEN j.captured_l2
+           WHEN j.eff_l1 IS NOT NULL THEN j.eff_l2
+           ELSE 'Unmapped' END AS as_was_l2,
+      CASE WHEN j.cur_non_merch THEN 'Non-Merchandise'
+           WHEN j.cur_l1 IS NOT NULL THEN j.cur_l1
+           ELSE 'Unmapped' END AS as_is_l1,
+      CASE WHEN j.cur_non_merch THEN 'Services'
+           WHEN j.cur_l1 IS NOT NULL THEN j.cur_l2
+           ELSE 'Unmapped' END AS as_is_l2
+    FROM joined AS j
+  ),
+  
+  reported AS (
+    SELECT
+      r.event_date,
+      r.channel,
+      r.event_name,
+      r.quantity,
+      r.item_revenue_usd,
+      r.item_refund_usd,
+      r.collected_unmapped,
+      p.reporting_basis,
+      IF(p.reporting_basis = 'as_is', r.as_is_l1, r.as_was_l1) AS item_category,
+      IF(p.reporting_basis = 'as_is', r.as_is_l2, r.as_was_l2) AS item_category2,
+      (r.as_was_l1 <> 'Unmapped' AND (r.as_was_l1 <> r.as_is_l1 OR r.as_was_l2 <> r.as_is_l2)) AS is_reclassified
+    FROM resolved AS r
+    CROSS JOIN params AS p
+  ),
+  
+  daily AS (
+    SELECT
+      event_date,
+      reporting_basis,
+      channel,
+      item_category,
+      item_category2,
+      COUNTIF(event_name = 'view_item_list') AS item_list_impressions,
+      COUNTIF(event_name = 'select_item') AS items_selected,
+      COUNTIF(event_name = 'view_item') AS items_viewed,
+      COUNTIF(event_name = 'add_to_cart') AS item_add_to_cart_lines,
+      SUM(IF(event_name = 'add_to_cart', quantity, 0)) AS items_added_to_cart,
+      SUM(IF(event_name = 'purchase', quantity, 0)) AS items_purchased,
+      SUM(IF(event_name = 'purchase', item_revenue_usd, 0)) AS item_revenue_usd,
+      SUM(IF(event_name = 'refund', quantity, 0)) AS items_refunded,
+      SUM(IF(event_name = 'refund', item_refund_usd, 0)) AS item_refund_usd,
+      SUM(IF(event_name = 'purchase' AND collected_unmapped, item_revenue_usd, 0)) AS collected_unmapped_item_revenue_usd,
+      SUM(IF(event_name = 'purchase' AND is_reclassified, item_revenue_usd, 0)) AS reclassified_item_revenue_usd
+    FROM reported
+    GROUP BY event_date, reporting_basis, channel, item_category, item_category2
+  ),
+  
+  -- Funnel consistency on the raw payload: an item_id is inconsistent when it carries more than one pair
+  -- across view_item_list, select_item, view_item, add_to_wishlist, add_to_cart, begin_checkout, purchase and refund that day.
+  pair_consistency AS (
+    SELECT
+      event_date,
+      COUNT(*) AS item_ids_seen,
+      COUNTIF(distinct_pairs > 1) AS item_ids_with_pair_mismatch
+    FROM (
+      SELECT
+        event_date,
+        item_id,
+        COUNT(DISTINCT CONCAT(IFNULL(captured_l1, '(not set)'), ' | ', IFNULL(captured_l2, '(not set)'))) AS distinct_pairs
+      FROM item_lines
+      WHERE item_id IS NOT NULL
+        AND event_date BETWEEN (SELECT start_date FROM params) AND (SELECT end_date FROM params)
+      GROUP BY event_date, item_id
+    )
+    GROUP BY event_date
+  )
+  
+  SELECT
+    d.event_date,
+    d.reporting_basis,
+    d.channel,
+    d.item_category,
+    d.item_category2,
+    CONCAT(d.item_category, ' | ', d.item_category2) AS category_sport,
+    d.item_category <> 'Non-Merchandise' AS in_category_sell_through,
+    d.item_list_impressions,
+    d.items_selected,
+    d.items_viewed,
+    d.item_add_to_cart_lines,
+    d.items_added_to_cart,
+    d.items_purchased,
+    ROUND(d.item_revenue_usd, 2) AS item_revenue_usd,
+    d.items_refunded,
+    ROUND(d.item_refund_usd, 2) AS item_refund_usd,
+    ROUND(d.item_revenue_usd - d.item_refund_usd, 2) AS net_item_revenue_usd,
+    ROUND(SAFE_DIVIDE(d.item_add_to_cart_lines, d.items_viewed), 4) AS item_view_to_cart_ratio,
+    ROUND(d.reclassified_item_revenue_usd, 2) AS reclassified_item_revenue_usd,
+    ROUND(SAFE_DIVIDE(
+      SUM(IF(d.channel = 'digital', d.collected_unmapped_item_revenue_usd, 0)) OVER (PARTITION BY d.event_date),
+      SUM(IF(d.channel = 'digital', d.item_revenue_usd, 0)) OVER (PARTITION BY d.event_date)
+    ), 4) AS day_collected_unmapped_revenue_share,
+    ROUND(SAFE_DIVIDE(
+      SUM(IF(d.item_category = 'Unmapped', d.item_revenue_usd, 0)) OVER (PARTITION BY d.event_date),
+      SUM(d.item_revenue_usd) OVER (PARTITION BY d.event_date)
+    ), 4) AS day_residual_unmapped_revenue_share,
+    COALESCE(SAFE_DIVIDE(
+      SUM(IF(d.channel = 'digital', d.collected_unmapped_item_revenue_usd, 0)) OVER (PARTITION BY d.event_date),
+      SUM(IF(d.channel = 'digital', d.item_revenue_usd, 0)) OVER (PARTITION BY d.event_date)
+    ), 0) > 0.02
+    OR COALESCE(SAFE_DIVIDE(
+      SUM(IF(d.item_category = 'Unmapped', d.item_revenue_usd, 0)) OVER (PARTITION BY d.event_date),
+      SUM(d.item_revenue_usd) OVER (PARTITION BY d.event_date)
+    ), 0) > 0.02 AS catalog_feed_fix_required,
+    q.item_ids_seen AS day_item_ids_seen,
+    q.item_ids_with_pair_mismatch AS day_item_ids_with_pair_mismatch,
+    ROUND(SAFE_DIVIDE(q.item_ids_with_pair_mismatch, q.item_ids_seen), 4) AS day_pair_mismatch_rate,
+    CAST(0 AS INT64) AS day_lines_missing_fx_rate
+  FROM daily AS d
+  LEFT JOIN pair_consistency AS q
+    ON q.event_date = d.event_date
+  ORDER BY d.event_date, d.channel, item_revenue_usd DESC
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Product Category and Sport: daily item-scoped funnel and item revenue by
+  -- Level 1 merchandise category x Level 2 sport from productListItems[]._tenant.productHierarchy.
+  -- _tenant stands for your organisation's tenant namespace (for example _acmesports).
+  -- productListItems[].productCategories[] is not used because its array order is not guaranteed.
+  -- Grain: event_date x reporting_basis x channel x item_category x item_category2. Item-scoped measures only.
+  -- Basis: set reporting_basis in params to 'as_was' (pair captured on the event) or 'as_is' (current catalog mapping by SKU).
+  -- Complete days only: the window ends at the start of the current UTC day.
+  -- Day boundaries: to_date(timestamp) gives UTC days; POS business_date is the store's local trading day.
+  -- XDM has no standard product-list-impression or product-select event type; unless tenant events are mapped, list impressions and selects are null and the pair-consistency check covers productViews, saveForLaters, productListAdds, checkouts and purchases only.
+  -- Title-casing: initcap lower-cases the rest of each word, so acronyms change (BMX becomes Bmx); take display labels from the catalog's original casing.
+  -- FX: non-USD purchase lines with no daily FX rate contribute 0 revenue; day_lines_missing_fx_rate counts them so the gap is visible.
+  WITH params AS (
+    SELECT
+      'as_was' AS reporting_basis,
+      date_sub(current_date(), 28) AS start_date,
+      date_sub(current_date(), 1) AS end_date
+  ),
+  
+  -- Effective-dated product hierarchy (SCD Type 2), primary merchandising node only:
+  -- one primary sport per SKU; 'Multi-Sport' only when the catalog has no primary sport.
+  catalog_history AS (
+    SELECT item_id, valid_from, valid_to_excl, is_current, is_non_merchandise, catalog_l1, catalog_l2
+    FROM (
+      SELECT
+        trim(h.item_id) AS item_id,
+        h.valid_from,
+        COALESCE(h.valid_to, to_timestamp('9999-12-31 00:00:00')) AS valid_to_excl,
+        h.valid_to IS NULL AS is_current,
+        COALESCE(h.is_non_merchandise, false) AS is_non_merchandise,
+        left(regexp_replace(initcap(regexp_replace(regexp_replace(trim(h.merchandise_category), '[ ]+', ' '), '-', '- ')), '- ', '-'), 100) AS catalog_l1,
+        left(regexp_replace(initcap(regexp_replace(regexp_replace(trim(COALESCE(NULLIF(trim(h.primary_sport), ''), 'Multi-Sport')), '[ ]+', ' '), '-', '- ')), '- ', '-'), 100) AS catalog_l2,
+        ROW_NUMBER() OVER (PARTITION BY trim(h.item_id), h.valid_from ORDER BY h.loaded_at DESC) AS rn
+      FROM aep_pim_product_hierarchy_dataset h
+      WHERE h.is_primary_merchandising_node = true
+    ) ch
+    WHERE ch.rn = 1
+  ),
+  
+  catalog_current AS (
+    SELECT item_id, catalog_l1, catalog_l2, is_non_merchandise
+    FROM (
+      SELECT
+        ch.*,
+        ROW_NUMBER() OVER (PARTITION BY ch.item_id ORDER BY ch.valid_from DESC) AS rn_cur
+      FROM catalog_history ch
+      WHERE ch.is_current
+    ) cc
+    WHERE cc.rn_cur = 1
+  ),
+  
+  -- XDM commerce event types mapped to the unified funnel steps; 150-day read so refunds can recover the purchase-time pair.
+  experience_events AS (
+    SELECT
+      e._id AS event_id,
+      e.timestamp AS event_ts,
+      to_date(e.timestamp) AS event_date,
+      CASE e.eventType
+        WHEN 'commerce.productViews' THEN 'view_item'
+        WHEN 'commerce.saveForLaters' THEN 'add_to_wishlist'
+        WHEN 'commerce.productListAdds' THEN 'add_to_cart'
+        WHEN 'commerce.checkouts' THEN 'begin_checkout'
+        WHEN 'commerce.purchases' THEN 'purchase'
+      END AS event_name,
+      e.commerce.order.purchaseID AS transaction_id,
+      e.commerce.order.currencyCode AS order_currency,
+      e.productListItems AS items
+    FROM aep_web_experience_event_dataset e
+    WHERE e.timestamp >= to_timestamp(date_sub(current_date(), 150))
+      AND e.timestamp < to_timestamp(current_date())
+      AND e.eventType IN ('commerce.productViews', 'commerce.saveForLaters', 'commerce.productListAdds',
+                          'commerce.checkouts', 'commerce.purchases')
+      AND size(e.productListItems) > 0
+  ),
+  
+  -- Duplicate purchase hits for the same order are counted once.
+  purchase_events AS (
+    SELECT event_id, event_ts, event_date, event_name, transaction_id, order_currency, items
+    FROM (
+      SELECT
+        ee.*,
+        ROW_NUMBER() OVER (PARTITION BY COALESCE(ee.transaction_id, ee.event_id) ORDER BY ee.event_ts) AS rn
+      FROM experience_events ee
+      WHERE ee.event_name = 'purchase'
+    ) pe
+    WHERE pe.rn = 1
+  ),
+  
+  funnel_event_rows AS (
+    SELECT event_id, event_ts, event_date, event_name, transaction_id, order_currency, items
+    FROM experience_events
+    WHERE event_name <> 'purchase'
+    UNION ALL
+    SELECT event_id, event_ts, event_date, event_name, transaction_id, order_currency, items
+    FROM purchase_events
+  ),
+  
+  exploded AS (
+    SELECT
+      f.event_date,
+      f.event_ts,
+      f.event_name,
+      f.transaction_id,
+      f.order_currency,
+      explode(f.items) AS pli
+    FROM funnel_event_rows f
+  ),
+  
+  -- One FX rate per rate_date x currency (latest load), so the item-line join cannot multiply lines.
+  fx_rates AS (
+    SELECT rate_date, currency_code, usd_rate
+    FROM (
+      SELECT
+        r.rate_date,
+        r.currency_code,
+        r.usd_rate,
+        ROW_NUMBER() OVER (PARTITION BY r.rate_date, r.currency_code ORDER BY r.loaded_at DESC) AS rn
+      FROM aep_fx_daily_rates_dataset r
+    ) fr
+    WHERE fr.rn = 1
+  ),
+  
+  -- One row per productListItems[] entry. Captured values are trimmed, whitespace-collapsed, title-cased and capped at 100 chars.
+  -- '(not set)', empty values and breadcrumb / URL-built values ('/', '>', '|', http) are treated as unmapped.
+  item_lines AS (
+    SELECT
+      x.event_date,
+      x.event_ts,
+      x.event_name,
+      x.transaction_id,
+      NULLIF(trim(x.pli.SKU), '') AS item_id,
+      CASE
+        WHEN x.pli._tenant.productHierarchy.merchandiseCategory IS NULL
+          OR lower(trim(x.pli._tenant.productHierarchy.merchandiseCategory)) IN ('', '(not set)', 'not set', 'undefined', 'null') THEN NULL
+        WHEN x.pli._tenant.productHierarchy.merchandiseCategory RLIKE '[/>|]|https?:' THEN NULL
+        ELSE left(regexp_replace(initcap(regexp_replace(regexp_replace(trim(x.pli._tenant.productHierarchy.merchandiseCategory), '[ ]+', ' '), '-', '- ')), '- ', '-'), 100)
+      END AS captured_l1,
+      CASE
+        WHEN x.pli._tenant.productHierarchy.sport IS NULL
+          OR lower(trim(x.pli._tenant.productHierarchy.sport)) IN ('', '(not set)', 'not set', 'undefined', 'null') THEN NULL
+        WHEN x.pli._tenant.productHierarchy.sport RLIKE '[/>|]|https?:' THEN NULL
+        ELSE left(regexp_replace(initcap(regexp_replace(regexp_replace(trim(x.pli._tenant.productHierarchy.sport), '[ ]+', ' '), '-', '- ')), '- ', '-'), 100)
+      END AS captured_l2,
+      COALESCE(x.pli.quantity, 0) AS quantity,
+      COALESCE(x.pli.priceTotal, 0)
+        * COALESCE(fx.usd_rate, CASE WHEN COALESCE(x.pli.currencyCode, x.order_currency, 'USD') = 'USD' THEN 1 END) AS line_value_usd
+    FROM exploded x
+    LEFT JOIN fx_rates fx
+      ON fx.rate_date = x.event_date
+     AND fx.currency_code = COALESCE(x.pli.currencyCode, x.order_currency)
+  ),
+  
+  -- Pair from the original purchase payload, one row per order x SKU (no fan-out on the refund join).
+  purchase_pairs AS (
+    SELECT transaction_id, item_id, purchase_l1, purchase_l2, purchase_ts
+    FROM (
+      SELECT
+        il.transaction_id,
+        il.item_id,
+        il.captured_l1 AS purchase_l1,
+        il.captured_l2 AS purchase_l2,
+        il.event_ts AS purchase_ts,
+        ROW_NUMBER() OVER (PARTITION BY il.transaction_id, il.item_id ORDER BY il.event_ts) AS rn
+      FROM item_lines il
+      WHERE il.event_name = 'purchase' AND il.transaction_id IS NOT NULL AND il.item_id IS NOT NULL
+    ) pp
+    WHERE pp.rn = 1
+  ),
+  
+  -- Online refunds come from the commerce order-refund dataset (no standard XDM web refund event) and take the purchase-time pair.
+  -- Outside the 150-day lookback the mapping falls back to order time, else refund time.
+  refund_lines AS (
+    SELECT
+      to_date(r.refund_ts) AS event_date,
+      'digital' AS channel,
+      'refund' AS event_name,
+      NULLIF(trim(r.sku), '') AS item_id,
+      pp.purchase_l1 AS captured_l1,
+      pp.purchase_l2 AS captured_l2,
+      COALESCE(pp.purchase_ts, r.order_ts, r.refund_ts) AS mapping_ts,
+      abs(COALESCE(r.refund_quantity, 0)) AS quantity,
+      CAST(0 AS DOUBLE) AS item_revenue_usd,
+      abs(COALESCE(r.refund_amount_usd, 0)) AS item_refund_usd
+    FROM aep_commerce_order_refunds_dataset r
+    LEFT JOIN purchase_pairs pp
+      ON pp.transaction_id = r.order_id
+     AND pp.item_id = NULLIF(trim(r.sku), '')
+    WHERE r.sales_channel = 'online'
+      AND to_date(r.refund_ts) BETWEEN (SELECT start_date FROM params) AND (SELECT end_date FROM params)
+  ),
+  
+  digital_lines AS (
+    SELECT
+      il.event_date,
+      'digital' AS channel,
+      il.event_name,
+      il.item_id,
+      il.captured_l1,
+      il.captured_l2,
+      il.event_ts AS mapping_ts,
+      il.quantity,
+      CASE WHEN il.event_name = 'purchase' THEN COALESCE(il.line_value_usd, 0) ELSE 0 END AS item_revenue_usd,
+      CAST(0 AS DOUBLE) AS item_refund_usd
+    FROM item_lines il
+    WHERE il.event_date BETWEEN (SELECT start_date FROM params) AND (SELECT end_date FROM params)
+  ),
+  
+  -- Store sales and returns joined on SKU. Returns are mapped at the original sale time.
+  -- BOPIS orders placed online are already counted once from the web purchase, so POS lines carrying an online order id are excluded.
+  pos_lines AS (
+    SELECT
+      s.business_date AS event_date,
+      'store' AS channel,
+      CASE WHEN s.line_type = 'return' THEN 'refund' ELSE 'purchase' END AS event_name,
+      NULLIF(trim(s.sku), '') AS item_id,
+      CAST(NULL AS STRING) AS captured_l1,
+      CAST(NULL AS STRING) AS captured_l2,
+      CASE WHEN s.line_type = 'return' THEN COALESCE(s.original_sale_ts, s.sale_ts) ELSE s.sale_ts END AS mapping_ts,
+      abs(COALESCE(s.quantity, 0)) AS quantity,
+      CASE WHEN s.line_type = 'return' THEN 0 ELSE COALESCE(s.net_amount_usd, 0) END AS item_revenue_usd,
+      CASE WHEN s.line_type = 'return' THEN abs(COALESCE(s.net_amount_usd, 0)) ELSE 0 END AS item_refund_usd
+    FROM aep_pos_store_sales_dataset s
+    WHERE s.business_date BETWEEN (SELECT start_date FROM params) AND (SELECT end_date FROM params)
+      AND s.online_order_id IS NULL
+  ),
+  
+  all_lines AS (
+    SELECT event_date, channel, event_name, item_id, captured_l1, captured_l2, mapping_ts, quantity, item_revenue_usd, item_refund_usd
+    FROM digital_lines
+    UNION ALL
+    SELECT event_date, channel, event_name, item_id, captured_l1, captured_l2, mapping_ts, quantity, item_revenue_usd, item_refund_usd
+    FROM refund_lines
+    UNION ALL
+    SELECT event_date, channel, event_name, item_id, captured_l1, captured_l2, mapping_ts, quantity, item_revenue_usd, item_refund_usd
+    FROM pos_lines
+  ),
+  
+  joined AS (
+    SELECT
+      a.event_date,
+      a.channel,
+      a.event_name,
+      a.captured_l1,
+      a.captured_l2,
+      a.quantity,
+      a.item_revenue_usd,
+      a.item_refund_usd,
+      h.catalog_l1 AS eff_l1,
+      h.catalog_l2 AS eff_l2,
+      (COALESCE(h.is_non_merchandise, false) OR a.captured_l1 = 'Non-Merchandise') AS eff_non_merch,
+      c.catalog_l1 AS cur_l1,
+      c.catalog_l2 AS cur_l2,
+      COALESCE(c.is_non_merchandise, false) AS cur_non_merch,
+      (a.channel = 'digital' AND a.event_name <> 'refund' AND (a.captured_l1 IS NULL OR a.captured_l2 IS NULL)) AS collected_unmapped,
+      -- The captured pair is kept unless it is incomplete, or it says 'Multi-Sport' while the catalog holds a primary sport.
+      (a.captured_l1 IS NOT NULL AND a.captured_l2 IS NOT NULL
+        AND NOT (a.captured_l2 = 'Multi-Sport' AND h.catalog_l1 IS NOT NULL AND COALESCE(h.catalog_l2, '') <> 'Multi-Sport')) AS use_captured
+    FROM all_lines a
+    LEFT JOIN catalog_history h
+      ON h.item_id = a.item_id
+     AND a.mapping_ts >= h.valid_from
+     AND a.mapping_ts < h.valid_to_excl
+    LEFT JOIN catalog_current c
+      ON c.item_id = a.item_id
+  ),
+  
+  resolved AS (
+    SELECT
+      j.*,
+      CASE WHEN j.eff_non_merch THEN 'Non-Merchandise'
+           WHEN j.use_captured THEN j.captured_l1
+           WHEN j.eff_l1 IS NOT NULL THEN j.eff_l1
+           ELSE 'Unmapped' END AS as_was_l1,
+      CASE WHEN j.eff_non_merch THEN 'Services'
+           WHEN j.use_captured THEN j.captured_l2
+           WHEN j.eff_l1 IS NOT NULL THEN j.eff_l2
+           ELSE 'Unmapped' END AS as_was_l2,
+      CASE WHEN j.cur_non_merch THEN 'Non-Merchandise'
+           WHEN j.cur_l1 IS NOT NULL THEN j.cur_l1
+           ELSE 'Unmapped' END AS as_is_l1,
+      CASE WHEN j.cur_non_merch THEN 'Services'
+           WHEN j.cur_l1 IS NOT NULL THEN j.cur_l2
+           ELSE 'Unmapped' END AS as_is_l2
+    FROM joined j
+  ),
+  
+  reported AS (
+    SELECT
+      r.event_date,
+      r.channel,
+      r.event_name,
+      r.quantity,
+      r.item_revenue_usd,
+      r.item_refund_usd,
+      r.collected_unmapped,
+      p.reporting_basis,
+      CASE WHEN p.reporting_basis = 'as_is' THEN r.as_is_l1 ELSE r.as_was_l1 END AS item_category,
+      CASE WHEN p.reporting_basis = 'as_is' THEN r.as_is_l2 ELSE r.as_was_l2 END AS item_category2,
+      (r.as_was_l1 <> 'Unmapped' AND (r.as_was_l1 <> r.as_is_l1 OR r.as_was_l2 <> r.as_is_l2)) AS is_reclassified
+    FROM resolved r
+    CROSS JOIN params p
+  ),
+  
+  daily AS (
+    SELECT
+      event_date,
+      reporting_basis,
+      channel,
+      item_category,
+      item_category2,
+      SUM(CASE WHEN event_name = 'view_item' THEN 1 ELSE 0 END) AS items_viewed,
+      SUM(CASE WHEN event_name = 'add_to_cart' THEN 1 ELSE 0 END) AS item_add_to_cart_lines,
+      SUM(CASE WHEN event_name = 'add_to_cart' THEN quantity ELSE 0 END) AS items_added_to_cart,
+      SUM(CASE WHEN event_name = 'purchase' THEN quantity ELSE 0 END) AS items_purchased,
+      SUM(CASE WHEN event_name = 'purchase' THEN item_revenue_usd ELSE 0 END) AS item_revenue_usd,
+      SUM(CASE WHEN event_name = 'refund' THEN quantity ELSE 0 END) AS items_refunded,
+      SUM(CASE WHEN event_name = 'refund' THEN item_refund_usd ELSE 0 END) AS item_refund_usd,
+      SUM(CASE WHEN event_name = 'purchase' AND collected_unmapped THEN item_revenue_usd ELSE 0 END) AS collected_unmapped_item_revenue_usd,
+      SUM(CASE WHEN event_name = 'purchase' AND is_reclassified THEN item_revenue_usd ELSE 0 END) AS reclassified_item_revenue_usd
+    FROM reported
+    GROUP BY event_date, reporting_basis, channel, item_category, item_category2
+  ),
+  
+  day_totals AS (
+    SELECT
+      event_date,
+      SUM(CASE WHEN channel = 'digital' THEN collected_unmapped_item_revenue_usd ELSE 0 END) AS day_collected_unmapped_usd,
+      SUM(CASE WHEN channel = 'digital' THEN item_revenue_usd ELSE 0 END) AS day_digital_item_revenue_usd,
+      SUM(CASE WHEN item_category = 'Unmapped' THEN item_revenue_usd ELSE 0 END) AS day_residual_unmapped_usd,
+      SUM(item_revenue_usd) AS day_item_revenue_usd
+    FROM daily
+    GROUP BY event_date
+  ),
+  
+  -- Funnel consistency on the raw payload: an SKU is inconsistent when it carries more than one pair
+  -- across the captured funnel events that day.
+  pair_consistency AS (
+    SELECT
+      event_date,
+      COUNT(*) AS item_ids_seen,
+      SUM(CASE WHEN distinct_pairs > 1 THEN 1 ELSE 0 END) AS item_ids_with_pair_mismatch
+    FROM (
+      SELECT
+        il.event_date,
+        il.item_id,
+        COUNT(DISTINCT concat(COALESCE(il.captured_l1, '(not set)'), ' | ', COALESCE(il.captured_l2, '(not set)'))) AS distinct_pairs
+      FROM item_lines il
+      WHERE il.item_id IS NOT NULL
+        AND il.event_date BETWEEN (SELECT start_date FROM params) AND (SELECT end_date FROM params)
+      GROUP BY il.event_date, il.item_id
+    ) ic
+    GROUP BY event_date
+  ),
+  
+  -- Non-USD purchase lines with no FX rate for the day (line_value_usd is null and becomes 0 revenue).
+  fx_gaps AS (
+    SELECT
+      il.event_date,
+      SUM(CASE WHEN il.line_value_usd IS NULL THEN 1 ELSE 0 END) AS lines_missing_fx_rate
+    FROM item_lines il
+    WHERE il.event_name = 'purchase'
+      AND il.event_date BETWEEN (SELECT start_date FROM params) AND (SELECT end_date FROM params)
+    GROUP BY il.event_date
+  )
+  
+  SELECT
+    d.event_date,
+    d.reporting_basis,
+    d.channel,
+    d.item_category,
+    d.item_category2,
+    concat(d.item_category, ' | ', d.item_category2) AS category_sport,
+    d.item_category <> 'Non-Merchandise' AS in_category_sell_through,
+    CAST(NULL AS BIGINT) AS item_list_impressions,
+    CAST(NULL AS BIGINT) AS items_selected,
+    d.items_viewed,
+    d.item_add_to_cart_lines,
+    d.items_added_to_cart,
+    d.items_purchased,
+    round(d.item_revenue_usd, 2) AS item_revenue_usd,
+    d.items_refunded,
+    round(d.item_refund_usd, 2) AS item_refund_usd,
+    round(d.item_revenue_usd - d.item_refund_usd, 2) AS net_item_revenue_usd,
+    round(CASE WHEN d.items_viewed > 0 THEN d.item_add_to_cart_lines / d.items_viewed END, 4) AS item_view_to_cart_ratio,
+    round(d.reclassified_item_revenue_usd, 2) AS reclassified_item_revenue_usd,
+    round(CASE WHEN t.day_digital_item_revenue_usd > 0 THEN t.day_collected_unmapped_usd / t.day_digital_item_revenue_usd END, 4) AS day_collected_unmapped_revenue_share,
+    round(CASE WHEN t.day_item_revenue_usd > 0 THEN t.day_residual_unmapped_usd / t.day_item_revenue_usd END, 4) AS day_residual_unmapped_revenue_share,
+    (COALESCE(CASE WHEN t.day_digital_item_revenue_usd > 0 THEN t.day_collected_unmapped_usd / t.day_digital_item_revenue_usd END, 0) > 0.02
+      OR COALESCE(CASE WHEN t.day_item_revenue_usd > 0 THEN t.day_residual_unmapped_usd / t.day_item_revenue_usd END, 0) > 0.02) AS catalog_feed_fix_required,
+    q.item_ids_seen AS day_item_ids_seen,
+    q.item_ids_with_pair_mismatch AS day_item_ids_with_pair_mismatch,
+    round(CASE WHEN q.item_ids_seen > 0 THEN q.item_ids_with_pair_mismatch / q.item_ids_seen END, 4) AS day_pair_mismatch_rate,
+    COALESCE(g.lines_missing_fx_rate, 0) AS day_lines_missing_fx_rate
+  FROM daily d
+  JOIN day_totals t
+    ON t.event_date = d.event_date
+  LEFT JOIN pair_consistency q
+    ON q.event_date = d.event_date
+  LEFT JOIN fx_gaps g
+    ON g.event_date = d.event_date
+  ORDER BY d.event_date, d.channel, item_revenue_usd DESC
 
+Calculation Notes: |
+  1️⃣ Hierarchy levels: the reported value is item_category (Level 1, merchandise category from the fixed department list) and item_category2 (Level 2, sport or activity from the governed sport list), shown as "Footwear | Running". item_category3 to item_category5 hold product class (Road Running Shoes, Firm-Ground Cleats), gender or age group (Men's, Women's, Kids') and sub-discipline or skill level (Trail, Youth League). They are separate drill-down attributes and are never joined into this value. Each level is capped at 100 characters.
+  2️⃣ Item scope: the value lives on each entry in items[], not on the event. Combine it only with item-scoped measures (items viewed, items added to cart, item quantity, item revenue). Splitting sessions, users or transactions by it counts an order with several category-sport pairs once per pair, so rows add up to more than the site total. Never show a grand total for event-scoped metrics under this breakdown.
+  3️⃣ Multi-sport items: a product used for several sports (cross-trainers, compression base layers, general training bags) gets exactly one primary sport, taken from the primary merchandising node in the product catalog. Secondary sports belong in a separate facet attribute and never create duplicate item rows. "Multi-Sport" is an allowed Level 2 value only when the catalog has no primary sport for that style.
+  4️⃣ Unmapped and non-merchandise lines: when either level is missing, GA4 reports "(not set)". Show it as an explicit "Unmapped" row instead of filtering it out, and backfill it in the warehouse from the catalog by item_id. If unmapped lines exceed 2% of daily item revenue, a catalog-feed fix is required. Gift cards, shipping protection, extended warranties and services such as ski tuning or racquet stringing map to "Non-Merchandise | Services" and are left out of category sell-through.
+  5️⃣ Funnel consistency: for a given item_id, the pair must be identical on view_item_list, select_item, view_item, add_to_wishlist, add_to_cart, begin_checkout, purchase and refund. Values are trimmed and title-cased, and localised storefronts send the canonical English label so it can be translated at presentation time. Monitor the mismatch rate per item_id across events. Values built at runtime from breadcrumbs or URL paths are not accepted.
+  6️⃣ Taxonomy changes over time: the product hierarchy is effective-dated (SCD Type 2 in the product dimension). Every report must state its basis. "As-was" uses the value captured on the event. "As-is" uses the current catalog mapping joined by item_id and is required for year-over-year comparisons after a reclassification, such as moving pickleball from "Equipment | Tennis" to its own sport. Each reclassification is logged with its effective date and the SKUs it affects.
+  7️⃣ Timing and omnichannel: purchase and refund rows keep the pair from the original purchase payload, not the mapping in force when the refund happens. Store sales are joined from POS on SKU and use the same effective-dated mapping. BOPIS and other orders placed online are counted once, from the digital purchase; POS lines carrying an online order id are excluded so digital and store sell-through reconcile without double counting. When the original purchase falls outside the 150-day lookback, the catalog mapping in force at order time is used, or at refund time if the order time is unknown. Report on complete days only (GA4 daily export), because intraday tables can drop late-arriving item parameters.
 
+Business Use Case: |
+  1️⃣ Category managers (Merchandising): in the weekly trading review, if a category-sport pair such as "Footwear | Running" shows an item view-to-cart rate more than 15% below its trailing 8-week baseline, they check size availability, PDP imagery and price position against key competitors, then re-rank the pair's listing pages before the weekend peak.
+  2️⃣ Seasonal campaign team (Marketing): about six weeks before a sport season starts (fall soccer, winter ski, spring baseball), they build audiences of users who viewed but did not buy "Equipment | Soccer" or "Footwear | Soccer" items in the last 30 days, then send them sport-specific email and paid social creative with a matching landing page.
+  3️⃣ Merchandise planners (Merchandising): in season, if online units sold for a category-sport pair run more than 20% ahead of plan while weeks of supply fall below four, they move distribution-center stock to e-commerce fulfillment and speed up the reorder. If sell-through runs more than 20% behind plan at mid-season, they open markdown discussions for that pair.
+  4️⃣ Digital merchandising team (Product): each quarter, they rank sports by select_item share and revenue per list view, then reorder the top-navigation sport menu and home-page sport tiles so that growing activities such as pickleball or trail running get more space.
 
+Dependencies:
+  Events: [product-view, add-to-cart, purchase]
+  Dimensions: [item-category]
 
+Source Data: Digital Analytics (GA4) + Product Catalog (PIM) + POS
 
+Report Attributes: |
+  Item Category (Level 1); Item Category 2 (Sport / Activity); Item Category 3 (Product Class); Item Category 4 (Gender / Age Group); Item Brand; Item Name; Item List Name; Device Category; Session Source / Medium; Fulfillment Method
 
+Dashboard Usage: [Category & Sport Trading Performance, Product Discovery Funnel by Category and Sport, Seasonal Sport Sell-Through vs Plan, Promotion and Campaign Performance by Sport, Product Hierarchy Data Quality Monitor]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [item-category, product-name, promotion-type, inventory-class]
 
+Derived Dimensions: [Sport, Category Sell-Through Eligibility, Reclassified Item Flag]
 
+Data Sensitivity: Internal
+
+Contains PII: No
 
 Status: draft
 
@@ -38,6 +930,7 @@ Contributed By: swapnamagantius
 
 Created At: 2026-06-09T06:36:48.135576+00:00
 
-Last Modified By: swapnamagantius
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-15T19:41:55.869+00:00
 
