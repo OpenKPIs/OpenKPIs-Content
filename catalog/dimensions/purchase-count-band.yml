@@ -1,0 +1,436 @@
+# Dimension: Purchase Count Band
+# Generated: 2026-09-15T13:34:51.048Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Purchase Count Band
+
+Description: |
+  Purchase Count Band groups each customer by their lifetime number of completed orders, meaning orders that were not cancelled and are not test orders, into the default bands 0 (registered, no orders), 1, 2, 3-5 and 6+. It is the standard way to split one-time buyers from repeat buyers in retention, Customer Lifetime Value and CRM segmentation, and it is only a banding of the Orders per Customer count: it is not a New/Returning label (Customer Status), not a basket-size cut (Cart Size Band) and not a score.
+
+Category: Retention
+
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV, retention, repeat-purchase, segmentation]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User, Daily, Weekly, Monthly, Quarterly, Yearly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Purchase Count Band from the backend commerce order tables (not the GA4 events_* export).
+  -- Rebuild daily after order status sync. Timestamps are stored in UTC; order dates use the store reporting time zone.
+  -- evaluation_mode = 'as_of_report_date': one row per customer_key (default mode, band 0 possible, full refunds removed).
+  -- evaluation_mode = 'as_of_order': one row per counted order, count includes the current order; append these rows once per stamp window and never update them.
+  -- Visitors with no customer_key take '(not set)' when this output is joined to behavioural data.
+  WITH params AS (
+    SELECT
+      DATE '2026-09-14' AS report_end_date,
+      DATE '2026-09-14' AS order_stamp_start_date,
+      'America/New_York' AS reporting_tz,
+      ['online_store', 'marketplace', 'pos'] AS channel_scope
+  ),
+  accounts AS (
+    SELECT
+      CAST(c.customer_id AS STRING) AS customer_id,
+      CAST(COALESCE(c.merged_into_customer_id, c.customer_id) AS STRING) AS master_customer_id,
+      LOWER(TRIM(c.email)) AS email_norm,
+      c.email_verified,
+      c.account_state,
+      c.customer_type,
+      c.created_at AS account_created_at
+    FROM `your-project.commerce.customers` AS c
+  ),
+  verified_email_map AS (
+    SELECT email_norm, MIN(master_customer_id) AS master_customer_id
+    FROM accounts
+    WHERE email_verified = TRUE
+      AND email_norm IS NOT NULL
+      AND email_norm != ''
+    GROUP BY email_norm
+  ),
+  eligible_orders AS (
+    -- One row per order_id: split shipments, upsells and order edits stay on the parent order; subscription renewals are their own orders.
+    SELECT
+      o.order_id,
+      o.created_at,
+      DATE(o.created_at, p.reporting_tz) AS order_date,
+      o.merchandise_amount,
+      COALESCE(
+        a.master_customer_id,
+        CAST(o.customer_id AS STRING),
+        vem.master_customer_id,
+        CONCAT('email_sha256:', TO_HEX(SHA256(NULLIF(LOWER(TRIM(o.email)), ''))))
+      ) AS customer_key
+    FROM `your-project.commerce.orders` AS o
+    CROSS JOIN params AS p
+    LEFT JOIN accounts AS a
+      ON a.customer_id = CAST(o.customer_id AS STRING)
+    LEFT JOIN verified_email_map AS vem
+      ON o.customer_id IS NULL
+     AND vem.email_norm = LOWER(TRIM(o.email))
+    WHERE COALESCE(o.is_test, FALSE) = FALSE
+      AND COALESCE(o.is_staff_order, FALSE) = FALSE
+      AND COALESCE(o.order_status, 'unknown') NOT IN ('draft', 'cancelled', 'unknown')
+      AND o.cancelled_at IS NULL
+      AND COALESCE(o.financial_status, 'unknown') != 'voided'
+      AND COALESCE(o.fraud_status, 'not_flagged') != 'declined'
+      AND NOT (COALESCE(o.order_type, 'standard') IN ('exchange_replacement', 'warranty_replacement') AND COALESCE(o.merchandise_amount, 0) = 0)
+      AND o.sales_channel IN UNNEST(p.channel_scope)
+      AND DATE(o.created_at, p.reporting_tz) <= p.report_end_date
+  ),
+  order_refunds AS (
+    SELECT r.order_id, SUM(r.refunded_merchandise_amount) AS refunded_merchandise_amount
+    FROM `your-project.commerce.refunds` AS r
+    CROSS JOIN params AS p
+    WHERE DATE(r.refund_posted_at, p.reporting_tz) <= p.report_end_date
+    GROUP BY r.order_id
+  ),
+  report_date_counts AS (
+    -- Fully refunded orders (100% of merchandise value refunded or returned) are removed; partial refunds still count.
+    SELECT e.customer_key, COUNT(*) AS counted_orders
+    FROM eligible_orders AS e
+    LEFT JOIN order_refunds AS r
+      ON r.order_id = e.order_id
+    WHERE e.customer_key IS NOT NULL
+      AND NOT (e.merchandise_amount > 0 AND COALESCE(r.refunded_merchandise_amount, 0) >= e.merchandise_amount)
+    GROUP BY e.customer_key
+  ),
+  zero_order_population AS (
+    -- Band 0 requires a registered account or a subscribed CRM profile.
+    SELECT DISTINCT a.master_customer_id AS customer_key
+    FROM accounts AS a
+    CROSS JOIN params AS p
+    WHERE a.account_state = 'enabled'
+      AND DATE(a.account_created_at, p.reporting_tz) <= p.report_end_date
+    UNION DISTINCT
+    SELECT COALESCE(vem.master_customer_id, CONCAT('email_sha256:', TO_HEX(SHA256(LOWER(TRIM(cp.email)))))) AS customer_key
+    FROM `your-project.crm.customer_profiles` AS cp
+    CROSS JOIN params AS p
+    LEFT JOIN verified_email_map AS vem
+      ON vem.email_norm = LOWER(TRIM(cp.email))
+    WHERE cp.email_subscription_status = 'subscribed'
+      AND NULLIF(TRIM(cp.email), '') IS NOT NULL
+      AND DATE(cp.subscribed_at, p.reporting_tz) <= p.report_end_date
+  ),
+  customer_population AS (
+    SELECT customer_key FROM zero_order_population
+    UNION DISTINCT
+    SELECT customer_key FROM report_date_counts
+  ),
+  history_coverage AS (
+    SELECT MIN(DATE(o.created_at, p.reporting_tz)) AS earliest_available_order_date
+    FROM `your-project.commerce.orders` AS o
+    CROSS JOIN params AS p
+  ),
+  as_of_order AS (
+    -- Refunds are not applied here: the band is fixed at placement.
+    SELECT
+      customer_key,
+      order_id,
+      created_at,
+      order_date,
+      COUNT(*) OVER (
+        PARTITION BY customer_key
+        ORDER BY created_at, order_id
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS counted_orders
+    FROM eligible_orders
+    WHERE customer_key IS NOT NULL
+  ),
+  banded AS (
+    SELECT
+      'as_of_report_date' AS evaluation_mode,
+      cp.customer_key,
+      CAST(NULL AS STRING) AS order_id,
+      CAST(NULL AS TIMESTAMP) AS order_created_at,
+      COALESCE(rc.counted_orders, 0) AS counted_orders
+    FROM customer_population AS cp
+    LEFT JOIN report_date_counts AS rc
+      ON rc.customer_key = cp.customer_key
+    UNION ALL
+    SELECT
+      'as_of_order' AS evaluation_mode,
+      o.customer_key,
+      CAST(o.order_id AS STRING) AS order_id,
+      o.created_at AS order_created_at,
+      o.counted_orders
+    FROM as_of_order AS o
+    CROSS JOIN params AS p
+    WHERE o.order_date BETWEEN p.order_stamp_start_date AND p.report_end_date
+  )
+  SELECT
+    b.evaluation_mode,
+    p.report_end_date,
+    b.customer_key,
+    COALESCE(acct.customer_type, 'unregistered') AS customer_type,
+    b.order_id,
+    b.order_created_at,
+    b.counted_orders,
+    CASE
+      WHEN b.counted_orders = 0 THEN '0'
+      WHEN b.counted_orders = 1 THEN '1'
+      WHEN b.counted_orders = 2 THEN '2'
+      WHEN b.counted_orders BETWEEN 3 AND 5 THEN '3-5'
+      ELSE '6+'
+    END AS purchase_count_band,
+    CASE
+      WHEN b.counted_orders = 0 THEN 0
+      WHEN b.counted_orders = 1 THEN 1
+      WHEN b.counted_orders = 2 THEN 2
+      WHEN b.counted_orders BETWEEN 3 AND 5 THEN 3
+      ELSE 4
+    END AS band_sort_key,
+    h.earliest_available_order_date,
+    ARRAY_TO_STRING(p.channel_scope, ', ') AS channel_scope
+  FROM banded AS b
+  CROSS JOIN params AS p
+  CROSS JOIN history_coverage AS h
+  LEFT JOIN (
+    SELECT customer_id, customer_type
+    FROM accounts
+    WHERE customer_id = master_customer_id
+  ) AS acct
+    ON acct.customer_id = b.customer_key
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Purchase Count Band from backend commerce datasets ingested into AEP (not web event schemas).
+  -- Rebuild daily after order status sync. Timestamps are stored in UTC; order dates use the store reporting time zone.
+  -- evaluation_mode = 'as_of_report_date': one row per customer_key (default mode, band 0 possible, full refunds removed).
+  -- evaluation_mode = 'as_of_order': one row per counted order, count includes the current order; append these rows once per stamp window and never update them.
+  -- Visitors with no customer_key take '(not set)' when this output is joined to behavioural data.
+  WITH params AS (
+    SELECT
+      to_date('2026-09-14') AS report_end_date,
+      to_date('2026-09-14') AS order_stamp_start_date,
+      'America/New_York' AS reporting_tz,
+      array('online_store', 'marketplace', 'pos') AS channel_scope
+  ),
+  accounts AS (
+    SELECT
+      CAST(c.customer_id AS STRING) AS customer_id,
+      CAST(COALESCE(c.merged_into_customer_id, c.customer_id) AS STRING) AS master_customer_id,
+      lower(trim(c.email)) AS email_norm,
+      c.email_verified,
+      c.account_state,
+      c.customer_type,
+      c.created_at AS account_created_at
+    FROM commerce_customers_dataset AS c
+  ),
+  verified_email_map AS (
+    SELECT email_norm, MIN(master_customer_id) AS master_customer_id
+    FROM accounts
+    WHERE email_verified = TRUE
+      AND email_norm IS NOT NULL
+      AND email_norm != ''
+    GROUP BY email_norm
+  ),
+  eligible_orders AS (
+    -- One row per order_id: split shipments, upsells and order edits stay on the parent order; subscription renewals are their own orders.
+    SELECT
+      o.order_id,
+      o.created_at,
+      to_date(from_utc_timestamp(o.created_at, p.reporting_tz)) AS order_date,
+      o.merchandise_amount,
+      COALESCE(
+        a.master_customer_id,
+        CAST(o.customer_id AS STRING),
+        vem.master_customer_id,
+        concat('email_sha256:', sha2(NULLIF(lower(trim(o.email)), ''), 256))
+      ) AS customer_key
+    FROM commerce_orders_dataset AS o
+    CROSS JOIN params AS p
+    LEFT JOIN accounts AS a
+      ON a.customer_id = CAST(o.customer_id AS STRING)
+    LEFT JOIN verified_email_map AS vem
+      ON o.customer_id IS NULL
+     AND vem.email_norm = lower(trim(o.email))
+    WHERE COALESCE(o.is_test, FALSE) = FALSE
+      AND COALESCE(o.is_staff_order, FALSE) = FALSE
+      AND COALESCE(o.order_status, 'unknown') NOT IN ('draft', 'cancelled', 'unknown')
+      AND o.cancelled_at IS NULL
+      AND COALESCE(o.financial_status, 'unknown') != 'voided'
+      AND COALESCE(o.fraud_status, 'not_flagged') != 'declined'
+      AND NOT (COALESCE(o.order_type, 'standard') IN ('exchange_replacement', 'warranty_replacement') AND COALESCE(o.merchandise_amount, 0) = 0)
+      AND array_contains(p.channel_scope, o.sales_channel)
+      AND to_date(from_utc_timestamp(o.created_at, p.reporting_tz)) <= p.report_end_date
+  ),
+  order_refunds AS (
+    SELECT r.order_id, SUM(r.refunded_merchandise_amount) AS refunded_merchandise_amount
+    FROM commerce_refunds_dataset AS r
+    CROSS JOIN params AS p
+    WHERE to_date(from_utc_timestamp(r.refund_posted_at, p.reporting_tz)) <= p.report_end_date
+    GROUP BY r.order_id
+  ),
+  report_date_counts AS (
+    -- Fully refunded orders (100% of merchandise value refunded or returned) are removed; partial refunds still count.
+    SELECT e.customer_key, COUNT(*) AS counted_orders
+    FROM eligible_orders AS e
+    LEFT JOIN order_refunds AS r
+      ON r.order_id = e.order_id
+    WHERE e.customer_key IS NOT NULL
+      AND NOT (e.merchandise_amount > 0 AND COALESCE(r.refunded_merchandise_amount, 0) >= e.merchandise_amount)
+    GROUP BY e.customer_key
+  ),
+  zero_order_population AS (
+    -- Band 0 requires a registered account or a subscribed CRM profile.
+    SELECT DISTINCT a.master_customer_id AS customer_key
+    FROM accounts AS a
+    CROSS JOIN params AS p
+    WHERE a.account_state = 'enabled'
+      AND to_date(from_utc_timestamp(a.account_created_at, p.reporting_tz)) <= p.report_end_date
+    UNION
+    SELECT COALESCE(vem.master_customer_id, concat('email_sha256:', sha2(lower(trim(cp.email)), 256))) AS customer_key
+    FROM crm_customer_profiles_dataset AS cp
+    CROSS JOIN params AS p
+    LEFT JOIN verified_email_map AS vem
+      ON vem.email_norm = lower(trim(cp.email))
+    WHERE cp.email_subscription_status = 'subscribed'
+      AND NULLIF(trim(cp.email), '') IS NOT NULL
+      AND to_date(from_utc_timestamp(cp.subscribed_at, p.reporting_tz)) <= p.report_end_date
+  ),
+  customer_population AS (
+    SELECT customer_key FROM zero_order_population
+    UNION
+    SELECT customer_key FROM report_date_counts
+  ),
+  history_coverage AS (
+    SELECT MIN(to_date(from_utc_timestamp(o.created_at, p.reporting_tz))) AS earliest_available_order_date
+    FROM commerce_orders_dataset AS o
+    CROSS JOIN params AS p
+  ),
+  as_of_order AS (
+    -- Refunds are not applied here: the band is fixed at placement.
+    SELECT
+      customer_key,
+      order_id,
+      created_at,
+      order_date,
+      COUNT(*) OVER (
+        PARTITION BY customer_key
+        ORDER BY created_at, order_id
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS counted_orders
+    FROM eligible_orders
+    WHERE customer_key IS NOT NULL
+  ),
+  banded AS (
+    SELECT
+      'as_of_report_date' AS evaluation_mode,
+      cp.customer_key,
+      CAST(NULL AS STRING) AS order_id,
+      CAST(NULL AS TIMESTAMP) AS order_created_at,
+      COALESCE(rc.counted_orders, 0) AS counted_orders
+    FROM customer_population AS cp
+    LEFT JOIN report_date_counts AS rc
+      ON rc.customer_key = cp.customer_key
+    UNION ALL
+    SELECT
+      'as_of_order' AS evaluation_mode,
+      o.customer_key,
+      CAST(o.order_id AS STRING) AS order_id,
+      o.created_at AS order_created_at,
+      o.counted_orders
+    FROM as_of_order AS o
+    CROSS JOIN params AS p
+    WHERE o.order_date BETWEEN p.order_stamp_start_date AND p.report_end_date
+  )
+  SELECT
+    b.evaluation_mode,
+    p.report_end_date,
+    b.customer_key,
+    COALESCE(acct.customer_type, 'unregistered') AS customer_type,
+    b.order_id,
+    b.order_created_at,
+    b.counted_orders,
+    CASE
+      WHEN b.counted_orders = 0 THEN '0'
+      WHEN b.counted_orders = 1 THEN '1'
+      WHEN b.counted_orders = 2 THEN '2'
+      WHEN b.counted_orders BETWEEN 3 AND 5 THEN '3-5'
+      ELSE '6+'
+    END AS purchase_count_band,
+    CASE
+      WHEN b.counted_orders = 0 THEN 0
+      WHEN b.counted_orders = 1 THEN 1
+      WHEN b.counted_orders = 2 THEN 2
+      WHEN b.counted_orders BETWEEN 3 AND 5 THEN 3
+      ELSE 4
+    END AS band_sort_key,
+    h.earliest_available_order_date,
+    array_join(p.channel_scope, ', ') AS channel_scope
+  FROM banded AS b
+  CROSS JOIN params AS p
+  CROSS JOIN history_coverage AS h
+  LEFT JOIN (
+    SELECT customer_id, customer_type
+    FROM accounts
+    WHERE customer_id = master_customer_id
+  ) AS acct
+    ON acct.customer_id = b.customer_key
+
+Calculation Notes: |
+  1️⃣ Counted order = an order record in the commerce platform's order tables (Shopify orders, Adobe Commerce sales_order, Salesforce Commerce order history) that is placed and not cancelled, voided or fraud-declined, excluding test orders, staff or internal orders, draft orders that were never completed, and $0 replacement orders created by exchanges or warranty claims. A split shipment, a post-purchase upsell added to an existing order, or an order edit is still one order. Each subscription renewal that creates its own order counts as a separate order. Band labels are "0", "1", "2", "3-5", "6+" with inclusive integer edges and a sort key from 0 to 4, so reports list them by count and not alphabetically.
+  2️⃣ There are two evaluation modes, and every report must say which one it uses. DEFAULT is as-of-report-date: the band is set from the customer's counted orders placed up to the end of the reporting period and sits on the customer record. Use it for customer-level cuts, audience building and Shopify-style segment filters (number_of_orders). The alternative is as-of-order: the band is set from the count including the current order, ordered by created_at with order ID as the tie-breaker, and stamped on the order row. Use it for order-level slicing, so a customer's first order always falls in "1" and their second in "2". Band "0" only exists in as-of-report-date mode.
+  3️⃣ Refund treatment: an order that is fully refunded, meaning 100% of its merchandise value refunded or returned, is removed from the as-of-report-date count once the refund is posted. Partially refunded orders still count. The as-of-order band is fixed when the order is placed and is never restated after later refunds, cancellations or chargebacks, so historical order-level reports do not move. The difference between the two modes is expected, and it is also why this count can be lower than Shopify's native number_of_orders, which includes refunded orders.
+  4️⃣ Customers are keyed on the commerce platform customer ID. Guest-checkout orders are attached to that ID by verified, normalised email (lowercased and trimmed), and records combined by an account merge keep one combined order history. Guest orders that match no account are banded on a hashed-email customer key and never on a device or cookie ID, so this dimension is not fed from client-side purchase hits. Band "0" requires a registered account or subscribed profile with no counted orders. Anonymous visitors are "(not set)".
+  5️⃣ Band edges can be configured to fit purchase frequency (for example 1 / 2 / 3 / 4+ for consumables, or 1 / 2+ only for durables), but the break between 1 and 2+ is fixed in every configuration. It matches the Shopify definition of a returning customer (more than one order) and the denominators of Repeat Purchase Rate and Second-Purchase Conversion Rate. Changing the edges requires a version increment and a restatement of historical reports. Dashboards may not re-cut the bands on their own.
+  6️⃣ Lifetime means the full order history kept in the order tables, including orders imported from a replatforming migration. When history is truncated, the earliest available order date must appear on the report, because truncation understates the bands. Online store, marketplace and POS orders are counted only when they resolve to the same customer ID, and the channel scope must be stated. Order dates use the store's reporting time zone. The as-of-report-date band is rebuilt daily after order status sync, and it can change for up to the refund window (typically 30 days) as full refunds post.
+  7️⃣ Keep this dimension separate from related concepts. Customer Status (customer-status) is a relationship label based on the session or period. Cart Size Band (cart-size-band) counts units per cart, not orders per customer. Orders per Customer is the numeric metric that this dimension groups into bands, and Purchase Frequency averages that metric over a time window. Wholesale, B2B and reseller accounts should be filtered or segmented out before you read the 6+ band as consumer loyalty.
+
+Business Use Case: |
+  1️⃣ The CRM and Lifecycle Marketing team triggers its second-purchase journey from Purchase Count Band. When a customer is still in band "1" 21 days after the first order (or at the category's median repurchase interval), they receive a replenishment or cross-sell offer. Weekly movement from "1" to "2" is tracked as Second-Purchase Conversion Rate, and incentives stay off for customers already in "2" or higher.
+  2️⃣ Every month, Finance and the retention analytics lead report Customer Lifetime Value and Customer Retention Rate by band. When the share of customers in band "1" rises more than 2 percentage points above the trailing 12-month average, the CAC payback model is recalculated with lower repeat assumptions, and acquisition budget for channels that bring in one-time buyers is flagged for review.
+  3️⃣ Loyalty programme managers set tier entry and rewards on band edges, for example early-access perks at "3-5" and VIP service at "6+". Tier sizes are reviewed each quarter, and the thresholds are changed through a spec version change when a tier holds more than its planned share of the active base.
+  4️⃣ Paid Media builds suppression and value-based lookalike audiences from the as-of-report-date band and uploads them daily. Band "6+" is excluded from prospecting and discount campaigns, and bands "2" and "3-5" seed lookalike audiences. Order-level ROAS is split by as-of-order band to show how much attributed revenue comes from repeat buyers.
+
+Dependencies:
+  Events: [purchase]
+
+Source Data: Commerce Order Management (Shopify / Adobe Commerce orders) + CRM Customer Profile (Klaviyo / Salesforce)
+
+Report Attributes: |
+  purchase-count-band; customer-status; acquisition-cohort; last-purchase-recency-band; rfm-segment; acquisition-channel; sales-channel; country
+
+Dashboard Usage: [Customer Retention & Repeat Purchase, Customer Lifetime Value by Segment, CRM Lifecycle Journey Performance, Loyalty Programme Tier Health, Monthly E-commerce Customer Base Review]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [customer-status, cart-size-band, rfm-segment, acquisition-cohort, last-purchase-recency-band]
+
+Derived Dimensions: [repeat-customer-flag, one-time-vs-repeat-buyer]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-15T13:34:40.002+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-15T13:34:50.641+00:00
+
