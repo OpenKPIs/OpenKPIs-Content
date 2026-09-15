@@ -1,153 +1,909 @@
 # Dimension: Customer Status
-# Generated: 2026-06-14T00:33:43.905Z
+# Generated: 2026-09-15T22:58:55.686Z
 # Contributed by: swapnamagantius
 # Last modified by: devyendarm
 
 Dimension Name: Customer Status
 
 Description: |
-  Customer Status represents the shopper’s relationship and lifecycle stage within the customer journey, ranging from Prospect and New to Active, Returning, Churned, and Reactivated.
+  Customer Status classifies each resolvable shopper into a single, mutually exclusive lifecycle stage — prospect, guest, new, returning, lapsing, churned or reactivated — determined from CRM and order-management purchase history rather than from device-based new/returning signals. It is the primary segmentation key for retention reporting: stamped onto digital behaviour, it allows conversion, order value, loyalty engagement and support demand to be read separately for every stage of the customer relationship.
 
 Category: Retention
 
+Tags: [dimension, E-commerce: Customer Lifecycle & Retention Analytics]
 
-Industry: Retail, E-commerce
+Industry: E-commerce
 
 Priority: High
 
-Core Area: Digital Analytics
+Core Area: Engagement
 
 Scope: User
 
 Data Type: string
 
-Aggregation Window: Event, Session, User, Daily, Weekly, Monthly, Quarterly, Yearly
+Aggregation Window: Event, Session, User, Daily, Monthly, Quarterly
 
 GA4 Event: |
-  user_property.customer_status
+  login
 
+Adobe Event: |
+  customerLogin
 
 W3 Data Layer: |
   {
-    "event": "customer_status_available",
-    "customer": {
-      "id": "C123456",
-      "status": "returning_customer",
-      "firstPurchaseDate": "2024-02-15",
-      "lastPurchaseDate": "2025-06-01",
-      "purchaseCount": 7,
-      "subscriptionStatus": "inactive"
+    "digitalData": {
+      "pageInstanceID": "www.example-shop.com:prod:account-dashboard",
+      "page": {
+        "pageInfo": {
+          "pageID": "account-dashboard",
+          "pageName": "Account Dashboard",
+          "destinationURL": "https://www.example-shop.com/account",
+          "sysEnv": "production",
+          "language": "en-US"
+        },
+        "category": {
+          "primaryCategory": "Account",
+          "subCategory1": "Authentication"
+        }
+      },
+      "user": [
+        {
+          "segment": {
+            "customerStatus": "returning_customer",
+            "customerStatusEvaluationDate": "2025-09-15",
+            "customerStatusSource": "crm_order_management",
+            "loyaltyTier": "silver",
+            "acquisitionCohort": "2024-02"
+          },
+          "profile": [
+            {
+              "profileInfo": {
+                "profileID": "C123456",
+                "userName": "returning_customer_C123456",
+                "type": "registered",
+                "authenticatedState": "authenticated",
+                "loginMethod": "email"
+              },
+              "attributes": {
+                "customerStatus": "returning_customer",
+                "firstPurchaseDate": "2024-02-15",
+                "lastPurchaseDate": "2025-06-01",
+                "daysSinceLastPurchase": 106,
+                "lifetimePurchaseCount": 7,
+                "subscriptionStatus": "inactive",
+                "analyticsConsent": "granted"
+              }
+            }
+          ]
+        }
+      ],
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "login",
+            "eventAction": "customerLogin",
+            "type": "authentication",
+            "timeStamp": "2025-09-15T14:32:10.000Z"
+          },
+          "attributes": {
+            "method": "email",
+            "customerStatus": "returning_customer",
+            "customerStatusAtEvent": "returning_customer"
+          },
+          "category": {
+            "primaryCategory": "Account"
+          }
+        }
+      ]
     }
   }
 
 GA4 Data Layer: |
   {
-    "event": "customer_status_available",
+    "event": "login",
+    "method": "email",
+    "user_id": "C123456",
     "customer_status": "returning_customer",
-    "customer_id": "C123456",
-    "first_purchase_date": "2024-02-15",
-    "last_purchase_date": "2025-06-01",
-    "purchase_count": 7,
-    "subscription_status": "inactive"
+    "user_properties": {
+      "customer_status": "returning_customer",
+      "customer_status_source": "crm_order_management",
+      "customer_status_evaluation_date": "2025-09-15",
+      "first_purchase_date": "2024-02-15",
+      "last_purchase_date": "2025-06-01",
+      "days_since_last_purchase": 106,
+      "lifetime_purchase_count": 7,
+      "subscription_status": "inactive",
+      "loyalty_tier": "silver",
+      "acquisition_cohort": "2024-02"
+    }
   }
 
 Adobe Client Data Layer: |
   {
-    "event": "customer_status_available",
-    "customer": {
-      "customerID": "C123456",
-      "customerStatus": "returning_customer",
-      "firstPurchaseDate": "2024-02-15",
-      "lastPurchaseDate": "2025-06-01",
-      "purchaseCount": 7,
-      "subscriptionStatus": "inactive"
+    "event": "login",
+    "eventInfo": {
+      "eventName": "login",
+      "eventAction": "customerLogin",
+      "timestamp": "2025-09-15T14:32:10.000Z",
+      "path": "user.profile"
+    },
+    "user": {
+      "profile": {
+        "profileInfo": {
+          "profileID": "C123456",
+          "authenticatedState": "authenticated",
+          "loginMethod": "email"
+        },
+        "attributes": {
+          "customerStatus": "returning_customer",
+          "customerStatusSource": "crm_order_management",
+          "customerStatusEvaluationDate": "2025-09-15",
+          "firstPurchaseDate": "2024-02-15",
+          "lastPurchaseDate": "2025-06-01",
+          "daysSinceLastPurchase": 106,
+          "lifetimePurchaseCount": 7,
+          "subscriptionStatus": "inactive",
+          "loyaltyTier": "silver",
+          "acquisitionCohort": "2024-02",
+          "analyticsConsent": "granted"
+        }
+      }
     }
   }
 
 XDM Mapping: |
   {
-    "xdm:identityMap": {
-      "customerId": [
+    "eventType": "userAccount.login",
+    "timestamp": "2025-09-15T14:32:10.000Z",
+    "identityMap": {
+      "CRMID": [
         {
           "id": "C123456",
           "authenticatedState": "authenticated",
           "primary": true
         }
+      ],
+      "ECID": [
+        {
+          "id": "79856793756486514236784321987654321",
+          "authenticatedState": "authenticated",
+          "primary": false
+        }
       ]
     },
-    "xdm:person": {
-      "customFields": {
+    "web": {
+      "webPageDetails": {
+        "name": "Account Dashboard",
+        "URL": "https://www.example-shop.com/account"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar17": "returning_customer",
+            "eVar18": "silver"
+          }
+        }
+      }
+    },
+    "_tenant": {
+      "customerProfile": {
         "customerStatus": "returning_customer",
+        "customerStatusSource": "crm_order_management",
+        "customerStatusEvaluationDate": "2025-09-15",
         "firstPurchaseDate": "2024-02-15",
         "lastPurchaseDate": "2025-06-01",
-        "purchaseCount": 7,
-        "subscriptionStatus": "inactive"
+        "daysSinceLastPurchase": 106,
+        "lifetimePurchaseCount": 7,
+        "subscriptionStatus": "inactive",
+        "loyaltyTier": "silver",
+        "acquisitionCohort": "2024-02",
+        "loginMethod": "email",
+        "analyticsConsent": "granted"
       }
     }
   }
 
-SQL Query: |
-  WITH customer_history AS (
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Customer Status: one mutually exclusive lifecycle stage per event, resolved from
+  -- CRM / order-management purchase history (never from device-based new vs returning).
+  -- Grain: one row per GA4 event. Status is evaluated AS OF the event date - only orders placed on or
+  -- before that date are visible - so the value stamped on an event is immutable (calculation_notes 5).
+  -- Precedence (calculation_notes 2): new (first paid relationship in window) > reactivated >
+  --   active subscription > churned > lapsing > returning (repeat, or single order 91-180 days) >
+  --   prospect > guest; 'unknown' only where identity resolution itself failed (calculation_notes 1).
+  WITH thresholds AS (
     SELECT
-      customer_id,
-      MIN(order_date) AS first_purchase_date,
-      MAX(order_date) AS last_purchase_date,
-      COUNT(DISTINCT order_id) AS purchase_count
-    FROM orders
-    WHERE order_status = 'completed'
-    GROUP BY customer_id
-  ), subscription_history AS (
+      90  AS new_window_days,         -- new: first paid relationship within the trailing 90 days
+      180 AS returning_window_days,   -- returning: last net order within 180 days
+      365 AS lapsing_ceiling_days,    -- lapsing: 181-365 days since last order
+      365 AS dormancy_days,           -- churned: more than 365 days with no order
+      90  AS reactivation_hold_days,  -- reactivated: order after 365+ dormant days, held 90 days
+      1800 AS session_timeout_seconds
+  ),
+  
+  -- Event stream for the reporting window. event_params and user_properties are pivoted with
+  -- MAX(IF(key = '...')) so no row is filtered on two different keys at once.
+  event_base AS (
     SELECT
-      customer_id,
+      CONCAT(
+        e.user_pseudo_id, '.',
+        CAST(e.event_timestamp AS STRING), '.',
+        e.event_name, '.',
+        CAST(COALESCE(e.event_bundle_sequence_id, 0) AS STRING)
+      ) AS event_key,
+      TIMESTAMP_MICROS(e.event_timestamp) AS event_timestamp,
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      e.event_name,
+      e.user_pseudo_id,
+      NULLIF(TRIM(COALESCE(e.user_id, '')), '') AS event_user_id,
+      COALESCE(e.privacy_info.analytics_storage, 'Unset') AS analytics_storage_consent,
+      e.device.category AS device_category,
+      e.geo.country AS country_region,
+      e.traffic_source.source AS traffic_source,
+      e.traffic_source.medium AS traffic_medium,
+      e.collected_traffic_source.gclid AS click_identifier,
+      MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+      MAX(IF(ep.key = 'shipping_tier', ep.value.string_value, NULL)) AS event_fulfillment_type,
+      MAX(IF(up.key = 'customer_status', up.value.string_value, NULL)) AS stamped_customer_status,
+      MAX(IF(up.key = 'customer_status_source', up.value.string_value, NULL)) AS stamped_status_source,
+      MAX(IF(up.key = 'loyalty_tier', up.value.string_value, NULL)) AS loyalty_tier,
+      MAX(IF(up.key = 'acquisition_cohort', up.value.string_value, NULL)) AS acquisition_cohort
+    FROM `your-project.analytics_123456789.events_*` AS e
+    LEFT JOIN UNNEST(e.event_params) AS ep
+    LEFT JOIN UNNEST(e.user_properties) AS up
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+    GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+  ),
+  
+  -- Net paid order history read straight from the order-management system at ORDER grain, UNBOUNDED in
+  -- time on purpose: sourcing last_order_date from a trailing digital window would hide every customer
+  -- whose last order is older than that window, making churned_customer unreachable and mislabelling a
+  -- long-dormant reactivation as new. Cancelled, refunded, fraud-flagged, test and internal orders are
+  -- excluded before the ladder runs (calculation_notes 6).
+  order_history AS (
+    SELECT
+      o.customer_id AS customer_key,
+      o.order_id,
+      o.order_date,
+      COALESCE(o.order_status, 'completed') AS order_status,
+      o.fulfillment_type,
+      o.primary_item_category
+    FROM `your-project.crm.orders` AS o
+    WHERE LOWER(COALESCE(o.order_status, 'completed'))
+          NOT IN ('cancelled', 'canceled', 'refunded', 'fraud', 'chargeback', 'test')
+      AND COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_internal_account, FALSE) = FALSE
+      AND o.customer_id IS NOT NULL
+      AND o.order_date <= CURRENT_DATE()
+  ),
+  
+  -- CRM customer master: the system of record for identity. A key asserted by a device that matches no
+  -- customer record here is an identity-resolution failure ('unknown'), not a prospect.
+  customer_master AS (
+    SELECT c.customer_id AS customer_key
+    FROM `your-project.crm.customers` AS c
+    WHERE COALESCE(c.is_employee_or_test_account, FALSE) = FALSE
+  ),
+  
+  -- Guest checkouts back-stitched on order-email match: a device inherits the CRM key of the order it
+  -- placed even when it never authenticated.
+  device_order_link AS (
+    SELECT DISTINCT
+      e.user_pseudo_id,
+      o.customer_id AS customer_key
+    FROM `your-project.analytics_123456789.events_*` AS e
+    JOIN `your-project.crm.orders` AS o
+      ON o.order_id = e.ecommerce.transaction_id
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 730 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name = 'purchase'
+      AND e.ecommerce.transaction_id IS NOT NULL
+      AND o.customer_id IS NOT NULL
+  ),
+  
+  -- Identity resolution. asserted_customer_key is what the device claims; customer_key is that claim
+  -- confirmed against the CRM master, and identity_resolution_failed marks a claim that does not resolve.
+  -- Consent gate: a missing analytics_storage flag defaults to granted - the same default as the AEP
+  -- build's COALESCE(analytics_consent, 'granted') - and any explicit non-granted value drops the key.
+  device_identity AS (
+    SELECT
+      d.user_pseudo_id,
+      d.asserted_customer_key,
+      cm.customer_key,
+      IF(d.asserted_customer_key IS NOT NULL AND cm.customer_key IS NULL, 1, 0) AS identity_resolution_failed
+    FROM (
+      SELECT
+        user_pseudo_id,
+        MAX(asserted_customer_key) AS asserted_customer_key
+      FROM (
+        SELECT
+          user_pseudo_id,
+          IF(COALESCE(NULLIF(analytics_storage_consent, 'Unset'), 'Yes') = 'Yes', event_user_id, NULL) AS asserted_customer_key
+        FROM event_base
+        UNION ALL
+        SELECT user_pseudo_id, customer_key
+        FROM device_order_link
+        WHERE user_pseudo_id IS NOT NULL
+      )
+      WHERE user_pseudo_id IS NOT NULL
+      GROUP BY user_pseudo_id
+    ) AS d
+    LEFT JOIN customer_master AS cm ON cm.customer_key = d.asserted_customer_key
+  ),
+  
+  -- Marketable lead identifiers for devices with no resolvable customer key. The unified events map
+  -- one-for-one onto the XDM eventTypes used by the AEP build: generate_lead / subscribe ->
+  -- leadOperation.newLead, sign_up -> userAccount.createProfile, submit_form -> web.formFilledOut.
+  lead_signals AS (
+    SELECT
+      user_pseudo_id,
+      MAX(IF(event_name IN ('generate_lead', 'sign_up', 'subscribe', 'submit_form'), 1, 0)) AS has_lead_event,
+      MAX(IF(click_identifier IS NOT NULL, 1, 0)) AS has_click_identifier
+    FROM event_base
+    GROUP BY user_pseudo_id
+  ),
+  
+  -- One evaluation key per resolved customer per event date: the as-of dates the ladder must run for.
+  evaluation_keys AS (
+    SELECT DISTINCT
+      di.customer_key,
+      eb.event_date
+    FROM event_base AS eb
+    JOIN device_identity AS di ON di.user_pseudo_id = eb.user_pseudo_id
+    WHERE di.customer_key IS NOT NULL
+  ),
+  
+  -- As-of-event-date order history: only orders placed ON OR BEFORE the event date are visible, so a
+  -- later purchase can never back-date new_customer or reactivated_customer onto an earlier event and
+  -- every recency difference stays non-negative (calculation_notes 5).
+  asof_orders AS (
+    SELECT
+      k.customer_key,
+      k.event_date,
+      o.order_id,
+      o.order_date,
+      o.order_status,
+      o.fulfillment_type,
+      o.primary_item_category,
+      ROW_NUMBER() OVER (
+        PARTITION BY k.customer_key, k.event_date
+        ORDER BY o.order_date DESC, o.order_id DESC
+      ) AS recency_rank
+    FROM evaluation_keys AS k
+    JOIN order_history AS o
+      ON o.customer_key = k.customer_key
+     AND o.order_date <= k.event_date
+  ),
+  
+  customer_history AS (
+    SELECT
+      customer_key,
+      event_date,
+      MIN(order_date) AS first_order_date,
+      MAX(order_date) AS last_order_date,
+      COUNT(DISTINCT order_id) AS order_count,
+      -- Dormant gap that preceded the latest order as of this date (NULL for a single-order customer).
+      DATE_DIFF(
+        MAX(IF(recency_rank = 1, order_date, NULL)),
+        MAX(IF(recency_rank = 2, order_date, NULL)),
+        DAY
+      ) AS latest_order_gap_days,
+      MAX(IF(recency_rank = 1, order_status, NULL)) AS last_order_status,
+      MAX(IF(recency_rank = 1, fulfillment_type, NULL)) AS last_order_fulfillment_type,
+      MAX(IF(recency_rank = 1, primary_item_category, NULL)) AS last_order_item_category
+    FROM asof_orders
+    GROUP BY customer_key, event_date
+  ),
+  
+  -- Subscription state from the order-management system. The active window is compared to the event
+  -- date in the ladder, so a status stamped on a historical event is never re-keyed to today's state.
+  subscription_state AS (
+    SELECT
+      customer_id AS customer_key,
+      MAX(IF(LOWER(subscription_status) = 'active', 1, 0)) AS has_active_subscription,
+      MIN(IF(LOWER(subscription_status) = 'active', valid_from_date, NULL)) AS active_from_date,
+      MAX(IF(LOWER(subscription_status) = 'active', COALESCE(valid_to_date, DATE '9999-12-31'), NULL)) AS active_to_date,
       MAX(subscription_status) AS subscription_status
-    FROM subscriptions
+    FROM `your-project.crm.subscriptions`
     GROUP BY customer_id
+  ),
+  
+  resolved AS (
+    SELECT
+      eb.event_key,
+      eb.event_timestamp,
+      eb.event_date,
+      eb.event_name,
+      eb.user_pseudo_id,
+      CONCAT(eb.user_pseudo_id, '.', CAST(COALESCE(eb.ga_session_id, 0) AS STRING)) AS session_id,
+      di.customer_key,
+      COALESCE(di.identity_resolution_failed, 0) AS identity_resolution_failed,
+      eb.analytics_storage_consent,
+      eb.stamped_customer_status,
+      eb.stamped_status_source,
+      eb.device_category,
+      eb.country_region,
+      eb.traffic_source,
+      eb.traffic_medium,
+      eb.loyalty_tier,
+      eb.acquisition_cohort,
+      COALESCE(eb.event_fulfillment_type, ch.last_order_fulfillment_type) AS fulfillment_type,
+      ch.last_order_item_category AS item_category,
+      COALESCE(ch.last_order_status, 'no_order') AS last_order_status,
+      COALESCE(ls.has_lead_event, 0) + COALESCE(ls.has_click_identifier, 0) AS lead_signal_count,
+      ch.first_order_date,
+      ch.last_order_date,
+      COALESCE(ch.order_count, 0) AS order_count,
+      ch.latest_order_gap_days,
+      -- Start of the paid relationship as of the event date: first net order, or the subscription start
+      -- when an active subscriber has no net paid order yet (calculation_notes 2).
+      CASE
+        WHEN ch.first_order_date IS NULL
+             AND (ss.active_from_date IS NULL OR ss.active_from_date > eb.event_date) THEN NULL
+        WHEN ch.first_order_date IS NULL THEN ss.active_from_date
+        WHEN ss.active_from_date IS NULL OR ss.active_from_date > eb.event_date THEN ch.first_order_date
+        ELSE LEAST(ch.first_order_date, ss.active_from_date)
+      END AS first_relationship_date,
+      DATE_DIFF(eb.event_date, ch.first_order_date, DAY) AS days_since_first_order,
+      DATE_DIFF(eb.event_date, ch.last_order_date, DAY) AS days_since_last_order,
+      COALESCE(ss.has_active_subscription, 0) AS has_active_subscription,
+      ss.active_from_date,
+      ss.active_to_date,
+      COALESCE(ss.subscription_status, 'none') AS subscription_status
+    FROM event_base AS eb
+    LEFT JOIN device_identity  AS di ON di.user_pseudo_id = eb.user_pseudo_id
+    LEFT JOIN lead_signals     AS ls ON ls.user_pseudo_id = eb.user_pseudo_id
+    LEFT JOIN customer_history AS ch ON ch.customer_key   = di.customer_key
+                                    AND ch.event_date     = eb.event_date
+    LEFT JOIN subscription_state AS ss ON ss.customer_key = di.customer_key
   )
+  
   SELECT
-    e.event_id,
-    e.event_timestamp,
-    e.customer_id,
+    r.event_key,
+    r.event_timestamp,
+    r.event_date,
+    r.event_name,
+    r.session_id,
+    r.user_pseudo_id,
+    r.customer_key,
     CASE
-      WHEN e.customer_id IS NULL AND COALESCE(e.is_logged_in,false) = false THEN 'guest'
-      WHEN ch.customer_id IS NULL THEN 'prospect'
-      WHEN DATE(ch.first_purchase_date) = DATE(e.event_timestamp) THEN 'new_customer'
-      WHEN ch.purchase_count > 1
-           AND DATE_DIFF(DATE(e.event_timestamp), DATE(ch.last_purchase_date), DAY) > 365 THEN 'reactivated_customer'
-      WHEN sh.subscription_status = 'active' THEN 'active_subscriber'
-      WHEN sh.subscription_status IN ('cancelled','expired','paused') THEN 'inactive_customer'
-      WHEN ch.purchase_count >= 1 THEN 'returning_customer'
-      ELSE 'unknown'
-    END AS customer_status
-  FROM raw_events e
-  LEFT JOIN customer_history ch
-    ON e.customer_id = ch.customer_id
-  LEFT JOIN subscription_history sh
-    ON e.customer_id = sh.customer_id;
+      -- Identity resolution itself failed: no device identifier, or a key the CRM master does not know.
+      WHEN r.user_pseudo_id IS NULL OR r.identity_resolution_failed = 1 THEN 'unknown'
+      -- 1. New: first paid relationship (first net order, or the subscription start for a subscriber
+      --    with no net paid order yet) inside the trailing 90 days, with at most one net order. Placed
+      --    above the subscription override so a first-time buyer who subscribes is still new.
+      WHEN r.first_relationship_date IS NOT NULL
+           AND r.order_count <= 1
+           AND DATE_DIFF(r.event_date, r.first_relationship_date, DAY) BETWEEN 0 AND t.new_window_days
+        THEN 'new_customer'
+      -- 2. Reactivated: an order placed after 365+ dormant days, held for 90 days. The unbounded order
+      --    history keeps this reachable however long the dormancy ran.
+      WHEN r.order_count >= 2
+           AND r.latest_order_gap_days > t.dormancy_days
+           AND r.days_since_last_order <= t.reactivation_hold_days
+        THEN 'reactivated_customer'
+      -- 3. Active subscription outranks the lapse/churn recency ladder; the closed value set has no
+      --    separate subscriber label, so an active subscriber - including one with no net paid order -
+      --    resolves to returning_customer once the new-customer window has closed.
+      WHEN r.customer_key IS NOT NULL
+           AND r.has_active_subscription = 1
+           AND r.event_date BETWEEN r.active_from_date AND r.active_to_date
+        THEN 'returning_customer'
+      -- 4. Churned: more than 365 days with no order (measured against unbounded order history).
+      WHEN r.order_count >= 1 AND r.days_since_last_order > t.dormancy_days THEN 'churned_customer'
+      -- 5. Lapsing: 181-365 days since the last order.
+      WHEN r.order_count >= 1
+           AND r.days_since_last_order > t.returning_window_days
+           AND r.days_since_last_order <= t.lapsing_ceiling_days
+        THEN 'lapsing_customer'
+      -- 6. Returning: last net order within 180 days and outside the new-customer window - two or more
+      --    orders, or a single order placed 91-180 days ago (calculation_notes 3).
+      WHEN r.order_count >= 1 THEN 'returning_customer'
+      -- 7. Resolvable but non-buying traffic: a marketable lead identifier (or a known CRM record with
+      --    no net order) is a prospect, everything else is a guest.
+      WHEN r.customer_key IS NOT NULL OR r.lead_signal_count > 0 THEN 'prospect'
+      ELSE 'guest'
+    END AS customer_status,
+    r.stamped_customer_status,
+    r.stamped_status_source,
+    r.subscription_status,
+    r.last_order_status,
+    r.first_order_date,
+    r.last_order_date,
+    r.order_count,
+    r.days_since_last_order,
+    CASE
+      WHEN r.traffic_medium IN ('cpc', 'ppc', 'paid', 'paidsearch') THEN 'Paid Search'
+      WHEN r.traffic_medium = 'organic' THEN 'Organic Search'
+      WHEN r.traffic_medium IN ('email', 'e-mail', 'newsletter') THEN 'Email'
+      WHEN r.traffic_medium IN ('social', 'paid-social', 'social-paid') THEN 'Social'
+      WHEN r.traffic_medium = 'affiliate' THEN 'Affiliates'
+      WHEN r.traffic_medium = 'referral' THEN 'Referral'
+      WHEN r.traffic_source = '(direct)' THEN 'Direct'
+      ELSE 'Other'
+    END AS default_channel_grouping,
+    r.device_category,
+    r.country_region,
+    r.acquisition_cohort,
+    r.loyalty_tier,
+    r.fulfillment_type,
+    r.item_category,
+    r.analytics_storage_consent
+  FROM resolved AS r
+  CROSS JOIN thresholds AS t
+  ORDER BY r.event_timestamp
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Customer Status: same closed value set, same precedence and the same recency thresholds as the
+  -- BigQuery build, resolved on XDM ExperienceEvents plus the CRM / order-management datasets.
+  -- Grain: one row per ExperienceEvent, sessionised on the ECID, identity-resolved on the CRMID.
+  -- Status is evaluated AS OF the event date - only orders placed on or before it are visible.
+  WITH thresholds AS (
+    SELECT
+      90  AS new_window_days,
+      180 AS returning_window_days,
+      365 AS lapsing_ceiling_days,
+      365 AS dormancy_days,
+      90  AS reactivation_hold_days,
+      1800 AS session_timeout_seconds
+  ),
+  
+  event_base AS (
+    SELECT
+      CONCAT(
+        COALESCE(identityMap['ECID'][0].id, 'unresolved'), '-',
+        CAST(timestamp AS STRING), '-',
+        COALESCE(eventType, 'unknown')
+      ) AS event_key,
+      timestamp AS event_timestamp,
+      to_date(timestamp) AS event_date,
+      eventType AS event_type,
+      identityMap['ECID'][0].id AS ecid,
+      CASE
+        WHEN identityMap['CRMID'][0].authenticatedState = 'authenticated'
+        THEN identityMap['CRMID'][0].id
+      END AS authenticated_crm_id,
+      CASE WHEN identityMap['CRMID'][0].authenticatedState = 'authenticated' THEN 1 ELSE 0 END AS is_authenticated,
+      _tenant.customerProfile.customerStatus AS stamped_customer_status,
+      _tenant.customerProfile.customerStatusSource AS stamped_status_source,
+      _experience.analytics.customDimensions.eVars.eVar17 AS evar_customer_status,
+      COALESCE(_tenant.customerProfile.loyaltyTier, _experience.analytics.customDimensions.eVars.eVar18) AS loyalty_tier,
+      _tenant.customerProfile.acquisitionCohort AS acquisition_cohort,
+      -- Declared in xdm_mapping._tenant.customerProfile.analyticsConsent alongside the same field in the
+      -- W3C and Adobe Client Data Layer payloads.
+      _tenant.customerProfile.analyticsConsent AS analytics_consent,
+      device.type AS device_category,
+      placeContext.geo.countryCode AS country_region,
+      web.webReferrer.type AS referrer_type,
+      marketing.trackingCode AS tracking_code,
+      commerce.order.purchaseID AS purchase_id
+    FROM experience_events
+    WHERE to_date(timestamp) BETWEEN date_sub(current_date(), 90) AND date_sub(current_date(), 1)
+  ),
+  
+  -- Visit boundaries: 30-minute inactivity timeout on the ECID, matching the visit-level expiry of
+  -- the customer status eVar.
+  sessionised_events AS (
+    SELECT
+      eb.*,
+      SESS_TIMEOUT(event_timestamp, 60 * 30)
+        OVER (PARTITION BY ecid ORDER BY event_timestamp
+              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session
+    FROM event_base AS eb
+  ),
+  
+  -- Net paid order history read straight from the order-management dataset at ORDER grain, UNBOUNDED in
+  -- time: a trailing ExperienceEvent window would hide every customer whose last order predates it, so
+  -- churned_customer would be unreachable and a long-dormant reactivation would be counted as new.
+  order_history AS (
+    SELECT
+      o.customerID AS customer_key,
+      o.orderID AS order_id,
+      o.orderDate AS order_date,
+      COALESCE(o.orderStatus, 'completed') AS order_status,
+      o.fulfillmentType AS fulfillment_type,
+      o.primaryItemCategory AS primary_item_category
+    FROM crm_orders AS o
+    WHERE lower(COALESCE(o.orderStatus, 'completed'))
+          NOT IN ('cancelled', 'canceled', 'refunded', 'fraud', 'chargeback', 'test')
+      AND COALESCE(o.isTestOrder, false) = false
+      AND COALESCE(o.isInternalAccount, false) = false
+      AND o.customerID IS NOT NULL
+      AND o.orderDate <= current_date()
+  ),
+  
+  -- CRM customer master: the system of record for identity.
+  customer_master AS (
+    SELECT c.customerID AS customer_key
+    FROM crm_customers AS c
+    WHERE COALESCE(c.isEmployeeOrTestAccount, false) = false
+  ),
+  
+  -- Guest checkouts back-stitched on order-email match: the device inherits the CRM key of its order.
+  device_order_link AS (
+    SELECT DISTINCT
+      e.identityMap['ECID'][0].id AS ecid,
+      o.customerID AS customer_key
+    FROM experience_events AS e
+    JOIN crm_orders AS o
+      ON o.orderID = e.commerce.order.purchaseID
+    WHERE e.eventType = 'commerce.purchases'
+      AND e.commerce.order.purchaseID IS NOT NULL
+      AND to_date(e.timestamp) BETWEEN date_sub(current_date(), 730) AND date_sub(current_date(), 1)
+      AND o.customerID IS NOT NULL
+  ),
+  
+  -- Identity resolution on the ECID. asserted_customer_key is the claim (authenticated CRMID or a
+  -- back-stitched guest order); customer_key is that claim confirmed against the CRM master, and
+  -- identity_resolution_failed marks a claim that does not resolve -> 'unknown'. Consent gate: a missing
+  -- analyticsConsent defaults to granted, the same default as the GA4 build's 'Unset' analytics_storage,
+  -- and any explicit non-granted value drops the key.
+  device_identity AS (
+    SELECT
+      d.ecid,
+      d.asserted_customer_key,
+      cm.customer_key,
+      CASE WHEN d.asserted_customer_key IS NOT NULL AND cm.customer_key IS NULL THEN 1 ELSE 0 END AS identity_resolution_failed
+    FROM (
+      SELECT
+        ecid,
+        MAX(asserted_customer_key) AS asserted_customer_key
+      FROM (
+        SELECT
+          ecid,
+          CASE WHEN COALESCE(analytics_consent, 'granted') = 'granted' THEN authenticated_crm_id END AS asserted_customer_key
+        FROM event_base
+        UNION ALL
+        SELECT ecid, customer_key
+        FROM device_order_link
+        WHERE ecid IS NOT NULL
+      ) AS keys
+      WHERE ecid IS NOT NULL
+      GROUP BY ecid
+    ) AS d
+    LEFT JOIN customer_master AS cm ON cm.customer_key = d.asserted_customer_key
+  ),
+  
+  -- Standard XDM eventTypes only, mapped one-for-one onto the GA4 unified events used above:
+  -- leadOperation.newLead <- generate_lead / subscribe, userAccount.createProfile <- sign_up,
+  -- web.formFilledOut <- submit_form.
+  lead_signals AS (
+    SELECT
+      ecid,
+      MAX(CASE WHEN event_type IN ('leadOperation.newLead', 'userAccount.createProfile', 'web.formFilledOut') THEN 1 ELSE 0 END) AS has_lead_event,
+      MAX(CASE WHEN tracking_code IS NOT NULL THEN 1 ELSE 0 END) AS has_click_identifier
+    FROM event_base
+    GROUP BY ecid
+  ),
+  
+  -- One evaluation key per resolved customer per event date.
+  evaluation_keys AS (
+    SELECT DISTINCT
+      di.customer_key,
+      eb.event_date
+    FROM event_base AS eb
+    JOIN device_identity AS di ON di.ecid = eb.ecid
+    WHERE di.customer_key IS NOT NULL
+  ),
+  
+  -- As-of-event-date order history: only orders placed ON OR BEFORE the event date are visible, so a
+  -- later purchase can never back-date a status onto an earlier event and every recency difference
+  -- stays non-negative.
+  asof_orders AS (
+    SELECT
+      k.customer_key,
+      k.event_date,
+      o.order_id,
+      o.order_date,
+      o.order_status,
+      o.fulfillment_type,
+      o.primary_item_category,
+      ROW_NUMBER() OVER (
+        PARTITION BY k.customer_key, k.event_date
+        ORDER BY o.order_date DESC, o.order_id DESC
+      ) AS recency_rank
+    FROM evaluation_keys AS k
+    JOIN order_history AS o
+      ON o.customer_key = k.customer_key
+     AND o.order_date <= k.event_date
+  ),
+  
+  customer_history AS (
+    SELECT
+      customer_key,
+      event_date,
+      MIN(order_date) AS first_order_date,
+      MAX(order_date) AS last_order_date,
+      COUNT(DISTINCT order_id) AS order_count,
+      DATEDIFF(
+        MAX(CASE WHEN recency_rank = 1 THEN order_date END),
+        MAX(CASE WHEN recency_rank = 2 THEN order_date END)
+      ) AS latest_order_gap_days,
+      MAX(CASE WHEN recency_rank = 1 THEN order_status END) AS last_order_status,
+      MAX(CASE WHEN recency_rank = 1 THEN fulfillment_type END) AS last_order_fulfillment_type,
+      MAX(CASE WHEN recency_rank = 1 THEN primary_item_category END) AS last_order_item_category
+    FROM asof_orders
+    GROUP BY customer_key, event_date
+  ),
+  
+  subscription_state AS (
+    SELECT
+      customerID AS customer_key,
+      MAX(CASE WHEN lower(subscriptionStatus) = 'active' THEN 1 ELSE 0 END) AS has_active_subscription,
+      MIN(CASE WHEN lower(subscriptionStatus) = 'active' THEN validFromDate END) AS active_from_date,
+      MAX(CASE WHEN lower(subscriptionStatus) = 'active' THEN COALESCE(validToDate, date '9999-12-31') END) AS active_to_date,
+      MAX(subscriptionStatus) AS subscription_status
+    FROM crm_subscriptions
+    GROUP BY customerID
+  ),
+  
+  resolved AS (
+    SELECT
+      se.event_key,
+      se.event_timestamp,
+      se.event_date,
+      se.event_type,
+      se.ecid,
+      CONCAT(se.ecid, '-', CAST(se.session.num AS STRING)) AS session_id,
+      di.customer_key,
+      COALESCE(di.identity_resolution_failed, 0) AS identity_resolution_failed,
+      se.is_authenticated,
+      se.analytics_consent,
+      COALESCE(se.stamped_customer_status, se.evar_customer_status) AS stamped_customer_status,
+      se.stamped_status_source,
+      se.device_category,
+      se.country_region,
+      se.referrer_type,
+      se.tracking_code,
+      se.loyalty_tier,
+      se.acquisition_cohort,
+      ch.last_order_fulfillment_type AS fulfillment_type,
+      ch.last_order_item_category AS item_category,
+      COALESCE(ch.last_order_status, 'no_order') AS last_order_status,
+      COALESCE(ls.has_lead_event, 0) + COALESCE(ls.has_click_identifier, 0) AS lead_signal_count,
+      ch.first_order_date,
+      ch.last_order_date,
+      COALESCE(ch.order_count, 0) AS order_count,
+      ch.latest_order_gap_days,
+      CASE
+        WHEN ch.first_order_date IS NULL
+             AND (ss.active_from_date IS NULL OR ss.active_from_date > se.event_date) THEN NULL
+        WHEN ch.first_order_date IS NULL THEN ss.active_from_date
+        WHEN ss.active_from_date IS NULL OR ss.active_from_date > se.event_date THEN ch.first_order_date
+        ELSE LEAST(ch.first_order_date, ss.active_from_date)
+      END AS first_relationship_date,
+      DATEDIFF(se.event_date, ch.first_order_date) AS days_since_first_order,
+      DATEDIFF(se.event_date, ch.last_order_date) AS days_since_last_order,
+      COALESCE(ss.has_active_subscription, 0) AS has_active_subscription,
+      ss.active_from_date,
+      ss.active_to_date,
+      COALESCE(ss.subscription_status, 'none') AS subscription_status
+    FROM sessionised_events AS se
+    LEFT JOIN device_identity    AS di ON di.ecid = se.ecid
+    LEFT JOIN lead_signals       AS ls ON ls.ecid = se.ecid
+    LEFT JOIN customer_history   AS ch ON ch.customer_key = di.customer_key
+                                      AND ch.event_date   = se.event_date
+    LEFT JOIN subscription_state AS ss ON ss.customer_key = di.customer_key
+  )
+  
+  SELECT
+    r.event_key,
+    r.event_timestamp,
+    r.event_date,
+    r.event_type,
+    r.session_id,
+    r.ecid,
+    r.customer_key,
+    CASE
+      -- Identity resolution itself failed: no ECID, or a CRM key the customer master does not know.
+      WHEN r.ecid IS NULL OR r.identity_resolution_failed = 1 THEN 'unknown'
+      -- 1. New: first paid relationship (first net order, or the subscription start for a subscriber
+      --    with no net paid order yet) inside the trailing 90 days, with at most one net order.
+      WHEN r.first_relationship_date IS NOT NULL
+           AND r.order_count <= 1
+           AND DATEDIFF(r.event_date, r.first_relationship_date) BETWEEN 0 AND t.new_window_days
+        THEN 'new_customer'
+      -- 2. Reactivated: an order placed after 365+ dormant days, held for 90 days.
+      WHEN r.order_count >= 2
+           AND r.latest_order_gap_days > t.dormancy_days
+           AND r.days_since_last_order <= t.reactivation_hold_days
+        THEN 'reactivated_customer'
+      -- 3. Active subscription outranks the lapse/churn recency ladder; an active subscriber - including
+      --    one with no net paid order - resolves to returning_customer once the new window has closed.
+      WHEN r.customer_key IS NOT NULL
+           AND r.has_active_subscription = 1
+           AND r.event_date BETWEEN r.active_from_date AND r.active_to_date
+        THEN 'returning_customer'
+      -- 4. Churned: more than 365 days with no order (measured against unbounded order history).
+      WHEN r.order_count >= 1 AND r.days_since_last_order > t.dormancy_days THEN 'churned_customer'
+      -- 5. Lapsing: 181-365 days since the last order.
+      WHEN r.order_count >= 1
+           AND r.days_since_last_order > t.returning_window_days
+           AND r.days_since_last_order <= t.lapsing_ceiling_days
+        THEN 'lapsing_customer'
+      -- 6. Returning: last net order within 180 days and outside the new-customer window - two or more
+      --    orders, or a single order placed 91-180 days ago (calculation_notes 3).
+      WHEN r.order_count >= 1 THEN 'returning_customer'
+      -- 7. Resolvable but non-buying traffic: marketable lead identifier or known CRM record with no
+      --    net order is a prospect, everything else is a guest.
+      WHEN r.customer_key IS NOT NULL OR r.lead_signal_count > 0 THEN 'prospect'
+      ELSE 'guest'
+    END AS customer_status,
+    r.stamped_customer_status,
+    r.stamped_status_source,
+    r.subscription_status,
+    r.last_order_status,
+    r.first_order_date,
+    r.last_order_date,
+    r.order_count,
+    r.days_since_last_order,
+    CASE
+      WHEN r.tracking_code IS NOT NULL THEN 'Paid'
+      WHEN r.referrer_type = 'search' THEN 'Organic Search'
+      WHEN r.referrer_type = 'social' THEN 'Social'
+      WHEN r.referrer_type = 'email' THEN 'Email'
+      WHEN r.referrer_type = 'external' THEN 'Referral'
+      WHEN r.referrer_type = 'internal' OR r.referrer_type IS NULL THEN 'Direct'
+      ELSE 'Other'
+    END AS default_channel_grouping,
+    r.device_category,
+    r.country_region,
+    r.acquisition_cohort,
+    r.loyalty_tier,
+    r.fulfillment_type,
+    r.item_category,
+    r.analytics_consent
+  FROM resolved AS r
+  CROSS JOIN thresholds AS t
+  ORDER BY r.event_timestamp
 
 Calculation Notes: |
-  1️⃣ Define statuses centrally in a business rules document and keep them mutually exclusive. 
-  2️⃣ Prefer CRM or order-management history over browser-only logic. 
-  3️⃣ Persist as a user-level attribute and stamp onto events for easier reporting. 
-  4️⃣ For anonymous users, use 'guest' or 'prospect' based on known lead state. 
-  5️⃣ For subscription businesses, decide precedence between subscriber states and purchase-history states. 
-  6️⃣ Capture after login, registration, purchase, subscription change, and CRM sync events. 
-  7️⃣ Avoid using raw GA4 new/returning user as a substitute because it is device/browser based, not customer based.
+  1️⃣ The value set is closed, mutually exclusive and collectively exhaustive — prospect, guest, new_customer, returning_customer, lapsing_customer, churned_customer, reactivated_customer — with exactly one value resolved per customer per evaluation date; never emit comma-joined or multi-valued statuses, and reserve 'unknown' strictly for records where identity resolution itself failed: no device identifier on the event at all, or a customer key asserted by the device (authenticated id or back-stitched guest order) that matches no record in the CRM customer master. A resolvable but non-buying person is prospect or guest, never unknown.
+  2️⃣ Precedence is deterministic and evaluated top-down so GA4, Adobe Analytics and the CRM resolve identically: first the new-customer window (first paid relationship — first net order, or the subscription start date when the subscriber has no net paid order yet — inside the trailing 90 days with at most one net order, so a first-time buyer who subscribes is still counted new), then reactivation, then active subscription state (which outranks the lapse/churn recency ladder: an active subscriber whose last net order is stale, or who has no net paid order at all, resolves to returning_customer), then the churn and lapse recency bands, then repeat purchase, and only then the anonymous prospect/guest states. Every branch is evaluated as of the event date against orders placed on or before it, never against later orders.
+  3️⃣ Recency thresholds define the ladder and must be set from the category's observed inter-purchase interval rather than a round number; the prevailing e-commerce default is new = first paid relationship in the trailing 90 days, returning = last net order within 180 days once the new-customer window has closed (two or more orders, or a single order placed 91–180 days ago), lapsing = 181–365 days since last order, churned = more than 365 days with no order, reactivated = an order placed after 365+ dormant days (holding for 90 days before collapsing back to returning). Version the threshold set as configuration and re-baseline history only on an announced change.
+  4️⃣ Anonymous traffic is never forced into a purchase state: unauthenticated sessions with no resolvable customer key are 'prospect' when a marketable lead identifier exists (newsletter opt-in, abandoned-cart email, click identifier) and 'guest' otherwise. Guest checkouts are back-stitched to the customer record on order-email match and their events are re-stamped at the next daily rebuild.
+  5️⃣ Persistence and stamping: status is a user-scoped attribute (GA4 user property, Adobe eVar with most-recent allocation and a visit-level expiry, XDM person attribute) written by the nightly CRM/order-management rebuild and stamped onto every subsequent event. The value carried on an event is immutable — historical reports must keep the status as it stood at the moment of the interaction and must never be re-keyed to today's status.
+  6️⃣ Exclusions applied before the ladder runs: cancelled, fully refunded, fraud-flagged and test orders do not set first-order or last-order dates; employee, agency and QA accounts are removed from every status population; B2B and wholesale activity is resolved at account level rather than contact level so a buying team is not counted as multiple new customers. Order history is read unbounded from the order-management system, never from a trailing digital-analytics window, so the deepest-churned customers stay visible.
+  7️⃣ Consent and timing: the customer key is written to the digital layer only where analytics and personalisation consent is granted — with consent withdrawn the event carries the status label alone and no identifier, and the record is excluded from activation audiences. A missing consent flag defaults to granted identically in both builds (GA4 analytics_storage 'Unset' and a null XDM analyticsConsent), while any explicit non-granted value suppresses the key. Status recalculates once per day at the close of the order batch, so a same-day purchase surfaces as new or reactivated from the following processing cycle, not in real time.
 
 Business Use Case: |
-  1️⃣Analyze how customer lifecycle stage such as new, returning, loyal or reactivated impacts conversion, order value, retention, and support usage.
-  2️⃣ Improve customer retention and revenue by tailoring onboarding, loyalty, and win-back campaigns for new, returning, and reactivated customers.
-  3️⃣ Identify which customer lifecycle segments need targeted offers, service improvements, or retention actions to increase repeat purchases and lifetime value.
+  1️⃣ The CRM & Lifecycle Marketing team reviews the status mix weekly; when the lapsing population exceeds its trailing 13-week average they push the lapsing and churned segments to the ESP and launch the tiered win-back ladder, suppressing reactivated customers from discount offers to protect margin.
+  2️⃣ Merchandising breaks average order value, category mix and item affinity by customer status each month to decide which categories anchor new-customer landing pages and which hero slots and early-access windows are reserved for returning and loyal customers.
+  3️⃣ Finance and Revenue Management use the revenue split by status in the quarterly board pack to validate the new-versus-repeat revenue mix behind the customer lifetime value model and to reset the acquisition-versus-retention budget split.
+  4️⃣ Customer Service routes inbound contacts on the status attribute held on the CRM record: churned and high-value returning customers are queued to senior agents with retention treatments authorised, while new customers are routed to onboarding-trained agents.
 
+Dependencies:
+  Events: [purchase, login, sign-up, subscribe, cancel-subscription, loyalty-enroll]
+  Metrics: [days-since-last-purchase, orders-per-customer, repeat-customers, active-customers]
+  Dimensions: [subscription-status, acquisition-cohort, transaction-id, loyalty-tier]
 
+Source Data: Digital Analytics (GA4, Adobe Analytics) + CRM (Salesforce) + Order Management
 
+Report Attributes: |
+  Default Channel Grouping; Device Category; Country/Region; Acquisition Cohort; Loyalty Tier; Subscription Status; Order Status; Fulfillment Type (Ship / Pickup); Item Category
 
+Dashboard Usage: [Customer Retention & Lifecycle Dashboard, Loyalty Program Performance Dashboard, Win-Back & Reactivation Campaign Dashboard, Customer Lifetime Value Cohort Report, Executive Revenue & Retention Scorecard]
 
+Segment Eligibility: |
+  true
 
-Related Dimensions: [Customer Lifetime Value, Repeat Purchase Rate, Conversion Rate, Average Order Value, Customer Retention Rate, Loyalty Member Revenue Share]
+Related Dimensions: [customer-segment, rfm-segment, purchase-count-band, customer-tenure-band, last-purchase-recency-band, new-vs-returning-user, checkout-type-guest-registered, churn-risk-band]
 
+Derived Dimensions: [new-vs-returning-customer, customer-status-at-purchase, reactivation-cohort]
 
+Data Sensitivity: Restricted
 
-Contains PII: No
+Contains PII: Yes
 
 Status: published
 
@@ -157,5 +913,5 @@ Created At: 2026-06-09T06:36:48.135576+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-06-14T00:33:43.637+00:00
+Last Modified At: 2026-09-15T22:58:55.291+00:00
 
