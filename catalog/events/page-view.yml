@@ -1,43 +1,189 @@
 # Event: Page View
-# Generated: 2026-08-24T23:15:29.307Z
+# Generated: 2026-09-15T14:50:08.444Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Event Name: Page View
-Event Serialization: No
+Event Serialization: always
 
 Description: |
-  Used to capture user's action of viewing a page or screen
+  Page View is the standard analytics hit recorded each time a page, or a virtual screen in a single-page application, completes loading and renders for a visitor, equivalent to the GA4 page_view event and the Adobe Analytics page-load (s.t()) call. It is the foundational event behind Pageviews, Sessions, Landing Page and Pages per Session reporting, so its firing rules, URL hygiene and page taxonomy must be governed identically across every template, app shell and analytics platform.
 
 Category: Engagement
 
+Tags: [event, E-commerce: Top-of-Funnel & Marketing Acquisition]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Event Type: standard
 
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  page_view
 
+Adobe Event: |
+  page:view
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "plp-women-dresses",
+        "pageName": "example-shop:women:dresses",
+        "destinationURL": "https://www.example-shop.com/women/dresses",
+        "referringURL": "https://www.example-shop.com/",
+        "language": "en-US"
+      },
+      "category": {
+        "primaryCategory": "Women",
+        "subCategory1": "Dresses",
+        "pageType": "category"
+      },
+      "attributes": {
+        "pageTitle": "Women's Dresses | Example Shop",
+        "hostname": "www.example-shop.com",
+        "navigationType": "navigate"
+      }
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "page_view",
+          "eventAction": "page:view",
+          "type": "pageLoad"
+        },
+        "category": {
+          "primaryCategory": "Women"
+        }
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_location": "https://www.example-shop.com/women/dresses",
+    "page_referrer": "https://www.example-shop.com/",
+    "page_title": "Women's Dresses | Example Shop",
+    "page_type": "category",
+    "content_group": "Women",
+    "language": "en-US",
+    "page_hostname": "www.example-shop.com",
+    "navigation_type": "navigate"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "page:view",
+    "page": {
+      "pageInfo": {
+        "pageName": "example-shop:women:dresses",
+        "pageURL": "https://www.example-shop.com/women/dresses",
+        "referringURL": "https://www.example-shop.com/",
+        "pageTitle": "Women's Dresses | Example Shop",
+        "pageType": "category",
+        "siteSection": "Women",
+        "language": "en-US",
+        "hostname": "www.example-shop.com",
+        "navigationType": "navigate"
+      }
+    }
+  }
 
+XDM Mapping: |
+  {
+    "xdm": {
+      "eventType": "web.webpagedetails.pageViews",
+      "timestamp": "2026-09-15T14:32:08.000Z",
+      "web": {
+        "webPageDetails": {
+          "URL": "https://www.example-shop.com/women/dresses",
+          "name": "example-shop:women:dresses",
+          "server": "www.example-shop.com",
+          "siteSection": "Women",
+          "isHomePage": false,
+          "pageViews": {
+            "value": 1
+          }
+        },
+        "webReferrer": {
+          "URL": "https://www.example-shop.com/"
+        }
+      },
+      "_tenant": {
+        "page": {
+          "pageTitle": "Women's Dresses | Example Shop",
+          "pageType": "category",
+          "contentGroup": "Women",
+          "language": "en-US",
+          "navigationType": "navigate"
+        }
+      }
+    }
+  }
 
+Parameters: |
+  {
+    "page_location": "string - Full page URL after client-side PII scrubbing against the query-parameter allowlist; for SPA routes, the virtual URL of the rendered view",
+    "page_referrer": "string - URL of the previous page or external referrer, scrubbed with the same allowlist; for SPA routes, the prior virtual URL",
+    "page_title": "string - Document title of the rendered page or route, set before the hit fires",
+    "page_type": "string - Governed template taxonomy value (home, category, product, search_results, cart, checkout, order_confirmation, content, account)",
+    "content_group": "string - Business grouping of the page (e.g. department or site section) used for aggregated content reporting",
+    "language": "string - Page or UI language in BCP 47 format (e.g. en-US)",
+    "page_hostname": "string - Custom parameter carrying the hostname serving the page; must be registered as a custom dimension in GA4 to be reportable; the production hostname allowlist uses the collected device.web_info.hostname, with this parameter as a fallback",
+    "navigation_type": "string - Load mechanism: navigate, reload, back_forward, prerender or spa_route",
+    "engagement_time_msec": "integer - Foreground engagement time in milliseconds attributed to the previous page view in the session",
+    "ga_session_id": "integer - Session identifier inherited from the active GA4 session; null for cookieless consent-denied pings",
+    "ga_session_number": "integer - Ordinal count of the visitor's sessions, used for new versus returning analysis"
+  }
 
+Calculation Notes: |
+  1️⃣ Single-page applications: fire exactly one page_view per committed route change (history pushState / replaceState / popstate), only after the new route has set document.title, page_type and content_group; hash-only anchor jumps and query-string updates that do not swap the rendered view (PLP filter or sort state, carousel paging) do not fire. When manual virtual page_view calls are implemented, GA4 Enhanced Measurement 'page changes based on browser history events' must be disabled, and a page-instance guard keyed on route + page load id suppresses repeat calls for the same view. When page_view is pushed from the data layer, send_page_view: false is set on the gtag config (in GTM, untick 'Send a page view event when this configuration loads') so the pushed hit is the only page_view on full page loads and SPA routes.
+  2️⃣ Reloads, back/forward cache and prerender: a hard reload counts as a new page_view tagged navigation_type = reload; a bfcache restore (pageshow with event.persisted = true) fires once with navigation_type = back_forward because no new document load occurs; prerendered or speculatively loaded pages defer the hit until document.prerendering becomes false, so pages the visitor never activates are never counted.
+  3️⃣ Bot and internal traffic: GA4 known-bot and spider exclusion (IAB list) is applied automatically and cannot be disabled; internal traffic is excluded through the traffic_type = internal data filter (office and VPN IP ranges) and developer traffic through the debug_mode filter; staging, QA and localhost hostnames and synthetic uptime monitors are removed with an allowlist on the collected hostname (device.web_info.hostname) before any reporting or export. In Adobe Analytics, bot rules and the IAB bots and spiders list are applied in the report suite; in AEP, internal and bot traffic is excluded by IP-range and user-agent rules on the Edge-populated environment.ipV4 and environment.browserDetails.userAgent fields (environment.ipV4 is empty when IP obfuscation is enabled).
+  4️⃣ Consent: under Consent Mode v2 with analytics_storage = denied, page_view is sent as a cookieless ping with no user_pseudo_id or ga_session_id in the BigQuery export; consented and cookieless page views are reported as separate series, and denied pings are never stitched to users or sessions after the fact; behaviourally modelled page views exist only in the GA4 interface, not in the BigQuery export. In AEP, Web SDK hits with consent denied are not collected, so there is no cookieless series there; hits without an ECID are reported as unidentified (no_ecid).
+  5️⃣ Session attribution: every page_view inherits the active ga_session_id; a new session begins after 30 minutes of inactivity (GA4 default, configurable in the data stream) with no midnight or campaign-change reset, whereas an Adobe Analytics visit also closes after 12 hours of continuous activity or 2,500 hits, so cross-platform session counts can legitimately diverge by a small margin.
+  6️⃣ URL hygiene and timing: page_location and page_referrer are scrubbed client-side against a query-parameter allowlist before the hit is sent, removing email, phone, name, password-reset and order-lookup tokens; event_timestamp is stored in UTC and reported in the property time zone, and GA4 daily export tables accept hits up to 72 hours late, so D-1 counts are provisional until D+3.
+  7️⃣ Value action by industry: the event itself is identical everywhere and only the page_type taxonomy changes. E-commerce: page_type = home, category (PLP), product (PDP), search_results, cart, checkout, order_confirmation, content, account; Media: article, video, section front; SaaS: pricing, docs, in-app screen; Travel: search results, property or flight detail, itinerary; Finance: product page, calculator, application step.
 
+Business Use Case: |
+  1️⃣ E-commerce Merchandising: when weekly page_view volume for page_type = product within a category falls more than 15% week over week while category page views hold steady, the category merchandiser audits PLP sort order, out-of-stock suppression and navigation links for that category within the same trading week.
+  2️⃣ Performance Marketing: when landing page_views from paid campaigns fall below 90% of ad-platform clicks for the campaign, the paid media manager treats it as landing-page load abandonment or a broken tag, pauses the affected ad groups and raises a page-speed or tagging fix with the web team.
+  3️⃣ Digital Product (Web Experience): after every front-end or SPA router release, the product owner compares page_views per session on the release day against the trailing 14-day baseline; a shift beyond ±20% blocks publication of Pages per Session and Bounce Rate dashboards until double-firing or missed route changes are ruled out.
+  4️⃣ SEO & Content Marketing: at the monthly content review, the SEO lead ranks content_group and page templates by organic page_view trend and prioritises refresh, internal linking or consolidation for templates declining for three consecutive months.
 
+Dependencies:
+  Dimensions: [page-url, page-type]
 
+Source Data: Digital Analytics (GA4 + Adobe Analytics)
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
+    Report Attributes: |
+  Page Path; Page Title; Page Type; Content Group; Hostname; Landing Page; Previous Page; Session Source / Medium; Default Channel Grouping; Device Category; Country/Region; Language
+
+    Dashboard Usage: [Site Traffic & Engagement Overview, Landing Page Performance, Content Group Performance, Product Discovery Funnel, Tag Health & Data Quality Monitor]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [page-url, page-name, page-type, previous-page, traffic-source, device-category, first-touch-channel-grouping]
+
+    Derived Dimensions: [page-name, previous-page, landing-page]
+
+    Derived Metrics: [pageviews, unique-visitors, landing-page-views]
+
+    Derived KPIs: [session, pages-per-session, bounce-rate, landing-page-conversion-rate, conversion-rate]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
     Status: published
 
     Contributed By: devyendarm
@@ -46,5 +192,5 @@ Category: Engagement
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-08-24T23:15:28.742+00:00
+    Last Modified At: 2026-09-15T14:50:01.575+00:00
 
