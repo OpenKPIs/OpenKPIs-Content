@@ -1,36 +1,445 @@
 # Dimension: Device category
-# Generated: 2026-06-14T01:02:37.596Z
+# Generated: 2026-09-15T19:32:41.638Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Device category
 
+Description: |
+  Device category is the form-factor class of the device behind an event or session (desktop, mobile, tablet or smart TV), resolved at collection time from the User-Agent string and User-Agent Client Hints and exposed as device.category in GA4 and as Mobile Device Type (XDM device.type) in Adobe Analytics. It is the main breakdown for finding device-level gaps in add-to-cart, checkout completion and order conversion, and it guides mobile checkout UX investment and device bid adjustments in paid media.
 
+Category: Experience
 
+Tags: [dimension, E-commerce: Top-of-Funnel & Marketing Acquisition]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Generic
 
+Scope: Session
 
+Data Type: string
 
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  page_view
 
+Adobe Event: |
+  pageView
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "plp-womens-running-shoes",
+        "pageName": "category:womens:running-shoes",
+        "destinationURL": "https://www.example-store.com/c/womens/running-shoes",
+        "referringURL": "https://www.google.com/",
+        "language": "en-US"
+      },
+      "category": {
+        "primaryCategory": "womens",
+        "subCategory1": "running-shoes",
+        "pageType": "category"
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_location": "https://www.example-store.com/c/womens/running-shoes",
+    "page_referrer": "https://www.google.com/",
+    "page_title": "Women's Running Shoes",
+    "page_type": "category",
+    "language": "en-US"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "page": {
+      "pageInfo": {
+        "pageName": "category:womens:running-shoes",
+        "pageType": "category",
+        "siteSection": "womens",
+        "url": "https://www.example-store.com/c/womens/running-shoes",
+        "referrer": "https://www.google.com/",
+        "language": "en-US"
+      }
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web": {
+      "webPageDetails": {
+        "name": "category:womens:running-shoes",
+        "URL": "https://www.example-store.com/c/womens/running-shoes",
+        "siteSection": "womens",
+        "pageViews": {
+          "value": 1
+        }
+      },
+      "webReferrer": {
+        "URL": "https://www.google.com/"
+      }
+    },
+    "environment": {
+      "type": "browser",
+      "operatingSystem": "Android",
+      "operatingSystemVersion": "14.0.0",
+      "browserDetails": {
+        "name": "Chrome",
+        "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36",
+        "userAgentClientHints": {
+          "mobile": true,
+          "platform": "Android",
+          "platformVersion": "14.0.0",
+          "model": "SM-S921B"
+        }
+      }
+    },
+    "device": {
+      "type": "mobile",
+      "manufacturer": "Samsung",
+      "model": "SM-S921B",
+      "screenWidth": 384,
+      "screenHeight": 832,
+      "screenOrientation": "portrait"
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Device category by session date x platform x device category: sessions, users, page views, orders and session conversion rate.
+  -- Session = user_pseudo_id + ga_session_id. Device and platform come from the first event of the session by event_timestamp;
+  -- hits without device data (Measurement Protocol, server-side requests without user_agent) rank after collected hits, as the value is constant within a session.
+  -- Known bots are removed by GA4 (IAB list) before export; internal traffic (traffic_type = internal) is removed at session level.
+  -- Backend purchases without device data are credited to the session where the order was placed, joined on transaction_id.
+  -- users_non_additive: one person can appear in several device categories; never sum this column across rows.
+  -- The suffix range reads daily tables only; use events_intraday_* for same-day checks.
+  WITH events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      event_timestamp,
+      event_name,
+      user_pseudo_id,
+      UPPER(platform) AS platform,
+      NULLIF(LOWER(TRIM(device.category)), '') AS device_category_raw,
+      NULLIF(NULLIF(ecommerce.transaction_id, ''), '(not set)') AS ecommerce_transaction_id,
+      ecommerce.purchase_revenue AS purchase_revenue,
+      (SELECT MAX(IF(ep.key = 'ga_session_id', COALESCE(ep.value.int_value, SAFE_CAST(ep.value.string_value AS INT64)), NULL)) FROM UNNEST(event_params) AS ep) AS ga_session_id,
+      (SELECT MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS traffic_type,
+      (SELECT MAX(IF(ep.key = 'transaction_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) FROM UNNEST(event_params) AS ep) AS param_transaction_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN '20260801' AND '20260831'
+  ),
+  keyed AS (
+    SELECT
+      *,
+      CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING)) AS session_key,
+      COALESCE(ecommerce_transaction_id, NULLIF(NULLIF(param_transaction_id, ''), '(not set)')) AS transaction_id
+    FROM events
+  ),
+  sessions AS (
+    SELECT
+      session_key,
+      user_pseudo_id,
+      MIN(event_date) AS session_date,
+      ARRAY_AGG(STRUCT(platform, device_category_raw) ORDER BY IF(device_category_raw IS NULL, 1, 0), event_timestamp LIMIT 1)[OFFSET(0)] AS first_hit,
+      COUNTIF(event_name = 'page_view') AS page_views,
+      COALESCE(LOGICAL_OR(traffic_type = 'internal'), FALSE) AS is_internal
+    FROM keyed
+    WHERE user_pseudo_id IS NOT NULL
+      AND ga_session_id IS NOT NULL
+    GROUP BY session_key, user_pseudo_id
+  ),
+  session_device AS (
+    SELECT
+      session_key,
+      user_pseudo_id,
+      session_date,
+      COALESCE(first_hit.platform, '(not set)') AS platform,
+      CASE first_hit.device_category_raw
+        WHEN 'desktop' THEN 'desktop'
+        WHEN 'mobile' THEN 'mobile'
+        WHEN 'tablet' THEN 'tablet'
+        WHEN 'smart tv' THEN 'smart tv'
+        ELSE '(not set)'
+      END AS device_category,
+      page_views
+    FROM sessions
+    WHERE NOT is_internal
+  ),
+  transaction_session AS (
+    SELECT
+      transaction_id,
+      ARRAY_AGG(session_key ORDER BY event_timestamp LIMIT 1)[OFFSET(0)] AS placed_session_key
+    FROM keyed
+    WHERE transaction_id IS NOT NULL
+      AND ga_session_id IS NOT NULL
+      AND device_category_raw IS NOT NULL
+    GROUP BY transaction_id
+  ),
+  purchase_events AS (
+    SELECT
+      COALESCE(p.transaction_id, CONCAT(p.session_key, '.', CAST(p.event_timestamp AS STRING))) AS order_key,
+      COALESCE(ts.placed_session_key, IF(p.ga_session_id IS NOT NULL, p.session_key, NULL)) AS credited_session_key,
+      p.purchase_revenue
+    FROM keyed AS p
+    LEFT JOIN transaction_session AS ts
+      ON ts.transaction_id = p.transaction_id
+    WHERE p.event_name = 'purchase'
+  ),
+  orders AS (
+    SELECT
+      order_key,
+      ARRAY_AGG(credited_session_key IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] AS session_key,
+      MAX(purchase_revenue) AS purchase_revenue
+    FROM purchase_events
+    GROUP BY order_key
+  ),
+  session_orders AS (
+    SELECT
+      session_key,
+      COUNT(*) AS transactions,
+      SUM(COALESCE(purchase_revenue, 0)) AS purchase_revenue
+    FROM orders
+    WHERE session_key IS NOT NULL
+    GROUP BY session_key
+  ),
+  device_daily AS (
+    SELECT
+      sd.session_date,
+      sd.platform,
+      sd.device_category,
+      COUNT(DISTINCT sd.session_key) AS sessions,
+      COUNT(DISTINCT sd.user_pseudo_id) AS users_non_additive,
+      SUM(sd.page_views) AS page_views,
+      COUNT(DISTINCT IF(so.transactions > 0, sd.session_key, NULL)) AS purchase_sessions,
+      SUM(COALESCE(so.transactions, 0)) AS transactions,
+      ROUND(SUM(COALESCE(so.purchase_revenue, 0)), 2) AS purchase_revenue
+    FROM session_device AS sd
+    LEFT JOIN session_orders AS so
+      ON so.session_key = sd.session_key
+    GROUP BY sd.session_date, sd.platform, sd.device_category
+  )
+  SELECT
+    session_date,
+    platform,
+    device_category,
+    sessions,
+    users_non_additive,
+    page_views,
+    purchase_sessions,
+    transactions,
+    purchase_revenue,
+    SAFE_DIVIDE(purchase_sessions, sessions) AS session_conversion_rate,
+    SAFE_DIVIDE(sessions, SUM(sessions) OVER (PARTITION BY session_date, platform)) AS session_share_of_platform,
+    device_category = '(not set)' AND SAFE_DIVIDE(sessions, SUM(sessions) OVER (PARTITION BY session_date, platform)) > 0.01 AS not_set_share_above_1pct
+  FROM device_daily
+  ORDER BY session_date, platform, device_category;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Device category by session date (UTC) x platform x device category from the web and mobile ExperienceEvent dataset.
+  -- XDM device.type is mapped to the GA4 buckets: desktop; mobile; tablet + ereader -> tablet; television, settop, mediaplayer, gaming -> smart tv;
+  -- a missing or unrecognised type is treated as desktop only for browser hits on Windows, macOS, Linux or ChromeOS, otherwise (not set).
+  -- Session = ECID + 30-minute inactivity (SESS_TIMEOUT); device and platform come from the session's first event by timestamp.
+  -- Backend events without an environment are not sessionised; their orders are credited to the placing session via commerce.order.purchaseID.
+  -- Internal traffic (tenant field trafficType = internal) and bot user agents are removed at session level, in addition to datastream bot detection.
+  -- users_non_additive: one ECID or stitched person can appear in several device categories; never sum this column across rows.
+  WITH events AS (
+    SELECT
+      timestamp AS event_ts,
+      eventType AS event_type,
+      identityMap['ECID'][0].id AS ecid,
+      LOWER(TRIM(device.type)) AS device_type_raw,
+      LOWER(environment.type) AS environment_type,
+      LOWER(environment.operatingSystem) AS operating_system,
+      LOWER(COALESCE(environment.browserDetails.userAgent, '')) AS user_agent,
+      NULLIF(TRIM(commerce.order.purchaseID), '') AS purchase_id,
+      commerce.order.priceTotal AS order_total,
+      LOWER(_yourtenant.trafficType) AS traffic_type
+    FROM ecom_web_experience_events
+    WHERE timestamp >= TIMESTAMP '2026-08-01 00:00:00'
+      AND timestamp < TIMESTAMP '2026-09-01 00:00:00'
+  ),
+  mapped AS (
+    SELECT
+      *,
+      CASE
+        WHEN environment_type = 'browser' THEN 'WEB'
+        WHEN environment_type = 'application' AND operating_system RLIKE 'ios|ipados' THEN 'IOS'
+        WHEN environment_type = 'application' AND operating_system LIKE '%android%' THEN 'ANDROID'
+        ELSE '(not set)'
+      END AS platform,
+      CASE
+        WHEN device_type_raw = 'desktop' THEN 'desktop'
+        WHEN device_type_raw = 'mobile' THEN 'mobile'
+        WHEN device_type_raw IN ('tablet', 'ereader') THEN 'tablet'
+        WHEN device_type_raw IN ('television', 'settop', 'mediaplayer', 'gaming') THEN 'smart tv'
+        WHEN environment_type = 'browser' AND operating_system RLIKE 'windows|mac ?os|os x|linux|chrome ?os' THEN 'desktop'
+        ELSE NULL
+      END AS device_category_known
+    FROM events
+  ),
+  sessionised AS (
+    SELECT
+      m.*,
+      SESS_TIMEOUT(event_ts, 60 * 30) OVER (PARTITION BY ecid ORDER BY event_ts ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS sess
+    FROM mapped AS m
+    WHERE ecid IS NOT NULL
+      AND environment_type IS NOT NULL
+  ),
+  keyed AS (
+    SELECT
+      *,
+      CONCAT(ecid, '-', CAST(sess.num AS STRING)) AS session_key
+    FROM sessionised
+  ),
+  ranked AS (
+    SELECT
+      k.*,
+      ROW_NUMBER() OVER (PARTITION BY session_key ORDER BY CASE WHEN device_category_known IS NULL THEN 1 ELSE 0 END, event_ts) AS hit_rank,
+      MIN(event_ts) OVER (PARTITION BY session_key) AS session_start_ts,
+      SUM(CASE WHEN event_type = 'web.webpagedetails.pageViews' THEN 1 ELSE 0 END) OVER (PARTITION BY session_key) AS page_views,
+      MAX(CASE WHEN traffic_type = 'internal' THEN 1 ELSE 0 END) OVER (PARTITION BY session_key) AS is_internal,
+      MAX(CASE WHEN user_agent RLIKE 'bot|crawl|spider|slurp|headlesschrome|lighthouse|pingdom' THEN 1 ELSE 0 END) OVER (PARTITION BY session_key) AS is_bot
+    FROM keyed AS k
+  ),
+  session_device AS (
+    SELECT
+      session_key,
+      ecid,
+      TO_DATE(session_start_ts) AS session_date,
+      platform,
+      COALESCE(device_category_known, '(not set)') AS device_category,
+      page_views
+    FROM ranked
+    WHERE hit_rank = 1
+      AND is_internal = 0
+      AND is_bot = 0
+  ),
+  transaction_session AS (
+    SELECT purchase_id, session_key AS placed_session_key
+    FROM (
+      SELECT
+        purchase_id,
+        session_key,
+        ROW_NUMBER() OVER (PARTITION BY purchase_id ORDER BY event_ts) AS rn
+      FROM keyed
+      WHERE purchase_id IS NOT NULL
+    ) AS t
+    WHERE rn = 1
+  ),
+  order_events AS (
+    SELECT
+      m.purchase_id AS order_key,
+      ts.placed_session_key AS session_key,
+      m.order_total
+    FROM mapped AS m
+    JOIN transaction_session AS ts
+      ON ts.purchase_id = m.purchase_id
+    WHERE m.event_type = 'commerce.purchases'
+    UNION ALL
+    SELECT
+      CONCAT(session_key, '-', CAST(event_ts AS STRING)) AS order_key,
+      session_key,
+      order_total
+    FROM keyed
+    WHERE event_type = 'commerce.purchases'
+      AND purchase_id IS NULL
+  ),
+  session_orders AS (
+    SELECT
+      session_key,
+      COUNT(*) AS transactions,
+      SUM(COALESCE(order_total, 0)) AS purchase_revenue
+    FROM (
+      SELECT order_key, MAX(session_key) AS session_key, MAX(order_total) AS order_total
+      FROM order_events
+      GROUP BY order_key
+    ) AS o
+    GROUP BY session_key
+  ),
+  device_daily AS (
+    SELECT
+      sd.session_date,
+      sd.platform,
+      sd.device_category,
+      COUNT(DISTINCT sd.session_key) AS sessions,
+      COUNT(DISTINCT sd.ecid) AS users_non_additive,
+      SUM(sd.page_views) AS page_views,
+      COUNT(DISTINCT CASE WHEN so.transactions > 0 THEN sd.session_key END) AS purchase_sessions,
+      SUM(COALESCE(so.transactions, 0)) AS transactions,
+      ROUND(SUM(COALESCE(so.purchase_revenue, 0)), 2) AS purchase_revenue
+    FROM session_device AS sd
+    LEFT JOIN session_orders AS so
+      ON so.session_key = sd.session_key
+    GROUP BY sd.session_date, sd.platform, sd.device_category
+  )
+  SELECT
+    session_date,
+    platform,
+    device_category,
+    sessions,
+    users_non_additive,
+    page_views,
+    purchase_sessions,
+    transactions,
+    purchase_revenue,
+    CAST(purchase_sessions AS DOUBLE) / NULLIF(sessions, 0) AS session_conversion_rate,
+    CAST(sessions AS DOUBLE) / NULLIF(SUM(sessions) OVER (PARTITION BY session_date, platform), 0) AS session_share_of_platform,
+    CASE WHEN device_category = '(not set)' AND CAST(sessions AS DOUBLE) / NULLIF(SUM(sessions) OVER (PARTITION BY session_date, platform), 0) > 0.01 THEN TRUE ELSE FALSE END AS not_set_share_above_1pct
+  FROM device_daily
+  ORDER BY session_date, platform, device_category;
 
+Calculation Notes: |
+  1️⃣ Value list: GA4 stores the lowercase values desktop, mobile, tablet and smart tv (the UI shows them capitalised). Adobe Mobile Device Type returns Mobile Phone, Tablet, Television, Set-top Box, Gaming Console, Media Player, E-Reader and Other. Adobe's Other also includes desktops and unrecognised devices. For reports that combine both tools, map XDM device.type like this: desktop to desktop; mobile to mobile; tablet and ereader to tablet; television, settop, mediaplayer and gaming to smart tv; null or unrecognised to (not set). Treat Adobe Other as desktop only after checking that the operating system is Windows, macOS, Linux or ChromeOS.
+  2️⃣ Derivation: The platform assigns the value on the server from the User-Agent header and the Sec-CH-UA-Mobile, Sec-CH-UA-Platform and Sec-CH-UA-Model client hints. Never populate it from the data layer or infer it from viewport breakpoints. Chromium now sends a reduced User-Agent, so the Adobe Web SDK needs high-entropy client hints turned on, or Android tablet and device-model detection gets worse. iPadOS Safari and the Android 'Request desktop site' option send a desktop User-Agent by default, which shows up as desktop. Read the tablet share as a lower bound.
+  3️⃣ Session scope: The value is recorded on every hit (GA4 device.category on each events_ row, Adobe at hit level). It does not change within a session because a session belongs to one client_id or ECID cookie on one browser. For session-level reporting, take the value from the session's first event by event_timestamp. Switching devices always starts a new session (GA4 session_id, or an Adobe visit, which also ends after 30 minutes of inactivity).
+  4️⃣ User scope and cross-device: With GA4 User-ID or Reporting Identity, or Adobe cross-device stitching (CDA or a CJA person ID), one person can appear in several device categories. User counts by device therefore add up to more than total users and must never be summed. For user-level views, state the rule in the report title: first device (the device on first_visit) or dominant device (the device with the most sessions in the window). Credit an order to the device of the purchase session, not the device where the cart was built.
+  5️⃣ App vs web: GA4 app streams take device.category from Firebase SDK hardware detection (mobile or tablet, never desktop). Mobile web and in-app sessions both show as mobile. Always split by platform (WEB, IOS, ANDROID) before comparing checkout rates, because app funnels have persistent login, stored payment methods and native wallets, which inflate app conversion compared with mobile web.
+  6️⃣ Unknown and (not set): Some hits have no usable device data, such as Measurement Protocol hits, server-side container requests that don't forward user_agent or client hints, and truncated bot User-Agents. GA4 shows these as (not set) and Adobe as Other. Keep them as a separate bucket and never spread them across the other categories. If (not set) exceeds 1% of sessions, check that the server-side container forwards the User-Agent. Backend purchase events sent through Measurement Protocol carry no device, so recover it by joining transaction_id to the web session where the order was placed.
+  7️⃣ Filters and timing: Exclude internal traffic (traffic_type = internal) and known bots (GA4 automatic IAB bot exclusion, Adobe bot rules) before calculating device share or conversion by device. GA4 standard reports finalise within 24–48 hours. The BigQuery daily export events_YYYYMMDD arrives the next day, so use events_intraday_ for same-day checks. Adobe applies its device lookup tables at processing time and does not reprocess historical data. A tablet or mobile share shift right after a lookup update may come from the change in classification, not from customers.
 
+Business Use Case: |
+  1️⃣ E-commerce Product team: If mobile checkout completion rate falls more than 10 percentage points below desktop for two weekly funnel reviews in a row, pull mobile session recordings for the payment and shipping steps. Then put express wallets (Apple Pay, Google Pay), address autofill and fewer form fields at the top of the next sprint.
+  2️⃣ Performance Marketing team: When mobile conversion rate or ROAS for paid search and paid social falls below the blended target for 14 days, apply device bid adjustments in Google Ads and Microsoft Ads and move budget toward the better-converting device until landing pages are fixed.
+  3️⃣ E-commerce Operations team: If add-to-cart rate for one device category drops more than 20% day over day after a site release while other categories hold steady, open a release incident with that device and browser. Ask for a rollback before the next peak trading window.
+  4️⃣ Conversion Rate Optimisation team: Before launching an A/B test, stratify traffic allocation and the sample-ratio-mismatch check by device category. Read results separately for mobile and desktop, and don't ship a variant that wins on blended traffic but loses on mobile, since mobile carries most sessions.
 
+Dependencies:
+  Events: [page-view]
+  Metrics: [unique-visitors]
 
+Source Data: Digital Analytics (GA4 + Adobe Analytics)
 
+Report Attributes: |
+  Platform (Web / iOS / Android); Operating System; Browser; Default Channel Grouping; Session Source / Medium; Landing Page; Checkout Step; New vs Returning User; Country/Region
 
+Dashboard Usage: [Checkout Funnel by Device, Acquisition Overview, Mobile Experience Scorecard, Paid Media Performance by Device, Release Health Monitor]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [traffic-source, first-touch-channel-grouping, checkout-step, checkout-type, page-type]
 
+Derived Dimensions: [Mobile vs Desktop, Platform / Device Category]
 
+Data Sensitivity: Internal
+
+Contains PII: No
 
 Status: draft
 
@@ -40,4 +449,5 @@ Created At: 2026-06-14T01:02:37.299423+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-15T19:32:41.275+00:00
 
