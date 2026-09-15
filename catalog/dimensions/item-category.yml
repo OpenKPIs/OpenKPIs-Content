@@ -1,0 +1,468 @@
+# Dimension: Item Category
+# Generated: 2026-09-15T21:47:36.248Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Item Category
+
+Description: |
+  Item Category is the top level of the merchandise hierarchy on every product in the GA4 items[] array (item_category, with item_category2 to item_category5 for deeper levels), matching the Adobe Analytics product-string category and the Shopify and Salesforce Commerce catalog category. Merchandising uses it to compare item views, add-to-carts, units and item revenue across departments, and it reconciles with finance reporting only when the value comes from the product master for the item_id rather than the page breadcrumb.
+
+Category: Performance
+
+Tags: [dimension, E-commerce: Product Discovery & Merchandising, product hierarchy]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  prodView
+
+W3 Data Layer: |
+  {
+    "product": [
+      {
+        "productInfo": {
+          "productID": "SKU-48213",
+          "productName": "Trail Runner GTX Women's",
+          "manufacturer": "Northpeak"
+        },
+        "category": {
+          "primaryCategory": "Women",
+          "subCategory1": "Shoes",
+          "subCategory2": "Running",
+          "subCategory3": "Trail",
+          "subCategory4": "Waterproof"
+        },
+        "attributes": {
+          "variant": "Grey / 7.5"
+        },
+        "price": {
+          "basePrice": 129.99,
+          "currency": "USD"
+        },
+        "quantity": 1
+      }
+    ],
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "view_item",
+          "eventAction": "Product View"
+        },
+        "category": {
+          "primaryCategory": "Commerce"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "view_item",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 129.99,
+      "items": [
+        {
+          "item_id": "SKU-48213",
+          "item_name": "Trail Runner GTX Women's",
+          "item_brand": "Northpeak",
+          "item_category": "Women",
+          "item_category2": "Shoes",
+          "item_category3": "Running",
+          "item_category4": "Trail",
+          "item_category5": "Waterproof",
+          "item_variant": "Grey / 7.5",
+          "price": 129.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "prodView",
+    "eventInfo": {
+      "path": "product.SKU-48213"
+    },
+    "product": {
+      "SKU-48213": {
+        "productID": "SKU-48213",
+        "productName": "Trail Runner GTX Women's",
+        "brand": "Northpeak",
+        "category": {
+          "primaryCategory": "Women",
+          "subCategory1": "Shoes",
+          "subCategory2": "Running",
+          "subCategory3": "Trail",
+          "subCategory4": "Waterproof"
+        },
+        "variant": "Grey / 7.5",
+        "price": 129.99,
+        "currency": "USD",
+        "quantity": 1,
+        "merchandisingCategory": "Women"
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.productViews",
+    "commerce": {
+      "productViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-48213",
+        "name": "Trail Runner GTX Women's",
+        "priceTotal": 129.99,
+        "currencyCode": "USD",
+        "quantity": 1,
+        "productCategories": [
+          {
+            "categoryID": "CAT-1001",
+            "categoryName": "Women",
+            "categoryPath": "Women/Shoes/Running/Trail/Waterproof"
+          }
+        ],
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "eVar10": "Women"
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Item Category: item-scoped funnel by collected category path for the last 7 complete days.
+  -- Only daily export tables (events_YYYYMMDD) are read; events_intraday_* tables are provisional and excluded.
+  -- Internal, QA and known-bot traffic is assumed removed by the property's active data filters.
+  -- Reporting time zone: America/New_York stands in for the property time zone; replace it with your own.
+  -- item_revenue is USD: item_revenue_in_usd, falling back to price_in_usd x quantity.
+  -- Assumed PIM table: `your-project.pim.product_category_history`
+  --   (item_id STRING, category_level1 STRING, valid_from DATE, valid_to DATE; NULL valid_to = current mapping).
+  -- pim_mismatch_item_revenue compares the as-collected level 1 with the PIM value valid on the event date (as-was).
+  -- For a current-hierarchy restatement, join on valid_to IS NULL instead and group by the PIM value.
+  WITH item_rows AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      e.event_name,
+      e.event_timestamp,
+      e.user_pseudo_id,
+      COALESCE(
+        NULLIF(e.ecommerce.transaction_id, '(not set)'),
+        (SELECT MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep)
+      ) AS transaction_id,
+      it.item_id,
+      it.item_variant,
+      COALESCE(NULLIF(TRIM(it.item_category), ''), '(not set)') AS item_category,
+      NULLIF(TRIM(it.item_category2), '') AS item_category2,
+      ARRAY_TO_STRING([
+        COALESCE(NULLIF(TRIM(it.item_category), ''), '(not set)'),
+        NULLIF(TRIM(it.item_category2), ''),
+        NULLIF(TRIM(it.item_category3), ''),
+        NULLIF(TRIM(it.item_category4), ''),
+        NULLIF(TRIM(it.item_category5), '')
+      ], ' / ') AS category_path,
+      COALESCE(it.quantity, 1) AS quantity,
+      -- USD
+      COALESCE(it.item_revenue_in_usd, it.price_in_usd * COALESCE(it.quantity, 1), 0) AS item_revenue
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.items) AS it
+    WHERE _TABLE_SUFFIX NOT LIKE 'intraday%'
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 7 DAY))
+        AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 1 DAY))
+      AND e.event_name IN ('view_item', 'add_to_cart', 'purchase')
+  ),
+  -- Purchased items are counted once per distinct transaction x item x variant (duplicate purchase hits removed).
+  purchase_items AS (
+    SELECT
+      p.event_name,
+      p.item_category,
+      p.item_category2,
+      p.category_path,
+      p.quantity,
+      p.item_revenue,
+      m.category_level1 AS pim_category_as_was
+    FROM (
+      SELECT *
+      FROM item_rows
+      WHERE event_name = 'purchase'
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY
+          COALESCE(transaction_id, CONCAT(IFNULL(user_pseudo_id, ''), '|', CAST(event_timestamp AS STRING))),
+          IFNULL(item_id, ''),
+          IFNULL(item_variant, '')
+        ORDER BY event_timestamp
+      ) = 1
+    ) AS p
+    LEFT JOIN `your-project.pim.product_category_history` AS m
+      ON m.item_id = p.item_id
+      AND p.event_date >= m.valid_from
+      AND (m.valid_to IS NULL OR p.event_date < m.valid_to)
+  ),
+  unified AS (
+    SELECT event_name, item_category, item_category2, category_path, quantity, item_revenue,
+      CAST(NULL AS STRING) AS pim_category_as_was
+    FROM item_rows
+    WHERE event_name IN ('view_item', 'add_to_cart')
+    UNION ALL
+    SELECT event_name, item_category, item_category2, category_path, quantity, item_revenue, pim_category_as_was
+    FROM purchase_items
+  ),
+  by_category AS (
+    SELECT
+      item_category,
+      item_category2,
+      category_path,
+      SUM(IF(event_name = 'view_item', quantity, 0)) AS item_views,
+      SUM(IF(event_name = 'add_to_cart', quantity, 0)) AS items_added_to_cart,
+      SUM(IF(event_name = 'purchase', quantity, 0)) AS items_purchased,
+      SUM(IF(event_name = 'purchase', item_revenue, 0)) AS item_revenue,
+      SUM(IF(event_name = 'purchase' AND pim_category_as_was IS NOT NULL AND pim_category_as_was <> item_category, item_revenue, 0)) AS pim_mismatch_item_revenue
+    FROM unified
+    GROUP BY item_category, item_category2, category_path
+  )
+  -- view_to_cart_rate_pct denominator: all item units viewed in the category path.
+  -- not_set_share_above_threshold flags a weekly (not set) share of item revenue above 2% (top of the 1-2% tolerance).
+  SELECT
+    item_category,
+    item_category2,
+    category_path,
+    item_views,
+    items_added_to_cart,
+    ROUND(100 * SAFE_DIVIDE(items_added_to_cart, item_views), 2) AS view_to_cart_rate_pct,
+    items_purchased,
+    ROUND(item_revenue, 2) AS item_revenue,
+    ROUND(100 * SAFE_DIVIDE(item_revenue, SUM(item_revenue) OVER ()), 2) AS item_revenue_share_pct,
+    ROUND(pim_mismatch_item_revenue, 2) AS pim_mismatch_item_revenue,
+    ROUND(100 * SAFE_DIVIDE(SUM(IF(item_category = '(not set)', item_revenue, 0)) OVER (), SUM(item_revenue) OVER ()), 2) AS not_set_item_revenue_share_pct,
+    COALESCE(SAFE_DIVIDE(SUM(IF(item_category = '(not set)', item_revenue, 0)) OVER (), SUM(item_revenue) OVER ()) > 0.02, FALSE) AS not_set_share_above_threshold
+  FROM by_category
+  ORDER BY item_revenue DESC
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Item Category: item-scoped funnel by collected category path for the last 7 complete days.
+  -- Assumed datasets: web_experience_events (XDM ExperienceEvent with Commerce details and productListItems)
+  --   and pim_product_category_history (item_id, category_level1, valid_from DATE, valid_to DATE; NULL valid_to = current mapping).
+  -- The current day is excluded while streaming ingestion is still landing (the equivalent of the GA4 intraday table).
+  -- Reporting time zone: America/New_York stands in for the property time zone; replace it in every date expression.
+  -- Assumed FX table: fx_daily_rates (rate_date DATE, currency_code STRING, usd_rate DOUBLE, loaded_at TIMESTAMP).
+  -- item_revenue is USD: priceTotal x the daily usd_rate for the line currency and event date (one rate per day x currency, latest load).
+  -- Non-USD lines with no rate for the day contribute 0 revenue until the rate lands.
+  -- Level 1 comes from the first categoryPath segment, then productCategories[0].categoryName, then merchandising eVar10.
+  -- SKU is the variant-level identifier, so purchases are deduplicated per order x SKU.
+  WITH raw_items AS (
+    SELECT
+      to_date(from_utc_timestamp(e.timestamp, 'America/New_York')) AS event_date,
+      CASE
+        WHEN e.eventType = 'commerce.productViews' OR e.commerce.productViews.value > 0 THEN 'view_item'
+        WHEN e.eventType = 'commerce.productListAdds' OR e.commerce.productListAdds.value > 0 THEN 'add_to_cart'
+        WHEN e.eventType = 'commerce.purchases' OR e.commerce.purchases.value > 0 THEN 'purchase'
+      END AS event_name,
+      e.timestamp AS event_ts,
+      COALESCE(NULLIF(e.commerce.order.purchaseID, ''), e._id) AS order_key,
+      pli.SKU AS item_id,
+      CASE WHEN size(pli.productCategories) > 0 THEN pli.productCategories[0].categoryName END AS category_name_l1,
+      CASE WHEN size(pli.productCategories) > 0 THEN split(pli.productCategories[0].categoryPath, '/') END AS path_parts,
+      pli._experience.analytics.customDimensions.eVars.eVar10 AS merch_evar10,
+      COALESCE(pli.quantity, 1) AS quantity,
+      COALESCE(pli.priceTotal, 0) AS item_revenue_local,
+      COALESCE(NULLIF(pli.currencyCode, ''), e.commerce.order.currencyCode) AS currency_code
+    FROM web_experience_events e
+    LATERAL VIEW explode(e.productListItems) pli_t AS pli
+    WHERE e.timestamp >= to_timestamp(date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 8))
+      AND e.timestamp < to_timestamp(date_add(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 1))
+  ),
+  leveled AS (
+    SELECT
+      event_date,
+      event_name,
+      event_ts,
+      order_key,
+      item_id,
+      quantity,
+      item_revenue_local,
+      currency_code,
+      COALESCE(
+        NULLIF(trim(CASE WHEN size(path_parts) > 0 THEN path_parts[0] END), ''),
+        NULLIF(trim(category_name_l1), ''),
+        NULLIF(trim(merch_evar10), ''),
+        '(not set)'
+      ) AS item_category,
+      NULLIF(trim(CASE WHEN size(path_parts) > 1 THEN path_parts[1] END), '') AS item_category2,
+      NULLIF(trim(CASE WHEN size(path_parts) > 2 THEN path_parts[2] END), '') AS item_category3,
+      NULLIF(trim(CASE WHEN size(path_parts) > 3 THEN path_parts[3] END), '') AS item_category4,
+      NULLIF(trim(CASE WHEN size(path_parts) > 4 THEN path_parts[4] END), '') AS item_category5
+    FROM raw_items
+    WHERE event_name IS NOT NULL
+      AND event_date BETWEEN date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 7) AND date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 1)
+  ),
+  -- One FX rate per rate_date x currency (latest load), so the item-line join cannot multiply lines.
+  fx_rates AS (
+    SELECT rate_date, currency_code, usd_rate
+    FROM (
+      SELECT
+        r.rate_date,
+        r.currency_code,
+        r.usd_rate,
+        ROW_NUMBER() OVER (PARTITION BY r.rate_date, r.currency_code ORDER BY r.loaded_at DESC) AS rn
+      FROM fx_daily_rates r
+    ) fr
+    WHERE fr.rn = 1
+  ),
+  item_rows AS (
+    SELECT
+      l.event_date,
+      l.event_name,
+      l.event_ts,
+      l.order_key,
+      l.item_id,
+      l.quantity,
+      -- USD
+      l.item_revenue_local
+        * COALESCE(fx.usd_rate, CASE WHEN COALESCE(l.currency_code, 'USD') = 'USD' THEN 1 END, 0) AS item_revenue,
+      l.item_category,
+      l.item_category2,
+      concat_ws(' / ', l.item_category, l.item_category2, l.item_category3, l.item_category4, l.item_category5) AS category_path
+    FROM leveled l
+    LEFT JOIN fx_rates fx
+      ON fx.rate_date = l.event_date
+      AND fx.currency_code = l.currency_code
+  ),
+  purchase_items AS (
+    SELECT
+      p.event_name,
+      p.item_category,
+      p.item_category2,
+      p.category_path,
+      p.quantity,
+      p.item_revenue,
+      m.category_level1 AS pim_category_as_was
+    FROM (
+      SELECT
+        r.*,
+        ROW_NUMBER() OVER (PARTITION BY r.order_key, COALESCE(r.item_id, '') ORDER BY r.event_ts) AS rn
+      FROM item_rows r
+      WHERE r.event_name = 'purchase'
+    ) p
+    LEFT JOIN pim_product_category_history m
+      ON m.item_id = p.item_id
+      AND p.event_date >= m.valid_from
+      AND (m.valid_to IS NULL OR p.event_date < m.valid_to)
+    WHERE p.rn = 1
+  ),
+  unified AS (
+    SELECT event_name, item_category, item_category2, category_path, quantity, item_revenue,
+      CAST(NULL AS STRING) AS pim_category_as_was
+    FROM item_rows
+    WHERE event_name IN ('view_item', 'add_to_cart')
+    UNION ALL
+    SELECT event_name, item_category, item_category2, category_path, quantity, item_revenue, pim_category_as_was
+    FROM purchase_items
+  ),
+  by_category AS (
+    SELECT
+      item_category,
+      item_category2,
+      category_path,
+      SUM(CASE WHEN event_name = 'view_item' THEN quantity ELSE 0 END) AS item_views,
+      SUM(CASE WHEN event_name = 'add_to_cart' THEN quantity ELSE 0 END) AS items_added_to_cart,
+      SUM(CASE WHEN event_name = 'purchase' THEN quantity ELSE 0 END) AS items_purchased,
+      SUM(CASE WHEN event_name = 'purchase' THEN item_revenue ELSE 0 END) AS item_revenue,
+      SUM(CASE WHEN event_name = 'purchase' AND pim_category_as_was IS NOT NULL AND pim_category_as_was <> item_category THEN item_revenue ELSE 0 END) AS pim_mismatch_item_revenue
+    FROM unified
+    GROUP BY item_category, item_category2, category_path
+  )
+  -- view_to_cart_rate_pct denominator: all item units viewed in the category path.
+  -- not_set_share_above_threshold flags a weekly (not set) share of item revenue above 2% (top of the 1-2% tolerance).
+  SELECT
+    item_category,
+    item_category2,
+    category_path,
+    item_views,
+    items_added_to_cart,
+    ROUND(100 * items_added_to_cart / NULLIF(item_views, 0), 2) AS view_to_cart_rate_pct,
+    items_purchased,
+    ROUND(item_revenue, 2) AS item_revenue,
+    ROUND(100 * item_revenue / NULLIF(SUM(item_revenue) OVER (), 0), 2) AS item_revenue_share_pct,
+    ROUND(pim_mismatch_item_revenue, 2) AS pim_mismatch_item_revenue,
+    ROUND(100 * SUM(CASE WHEN item_category = '(not set)' THEN item_revenue ELSE 0 END) OVER () / NULLIF(SUM(item_revenue) OVER (), 0), 2) AS not_set_item_revenue_share_pct,
+    COALESCE(SUM(CASE WHEN item_category = '(not set)' THEN item_revenue ELSE 0 END) OVER () / NULLIF(SUM(item_revenue) OVER (), 0) > 0.02, false) AS not_set_share_above_threshold
+  FROM by_category
+  ORDER BY item_revenue DESC
+
+Calculation Notes: |
+  1️⃣ Collection: item_category is an item-scoped parameter. It must be filled on every item object of view_item_list, select_item, view_item, add_to_wishlist, add_to_cart, remove_from_cart, view_cart, begin_checkout, add_shipping_info, add_payment_info, purchase and refund. Level 1 goes in item_category and levels 2–5 in item_category2 to item_category5. Keep each value under GA4's 100-character item-parameter limit and send no more than 200 items per event.
+  2️⃣ Source of truth: look up the value from the PIM or product master by item_id when the hit fires. Never derive it from the breadcrumb, URL path or navigation context, because a product reachable through several paths (for example, Outerwear and Sale) would split its item revenue across categories. Collections, sale pages and campaign landing pages belong in item_list_name or promotion_name, never in item_category.
+  3️⃣ Funnel continuity: GA4 does not carry item_category forward from view_item to add_to_cart or purchase. If a later event omits it, those items report as (not set). Watch the (not set) share of item revenue as a data-quality control, and send the tagging fix to the release owner once it goes above 1–2% in a week. Exclude internal, QA and known-bot traffic with the property's data filters before trending it.
+  4️⃣ Timing and restatement: values are stored as collected at event time and dated in the property's reporting time zone. GA4 never restates history after a re-merchandising or taxonomy change. For like-for-like trends across a reclassification, join BigQuery export rows on item_id to a dated category mapping table, and label the report as either as-collected or current hierarchy. Treat intraday export tables as provisional until the daily table lands.
+  5️⃣ Taxonomy hygiene: send exactly one primary path per item_id; secondary placements are not emitted. Fill levels from the top down with no gaps, so item_category3 is never set while item_category2 is empty. Use human-readable names, not category IDs, and apply consistent casing and trimmed whitespace. Never use '/' inside a category name, because XDM categoryPath uses it as the level separator. Casing variants such as 'Womens' and 'womens' split rows in GA4.
+  6️⃣ Metric pairing: this is an item-scoped dimension. Pair it only with item-scoped metrics (items viewed, items added to cart, items purchased, item quantity, item revenue). With event- or session-scoped metrics such as sessions, event count or purchase revenue, a multi-item event counts once under each category it contains, which inflates totals. In Adobe Analytics, the product-string category field only reaches product-level metrics. To keep the PLP category through to the order, use a merchandising eVar with product-syntax binding.
+  7️⃣ Canonical concept and variants: this spec defines the product-hierarchy dimension. Product Category and Sport (product-category-and-sport) specialises it for sporting-goods retail by adding sport as a parallel axis. Product Area Interest (Category Affinity, product-area-interest) derives a user-level affinity from category interactions over a lookback window. Both variants must use the same level-1 values published here so category reporting and affinity audiences reconcile.
+
+Business Use Case: |
+  1️⃣ Category Managers (Merchandising) run the weekly trading review. When a level-1 or level-2 category's item view-to-cart rate drops more than 15% below its trailing four-week baseline, they audit PDP content, price position and stock depth on the category's top 20 SKUs by item views, then re-rank the PLP default sort before the next trading week.
+  2️⃣ The Site Merchandising team (Merchandising) compares each category's share of item views with its share of item revenue every month. When a category's view share is well above its revenue share, they move homepage hero slots, navigation feature tiles and promotion placements to categories with higher item revenue per item view.
+  3️⃣ Performance Marketing (Marketing) aligns the Merchant Center product_type attribute with item_category. When a category's paid-shopping item revenue and conversion rate beat the account average for two consecutive weeks, they raise that category's Shopping and Performance Max budget and bid priority.
+  4️⃣ Merchandise Planning (Merchandising) reconciles GA4 item revenue (USD) by category against order-management net sales by category at month-end. Item revenue here is gross of refunds, so a gap to net sales is expected. When the gap exceeds the agreed tolerance or the (not set) share rises, they log a tracking defect with the tagging owner and hold category-level open-to-buy changes that rely on digital demand signals until the data is corrected.
+
+Dependencies:
+  Events: [product-view, add-to-cart, purchase]
+
+Source Data: Digital Analytics (GA4) + Product Catalog (PIM)
+
+Report Attributes: |
+  Item Category 2; Item Name; Item Brand; Item List Name; Session Default Channel Group; Device Category; Country
+
+Dashboard Usage: [Merchandising Category Performance, Product Discovery Funnel (List View to Purchase), Weekly Trading Review, Assortment and Category Mix, Paid Shopping Category Performance]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [product-category-and-sport, product-area-interest, product-name, internal-search-term, promotion-type]
+
+Derived Dimensions: [product-area-interest]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-08-25T00:04:07.542+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-15T21:47:35.889+00:00
+
