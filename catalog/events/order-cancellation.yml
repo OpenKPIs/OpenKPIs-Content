@@ -1,0 +1,267 @@
+# Event: Order Cancellation
+# Generated: 2026-09-15T21:48:34.489Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Order Cancellation
+Event Serialization: always
+
+Description: |
+  Fires when an entire e-commerce order is cancelled before any item ships, whether the customer cancels through web or app self-service or the merchant or order management platform cancels it (such as Shopify orders/cancelled or a Salesforce Commerce Cloud order cancel), and is sent as the GA4 recommended refund event (a full refund for the transaction_id) with refund_type = order_cancellation because GA4 has no cancel event. It captures order-level cancellations only and feeds the Order Cancellation Rate KPI; it is distinct from shipment cancellation (voiding a carrier freight booking), post-delivery returns and refunds, and payment declines that never create an order, and refund events without refund_type = order_cancellation are never counted as cancellations.
+
+Category: Operations
+
+Tags: [event, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Monetization
+
+
+Event Type: standard
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  refund
+
+Adobe Event: |
+  order:cancel
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "order:cancel",
+          "eventAction": "order:cancel",
+          "type": "commerce",
+          "effect": "order cancelled before shipment",
+          "timeStamp": "2026-09-13T10:42:00Z"
+        },
+        "category": {
+          "primaryCategory": "ecommerce"
+        },
+        "attributes": {
+          "refund_type": "order_cancellation",
+          "cancel_initiator": "customer",
+          "cancellation_reason": "customer_changed_mind",
+          "order_status_at_cancel": "awaiting_fulfillment",
+          "fulfillment_type": "ship_to_home",
+          "payment_type": "credit_card",
+          "minutes_since_order": 38
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "ORD-100482",
+      "total": {
+        "currency": "USD",
+        "tax": 8.99,
+        "shipping": 5.99,
+        "transactionTotal": 129.97
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-24817",
+            "productName": "Trail Running Shoe"
+          },
+          "category": {
+            "primaryCategory": "Footwear"
+          },
+          "price": {
+            "basePrice": 114.99,
+            "currency": "USD"
+          },
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "refund",
+    "ecommerce": {
+      "transaction_id": "ORD-100482",
+      "value": 129.97,
+      "currency": "USD",
+      "tax": 8.99,
+      "shipping": 5.99,
+      "items": [
+        {
+          "item_id": "SKU-24817",
+          "item_name": "Trail Running Shoe",
+          "item_category": "Footwear",
+          "price": 114.99,
+          "quantity": 1
+        }
+      ]
+    },
+    "refund_type": "order_cancellation",
+    "cancel_initiator": "customer",
+    "cancellation_reason": "customer_changed_mind",
+    "order_status_at_cancel": "awaiting_fulfillment",
+    "fulfillment_type": "ship_to_home",
+    "payment_type": "credit_card",
+    "minutes_since_order": 38
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "order:cancel",
+    "eventInfo": {
+      "eventName": "order:cancel"
+    },
+    "transaction": {
+      "transaction_id": "ORD-100482",
+      "value": 129.97,
+      "currency": "USD",
+      "tax": 8.99,
+      "shipping": 5.99,
+      "refund_type": "order_cancellation",
+      "cancel_initiator": "customer",
+      "cancellation_reason": "customer_changed_mind",
+      "order_status_at_cancel": "awaiting_fulfillment",
+      "fulfillment_type": "ship_to_home",
+      "payment_type": "credit_card",
+      "minutes_since_order": 38,
+      "items": [
+        {
+          "item_id": "SKU-24817",
+          "item_name": "Trail Running Shoe",
+          "item_category": "Footwear",
+          "price": 114.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.backofficeOrderCancelled",
+    "commerce": {
+      "order": {
+        "purchaseID": "transaction_id",
+        "priceTotal": "value",
+        "currencyCode": "currency",
+        "taxAmount": "tax",
+        "cancelDate": "event timestamp (cancellation time)",
+        "payments": [
+          {
+            "paymentType": "payment_type",
+            "currencyCode": "currency"
+          }
+        ]
+      },
+      "shipping": {
+        "shippingAmount": "shipping"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "items[].item_id",
+        "name": "items[].item_name",
+        "productCategories": [
+          {
+            "categoryName": "items[].item_category"
+          }
+        ],
+        "priceTotal": "items[].price * items[].quantity",
+        "quantity": "items[].quantity"
+      }
+    ],
+    "_tenant": {
+      "orderCancellation": {
+        "refundType": "refund_type",
+        "cancelInitiator": "cancel_initiator",
+        "cancellationReason": "cancellation_reason",
+        "orderStatusAtCancel": "order_status_at_cancel",
+        "fulfillmentType": "fulfillment_type",
+        "minutesSinceOrder": "minutes_since_order"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "transaction_id",
+            "eVar2": "cancel_initiator",
+            "eVar3": "cancellation_reason"
+          }
+        }
+      }
+    }
+  }
+
+Parameters: |
+  {
+    "transaction_id": "string - Order identifier matching the transaction_id of the originating purchase event; deduplication and join key",
+    "value": "number - Order value cancelled, defined consistently with the purchase event and net of any partial refunds already issued",
+    "currency": "string - ISO 4217 currency code of value",
+    "tax": "number - Tax amount on the cancelled order",
+    "shipping": "number - Shipping amount on the cancelled order",
+    "items": "array - Line items on the cancelled order (item_id, item_name, item_category, price, quantity)",
+    "refund_type": "string - Refund context; always order_cancellation for this event, separating pre-shipment cancellations from post-delivery refunds and returns sent on the same GA4 refund event",
+    "cancel_initiator": "string - Party that initiated the cancellation: customer, merchant or system",
+    "cancellation_reason": "string - Normalised reason code, e.g. customer_changed_mind, duplicate_order, out_of_stock, fraud, payment_declined, address_unserviceable, order_edit, other",
+    "order_status_at_cancel": "string - Fulfilment status at the moment of cancellation, e.g. pending_payment, processing, awaiting_fulfillment, ready_for_pickup",
+    "fulfillment_type": "string - Fulfilment method of the order: ship_to_home, ship_from_store, bopis, curbside, same_day_delivery",
+    "payment_type": "string - Payment method used on the order, e.g. credit_card, paypal, bnpl, gift_card",
+    "minutes_since_order": "number - Elapsed minutes between order placement and cancellation"
+  }
+
+Calculation Notes: |
+  1️⃣ Scope: record one GA4 refund event with refund_type = order_cancellation (Adobe order:cancel) per transaction_id when the whole order moves to a cancelled status before any fulfilment line has shipped; partial line-item cancellations and cancellations after shipment (returns to origin, refused deliveries) are excluded and belong to refund / return tracking; refund events without refund_type = order_cancellation are never counted.
+  2️⃣ Source of truth and deduplication: the OMS record (Shopify orders/cancelled webhook with cancelled_at, Salesforce Commerce Cloud order status CANCELLED) is authoritative; a client-side self-service confirmation and the server-side OMS hit for the same order are deduplicated on transaction_id, keeping the OMS timestamp and value and the client hit's cancel_initiator = customer.
+  3️⃣ Exclusions: remove test orders, draft orders, orders deleted without a cancel status, and payment authorisation failures that never produced a purchase; cancel-and-reissue edits handled by Customer Service (address change, item swap) are retained but flagged cancellation_reason = order_edit so they can be excluded from customer-intent and operational cancellation rates.
+  4️⃣ Timing: the event timestamp is the cancellation time, not the order time; period reporting of Orders Cancelled uses cancellation date, while Order Cancellation Rate is reported by order-placed cohort (cancellations joined back to purchase by transaction_id) so numerator and denominator refer to the same orders, with the latest cohort treated as immature until the standard pre-ship window (typically 7–14 days) has elapsed.
+  5️⃣ Value: value, tax, shipping and currency mirror the definitions used on the originating purchase event (same inclusion of tax and shipping, ISO 4217 currency, order-date FX rate for multi-currency reporting), less any partial refunds already issued, so Cancelled Revenue reconciles against gross purchase revenue.
+  6️⃣ Session handling: merchant and system cancellations arrive server-side without a browsing session and must not start or extend a session or be subject to the 30-minute session timeout; user-level and channel attribution are inherited from the originating purchase via transaction_id and the user_id / client_id stored at checkout.
+  7️⃣ Rate denominator: Order Cancellation Rate = Orders Cancelled / all orders placed in the period (distinct purchase transaction_id, including orders later cancelled, excluding test orders); merchant-side cancellations for stock rejection on ship-from-store or BOPIS orders are included with cancel_initiator = merchant and fulfillment_type set accordingly.
+
+Business Use Case: |
+  1️⃣ Merchandising and Inventory Planning: when merchant-initiated cancellations with cancellation_reason = out_of_stock exceed 1% of a SKU's weekly orders, the planner raises the channel safety-stock buffer and escalates the inventory sync latency between the OMS and storefront.
+  2️⃣ Customer Service Operations lead: when customer-initiated cancellations within 60 minutes of order placement rise week over week, the team reviews the top cancellation_reason values (wrong item, delivery date, duplicate order) and updates order-confirmation messaging and the self-service order-edit window.
+  3️⃣ Performance Marketing: daily, the team uploads cancelled transaction_id values as conversion retractions or restatements to Google Ads and Meta so bidding algorithms optimise on net rather than gross orders.
+  4️⃣ Finance: in the daily revenue flash, the FP&A analyst subtracts Cancelled Revenue from gross demand and reconciles cancelled orders against payment voids and refunds, investigating any cancelled order with a captured payment that has no matching refund after 48 hours.
+
+Dependencies:
+  Events: [purchase]
+
+Source Data: Web/App Digital Analytics (GA4) + Order Management (Shopify, Salesforce Commerce Cloud)
+
+    Report Attributes: |
+  cancel_initiator; cancellation_reason; order_status_at_cancel; fulfillment_type; payment_type; item_category; device_category; session_default_channel_group; country
+
+    Dashboard Usage: [Order Management & Fulfillment Operations, Daily Revenue Flash (Gross vs. Net Demand), Inventory Availability & Stockout Impact, Customer Service Contact Drivers]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [fulfillment-strategy, payment-method, order-status]
+
+    Derived Dimensions: [cancel-initiator, order-cancellation-reason]
+
+    Derived Metrics: [orders-cancelled, cancelled-revenue]
+
+    Derived KPIs: [order-cancellation-rate]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-14T01:06:51.433+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-15T21:48:34.215+00:00
+
