@@ -1,0 +1,476 @@
+# KPI: Gross Merchandise Value
+# Generated: 2026-09-15T03:43:39.058Z
+# Contributed by: swapnamagantius
+# Last modified by: devyendarm
+
+KPI Name: Gross Merchandise Value
+Formula: GMV = SUM over distinct transaction_id order lines of (unit selling price × quantity × FX rate to reporting currency on order date), WHERE order is not test/internal AND order status ≠ cancelled before fulfilment; unit selling price is net of item-level markdowns and before order-level coupons; tax, shipping and fees excluded; gift card purchases excluded; returns, refunds, post-fulfilment cancellations and marketplace commissions not deducted (Net Revenue = GMV − order-level discounts − returns and refunds − post-fulfilment cancellations)
+
+Description: |
+  Gross Merchandise Value (GMV) is the total value of merchandise sold through completed orders in the period, calculated as unit selling price × quantity across every first- and third-party order line, excluding tax and shipping and stated before returns, refunds, post-fulfilment cancellations, order-level coupons and marketplace commissions. It is the top-line measure of transaction volume used to size demand and compare channels, categories and sellers, and it exceeds Net Revenue by order-level discounts, returns and refunds and post-fulfilment cancellations, plus, for marketplaces, the gap left when third-party seller proceeds are replaced by the commission earned, so it must never be presented as recognised revenue.
+
+Category: Monetization
+
+Tags: [kpi, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Global
+
+Measure Type: Currency
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly, Yearly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  commerce.purchases
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "purchase",
+          "eventAction": "transaction_complete"
+        },
+        "category": {
+          "primaryCategory": "commerce"
+        },
+        "attributes": {
+          "trafficType": "external"
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "T12345",
+      "total": {
+        "basePrice": 264.95,
+        "voucherCode": "SAVE10",
+        "voucherDiscount": 10,
+        "currency": "USD",
+        "taxRate": 0.08,
+        "tax": 20.4,
+        "shipping": 7.99,
+        "shippingMethod": "Standard",
+        "priceWithTax": 275.35,
+        "transactionTotal": 283.34
+      },
+      "attributes": {
+        "affiliation": "Online Store"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-1001",
+            "sku": "SKU-1001",
+            "productName": "Running Shoes",
+            "manufacturer": "Stride"
+          },
+          "category": {
+            "primaryCategory": "Footwear",
+            "subCategory1": "Running"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 109.99,
+            "currency": "USD"
+          },
+          "attributes": {
+            "listPrice": 129.99,
+            "itemDiscount": 20,
+            "sellerType": "1P"
+          }
+        },
+        {
+          "productInfo": {
+            "productID": "SKU-2044",
+            "sku": "SKU-2044",
+            "productName": "Performance Running Socks",
+            "manufacturer": "Stride"
+          },
+          "category": {
+            "primaryCategory": "Accessories",
+            "subCategory1": "Socks"
+          },
+          "quantity": 3,
+          "price": {
+            "basePrice": 14.99,
+            "currency": "USD"
+          },
+          "attributes": {
+            "listPrice": 14.99,
+            "itemDiscount": 0,
+            "sellerType": "3P"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "traffic_type": "external",
+    "ecommerce": {
+      "transaction_id": "T12345",
+      "affiliation": "Online Store",
+      "currency": "USD",
+      "value": 254.95,
+      "tax": 20.4,
+      "shipping": 7.99,
+      "coupon": "SAVE10",
+      "items": [
+        {
+          "item_id": "SKU-1001",
+          "item_name": "Running Shoes",
+          "affiliation": "Online Store",
+          "index": 0,
+          "item_brand": "Stride",
+          "item_category": "Footwear",
+          "item_category2": "Running",
+          "price": 109.99,
+          "discount": 20,
+          "quantity": 2,
+          "seller_type": "1P"
+        },
+        {
+          "item_id": "SKU-2044",
+          "item_name": "Performance Running Socks",
+          "affiliation": "Partner Marketplace Seller",
+          "index": 1,
+          "item_brand": "Stride",
+          "item_category": "Accessories",
+          "item_category2": "Socks",
+          "price": 14.99,
+          "discount": 0,
+          "quantity": 3,
+          "seller_type": "3P"
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "commerce.purchases",
+    "xdm": {
+      "eventType": "commerce.purchases",
+      "_tenant": {
+        "trafficType": "external"
+      },
+      "commerce": {
+        "purchases": {
+          "value": 1
+        },
+        "order": {
+          "purchaseID": "T12345",
+          "currencyCode": "USD",
+          "priceTotal": 283.34,
+          "taxAmount": 20.4,
+          "discountAmount": 10
+        },
+        "shipping": {
+          "shippingAmount": 7.99,
+          "shippingMethod": "Standard"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1001",
+          "name": "Running Shoes",
+          "quantity": 2,
+          "priceTotal": 219.98,
+          "currencyCode": "USD",
+          "_tenant": {
+            "sellerType": "1P"
+          },
+          "productCategories": [
+            {
+              "categoryID": "footwear-running",
+              "categoryName": "Footwear"
+            }
+          ]
+        },
+        {
+          "SKU": "SKU-2044",
+          "name": "Performance Running Socks",
+          "quantity": 3,
+          "priceTotal": 44.97,
+          "currencyCode": "USD",
+          "_tenant": {
+            "sellerType": "3P"
+          },
+          "productCategories": [
+            {
+              "categoryID": "accessories-socks",
+              "categoryName": "Accessories"
+            }
+          ]
+        }
+      ]
+    }
+  }
+
+XDM Mapping: |
+  {
+    "timestamp": "order placement event time",
+    "eventType": "commerce.purchases",
+    "_tenant": {
+      "trafficType": "traffic_type (event[].attributes.trafficType)"
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ecommerce.transaction_id",
+        "currencyCode": "ecommerce.currency",
+        "priceTotal": "transaction.total.transactionTotal",
+        "taxAmount": "ecommerce.tax",
+        "discountAmount": "transaction.total.voucherDiscount"
+      },
+      "shipping": {
+        "shippingAmount": "ecommerce.shipping",
+        "shippingMethod": "transaction.total.shippingMethod"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "ecommerce.items[].item_id",
+        "name": "ecommerce.items[].item_name",
+        "quantity": "ecommerce.items[].quantity",
+        "priceTotal": "ecommerce.items[].price × ecommerce.items[].quantity (line total after item-level markdowns)",
+        "currencyCode": "ecommerce.currency",
+        "_tenant": {
+          "sellerType": "ecommerce.items[].seller_type (transaction.item[].attributes.sellerType)"
+        },
+        "productCategories": [
+          {
+            "categoryID": "ecommerce.items[].item_category2",
+            "categoryName": "ecommerce.items[].item_category"
+          }
+        ]
+      }
+    ]
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Gross Merchandise Value (GMV) by order date in the reporting currency, with a seller (1P / 3P) breakdown from the seller_type custom item parameter (items.item_params).
+  -- Replace your-project and analytics_123456789 with your own project and GA4 export dataset; set the order date range, the _TABLE_SUFFIX window (7 days before the start date for transaction dedupe, 1 day after the end date for time zone spill), the reporting currency (USD here) and the reporting time zone.
+  -- FX source: your-project.finance.fx_rates_daily (rate_date, from_currency, to_currency, fx_rate), one row per date and currency pair. USD-only alternative: SUM(it.item_revenue_in_usd), which GA4 converts at the event-date rate.
+  -- Order status source: your-project.oms.order_status (transaction_id, order_status, status_updated_at).
+  -- items.price is the unit selling price after item-level markdowns and before order-level coupons; tax, shipping and fees live outside items and are never added.
+  -- Returns, refunds and post-fulfilment cancellations are not deducted; only orders cancelled before fulfilment, payment voids and fraud rejections are removed.
+  WITH purchase_events AS (
+    SELECT
+      e.ecommerce.transaction_id AS transaction_id,
+      e.event_timestamp,
+      DATE(TIMESTAMP_MICROS(e.event_timestamp), 'America/New_York') AS order_date,
+      (SELECT MAX(IF(ep.key = 'currency', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS currency,
+      (SELECT MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS traffic_type,
+      e.items
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE e.event_name = 'purchase'
+      AND _TABLE_SUFFIX BETWEEN '20260825' AND '20260914'
+      AND e.ecommerce.transaction_id IS NOT NULL
+      AND e.ecommerce.transaction_id NOT IN ('', '(not set)')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY e.ecommerce.transaction_id ORDER BY e.event_timestamp) = 1
+  ),
+  order_status_latest AS (
+    SELECT
+      transaction_id,
+      order_status
+    FROM `your-project.oms.order_status`
+    WHERE transaction_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY status_updated_at DESC) = 1
+  ),
+  valid_orders AS (
+    SELECT
+      pe.transaction_id,
+      pe.order_date,
+      COALESCE(UPPER(pe.currency), '(not set)') AS currency,
+      pe.items
+    FROM purchase_events AS pe
+    LEFT JOIN order_status_latest AS os
+      ON os.transaction_id = pe.transaction_id
+    WHERE pe.order_date BETWEEN DATE '2026-09-01' AND DATE '2026-09-13'
+      AND COALESCE(pe.traffic_type, '') != 'internal'
+      AND NOT REGEXP_CONTAINS(LOWER(pe.transaction_id), r'^(test|qa|sandbox)[-_]')
+      AND NOT EXISTS (SELECT 1 FROM UNNEST(pe.items) AS ti WHERE STARTS_WITH(UPPER(ti.item_id), 'TEST-'))
+      AND COALESCE(os.order_status, 'unknown') NOT IN ('cancelled_before_fulfilment', 'payment_voided', 'fraud_rejected')
+  ),
+  order_lines AS (
+    SELECT
+      vo.order_date,
+      vo.transaction_id,
+      vo.currency,
+      COALESCE((SELECT ip.value.string_value FROM UNNEST(it.item_params) AS ip WHERE ip.key = 'seller_type'), '(not set)') AS seller_type,
+      it.quantity,
+      it.price * it.quantity AS line_gmv_local
+    FROM valid_orders AS vo,
+    UNNEST(vo.items) AS it
+    WHERE it.quantity > 0
+      AND it.price IS NOT NULL
+      AND COALESCE(it.item_category, '') NOT IN ('Gift Card', 'Gift Cards')
+  )
+  SELECT
+    ol.order_date,
+    IF(GROUPING(ol.seller_type) = 1, 'All sellers', ol.seller_type) AS seller_breakdown,
+    'USD' AS reporting_currency,
+    COUNT(DISTINCT ol.transaction_id) AS orders,
+    SUM(ol.quantity) AS units,
+    ROUND(SUM(ol.line_gmv_local * IF(ol.currency = 'USD', 1, fx.fx_rate)), 2) AS gross_merchandise_value,
+    COUNTIF(ol.currency != 'USD' AND fx.fx_rate IS NULL) AS lines_missing_fx_rate
+  FROM order_lines AS ol
+  LEFT JOIN `your-project.finance.fx_rates_daily` AS fx
+    ON fx.rate_date = ol.order_date
+    AND fx.from_currency = ol.currency
+    AND fx.to_currency = 'USD'
+  GROUP BY GROUPING SETS ((ol.order_date), (ol.order_date, ol.seller_type))
+  ORDER BY ol.order_date, seller_breakdown;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Gross Merchandise Value (GMV) by order date in the reporting currency, with a seller (1P / 3P) breakdown.
+  -- Replace your_aep_web_events_dataset with your XDM ExperienceEvent dataset and _tenant with your organisation tenant id (trafficType and sellerType are the custom fields holding the internal traffic flag and the 1P / 3P seller type); set the timestamp window (7 days before the start date for purchaseID dedupe, 1 day after the end date for time zone spill), the order date range, the reporting currency (USD here) and the reporting time zone.
+  -- FX source: finance_fx_rates_daily (rate_date, from_currency, to_currency, fx_rate), the finance daily rate table ingested into the AEP data lake, one row per date and currency pair.
+  -- Order status source: oms_order_status (transaction_id, order_status, status_updated_at), the Order Management status table ingested into the AEP data lake.
+  -- productListItems.priceTotal is already the order line total (unit selling price after item-level markdowns x quantity, e.g. 109.99 x 2 = 219.98), so it is not multiplied by quantity again; order-level discountAmount, taxAmount and shippingAmount are never added or deducted.
+  -- Returns, refunds and post-fulfilment cancellations are not deducted; only orders cancelled before fulfilment, payment voids and fraud rejections are removed.
+  WITH purchase_events AS (
+    SELECT
+      commerce.order.purchaseID AS transaction_id,
+      to_date(from_utc_timestamp(timestamp, 'America/New_York')) AS order_date,
+      _tenant.trafficType AS traffic_type,
+      environment.browserDetails.userAgent AS user_agent,
+      productListItems,
+      ROW_NUMBER() OVER (PARTITION BY commerce.order.purchaseID ORDER BY timestamp) AS rn
+    FROM your_aep_web_events_dataset
+    WHERE eventType = 'commerce.purchases'
+      AND timestamp >= to_timestamp('2026-08-25 00:00:00')
+      AND timestamp < to_timestamp('2026-09-15 00:00:00')
+      AND commerce.order.purchaseID IS NOT NULL
+      AND commerce.order.purchaseID <> ''
+  ),
+  order_status_latest AS (
+    SELECT
+      transaction_id,
+      order_status
+    FROM (
+      SELECT
+        transaction_id,
+        order_status,
+        ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY status_updated_at DESC) AS rn
+      FROM oms_order_status
+      WHERE transaction_id IS NOT NULL
+    ) s
+    WHERE rn = 1
+  ),
+  valid_orders AS (
+    SELECT
+      pe.transaction_id,
+      pe.order_date,
+      pe.productListItems
+    FROM purchase_events pe
+    LEFT JOIN order_status_latest os
+      ON os.transaction_id = pe.transaction_id
+    WHERE pe.rn = 1
+      AND pe.order_date BETWEEN to_date('2026-09-01') AND to_date('2026-09-13')
+      AND COALESCE(pe.traffic_type, '') <> 'internal'
+      AND NOT (lower(COALESCE(pe.user_agent, '')) RLIKE 'bot|crawler|spider|headless|lighthouse')
+      AND NOT (lower(pe.transaction_id) RLIKE '^(test|qa|sandbox)[-_]')
+      AND NOT COALESCE(exists(pe.productListItems, x -> upper(x.SKU) LIKE 'TEST-%'), false)
+      AND COALESCE(os.order_status, 'unknown') NOT IN ('cancelled_before_fulfilment', 'payment_voided', 'fraud_rejected')
+  ),
+  exploded_lines AS (
+    SELECT
+      order_date,
+      transaction_id,
+      explode(productListItems) AS pli
+    FROM valid_orders
+  ),
+  order_lines AS (
+    SELECT
+      order_date,
+      transaction_id,
+      COALESCE(NULLIF(pli._tenant.sellerType, ''), '(not set)') AS seller_type,
+      upper(COALESCE(pli.currencyCode, '(not set)')) AS currency,
+      pli.quantity AS quantity,
+      pli.priceTotal AS line_gmv_local
+    FROM exploded_lines
+    WHERE pli.quantity > 0
+      AND pli.priceTotal IS NOT NULL
+      AND NOT COALESCE(exists(pli.productCategories, c -> lower(c.categoryName) IN ('gift card', 'gift cards')), false)
+  )
+  SELECT
+    order_date,
+    CASE WHEN grouping(seller_type) = 1 THEN 'All sellers' ELSE seller_type END AS seller_breakdown,
+    'USD' AS reporting_currency,
+    COUNT(DISTINCT transaction_id) AS orders,
+    SUM(quantity) AS units,
+    ROUND(SUM(line_gmv_local * CASE WHEN currency = 'USD' THEN 1 ELSE fx_rate END), 2) AS gross_merchandise_value,
+    SUM(CASE WHEN currency <> 'USD' AND fx_rate IS NULL THEN 1 ELSE 0 END) AS lines_missing_fx_rate
+  FROM order_lines ol
+  LEFT JOIN finance_fx_rates_daily fx
+    ON fx.rate_date = ol.order_date
+    AND fx.from_currency = ol.currency
+    AND fx.to_currency = 'USD'
+  GROUP BY order_date, seller_type
+  GROUPING SETS ((order_date), (order_date, seller_type))
+  ORDER BY order_date, seller_breakdown;
+
+Calculation Notes: |
+  1️⃣ Base population: order lines of completed orders only, i.e. a confirmed purchase (GA4 purchase / Adobe commerce.purchases) whose order status is not cancelled before fulfilment or payment-voided; line value = unit selling price × quantity, including third-party marketplace lines at the price the buyer paid.
+  2️⃣ Discounts and charges: item-level markdowns and promotional prices are already reflected in the unit selling price (the GA4 item price convention); order-level coupons, basket promotions and loyalty-point redemptions are NOT deducted; tax, shipping, handling, gift wrap, service fees and gift card purchases (stored value, not merchandise) are excluded.
+  3️⃣ Cancellations and returns: orders cancelled before fulfilment, including fraud rejections and authorisation voids, are removed by reconciling transaction_id against Order Management status; returns, refunds, post-fulfilment cancellations, chargebacks, payment processing fees and marketplace commissions are NOT deducted from GMV.
+  4️⃣ Deduplication and test traffic: count each transaction_id exactly once, keeping the earliest event timestamp across all sessions, devices and dates, which removes confirmation-page reloads and duplicate client-side plus server-side hits; exclude test and internal orders (sandbox payment gateways, internal traffic filters, staff and QA accounts, designated test SKUs); known bot traffic is excluded (GA4 removes known bots before the BigQuery export; AEP filters bot user agents).
+  5️⃣ Currency: convert every line to the reporting currency at the FX rate of the order date before summing (GA4 price_in_usd or the finance daily rate table), never sum native-currency amounts across stores, and label the reporting currency on every view.
+  6️⃣ Timing: attribute GMV to the order placement timestamp in the reporting time zone, not to payment capture, shipment or delivery date; the 30-minute session timeout and midnight session splits have no effect because the grain is the order; prior periods are restated as pre-fulfilment cancellations arrive and locked at finance period close.
+  7️⃣ GMV vs Net Revenue: Net Revenue = GMV − order-level discounts − returns and refunds − post-fulfilment cancellations, and for marketplaces third-party proceeds are further replaced by the commission earned (take rate); report both side by side so the gap (discount, return and post-fulfilment cancellation rates, plus the marketplace take-rate effect) stays visible.
+
+Business Use Case: |
+  1️⃣ Finance (FP&A): at the weekly close, when GMV for any category deviates more than 5% from plan, reconciles digital GMV against Order Management booked sales and updates the GMV-to-Net Revenue bridge (discount, return and cancellation rates) before the monthly forecast submission.
+  2️⃣ Merchandising: when a category's GMV declines for two consecutive weeks while its sessions hold steady, reviews price position, stock availability and PDP content of the top-selling SKUs and reallocates homepage placements and markdown budget to recover volume.
+  3️⃣ Performance Marketing: at the monthly budget review, ranks channels and campaigns by GMV per unit of spend alongside Net Revenue per unit of spend and moves budget away from channels whose GMV is inflated by coupon-heavy or high-return orders.
+
+Dependencies:
+  Events: [purchase, order-cancellation]
+  Dimensions: [order-status]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics) + Order Management (reconciliation)
+
+Report Attributes: |
+  Order Date; Default Channel Grouping; Session Source / Medium; Campaign Name; Device Category; Country/Region; Item Category; Item Brand; Seller Type (1P / 3P); Order Status; Currency
+
+Dashboard Usage: [Executive Revenue Dashboard, E-commerce Performance Overview, Merchandising Category Performance, Channel Performance, Finance Sales Reconciliation]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [average-order-value, revenue, item-revenue, sales-amount, orders, revenue-per-visit, return-on-ad-spend, customer-lifetime-value]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: swapnamagantius
+
+Created At: 2026-06-16T23:45:57.519+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-15T03:43:38.794+00:00
+
