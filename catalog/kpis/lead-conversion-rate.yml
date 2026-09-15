@@ -1,19 +1,19 @@
 # KPI: Lead Conversion Rate
-# Generated: 2026-08-27T16:31:22.250Z
+# Generated: 2026-09-15T03:37:08.091Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 KPI Name: Lead Conversion Rate
-Formula: (Converted Leads / Total Leads) × 100
+Formula: (Leads in cohort with IsConverted = TRUE, a linked Opportunity and ConvertedDate ≤ CreatedDate + 90 days ÷ Total unique leads created in the cohort window) × 100
 
 Description: |
-  Measures the percentage of leads that convert into customers within a specified period, indicating sales process effectiveness.
+  Lead Conversion Rate is the percentage of unique leads created in a reporting cohort that are converted in the CRM into a sales opportunity (Salesforce Lead Convert with a linked Opportunity) within a fixed maturation window. It is the standard hand-off measure between Marketing lead generation and Sales pipeline creation, showing how much captured demand is actually accepted and worked as pipeline.
 
 Category: Conversion
 
-Tags: [kpi]
+Tags: [kpi, Technology: B2B Lead-to-Pipeline Funnel]
 
-Industry: [Technology]
+Industry: [["Technology"]]
 
 Priority: High
 
@@ -21,9 +21,9 @@ Core Area: Generic
 
 Scope: User
 
-Measure Type: percentage
+Measure Type: Percentage
 
-Aggregation Window: Time based - Daily
+Aggregation Window: Time based - Daily, Monthly, Quarterly
 
 
 
@@ -35,41 +35,321 @@ Google Analytics SQL: |
   -- ==========================================
   -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
-  SELECT COUNT(DISTINCT CASE WHEN event_name = 'generate_lead' THEN user_pseudo_id END) AS converted_leads,
-         COUNT(DISTINCT user_pseudo_id) AS total_users,
-         (COUNT(DISTINCT CASE WHEN event_name = 'generate_lead' THEN user_pseudo_id END) / COUNT(DISTINCT user_pseudo_id)) * 100 AS lead_conversion_rate
-  FROM `your-project.crm.lead_events`
-  WHERE event_date BETWEEN '2023-01-01' AND '2023-12-31';
+  -- Lead Conversion Rate (Lead-to-Opportunity): unique leads per monthly creation cohort converted with a linked Opportunity within 90 days.
+  -- Numerator and denominator come from the Salesforce Lead export; GA4 generate_lead is joined on user_pseudo_id = Lead.GA_Client_ID__c only to fill first_touch_channel_group.
+  -- Recycle rule: uses each earlier record's current Status (no LeadHistory in the export); snapshot matured cohorts (is_mature_cohort = TRUE) so later status edits do not restate them.
+  -- Org-specific fields (Original_Capture_Date__c, Is_Test__c, Intake_Rejected__c, GA_Client_ID__c, status picklist values) must be mapped per org.
+  -- Roll-ups: SUM(converted_leads_90d) / SUM(total_unique_leads); trend comparisons use is_mature_cohort = TRUE only.
+  DECLARE cohort_start DATE DEFAULT DATE '2026-01-01';
+  DECLARE cohort_end DATE DEFAULT DATE '2026-06-30';
+  DECLARE as_of_date DATE DEFAULT CURRENT_DATE('UTC');
+  DECLARE window_days INT64 DEFAULT 90;
+  DECLARE org_tz STRING DEFAULT 'America/Los_Angeles'; -- CRM org time zone used for cohort reporting
+  DECLARE internal_domains ARRAY<STRING> DEFAULT ['yourcompany.com'];
+  DECLARE closed_unqualified_statuses ARRAY<STRING> DEFAULT ['Closed - Not Converted', 'Unqualified'];
+  
+  WITH leads_clean AS (
+    -- Removes deleted and merged-away records (MasterRecordId set), test records, intake-rejected records and internal email domains; statuses set later by reps stay in the base.
+    SELECT
+      l.Id AS lead_id,
+      NULLIF(TRIM(l.GA_Client_ID__c), '') AS ga_client_id,
+      NULLIF(LOWER(TRIM(l.Email)), '') AS email_norm,
+      l.LeadSource AS lead_source,
+      l.Status AS lead_status,
+      l.IsConverted AS is_converted,
+      l.ConvertedOpportunityId AS converted_opportunity_id,
+      CAST(l.ConvertedDate AS DATE) AS converted_date,
+      -- Bulk imports carry the original capture date (custom TIMESTAMP field); native leads use CreatedDate.
+      COALESCE(l.Original_Capture_Date__c, l.CreatedDate) AS created_ts
+    FROM `your-project.salesforce.Lead` AS l
+    WHERE COALESCE(l.IsDeleted, FALSE) = FALSE
+      AND l.MasterRecordId IS NULL
+      AND COALESCE(l.Is_Test__c, FALSE) = FALSE
+      AND COALESCE(l.Intake_Rejected__c, FALSE) = FALSE
+      AND COALESCE(SPLIT(LOWER(TRIM(l.Email)), '@')[SAFE_OFFSET(1)], '') NOT IN UNNEST(internal_domains)
+      AND COALESCE(LOWER(TRIM(l.Email)), '') NOT LIKE '%@example.com'
+  ),
+  lead_sequence AS (
+    SELECT
+      c.*,
+      COALESCE(c.email_norm, c.lead_id) AS person_key,
+      LAG(c.lead_status) OVER (PARTITION BY COALESCE(c.email_norm, c.lead_id) ORDER BY c.created_ts, c.lead_id) AS prev_status,
+      LAG(c.is_converted) OVER (PARTITION BY COALESCE(c.email_norm, c.lead_id) ORDER BY c.created_ts, c.lead_id) AS prev_is_converted,
+      ROW_NUMBER() OVER (PARTITION BY COALESCE(c.email_norm, c.lead_id) ORDER BY c.created_ts, c.lead_id) AS seq
+    FROM leads_clean AS c
+  ),
+  lead_episodes AS (
+    -- Same normalised email = same lead; a new lead starts only after the prior record converted (IsConverted = TRUE) or was closed Unqualified.
+    SELECT
+      s.*,
+      SUM(IF(s.seq = 1 OR COALESCE(s.prev_is_converted, FALSE) OR s.prev_status IN UNNEST(closed_unqualified_statuses), 1, 0))
+        OVER (PARTITION BY s.person_key ORDER BY s.created_ts, s.lead_id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS episode_no
+    FROM lead_sequence AS s
+  ),
+  unique_leads AS (
+    -- One row per unique lead; cohort anchored to the earliest record, so recycling never resets it.
+    SELECT
+      e.person_key,
+      e.episode_no,
+      ARRAY_AGG(STRUCT(e.lead_id AS lead_id, e.lead_source AS lead_source) ORDER BY e.created_ts, e.lead_id LIMIT 1)[OFFSET(0)] AS first_record,
+      -- Earliest non-null GA4 client id captured on any record of the episode.
+      ARRAY_AGG(e.ga_client_id IGNORE NULLS ORDER BY e.created_ts, e.lead_id LIMIT 1)[SAFE_OFFSET(0)] AS ga_client_id,
+      MIN(e.created_ts) AS cohort_ts,
+      -- Conversions without an Opportunity are not counted; each lead episode counts at most once.
+      MIN(IF(e.is_converted AND e.converted_opportunity_id IS NOT NULL, e.converted_date, NULL)) AS converted_date
+    FROM lead_episodes AS e
+    GROUP BY e.person_key, e.episode_no
+  ),
+  cohort_leads AS (
+    SELECT
+      u.*,
+      DATE_TRUNC(DATE(u.cohort_ts, org_tz), MONTH) AS cohort_month,
+      DATE_ADD(LAST_DAY(DATE(u.cohort_ts, org_tz), MONTH), INTERVAL window_days DAY) <= as_of_date AS is_mature_cohort,
+      IF(u.converted_date IS NOT NULL
+         AND DATE_DIFF(u.converted_date, DATE(u.cohort_ts, org_tz), DAY) BETWEEN 0 AND window_days, 1, 0) AS converted_within_window
+    FROM unique_leads AS u
+    WHERE DATE(u.cohort_ts, org_tz) BETWEEN cohort_start AND cohort_end
+  ),
+  web_leads AS (
+    -- generate_lead submissions keyed by user_pseudo_id (GA4 client_id), which the lead form also writes into Lead.GA_Client_ID__c; no lead ID or email is read from GA4.
+    SELECT
+      g.user_pseudo_id,
+      g.event_timestamp,
+      g.traffic_source.source AS ft_source,
+      g.traffic_source.medium AS ft_medium
+    FROM `your-project.analytics_123456789.events_*` AS g
+    WHERE g.event_name = 'generate_lead'
+      AND g.user_pseudo_id IS NOT NULL
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(cohort_start, INTERVAL 1 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_ADD(cohort_end, INTERVAL 1 DAY))
+  ),
+  web_by_client_id AS (
+    -- One row per client id (earliest generate_lead) before the join, so leads cannot fan out.
+    SELECT user_pseudo_id AS match_key,
+           ARRAY_AGG(STRUCT(ft_source, ft_medium) ORDER BY event_timestamp LIMIT 1)[OFFSET(0)] AS first_touch
+    FROM web_leads
+    GROUP BY match_key
+  ),
+  attributed AS (
+    -- Web linkage only fills first_touch_channel_group; the lead base and conversions come from the CRM, and unsynced submissions never enter it.
+    SELECT
+      c.cohort_month,
+      c.is_mature_cohort,
+      c.converted_within_window,
+      COALESCE(c.first_record.lead_source, '(not set)') AS lead_source,
+      CASE
+        WHEN w.first_touch IS NULL THEN 'Not web-linked'
+        WHEN LOWER(w.first_touch.ft_medium) IN ('cpc', 'ppc', 'paid', 'paidsearch') THEN 'Paid Search'
+        WHEN LOWER(w.first_touch.ft_medium) = 'organic' THEN 'Organic Search'
+        WHEN LOWER(w.first_touch.ft_medium) IN ('social', 'paid_social', 'paidsocial') THEN 'Social'
+        WHEN LOWER(w.first_touch.ft_medium) = 'email' THEN 'Email'
+        WHEN LOWER(w.first_touch.ft_medium) = 'referral' THEN 'Referral'
+        WHEN w.first_touch.ft_source = '(direct)' THEN 'Direct'
+        ELSE 'Other'
+      END AS first_touch_channel_group
+    FROM cohort_leads AS c
+    LEFT JOIN web_by_client_id AS w ON w.match_key = c.ga_client_id
+  )
+  SELECT
+    cohort_month,
+    is_mature_cohort,
+    lead_source,
+    first_touch_channel_group,
+    COUNT(*) AS total_unique_leads,
+    SUM(converted_within_window) AS converted_leads_90d,
+    ROUND(SAFE_DIVIDE(SUM(converted_within_window), COUNT(*)) * 100, 2) AS lead_conversion_rate_pct
+  FROM attributed
+  GROUP BY cohort_month, is_mature_cohort, lead_source, first_touch_channel_group
+  ORDER BY cohort_month, lead_source, first_touch_channel_group;
 
 AEP Query Service SQL: |
   -- ==========================================
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
-  SELECT COUNT(DISTINCT CASE WHEN events.eventType = 'generate_lead' THEN identityMap.ecid END) AS converted_leads,
-         COUNT(DISTINCT identityMap.ecid) AS total_users,
-         (COUNT(DISTINCT CASE WHEN events.eventType = 'generate_lead' THEN identityMap.ecid END) / COUNT(DISTINCT identityMap.ecid)) * 100 AS lead_conversion_rate
-  FROM aep_backend_dataset
-  WHERE events.timestamp BETWEEN '2023-01-01T00:00:00Z' AND '2023-12-31T23:59:59Z';
+  -- Lead Conversion Rate (Lead-to-Opportunity): unique leads per monthly creation cohort converted with a linked Opportunity within 90 days.
+  -- salesforce_b2b_lead = Salesforce Lead ingested through the Salesforce source connector (XDM Business Person class). Field mapping:
+  --   personKey.sourceID = Lead.Id | workEmail.address = Email | b2b.personStatus = Status | b2b.personSource = LeadSource
+  --   extSourceSystemAudit.createdDate = CreatedDate | isDeleted = IsDeleted
+  --   _yourtenant.salesforce.isConverted = IsConverted | _yourtenant.salesforce.convertedOpportunityId = ConvertedOpportunityId
+  --   _yourtenant.salesforce.convertedDate = ConvertedDate | _yourtenant.salesforce.masterRecordId = MasterRecordId
+  --   _yourtenant.salesforce.originalCaptureDate = bulk-import capture date | _yourtenant.salesforce.isTest = test-record flag
+  --   _yourtenant.salesforce.intakeRejected = Intake_Rejected__c (set by intake automation at creation) | _yourtenant.salesforce.ecid = ECID__c (hidden form field)
+  -- web_experience_events = web ExperienceEvent dataset; generate_lead is keyed by identityMap['ECID'][0].id and joined to Lead.ECID__c. First touch uses _yourtenant.attribution.firstTouchSource / _yourtenant.attribution.firstTouchMedium (tenant fields holding the visitor's first-session source and medium). No lead ID or email is sent to web events.
+  -- Web linkage only fills first_touch_channel_group; numerator and denominator come from the CRM lead dataset.
+  -- Recycle rule: uses each earlier record's current Status (no LeadHistory in the export); snapshot matured cohorts (is_mature_cohort = true) so later status edits do not restate them.
+  -- Org-specific fields (originalCaptureDate / Original_Capture_Date__c, isTest / Is_Test__c, intakeRejected / Intake_Rejected__c, ecid / ECID__c, status picklist values) must be mapped per org.
+  -- Roll-ups: SUM(converted_leads_90d) / SUM(total_unique_leads); trend comparisons use is_mature_cohort = true only.
+  WITH params AS (
+    SELECT
+      CAST('2026-01-01' AS DATE) AS cohort_start,
+      CAST('2026-06-30' AS DATE) AS cohort_end,
+      current_date() AS as_of_date,
+      90 AS window_days,
+      'America/Los_Angeles' AS org_tz
+  ),
+  leads_clean AS (
+    -- Removes deleted and merged-away records (masterRecordId set), test records, intake-rejected records and internal email domains; statuses set later by reps stay in the base.
+    SELECT
+      l.personKey.sourceID AS lead_id,
+      NULLIF(trim(l._yourtenant.salesforce.ecid), '') AS ecid,
+      NULLIF(lower(trim(l.workEmail.address)), '') AS email_norm,
+      l.b2b.personSource AS lead_source,
+      l.b2b.personStatus AS lead_status,
+      l._yourtenant.salesforce.isConverted AS is_converted,
+      l._yourtenant.salesforce.convertedOpportunityId AS converted_opportunity_id,
+      CAST(l._yourtenant.salesforce.convertedDate AS DATE) AS converted_date,
+      COALESCE(l._yourtenant.salesforce.originalCaptureDate, l.extSourceSystemAudit.createdDate) AS created_ts
+    FROM salesforce_b2b_lead AS l
+    WHERE COALESCE(l.isDeleted, false) = false
+      AND l._yourtenant.salesforce.masterRecordId IS NULL
+      AND COALESCE(l._yourtenant.salesforce.isTest, false) = false
+      AND COALESCE(l._yourtenant.salesforce.intakeRejected, false) = false
+      AND COALESCE(substring_index(lower(trim(l.workEmail.address)), '@', -1), '') NOT IN ('yourcompany.com')
+      AND COALESCE(lower(trim(l.workEmail.address)), '') NOT LIKE '%@example.com'
+  ),
+  lead_sequence AS (
+    SELECT
+      c.*,
+      COALESCE(c.email_norm, c.lead_id) AS person_key,
+      LAG(c.lead_status) OVER (PARTITION BY COALESCE(c.email_norm, c.lead_id) ORDER BY c.created_ts, c.lead_id) AS prev_status,
+      LAG(c.is_converted) OVER (PARTITION BY COALESCE(c.email_norm, c.lead_id) ORDER BY c.created_ts, c.lead_id) AS prev_is_converted,
+      ROW_NUMBER() OVER (PARTITION BY COALESCE(c.email_norm, c.lead_id) ORDER BY c.created_ts, c.lead_id) AS seq
+    FROM leads_clean AS c
+  ),
+  lead_episodes AS (
+    -- Same normalised email = same lead; a new lead starts only after the prior record converted (IsConverted = TRUE) or was closed Unqualified.
+    SELECT
+      s.*,
+      SUM(CASE WHEN s.seq = 1 OR COALESCE(s.prev_is_converted, false) = true OR s.prev_status IN ('Closed - Not Converted', 'Unqualified') THEN 1 ELSE 0 END)
+        OVER (PARTITION BY s.person_key ORDER BY s.created_ts, s.lead_id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS episode_no
+    FROM lead_sequence AS s
+  ),
+  lead_ranked AS (
+    SELECT
+      e.*,
+      ROW_NUMBER() OVER (PARTITION BY e.person_key, e.episode_no ORDER BY e.created_ts, e.lead_id) AS episode_rank,
+      ROW_NUMBER() OVER (PARTITION BY e.person_key, e.episode_no, CASE WHEN e.ecid IS NULL THEN 1 ELSE 0 END ORDER BY e.created_ts, e.lead_id) AS ecid_rank
+    FROM lead_episodes AS e
+  ),
+  unique_leads AS (
+    -- One row per unique lead; cohort anchored to the earliest record, so recycling never resets it.
+    SELECT
+      r.person_key,
+      r.episode_no,
+      MAX(CASE WHEN r.episode_rank = 1 THEN r.lead_id END) AS first_lead_id,
+      -- Earliest non-null ECID captured on any record of the episode.
+      MAX(CASE WHEN r.ecid IS NOT NULL AND r.ecid_rank = 1 THEN r.ecid END) AS ecid,
+      MAX(CASE WHEN r.episode_rank = 1 THEN r.lead_source END) AS first_lead_source,
+      MIN(r.created_ts) AS cohort_ts,
+      -- Conversions without an Opportunity are not counted; each lead episode counts at most once.
+      MIN(CASE WHEN r.is_converted = true AND r.converted_opportunity_id IS NOT NULL THEN r.converted_date END) AS converted_date
+    FROM lead_ranked AS r
+    GROUP BY r.person_key, r.episode_no
+  ),
+  cohort_leads AS (
+    SELECT
+      u.*,
+      trunc(to_date(from_utc_timestamp(u.cohort_ts, p.org_tz)), 'MM') AS cohort_month,
+      CASE WHEN date_add(last_day(to_date(from_utc_timestamp(u.cohort_ts, p.org_tz))), p.window_days) <= p.as_of_date
+           THEN true ELSE false END AS is_mature_cohort,
+      CASE WHEN u.converted_date IS NOT NULL
+            AND datediff(u.converted_date, to_date(from_utc_timestamp(u.cohort_ts, p.org_tz))) BETWEEN 0 AND p.window_days
+           THEN 1 ELSE 0 END AS converted_within_window
+    FROM unique_leads AS u
+    CROSS JOIN params AS p
+    WHERE to_date(from_utc_timestamp(u.cohort_ts, p.org_tz)) BETWEEN p.cohort_start AND p.cohort_end
+  ),
+  web_leads AS (
+    -- generate_lead ExperienceEvents keyed by the ECID in identityMap; no lead ID or email is read from web events.
+    SELECT
+      e.identityMap['ECID'][0].id AS ecid,
+      e.timestamp AS event_ts,
+      e._yourtenant.attribution.firstTouchSource AS ft_source,
+      e._yourtenant.attribution.firstTouchMedium AS ft_medium
+    FROM web_experience_events AS e
+    CROSS JOIN params AS p
+    WHERE e.eventType = 'generate_lead'
+      AND e.identityMap['ECID'][0].id IS NOT NULL
+      AND e.timestamp >= CAST(date_sub(p.cohort_start, 1) AS TIMESTAMP)
+      AND e.timestamp < CAST(date_add(p.cohort_end, 2) AS TIMESTAMP)
+  ),
+  web_by_ecid AS (
+    -- One row per ECID (earliest generate_lead) before the join, so leads cannot fan out.
+    SELECT match_key, ft_source, ft_medium
+    FROM (
+      SELECT ecid AS match_key, ft_source, ft_medium,
+             ROW_NUMBER() OVER (PARTITION BY ecid ORDER BY event_ts) AS rn
+      FROM web_leads
+    ) AS ranked
+    WHERE rn = 1
+  ),
+  attributed AS (
+    -- Web linkage only fills first_touch_channel_group; the lead base and conversions come from the CRM, and unsynced submissions never enter it.
+    SELECT
+      c.cohort_month,
+      c.is_mature_cohort,
+      c.converted_within_window,
+      COALESCE(c.first_lead_source, '(not set)') AS lead_source,
+      w.ft_source,
+      w.ft_medium,
+      CASE WHEN w.match_key IS NOT NULL THEN true ELSE false END AS is_web_linked
+    FROM cohort_leads AS c
+    LEFT JOIN web_by_ecid AS w ON w.match_key = c.ecid
+  ),
+  classified AS (
+    SELECT
+      a.cohort_month,
+      a.is_mature_cohort,
+      a.converted_within_window,
+      a.lead_source,
+      CASE
+        WHEN a.is_web_linked = false THEN 'Not web-linked'
+        WHEN lower(a.ft_medium) IN ('cpc', 'ppc', 'paid', 'paidsearch') THEN 'Paid Search'
+        WHEN lower(a.ft_medium) = 'organic' THEN 'Organic Search'
+        WHEN lower(a.ft_medium) IN ('social', 'paid_social', 'paidsocial') THEN 'Social'
+        WHEN lower(a.ft_medium) = 'email' THEN 'Email'
+        WHEN lower(a.ft_medium) = 'referral' THEN 'Referral'
+        WHEN a.ft_source = '(direct)' THEN 'Direct'
+        ELSE 'Other'
+      END AS first_touch_channel_group
+    FROM attributed AS a
+  )
+  SELECT
+    cohort_month,
+    is_mature_cohort,
+    lead_source,
+    first_touch_channel_group,
+    COUNT(*) AS total_unique_leads,
+    SUM(converted_within_window) AS converted_leads_90d,
+    ROUND(SUM(converted_within_window) * 100.0 / NULLIF(COUNT(*), 0), 2) AS lead_conversion_rate_pct
+  FROM classified
+  GROUP BY cohort_month, is_mature_cohort, lead_source, first_touch_channel_group
+  ORDER BY cohort_month, lead_source, first_touch_channel_group;
 
 Calculation Notes: |
-  Exclude duplicate leads and ensure consistent tracking across channels. Refresh data daily.
+  1️⃣ Conversion definition: a lead is converted when the CRM convert action completes and an opportunity is attached — Salesforce Lead.IsConverted = TRUE with ConvertedDate and ConvertedOpportunityId populated. Conversions run with 'Do not create an opportunity' are excluded from the numerator, and progression to Closed Won is a separate downstream stage (Lead-to-Customer Rate) that must never be blended into this KPI. HubSpot equivalent: base = contacts entering the Lead lifecycle stage in the cohort window; numerator = hs_lifecyclestage_opportunity_date within 90 days.,2️⃣ Denominator is the full lead base: every unique lead record created in the cohort window regardless of source, status, owner or qualification stage, including leads later disqualified, recycled or never worked. Only test records (Is_Test__c = TRUE), internal email domains, records rejected at intake (Intake_Rejected__c = TRUE, set by intake automation at creation for bot/spam submissions) and records merged away as duplicates are excluded; a Spam, Junk or Disqualified status set later by a rep never removes a lead from the base.,3️⃣ Duplicates: deduplicate on normalised email (lower-cased, trimmed) and CRM merge history, keeping the surviving master record and its original CreatedDate. A repeat form submission from a person with an open lead is an activity on that lead, not a new lead; a lead converted into an existing Account/Contact counts once. A new lead episode for the same email starts only when the person's previous record was converted (IsConverted = TRUE) or closed Unqualified.,4️⃣ Recycled leads: status transitions to Nurture/Recycled and later re-qualification do not create a new denominator entry or reset the cohort; the lead stays in its original CreatedDate cohort and converts there. A genuinely new lead record created after the prior one was closed Unqualified or converted is treated as a new lead. The Lead export carries no LeadHistory, so this rule reads the earlier record's current Status; matured cohorts are snapshotted and frozen once they pass the 90-day window, so later status edits do not restate them.,5️⃣ Cohort vs period: the governed figure is cohort-based — conversions are attributed to the lead's creation month and counted only if ConvertedDate falls within 90 days of CreatedDate; a cohort is mature only once 90 days have passed since its month end, and younger cohorts are flagged as immature and excluded from trend comparisons. Roll up across segments, months and quarters as a ratio of sums (SUM converted ÷ SUM unique leads), never an average of cohort rates. The period variant (converted in month ÷ created in month) mixes cohorts, can exceed 100% in low-volume segments and may be shown only as an operational pacing view, clearly labelled.,6️⃣ Timing and stitching: cohort month and conversion lag are both evaluated in the CRM org time zone, with ConvertedDate treated as a date. Bulk imports (event badge scans, list uploads) use the original capture date (Original_Capture_Date__c), not the import date, and must carry LeadSource so they can be segmented. Web linkage: the lead form writes the GA4 client_id (user_pseudo_id, a string such as '1234567890.1712345678') into hidden Lead field GA_Client_ID__c and the Adobe ECID (38-digit string) into hidden Lead field ECID__c; generate_lead events are reduced to one row per id and joined on user_pseudo_id = GA_Client_ID__c (BigQuery) or identityMap ECID = ECID__c (AEP). No lead ID or email, hashed or not, is sent to analytics. Web linkage only fills first_touch_channel_group and never changes the numerator or denominator.,7️⃣ Value action by industry: Technology/SaaS — lead converted to opportunity (sales-accepted pipeline); Financial Services — enquiry converted to application in progress; Real Estate — portal enquiry converted to booked viewing or signed buyer agreement; Education — prospect enquiry converted to submitted application; Manufacturing — RFQ lead converted to quoted opportunity.
 
 Business Use Case: |
-  Executives assess marketing and sales strategies to allocate resources to successful channels.
+  1️⃣ Sales Development leadership: in the monthly pipeline review, when a matured monthly inbound cohort (at least 90 days past cohort month end) converts more than 3 points below the trailing median of the previous six matured cohorts, audit speed-to-lead and SDR queue coverage for that segment and re-route still-open leads to available reps.,2️⃣ Demand Generation team: in the quarterly budget review, shift paid spend away from lead sources and campaigns that deliver volume but convert below the blended rate, and tighten MQL scoring thresholds for those sources before the next campaign cycle.,3️⃣ Sales Operations: during capacity planning, multiply open lead inventory by source-level matured cohort conversion rates to project next-quarter opportunity creation and set Account Executive hiring and territory quotas accordingly.,4️⃣ Marketing and Sales leadership: in the monthly SLA review, when a sales team's conversion on marketing-sourced leads diverges materially from peers, inspect disqualification reasons in the CRM and either correct lead routing and qualification criteria or retrain the team on the agreed acceptance definition.
 
+Dependencies:
+  Events: [generate-lead]
+  Metrics: [total-leads, converted-leads]
+  Dimensions: [traffic-source, first-touch-channel-grouping, industry-segment]
 
-Source Data: CRM
+Source Data: Web + CRM (Salesforce)
 
 Report Attributes: |
-  ["Geography","Lead Source","Campaign"]
+  Lead Source; First Touch Channel Grouping; Campaign; Lead Creation Cohort (Month); Lead Owner / Sales Team; Industry Segment; Company Size Band; Country / Region
 
-Dashboard Usage: [Sales Performance Dashboard, Marketing Effectiveness Dashboard]
+Dashboard Usage: [Lead-to-Revenue Funnel Dashboard, Sales Development Performance Dashboard, Marketing Pipeline Contribution Dashboard, Marketing and Sales SLA Review]
 
 Segment Eligibility: |
   true
 
+Related KPIs: [conversion-rate, time-to-close, customer-acquisition-cost, marketing-sourced-new-customer-rate, landing-page-conversion-rate]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -81,4 +361,5 @@ Created At: 2026-08-27T16:31:20.551339+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-15T03:37:07.089+00:00
 
