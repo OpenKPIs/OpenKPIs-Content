@@ -1,0 +1,750 @@
+# KPI: Return on Ad Spend
+# Generated: 2026-09-15T14:05:34.222Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Return on Ad Spend
+Formula: Attributed Purchase Revenue from Paid Media / Paid Media Ad Spend
+
+Description: |
+  Purchase revenue attributed to paid media channels and campaigns divided by the media cost incurred to generate it over the same period, expressed as revenue returned per unit of currency spent (e.g. 4.2 = 4.20 in revenue per 1.00 of spend). It is the primary efficiency lens for allocating and pacing paid search, paid social, shopping and display budgets, and it is only comparable across channels when revenue is attributed under one model and lookback window and cost is normalised to the same currency and date basis.
+
+Category: Acquisition
+
+Tags: [kpi, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Global
+
+Measure Type: Ratio
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "order-confirmation",
+        "pageName": "checkout:order-confirmation"
+      },
+      "category": {
+        "primaryCategory": "checkout"
+      }
+    },
+    "transaction": {
+      "transactionID": "T-100482",
+      "attributes": {
+        "orderType": "standard"
+      },
+      "total": {
+        "basePrice": 184.5,
+        "currency": "USD",
+        "taxRate": 0.08,
+        "shipping": 9.99,
+        "priceWithTax": 199.26,
+        "transactionTotal": 209.25
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-2231",
+            "productName": "Trail Running Shoe"
+          },
+          "category": {
+            "primaryCategory": "Footwear"
+          },
+          "price": {
+            "basePrice": 92.25,
+            "currency": "USD"
+          },
+          "quantity": 2
+        }
+      ]
+    },
+    "attributes": {
+      "campaign": {
+        "source": "google",
+        "medium": "cpc",
+        "campaignName": "spring_running_shoes",
+        "campaignID": "20931455",
+        "gclid": "Cj0KCQjw-example",
+        "fbclid": null,
+        "channelGroup": "Paid Search"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "order_type": "standard",
+    "ecommerce": {
+      "transaction_id": "T-100482",
+      "value": 184.5,
+      "tax": 14.76,
+      "shipping": 9.99,
+      "currency": "USD",
+      "items": [
+        {
+          "item_id": "SKU-2231",
+          "item_name": "Trail Running Shoe",
+          "item_category": "Footwear",
+          "price": 92.25,
+          "quantity": 2
+        }
+      ]
+    },
+    "campaign_source": "google",
+    "campaign_medium": "cpc",
+    "campaign_name": "spring_running_shoes",
+    "campaign_id": "20931455",
+    "gclid": "Cj0KCQjw-example"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "commerce": {
+      "purchaseID": "T-100482",
+      "orderType": "standard",
+      "revenue": 184.5,
+      "tax": 14.76,
+      "shipping": 9.99,
+      "currency": "USD",
+      "products": [
+        {
+          "productID": "SKU-2231",
+          "productName": "Trail Running Shoe",
+          "category": "Footwear",
+          "price": 92.25,
+          "quantity": 2
+        }
+      ]
+    },
+    "marketing": {
+      "trackingCode": "google|cpc|spring_running_shoes|20931455",
+      "source": "google",
+      "medium": "cpc",
+      "campaignName": "spring_running_shoes",
+      "campaignID": "20931455",
+      "gclid": "Cj0KCQjw-example"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100482",
+        "priceTotal": 209.25,
+        "currencyCode": "USD",
+        "taxAmount": 14.76
+      },
+      "shipping": {
+        "shippingAmount": 9.99
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-2231",
+        "name": "Trail Running Shoe",
+        "productCategories": [
+          {
+            "categoryName": "Footwear"
+          }
+        ],
+        "priceTotal": 184.5,
+        "quantity": 2,
+        "currencyCode": "USD"
+      }
+    ],
+    "marketing": {
+      "trackingCode": "google|cpc|spring_running_shoes|20931455",
+      "campaignName": "spring_running_shoes",
+      "campaignGroup": "Paid Search"
+    },
+    "channel": {
+      "typeAtSource": "google / cpc",
+      "mediaType": "paid"
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "google",
+            "eVar2": "cpc",
+            "eVar3": "spring_running_shoes",
+            "eVar4": "20931455",
+            "eVar5": "Cj0KCQjw-example"
+          }
+        }
+      }
+    },
+    "_yourtenant": {
+      "orderType": "standard",
+      "trafficType": "external"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Return on Ad Spend = attributed paid-media purchase revenue / paid-media ad spend (media cost only)
+  -- Revenue: purchase_revenue (value excluding tax and shipping) by conversion date, net of refunds stitched on transaction_id,
+  --          credited to the session last non-direct click campaign (utm_source, utm_medium, utm_campaign, utm_id)
+  -- Cost: your-project.ads.campaign_cost_daily by spend date, normalised to USD; cost rows whose campaign key never appears in GA4
+  --       stay in the denominator as Unmatched Spend. Known bot traffic is already excluded from the GA4 export.
+  -- Status: paid revenue whose campaign key never appears in the cost import for the window = No Imported Spend (excluded from Total);
+  --         cost uses the newest FX rate on or before cost_date (USD = 1); cost rows still without a rate = Missing FX Rate (excluded from Total).
+  WITH fx_asof AS (
+    -- one rate per currency and date; each rate is valid from its rate_date until the next available rate_date
+    SELECT
+      currency_code,
+      rate_date AS valid_from,
+      COALESCE(LEAD(rate_date) OVER (PARTITION BY currency_code ORDER BY rate_date), DATE '9999-12-31') AS valid_to,
+      rate_to_usd
+    FROM (
+      SELECT currency_code, rate_date, ANY_VALUE(rate_to_usd) AS rate_to_usd
+      FROM `your-project.finance.fx_rates_daily`
+      WHERE rate_to_usd IS NOT NULL
+      GROUP BY currency_code, rate_date
+    )
+  ),
+  ga4_raw AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_dt,
+      e.event_timestamp,
+      e.event_name,
+      e.ecommerce.transaction_id AS transaction_id,
+      e.ecommerce.purchase_revenue_in_usd AS purchase_revenue_usd,
+      e.ecommerce.refund_value_in_usd AS refund_value_usd,
+      e.session_traffic_source_last_click.cross_channel_campaign AS last_click,
+      (
+        SELECT AS STRUCT
+          MAX(IF(ep.key = 'campaign_source', ep.value.string_value, NULL)) AS campaign_source,
+          MAX(IF(ep.key = 'campaign_medium', ep.value.string_value, NULL)) AS campaign_medium,
+          MAX(IF(ep.key = 'campaign_name', ep.value.string_value, NULL)) AS campaign_name,
+          MAX(IF(ep.key = 'campaign_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS campaign_id,
+          MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type,
+          MAX(IF(ep.key = 'order_type', ep.value.string_value, NULL)) AS order_type
+        FROM UNNEST(e.event_params) AS ep
+      ) AS p
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name IN ('session_start', 'purchase', 'refund')
+  ),
+  ga4_events AS (
+    SELECT
+      event_dt,
+      event_timestamp,
+      event_name,
+      transaction_id,
+      purchase_revenue_usd,
+      refund_value_usd,
+      last_click.default_channel_group AS channel_group,
+      LOWER(COALESCE(NULLIF(last_click.source, ''), p.campaign_source)) AS source,
+      LOWER(COALESCE(NULLIF(last_click.medium, ''), p.campaign_medium)) AS medium,
+      LOWER(COALESCE(NULLIF(last_click.campaign_name, ''), p.campaign_name)) AS campaign_name,
+      LOWER(COALESCE(NULLIF(last_click.campaign_id, ''), p.campaign_id)) AS campaign_id,
+      p.order_type
+    FROM ga4_raw
+    WHERE COALESCE(p.traffic_type, '') <> 'internal'
+  ),
+  ga4_keyed AS (
+    SELECT
+      *,
+      CONCAT(IFNULL(source, ''), '|', IFNULL(medium, ''), '|', IFNULL(campaign_name, ''), '|', IFNULL(campaign_id, '')) AS campaign_key
+    FROM ga4_events
+  ),
+  ga4_campaign_keys AS (
+    SELECT DISTINCT campaign_key
+    FROM ga4_keyed
+    WHERE campaign_name IS NOT NULL
+      AND campaign_name NOT IN ('(direct)', '(organic)', '(referral)', '(not set)')
+  ),
+  purchases AS (
+    SELECT first_hit.*
+    FROM (
+      SELECT
+        ARRAY_AGG(
+          STRUCT(transaction_id, event_dt, channel_group, source, medium, campaign_name, campaign_id, campaign_key, purchase_revenue_usd)
+          ORDER BY event_timestamp LIMIT 1
+        )[OFFSET(0)] AS first_hit
+      FROM ga4_keyed
+      WHERE event_name = 'purchase'
+        AND transaction_id IS NOT NULL
+        AND transaction_id NOT IN ('', '(not set)')
+        AND LOWER(COALESCE(order_type, '')) <> 'test'
+      GROUP BY transaction_id
+    )
+  ),
+  refunds AS (
+    SELECT
+      transaction_id,
+      SUM(COALESCE(refund_value_usd, 0)) AS refund_usd
+    FROM ga4_keyed
+    WHERE event_name = 'refund'
+      AND transaction_id IS NOT NULL
+    GROUP BY transaction_id
+  ),
+  attributed_revenue AS (
+    SELECT
+      pu.event_dt AS report_date,
+      pu.campaign_key,
+      ANY_VALUE(pu.source) AS source,
+      ANY_VALUE(pu.medium) AS medium,
+      ANY_VALUE(pu.campaign_name) AS campaign_name,
+      ANY_VALUE(pu.campaign_id) AS campaign_id,
+      COUNT(DISTINCT pu.transaction_id) AS attributed_orders,
+      SUM(GREATEST(COALESCE(pu.purchase_revenue_usd, 0) - COALESCE(rf.refund_usd, 0), 0)) AS attributed_revenue_usd
+    FROM purchases AS pu
+    LEFT JOIN refunds AS rf
+      ON rf.transaction_id = pu.transaction_id
+    WHERE pu.channel_group IN ('Paid Search', 'Paid Social', 'Paid Shopping', 'Paid Video', 'Paid Other', 'Display', 'Cross-network')
+       OR REGEXP_CONTAINS(IFNULL(pu.medium, ''), r'^(cpc|ppc|paid.*|display|banner|cpm|cpv|shopping)$')
+    GROUP BY pu.event_dt, pu.campaign_key
+  ),
+  ad_cost_raw AS (
+    SELECT
+      c.cost_date AS report_date,
+      c.ad_platform,
+      LOWER(c.utm_source) AS source,
+      LOWER(c.utm_medium) AS medium,
+      LOWER(c.utm_campaign) AS campaign_name,
+      LOWER(CAST(c.utm_id AS STRING)) AS campaign_id,
+      CONCAT(IFNULL(LOWER(c.utm_source), ''), '|', IFNULL(LOWER(c.utm_medium), ''), '|',
+             IFNULL(LOWER(c.utm_campaign), ''), '|', IFNULL(LOWER(CAST(c.utm_id AS STRING)), '')) AS campaign_key,
+      IF(c.currency_code = 'USD', 1, fx.rate_to_usd) AS fx_rate,
+      c.cost_amount * IF(c.currency_code = 'USD', 1, fx.rate_to_usd) AS spend_usd
+    FROM `your-project.ads.campaign_cost_daily` AS c
+    LEFT JOIN fx_asof AS fx
+      ON fx.currency_code = c.currency_code
+     AND c.cost_date >= fx.valid_from
+     AND c.cost_date < fx.valid_to
+    WHERE c.cost_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+      AND c.cost_type = 'media'
+  ),
+  cost_campaign_keys AS (
+    -- every campaign key present in the cost import anywhere in the window, so revenue on a day without a cost row stays Matched
+    SELECT DISTINCT campaign_key
+    FROM ad_cost_raw
+    WHERE campaign_name IS NOT NULL
+  ),
+  ad_cost_flagged AS (
+    SELECT
+      r.*,
+      k.campaign_key IS NOT NULL AS in_ga4,
+      r.fx_rate IS NULL AS fx_missing
+    FROM ad_cost_raw AS r
+    LEFT JOIN ga4_campaign_keys AS k
+      ON k.campaign_key = r.campaign_key
+  ),
+  ad_cost AS (
+    -- matched spend: one row per report_date and campaign key; any cost row without an FX rate flags the row Missing FX Rate
+    SELECT
+      report_date,
+      ANY_VALUE(ad_platform) AS ad_platform,
+      ANY_VALUE(medium) AS medium,
+      IF(LOGICAL_OR(fx_missing), 'Missing FX Rate', 'Matched') AS match_status,
+      campaign_key AS join_key,
+      ANY_VALUE(source) AS source,
+      ANY_VALUE(campaign_name) AS campaign_name,
+      ANY_VALUE(campaign_id) AS campaign_id,
+      SUM(spend_usd) AS ad_spend_usd
+    FROM ad_cost_flagged
+    WHERE in_ga4
+    GROUP BY report_date, campaign_key
+    UNION ALL
+    -- unmatched spend: stays split by platform and medium; rows without an FX rate are split out as Missing FX Rate
+    SELECT
+      report_date,
+      ad_platform,
+      medium,
+      IF(fx_missing, 'Missing FX Rate', 'Unmatched Spend') AS match_status,
+      CAST(NULL AS STRING) AS join_key,
+      CAST(NULL AS STRING) AS source,
+      CAST(NULL AS STRING) AS campaign_name,
+      CAST(NULL AS STRING) AS campaign_id,
+      SUM(spend_usd) AS ad_spend_usd
+    FROM ad_cost_flagged
+    WHERE NOT in_ga4
+    GROUP BY report_date, ad_platform, medium, fx_missing
+  ),
+  roas_rows AS (
+    SELECT
+      COALESCE(c.report_date, r.report_date) AS report_date,
+      COALESCE(c.ad_platform, r.source) AS ad_platform,
+      COALESCE(c.medium, r.medium) AS medium,
+      COALESCE(c.source, r.source) AS source,
+      IF(c.report_date IS NOT NULL AND c.join_key IS NULL, 'Unmatched Spend', COALESCE(r.campaign_name, c.campaign_name)) AS campaign,
+      COALESCE(r.campaign_id, c.campaign_id) AS campaign_id,
+      CASE
+        WHEN c.match_status IS NOT NULL THEN c.match_status
+        WHEN ck.campaign_key IS NOT NULL THEN 'Matched'
+        ELSE 'No Imported Spend'
+      END AS match_status,
+      COALESCE(r.attributed_orders, 0) AS attributed_orders,
+      COALESCE(r.attributed_revenue_usd, 0) AS attributed_revenue_usd,
+      COALESCE(c.ad_spend_usd, 0) AS ad_spend_usd
+    FROM ad_cost AS c
+    FULL OUTER JOIN attributed_revenue AS r
+      ON c.report_date = r.report_date
+     AND c.join_key = r.campaign_key
+    LEFT JOIN cost_campaign_keys AS ck
+      ON ck.campaign_key = r.campaign_key
+  )
+  SELECT
+    report_date,
+    ad_platform,
+    medium,
+    source,
+    campaign,
+    campaign_id,
+    match_status,
+    attributed_orders,
+    ROUND(attributed_revenue_usd, 2) AS attributed_revenue_usd,
+    ROUND(ad_spend_usd, 2) AS ad_spend_usd,
+    ROUND(SAFE_DIVIDE(attributed_revenue_usd, NULLIF(ad_spend_usd, 0)), 2) AS roas,
+    report_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY) AS is_provisional
+  FROM roas_rows
+  UNION ALL
+  SELECT
+    report_date,
+    'All Paid Media' AS ad_platform,
+    NULL AS medium,
+    NULL AS source,
+    'Total (weighted)' AS campaign,
+    NULL AS campaign_id,
+    'All' AS match_status,
+    SUM(attributed_orders) AS attributed_orders,
+    ROUND(SUM(attributed_revenue_usd), 2) AS attributed_revenue_usd,
+    ROUND(SUM(ad_spend_usd), 2) AS ad_spend_usd,
+    ROUND(SAFE_DIVIDE(SUM(attributed_revenue_usd), NULLIF(SUM(ad_spend_usd), 0)), 2) AS roas,
+    report_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY) AS is_provisional
+  FROM roas_rows
+  WHERE match_status IN ('Matched', 'Unmatched Spend')
+  GROUP BY report_date
+  ORDER BY report_date DESC, ad_spend_usd DESC
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Return on Ad Spend = attributed paid-media purchase revenue / paid-media ad spend (media cost only)
+  -- Revenue: commerce.order.priceTotal - commerce.order.taxAmount - commerce.shipping.shippingAmount (excluding tax and shipping) by conversion date,
+  --          converted to USD, net of back-office credit memos and cancellations on the same purchaseID,
+  --          credited to the campaign carried on the purchase event (eVar1-eVar4 / marketing.trackingCode)
+  -- Cost: ad_platform_cost_dataset by spend date, normalised to USD; cost rows whose campaign key never appears in web events
+  --       stay in the denominator as Unmatched Spend. Rows whose _yourtenant.trafficType is 'internal' or 'bot' are excluded (values: external / internal / bot).
+  -- Status: paid revenue whose campaign key never appears in the cost import for the window = No Imported Spend (excluded from Total);
+  --         cost, purchases and refunds use the newest FX rate on or before their date (USD = 1); rows still without a rate = Missing FX Rate (excluded from Total).
+  WITH fx_asof AS (
+    -- one rate per currency and date; each rate is valid from its rate_date until the next available rate_date
+    SELECT
+      currency_code,
+      rate_date AS valid_from,
+      COALESCE(LEAD(rate_date) OVER (PARTITION BY currency_code ORDER BY rate_date), DATE '9999-12-31') AS valid_to,
+      rate_to_usd
+    FROM (
+      SELECT currency_code, rate_date, MAX(rate_to_usd) AS rate_to_usd
+      FROM fx_rates_daily_dataset
+      WHERE rate_to_usd IS NOT NULL
+      GROUP BY currency_code, rate_date
+    ) AS fx_daily
+  ),
+  web_events AS (
+    SELECT
+      CAST(e.timestamp AS DATE) AS event_dt,
+      e.timestamp AS event_ts,
+      e.eventType AS event_type,
+      e.commerce.order.purchaseID AS purchase_id,
+      e.commerce.order.priceTotal AS price_total,
+      e.commerce.order.taxAmount AS tax_amount,
+      e.commerce.shipping.shippingAmount AS shipping_amount,
+      e.commerce.order.currencyCode AS currency_code,
+      e.channel.mediaType AS media_type,
+      LOWER(COALESCE(e._experience.analytics.customDimensions.eVars.eVar1,
+                     NULLIF(regexp_extract(e.marketing.trackingCode, '^([^|]*)', 1), ''))) AS source,
+      LOWER(COALESCE(e._experience.analytics.customDimensions.eVars.eVar2,
+                     NULLIF(regexp_extract(e.marketing.trackingCode, '^(?:[^|]*[|]){1}([^|]*)', 1), ''))) AS medium,
+      LOWER(COALESCE(e._experience.analytics.customDimensions.eVars.eVar3, e.marketing.campaignName,
+                     NULLIF(regexp_extract(e.marketing.trackingCode, '^(?:[^|]*[|]){2}([^|]*)', 1), ''))) AS campaign_name,
+      LOWER(COALESCE(e._experience.analytics.customDimensions.eVars.eVar4,
+                     NULLIF(regexp_extract(e.marketing.trackingCode, '^(?:[^|]*[|]){3}([^|]*)', 1), ''))) AS campaign_id,
+      e._yourtenant.trafficType AS traffic_type,
+      e._yourtenant.orderType AS order_type
+    FROM aep_web_experience_events AS e
+    WHERE e.timestamp >= date_sub(current_date(), 90)
+      AND e.timestamp < current_date()
+      AND (e.marketing.trackingCode IS NOT NULL
+           OR e.eventType IN ('commerce.purchases', 'commerce.backofficeCreditMemoIssued', 'commerce.backofficeOrderCancelled'))
+  ),
+  web_keyed AS (
+    SELECT
+      w.*,
+      concat_ws('|', COALESCE(w.source, ''), COALESCE(w.medium, ''), COALESCE(w.campaign_name, ''), COALESCE(w.campaign_id, '')) AS campaign_key
+    FROM web_events AS w
+    WHERE COALESCE(w.traffic_type, '') NOT IN ('internal', 'bot')
+  ),
+  web_campaign_keys AS (
+    SELECT DISTINCT campaign_key
+    FROM web_keyed
+    WHERE campaign_name IS NOT NULL
+  ),
+  purchases AS (
+    SELECT *
+    FROM (
+      SELECT
+        wk.*,
+        wk.price_total - COALESCE(wk.tax_amount, 0) - COALESCE(wk.shipping_amount, 0) AS net_order_total,
+        ROW_NUMBER() OVER (PARTITION BY wk.purchase_id ORDER BY wk.event_ts) AS rn
+      FROM web_keyed AS wk
+      WHERE wk.event_type = 'commerce.purchases'
+        AND wk.purchase_id IS NOT NULL
+        AND LOWER(COALESCE(wk.order_type, '')) <> 'test'
+    ) AS ranked
+    WHERE rn = 1
+  ),
+  refunds AS (
+    SELECT
+      wk.purchase_id,
+      SUM(COALESCE(wk.price_total - COALESCE(wk.tax_amount, 0) - COALESCE(wk.shipping_amount, 0), 0) * CASE WHEN wk.currency_code = 'USD' THEN 1 ELSE fx.rate_to_usd END) AS refund_usd,
+      MAX(CASE WHEN wk.currency_code = 'USD' OR fx.rate_to_usd IS NOT NULL THEN 0 ELSE 1 END) AS refund_fx_missing
+    FROM web_keyed AS wk
+    LEFT JOIN fx_asof AS fx
+      ON fx.currency_code = wk.currency_code
+     AND wk.event_dt >= fx.valid_from
+     AND wk.event_dt < fx.valid_to
+    WHERE wk.event_type IN ('commerce.backofficeCreditMemoIssued', 'commerce.backofficeOrderCancelled')
+      AND wk.purchase_id IS NOT NULL
+    GROUP BY wk.purchase_id
+  ),
+  order_revenue AS (
+    SELECT
+      p.event_dt AS report_date,
+      p.campaign_key,
+      p.source,
+      p.medium,
+      p.campaign_name,
+      p.campaign_id,
+      p.purchase_id,
+      p.net_order_total,
+      CASE WHEN p.currency_code = 'USD' THEN 1 ELSE fx.rate_to_usd END AS fx_rate,
+      COALESCE(r.refund_usd, 0) AS refund_usd,
+      COALESCE(r.refund_fx_missing, 0) AS refund_fx_missing
+    FROM purchases AS p
+    LEFT JOIN fx_asof AS fx
+      ON fx.currency_code = p.currency_code
+     AND p.event_dt >= fx.valid_from
+     AND p.event_dt < fx.valid_to
+    LEFT JOIN refunds AS r
+      ON r.purchase_id = p.purchase_id
+    WHERE p.media_type = 'paid'
+       OR COALESCE(p.medium, '') RLIKE '^(cpc|ppc|paid.*|display|banner|cpm|cpv|shopping)$'
+  ),
+  attributed_revenue AS (
+    -- refunds are deducted on the original purchase date; an order whose purchase or refund has no FX rate is never zeroed, it flags the row Missing FX Rate
+    SELECT
+      report_date,
+      campaign_key,
+      MAX(source) AS source,
+      MAX(medium) AS medium,
+      MAX(campaign_name) AS campaign_name,
+      MAX(campaign_id) AS campaign_id,
+      COUNT(DISTINCT purchase_id) AS attributed_orders,
+      SUM(CASE WHEN fx_rate IS NULL OR refund_fx_missing = 1 THEN NULL
+               ELSE GREATEST(COALESCE(net_order_total, 0) * fx_rate - refund_usd, 0) END) AS attributed_revenue_usd,
+      MAX(CASE WHEN fx_rate IS NULL OR refund_fx_missing = 1 THEN 1 ELSE 0 END) AS fx_missing
+    FROM order_revenue
+    GROUP BY report_date, campaign_key
+  ),
+  ad_cost_raw AS (
+    SELECT
+      c.cost_date AS report_date,
+      c.ad_platform,
+      LOWER(c.utm_source) AS source,
+      LOWER(c.utm_medium) AS medium,
+      LOWER(c.utm_campaign) AS campaign_name,
+      LOWER(CAST(c.utm_id AS STRING)) AS campaign_id,
+      concat_ws('|', COALESCE(LOWER(c.utm_source), ''), COALESCE(LOWER(c.utm_medium), ''),
+                COALESCE(LOWER(c.utm_campaign), ''), COALESCE(LOWER(CAST(c.utm_id AS STRING)), '')) AS campaign_key,
+      CASE WHEN c.currency_code = 'USD' THEN 1 ELSE fx.rate_to_usd END AS fx_rate,
+      c.cost_amount * CASE WHEN c.currency_code = 'USD' THEN 1 ELSE fx.rate_to_usd END AS spend_usd
+    FROM ad_platform_cost_dataset AS c
+    LEFT JOIN fx_asof AS fx
+      ON fx.currency_code = c.currency_code
+     AND c.cost_date >= fx.valid_from
+     AND c.cost_date < fx.valid_to
+    WHERE c.cost_date >= date_sub(current_date(), 90)
+      AND c.cost_date < current_date()
+      AND c.cost_type = 'media'
+  ),
+  cost_campaign_keys AS (
+    -- every campaign key present in the cost import anywhere in the window, so revenue on a day without a cost row stays Matched
+    SELECT DISTINCT campaign_key
+    FROM ad_cost_raw
+    WHERE campaign_name IS NOT NULL
+  ),
+  ad_cost_flagged AS (
+    SELECT
+      r.*,
+      k.campaign_key IS NOT NULL AS in_web,
+      r.fx_rate IS NULL AS fx_missing
+    FROM ad_cost_raw AS r
+    LEFT JOIN web_campaign_keys AS k
+      ON k.campaign_key = r.campaign_key
+  ),
+  ad_cost AS (
+    -- matched spend: one row per report_date and campaign key; any cost row without an FX rate flags the row Missing FX Rate
+    SELECT
+      report_date,
+      MAX(ad_platform) AS ad_platform,
+      MAX(medium) AS medium,
+      CASE WHEN MAX(CASE WHEN fx_missing THEN 1 ELSE 0 END) = 1 THEN 'Missing FX Rate' ELSE 'Matched' END AS match_status,
+      campaign_key AS join_key,
+      MAX(source) AS source,
+      MAX(campaign_name) AS campaign_name,
+      MAX(campaign_id) AS campaign_id,
+      SUM(spend_usd) AS ad_spend_usd
+    FROM ad_cost_flagged
+    WHERE in_web
+    GROUP BY report_date, campaign_key
+    UNION ALL
+    -- unmatched spend: stays split by platform and medium; rows without an FX rate are split out as Missing FX Rate
+    SELECT
+      report_date,
+      ad_platform,
+      medium,
+      CASE WHEN fx_missing THEN 'Missing FX Rate' ELSE 'Unmatched Spend' END AS match_status,
+      CAST(NULL AS STRING) AS join_key,
+      CAST(NULL AS STRING) AS source,
+      CAST(NULL AS STRING) AS campaign_name,
+      CAST(NULL AS STRING) AS campaign_id,
+      SUM(spend_usd) AS ad_spend_usd
+    FROM ad_cost_flagged
+    WHERE NOT in_web
+    GROUP BY report_date, ad_platform, medium, fx_missing
+  ),
+  roas_rows AS (
+    SELECT
+      COALESCE(c.report_date, r.report_date) AS report_date,
+      COALESCE(c.ad_platform, r.source) AS ad_platform,
+      COALESCE(c.medium, r.medium) AS medium,
+      COALESCE(c.source, r.source) AS source,
+      CASE WHEN c.report_date IS NOT NULL AND c.join_key IS NULL THEN 'Unmatched Spend' ELSE COALESCE(r.campaign_name, c.campaign_name) END AS campaign,
+      COALESCE(r.campaign_id, c.campaign_id) AS campaign_id,
+      CASE
+        WHEN c.match_status = 'Missing FX Rate' OR COALESCE(r.fx_missing, 0) = 1 THEN 'Missing FX Rate'
+        WHEN c.match_status IS NOT NULL THEN c.match_status
+        WHEN ck.campaign_key IS NOT NULL THEN 'Matched'
+        ELSE 'No Imported Spend'
+      END AS match_status,
+      COALESCE(r.attributed_orders, 0) AS attributed_orders,
+      COALESCE(r.attributed_revenue_usd, 0) AS attributed_revenue_usd,
+      COALESCE(c.ad_spend_usd, 0) AS ad_spend_usd
+    FROM ad_cost AS c
+    FULL OUTER JOIN attributed_revenue AS r
+      ON c.report_date = r.report_date
+     AND c.join_key = r.campaign_key
+    LEFT JOIN cost_campaign_keys AS ck
+      ON ck.campaign_key = r.campaign_key
+  )
+  SELECT
+    report_date,
+    ad_platform,
+    medium,
+    source,
+    campaign,
+    campaign_id,
+    match_status,
+    attributed_orders,
+    ROUND(attributed_revenue_usd, 2) AS attributed_revenue_usd,
+    ROUND(ad_spend_usd, 2) AS ad_spend_usd,
+    ROUND(attributed_revenue_usd / NULLIF(ad_spend_usd, 0), 2) AS roas,
+    report_date >= date_sub(current_date(), 14) AS is_provisional
+  FROM roas_rows
+  UNION ALL
+  SELECT
+    report_date,
+    'All Paid Media' AS ad_platform,
+    CAST(NULL AS STRING) AS medium,
+    CAST(NULL AS STRING) AS source,
+    'Total (weighted)' AS campaign,
+    CAST(NULL AS STRING) AS campaign_id,
+    'All' AS match_status,
+    SUM(attributed_orders) AS attributed_orders,
+    ROUND(SUM(attributed_revenue_usd), 2) AS attributed_revenue_usd,
+    ROUND(SUM(ad_spend_usd), 2) AS ad_spend_usd,
+    ROUND(SUM(attributed_revenue_usd) / NULLIF(SUM(ad_spend_usd), 0), 2) AS roas,
+    report_date >= date_sub(current_date(), 14) AS is_provisional
+  FROM roas_rows
+  WHERE match_status IN ('Matched', 'Unmatched Spend')
+  GROUP BY report_date
+  ORDER BY report_date DESC, ad_spend_usd DESC
+
+Calculation Notes: |
+  1️⃣ Numerator is purchase revenue excluding tax and shipping (GA4 ecommerce.purchase_revenue_in_usd; AEP commerce.order.priceTotal minus commerce.order.taxAmount and commerce.shipping.shippingAmount) credited to paid channels under a last non-direct click model: GA4 credits session_traffic_source_last_click.cross_channel_campaign of the converting session, and AEP credits the campaign values carried on the commerce.purchases event (eVar1–eVar4 / marketing.trackingCode); data-driven attribution ROAS shown in the GA4 UI is not comparable with this warehouse figure, and platform-reported conversion values from Google Ads or Meta Ads Manager must never be mixed into the same ratio because each platform self-attributes and double-counts shared conversions.
+  2️⃣ Denominator is media cost only, loaded from Google Ads Data Transfer (ads_CampaignBasicStats_<customer_id>, metrics_cost_micros / 1e6) and Meta Ads Insights exports into a daily campaign cost table keyed on utm_source, utm_medium, utm_campaign and utm_id with cost_type = 'media'; agency fees, creative production, ad-serving and tooling costs are excluded and belong in fully loaded marketing ROI instead.
+  3️⃣ Cost and revenue are normalised to USD before division with an as-of join to the daily exchange-rate table: every cost row, purchase and refund uses the newest rate for its currency with rate_date on or before the cost or event date, USD rows use a rate of 1 (GA4 revenue already arrives as purchase_revenue_in_usd and refund_value_in_usd), and any row still without a rate is reported as a visible Missing FX Rate line excluded from the Total (weighted) ratio rather than being skipped or zeroed; weighted ROAS across campaigns is always SUM(revenue) / SUM(spend), never an average of campaign-level ratios, and weekly or monthly ROAS is SUM(revenue) / SUM(spend) over the daily Matched and Unmatched Spend rows, never an average of daily ROAS.
+  4️⃣ Cost rows with no matching campaign identifier in GA4 or AEP web events are reported as an explicit Unmatched Spend line and kept in the channel and total denominators, so broken or missing UTM tagging lowers ROAS visibly rather than silently inflating it; paid-channel revenue whose campaign identifier never appears in the cost import for the period is reported separately as No Imported Spend and excluded from the Total (weighted) ratio, while revenue on a day without a cost row for a campaign that does appear in the import (late conversions after a pause, zero-impression days skipped by the transfer) stays Matched and in the Total.
+  5️⃣ Campaigns with zero spend in the period return null rather than infinity, and campaigns with spend but no attributed revenue return 0; organic, direct, referral and owned channels such as email and SMS are out of scope because they carry no media cost in the import.
+  6️⃣ Refunded and cancelled orders are deducted from attributed revenue when the refund or credit-memo event is stitched to the original transaction_id / purchaseID; internal traffic is excluded (GA4 traffic_type = 'internal', with known bots already removed from the GA4 export; in AEP _yourtenant.trafficType carries external, internal or bot and rows marked internal or bot are dropped), and test orders are excluded through order_type = 'test'; GA4 reads order_type from event_params, so the top-level dataLayer order_type only reaches the export when the GTM purchase tag maps it as an event parameter.
+  7️⃣ Revenue is reported by conversion date and cost by spend date, so the most recent 7 to 14 days understate ROAS while conversion lag matures; refunds are deducted on the original purchase date, so past days are restated as refunds arrive; trailing periods are marked provisional and restated, and view-through conversions are excluded unless the view-through window is declared alongside the figure.
+
+Business Use Case: |
+  1️⃣ The Paid Media Manager reviews campaign-level ROAS every Monday against the target ROAS set by margin category and shifts budget from campaigns below the break-even threshold for three consecutive weeks into campaigns exceeding target with unfilled impression share.
+  2️⃣ The Performance Marketing Lead uses weekly ROAS by ad platform to set and adjust tROAS bid strategies in Google Ads and value-optimised bidding in Meta Ads, lowering targets to buy incremental volume when blended ROAS runs ahead of plan.
+  3️⃣ Finance and the CMO review monthly channel ROAS alongside Customer Acquisition Cost during budget reforecasting and cap next-quarter spend on any channel whose ROAS falls below the contribution-margin break-even ratio.
+  4️⃣ The Marketing Analytics Lead investigates any week where the Unmatched Spend share exceeds 5% of total cost and has the campaign team correct UTM and utm_id tagging before the figures are released to leadership.
+
+Dependencies:
+  Events: [purchase]
+  Dimensions: [traffic-source]
+  KPIs: [revenue]
+
+Source Data: Digital Analytics (GA4 / Adobe) + Ad Platform Cost Tables (Google Ads Data Transfer, Meta Ads Insights)
+
+Report Attributes: |
+  Session Default Channel Group; Session Source / Medium; Session Campaign; Campaign ID; Ad Platform; Ad Group / Ad Set; Device Category; Country; New vs Returning Customer; Product Category; Conversion Date
+
+Dashboard Usage: [Paid Media Efficiency Dashboard, Marketing Acquisition Scorecard, Executive Growth Dashboard, Budget Pacing and Reforecast Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [customer-acquisition-cost, marketing-sourced-new-customer-rate, conversion-rate, paid-search-conversion-rate, new-customer-conversion-rate, landing-page-conversion-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-13T22:54:13.525+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-15T14:05:33.799+00:00
+
