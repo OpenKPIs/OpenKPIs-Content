@@ -1,81 +1,414 @@
-# Metric: unique visitors
-# Generated: 2026-06-14T01:01:37.747Z
+# Metric: Unique Visitors
+# Generated: 2026-09-15T03:32:08.765Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
-Metric Name: unique visitors
-Formula: COUNT(DISTINCT visitor_id) over the reporting period, where visitor_id is typically user_id when available, otherwise an anonymous device/browser identifier such as GA4 user_pseudo_id or Adobe Experience Cloud ID.
+Metric Name: Unique Visitors
+Formula: Unique Visitors = COUNT(DISTINCT COALESCE(user_id, last user_id seen on the same device ID in the date range, device ID)) over qualifying client-side hits with a non-null device ID (GA4 user_pseudo_id / Adobe ECID); page_view (web) and screen_view (app) are the reference events, and any other client-side event carrying the same identifier also counts. Applied after bot, internal, non-production and denied-consent exclusions, within the reporting date range. Computed directly at each requested grain (date range × segment) and never summed or averaged from finer grains.
 
 Description: |
-  Unique visitors measures the number of distinct people or browser/app identifiers who visited a digital property during a selected reporting period. It is a core reach metric used to understand audience size, acquisition effectiveness, and top-of-funnel growth.
+  Unique Visitors is the de-duplicated count of distinct people who generated at least one qualifying hit on the web or app storefront within the selected date range. Each person is counted once, by customer login ID when available and otherwise by a persistent browser or app-instance ID, aligned with Total Users in GA4 and Unique Visitors in Adobe Analytics. It is the reach denominator for visitor-based conversion and revenue KPIs, and because it is a distinct count it must be recalculated for every date range, channel or segment rather than summed from smaller slices.
 
 Category: Acquisition
 
-Tags: [audience, traffic, users, reach, visitor-count, top-of-funnel]
+Tags: [metric, E-commerce: Top-of-Funnel & Marketing Acquisition, audience reach, traffic]
 
-Industry: ["Retail","E-commerce","SaaS","Healthcare","Education","Finance","Media","Technology","Manufacturing","Other"]
+Industry: ["Retail", "E-commerce", "SaaS", "Healthcare", "Education", "Finance", "Media", "Technology", "Manufacturing", "Other"], Retail
 
 Priority: High
 
-Core Area: Digital Analytics
+Core Area: Generic
 
 Scope: User
 
-Measure Type: count
+Measure Type: Counter
 
-Aggregation Window: User and time based - Hourly/Daily/Monthly/Yearly; can also be segmented by acquisition, content, device, geography, campaign, and other user/session dimensions.
+Aggregation Window: User and time based - Hourly/Daily/Monthly/Yearly; can also be segmented by acquisition, content, device, geography, campaign, and other user/session dimensions., Daily, Weekly, Monthly, Quarterly, Yearly
 
 GA4 Event: |
   page_view
 
 Adobe Event: |
-  page_view
+  web.webpagedetails.pageViews
 
 W3 Data Layer: |
-  {"digitalData":{"event":[{"eventInfo":{"eventName":"page_view","eventAction":"view"}}],"page":{"pageInfo":{"pageName":"Home","destinationURL":"https://www.example.com/"}},"user":[{"profile":[{"profileInfo":{"visitorID":"<anonymous_or_authenticated_visitor_id>"}}]}]}}
+  {
+    "digitalData": {
+      "pageInstanceID": "home-production",
+      "page": {
+        "pageInfo": {
+          "pageID": "home",
+          "pageName": "home",
+          "destinationURL": "https://www.example.com/",
+          "referringURL": "https://www.google.com/",
+          "language": "en-US",
+          "sysEnv": "desktop",
+          "onsiteHostname": "www.example.com",
+          "siteEnvironment": "production"
+        },
+        "category": {
+          "primaryCategory": "home",
+          "pageType": "home"
+        }
+      },
+      "user": [
+        {
+          "profile": [
+            {
+              "profileInfo": {
+                "profileID": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+                "returningStatus": "returning"
+              },
+              "attributes": {
+                "loginStatus": "logged_in",
+                "authState": "authenticated",
+                "trafficType": "external",
+                "consentAnalyticsStorage": "granted"
+              }
+            }
+          ]
+        }
+      ],
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "page_view",
+            "eventAction": "view",
+            "type": "page",
+            "timeStamp": "2026-09-14T15:04:05.123Z"
+          }
+        }
+      ],
+      "privacy": {
+        "accessCategories": [
+          {
+            "categoryName": "analytics",
+            "domains": [
+              "www.example.com"
+            ]
+          }
+        ]
+      }
+    }
+  }
 
 GA4 Data Layer: |
-  {"event":"page_view","page_location":"https://www.example.com/","page_title":"Home","user_id":"<authenticated_user_id_if_available>","visitor_id":"<anonymous_or_authenticated_visitor_id>"}
+  {
+    "event": "page_view",
+    "page_location": "https://www.example.com/",
+    "page_referrer": "https://www.google.com/",
+    "page_title": "Home",
+    "page_type": "home",
+    "site_environment": "production",
+    "traffic_type": "external",
+    "user_id": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "login_status": "logged_in",
+    "consent_analytics_storage": "granted",
+    "consent_ad_storage": "granted",
+    "consent_ad_user_data": "granted",
+    "consent_ad_personalization": "denied"
+  }
 
 Adobe Client Data Layer: |
-  {"event":"page_view","page":{"pageInfo":{"pageName":"Home","destinationURL":"https://www.example.com/"}},"user":{"visitorId":"<anonymous_or_authenticated_visitor_id>"}}
+  {
+    "event": "web.webpagedetails.pageViews",
+    "eventInfo": {
+      "eventType": "web.webpagedetails.pageViews",
+      "timestamp": "2026-09-14T15:04:05.123Z"
+    },
+    "page": {
+      "pageInfo": {
+        "pageName": "home",
+        "pageType": "home",
+        "URL": "https://www.example.com/",
+        "referrer": "https://www.google.com/",
+        "server": "www.example.com",
+        "language": "en-US",
+        "siteEnvironment": "production"
+      }
+    },
+    "user": {
+      "authState": "authenticated",
+      "loginStatus": "logged_in",
+      "crmIdHashed": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      "trafficType": "external"
+    },
+    "consent": {
+      "collect": "in",
+      "analyticsStorage": "granted"
+    }
+  }
 
 XDM Mapping: |
-  {"identityMap":{"ECID":[{"id":"<experience_cloud_id>","authenticatedState":"ambiguous","primary":true}],"CRMID":[{"id":"<authenticated_user_id>","authenticatedState":"authenticated","primary":false}]},"web":{"webPageDetails":{"URL":"https://www.example.com/","name":"Home","pageViews":{"value":1}}},"timestamp":"<event_timestamp>"}
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "timestamp": "2026-09-14T15:04:05.123Z",
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "43012345678901234567890123456789012345",
+          "authenticatedState": "ambiguous",
+          "primary": true
+        }
+      ],
+      "CRMID": [
+        {
+          "id": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+          "authenticatedState": "authenticated",
+          "primary": false
+        }
+      ]
+    },
+    "web": {
+      "webPageDetails": {
+        "URL": "https://www.example.com/",
+        "name": "home",
+        "server": "www.example.com",
+        "pageViews": {
+          "value": 1
+        }
+      },
+      "webReferrer": {
+        "URL": "https://www.google.com/"
+      }
+    },
+    "environment": {
+      "type": "browser",
+      "browserDetails": {
+        "name": "Chrome",
+        "version": "128.0",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "javaScriptEnabled": true
+      }
+    },
+    "device": {
+      "type": "desktop"
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "logged_in",
+            "eVar11": "external"
+          }
+        }
+      }
+    },
+    "consents": {
+      "collect": {
+        "val": "y"
+      }
+    },
+    "_tenant": {
+      "identity": {
+        "loginStatus": "logged_in",
+        "crmIdHashed": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+      },
+      "trafficType": "external",
+      "siteEnvironment": "production",
+      "consent": {
+        "analyticsStorage": "granted"
+      }
+    }
+  }
 
-SQL Query: |
-  -- GA4 BigQuery example: unique visitors by day
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Unique Visitors (GA4 Total Users) = COUNT(DISTINCT visitor_key) over qualifying client-side hits in the date range.
+  -- visitor_key = user_id (hashed CRM id), else the last user_id seen on the same user_pseudo_id anywhere in the range (window runs UNBOUNDED PRECEDING to UNBOUNDED FOLLOWING), else user_pseudo_id.
+  -- Non-additive: every row is computed from hit level via GROUPING SETS. Never SUM or AVG day or login_status rows.
+  -- Replace the _TABLE_SUFFIX range and production hostnames. event_date is already in the property time zone.
+  -- Known bots and spiders are removed by GA4 at collection; uptime monitors and synthetic tests must be tagged traffic_type = 'internal'.
+  WITH events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_day,
+      event_timestamp,
+      platform,
+      user_id,
+      user_pseudo_id,
+      privacy_info.analytics_storage AS analytics_storage,
+      device.web_info.hostname AS web_hostname,
+      (
+        SELECT AS STRUCT
+          MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type,
+          MAX(IF(ep.key = 'site_environment', ep.value.string_value, NULL)) AS site_environment,
+          MAX(IF(ep.key = 'login_status', ep.value.string_value, NULL)) AS login_status,
+          MAX(IF(ep.key = 'page_location', ep.value.string_value, NULL)) AS page_location,
+          MAX(IF(ep.key = 'page_type', ep.value.string_value, NULL)) AS page_type,
+          MAX(IF(ep.key = 'debug_mode', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS debug_mode
+        FROM UNNEST(event_params) AS ep
+      ) AS p
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN '20260801' AND '20260831'
+  ),
+  qualifying_hits AS (
+    SELECT
+      event_day,
+      event_timestamp,
+      user_id,
+      user_pseudo_id,
+      COALESCE(p.login_status, IF(user_id IS NOT NULL, 'logged_in', 'logged_out')) AS login_status
+    FROM events
+    -- Any event name qualifies; Measurement Protocol and server-side hits without a client or app-instance ID are dropped
+    WHERE user_pseudo_id IS NOT NULL
+      -- Consent Mode v2: drop analytics_storage denied; hits with no consent value are kept
+      AND analytics_storage IS DISTINCT FROM 'No'
+      AND COALESCE(p.traffic_type, '') != 'internal'
+      AND p.debug_mode IS NULL
+      AND COALESCE(p.site_environment, 'production') = 'production'
+      -- Web hits must come from production hostnames; app streams have no hostname
+      AND (
+        platform IN ('IOS', 'ANDROID')
+        OR LOWER(COALESCE(web_hostname, NET.HOST(p.page_location))) IN ('www.example.com', 'm.example.com')
+      )
+  ),
+  resolved AS (
+    SELECT
+      event_day,
+      login_status,
+      user_id,
+      COALESCE(
+        user_id,
+        LAST_VALUE(user_id IGNORE NULLS) OVER (
+          PARTITION BY user_pseudo_id
+          ORDER BY event_timestamp
+          ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ),
+        user_pseudo_id
+      ) AS visitor_key
+    FROM qualifying_hits
+  )
+  -- date_range_total is the headline figure. A visitor with both logged_in and logged_out hits appears in both login_status rows.
   SELECT
-    PARSE_DATE('%Y%m%d', event_date) AS event_day,
-    COUNT(DISTINCT COALESCE(user_id, user_pseudo_id)) AS unique_visitors
-  FROM `project.dataset.events_*`
-  WHERE _TABLE_SUFFIX BETWEEN '20250101' AND '20250131'
-    AND event_name IN ('page_view', 'screen_view', 'session_start', 'user_engagement')
-  GROUP BY event_day
-  ORDER BY event_day;
+    CASE
+      WHEN GROUPING(event_day) = 1 AND GROUPING(login_status) = 1 THEN 'date_range_total'
+      WHEN GROUPING(login_status) = 1 THEN 'day'
+      ELSE 'login_status'
+    END AS grain,
+    event_day,
+    login_status,
+    COUNT(DISTINCT visitor_key) AS unique_visitors,
+    COUNT(DISTINCT IF(user_id IS NOT NULL, visitor_key, NULL)) AS authenticated_visitors
+  FROM resolved
+  GROUP BY GROUPING SETS ((), (event_day), (login_status))
+  ORDER BY grain, event_day, login_status;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Unique Visitors (Adobe Analytics Unique Visitors) = COUNT(DISTINCT visitor_key) over qualifying client-side hits in the date range.
+  -- visitor_key = CRMID, else the last CRMID seen on the same ECID anywhere in the range (window runs UNBOUNDED PRECEDING to UNBOUNDED FOLLOWING), else ECID.
+  -- Replace your_web_experience_event_dataset with the XDM ExperienceEvent web dataset and _tenant with the org tenant namespace.
+  -- timestamp is UTC; America/New_York stands in for the report suite time zone. Replace the date range and production hostnames.
+  -- Non-additive: every row is computed from hit level via GROUPING SETS. Never SUM or AVG day or login_status rows.
+  WITH events AS (
+    SELECT
+      to_date(from_utc_timestamp(timestamp, 'America/New_York')) AS event_day,
+      timestamp AS event_ts,
+      identityMap['ECID'][0].id AS ecid,
+      identityMap['CRMID'][0].id AS crm_id,
+      _tenant.identity.loginStatus AS login_status,
+      _tenant.trafficType AS traffic_type,
+      _tenant.siteEnvironment AS site_environment,
+      consents.collect.val AS consent_collect,
+      _tenant.consent.analyticsStorage AS analytics_storage,
+      lower(COALESCE(web.webPageDetails.server, parse_url(web.webPageDetails.URL, 'HOST'))) AS hostname,
+      environment.type AS environment_type,
+      environment.browserDetails.userAgent AS user_agent,
+      environment.browserDetails.name AS browser_name
+    FROM your_web_experience_event_dataset
+    WHERE timestamp >= to_utc_timestamp('2026-08-01 00:00:00', 'America/New_York')
+      AND timestamp < to_utc_timestamp('2026-09-01 00:00:00', 'America/New_York')
+  ),
+  qualifying_hits AS (
+    SELECT
+      event_day,
+      event_ts,
+      ecid,
+      crm_id,
+      COALESCE(login_status, CASE WHEN crm_id IS NOT NULL THEN 'logged_in' ELSE 'logged_out' END) AS login_status
+    FROM events
+    -- Any client event type qualifies (web.webpagedetails.pageViews and others); server-side hits without an ECID are dropped
+    WHERE ecid IS NOT NULL
+      AND environment_type IN ('browser', 'application')
+      -- Opt-out: drop consents.collect.val = 'n' (secondary check: tenant analyticsStorage denied); hits with no consent value are kept, as in GA4
+      AND COALESCE(consent_collect, '') <> 'n'
+      AND COALESCE(analytics_storage, '') <> 'denied'
+      AND COALESCE(traffic_type, '') <> 'internal'
+      AND COALESCE(site_environment, 'production') = 'production'
+      -- Web hits must come from production hostnames
+      AND (environment_type = 'application' OR hostname IN ('www.example.com', 'm.example.com'))
+      -- Bots, crawlers, headless browsers, uptime monitors and synthetic tests
+      AND COALESCE(user_agent, '') NOT RLIKE '(?i)(bot|crawl|spider|slurp|headless|phantomjs|lighthouse|pingdom|uptimerobot|synthetic)'
+      AND COALESCE(browser_name, '') NOT RLIKE '(?i)(headless|bot)'
+  ),
+  resolved AS (
+    SELECT
+      event_day,
+      login_status,
+      crm_id,
+      COALESCE(
+        crm_id,
+        last(crm_id, true) OVER (
+          PARTITION BY ecid
+          ORDER BY event_ts
+          ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ),
+        ecid
+      ) AS visitor_key
+    FROM qualifying_hits
+  )
+  -- date_range_total is the headline figure. A visitor with both logged_in and logged_out hits appears in both login_status rows.
+  SELECT
+    CASE
+      WHEN grouping(event_day) = 1 AND grouping(login_status) = 1 THEN 'date_range_total'
+      WHEN grouping(login_status) = 1 THEN 'day'
+      ELSE 'login_status'
+    END AS grain,
+    event_day,
+    login_status,
+    COUNT(DISTINCT visitor_key) AS unique_visitors,
+    COUNT(DISTINCT CASE WHEN crm_id IS NOT NULL THEN visitor_key END) AS authenticated_visitors
+  FROM resolved
+  GROUP BY GROUPING SETS ((), (event_day), (login_status))
+  ORDER BY grain, event_day, login_status;
 
 Calculation Notes: |
-  Use a stable visitor identifier and define the reporting period clearly. Prefer authenticated user_id for cross-device deduplication when available; otherwise use anonymous cookie/device IDs, which may overcount due to cookie deletion, browser changes, app reinstalls, consent restrictions, or multiple devices. Do not sum daily unique visitors to calculate monthly unique visitors because the same visitor may appear on multiple days. Exclude known bots, internal traffic, QA environments, and invalid events where possible.
+  1️⃣ Identity key: count distinct values of one resolved visitor key per hit. Use the authenticated customer ID first (GA4 user_id; Adobe CRM ID or the CJA person ID) and fall back to the device identifier (GA4 user_pseudo_id; Adobe ECID). Keep the reporting identity space fixed across comparison periods (GA4 Blended vs Observed vs Device-based; CJA stitched vs unstitched person ID). Switching it restates history and must not be done silently. Range-wide stitching, the exclusions and observed-only counting make the governed figure lower than GA4 interface Total Users (which does not stitch across the range) and the Adobe Analytics ECID/cookie-based Unique Visitors count; login-first counting corresponds to the CJA person ID.
+  2️⃣ Cross-device and identity stitching: resolve every hit to COALESCE(user_id, the last user_id seen on the same device ID anywhere in the date range, device ID), where the device ID is GA4 user_pseudo_id or Adobe ECID, so the anonymous pre-login hits of a later-authenticated visitor count as the same person. Without a login, one shopper browsing on phone, laptop and the native app is counted up to three times. Cookie deletion, private browsing and Safari ITP's 7-day cap on script-set cookies push the count up further. Stitch only on deterministic logins. Because the stitch looks across the whole range, daily rows are restated when the range is extended, and retroactive stitching (e.g. CJA field-based stitching replay) can lower already-published counts, so treat periods inside the replay lookback window as provisional.
+  3️⃣ Non-additive: distinct counts never sum across days, weeks, channels, devices, campaigns or segments. A visitor who arrives via paid search on Monday and email on Thursday is one weekly visitor but appears in both channel rows, so breakdown rows add up to more than the de-duplicated total. Compute every grain directly from hit-level data. Never SUM or AVG daily values into weekly or monthly totals. For pre-aggregated tables, store HLL++ sketches (HLL_COUNT.INIT / MERGE) rather than finished counts. Expect roughly 1–2% variance between the GA4 interface (HyperLogLog++ estimates) and exact counts from the BigQuery export.
+  4️⃣ Qualifying hit: any client-side event carrying a valid, non-null visitor identifier inside the date range, which is the GA4 Total Users definition. page_view (web) and screen_view (app) are the reference events, and any other client-side event carrying the same identifier (e.g. view_item, add_to_cart, user_engagement) also counts. Do not substitute GA4 Active Users, which requires an engaged session, first_visit or engagement_time_msec > 0. Exclude server-side and Measurement Protocol events sent without a real client or app-instance ID (refund feeds, order-status webhooks), because they create phantom visitors.
+  5️⃣ Exclusions: remove IAB/ABC International Spiders & Bots List matches, internal IP ranges and traffic_type = 'internal', debug_mode and staging-hostname traffic, uptime monitors and synthetic checkout tests. Restrict to production hostnames so cross-domain payment or CMS preview pages do not add identifiers. A missing site_environment is treated as production, because the production-hostname filter still applies to web hits.
+  6️⃣ Consent: exclude only hits where analytics consent is explicitly denied (GA4 privacy_info.analytics_storage = 'No'; XDM consents.collect.val = 'n' or _tenant.consent.analyticsStorage = 'denied') and keep hits with no consent value in both GA4 and AEP, matching the GA4 export behaviour. Under Google Consent Mode v2, cookieless pings with analytics_storage denied carry no persistent identifier and are excluded from the distinct count. Modelled users appear only in the GA4 interface (Blended identity), never in the BigQuery export, so publish the observed consented count as the governed figure and report any modelled uplift separately. Adobe opt-out visitors are excluded the same way.
+  7️⃣ Timing: bucket dates in the property's reporting time zone. GA4 export event_date is already local to the property, while event_timestamp is UTC microseconds and must be converted before custom date cuts. Adobe hit times follow the report suite time zone. App hits queued offline can arrive up to 72 hours late, so treat the trailing 3 days as provisional in daily trend reporting.
 
 Business Use Case: |
-  A marketing team tracks unique visitors by campaign and landing page to determine which acquisition channels are expanding reach. If paid search drives high sessions but low unique visitor growth, budget may be shifted toward channels bringing net-new audiences.
+  1️⃣ Performance Marketing Manager, in the weekly channel review: when a paid social or display channel shows sessions per unique visitor above 1.8 while its unique visitors stay flat week over week, lower retargeting frequency caps and move that budget to prospecting audiences that add net-new reach.
+  2️⃣ E-commerce Director, in the monthly trading review: when unique visitors grow but Order Conversion Rate (Visitor) falls by more than 10% month over month, have Merchandising audit landing-page offers and assortment for the new traffic cohorts before any cut to acquisition spend is approved.
+  3️⃣ CRM & Loyalty Manager, on the release dashboard: when the share of unique visitors who are logged in drops below target after a site or app release, log a priority defect with the Product team on the login and persistent-session flow. Falling logins inflate device-based visitor counts and break personalised journeys.
+  4️⃣ Head of Marketing, during peak-season planning (Black Friday / Cyber Week): set daily unique-visitor forecasts from prior-year peak curves, then share them with Engineering for storefront capacity tests and with Paid Media for day-by-day budget pacing.
 
-Dependencies: |
-  page_view event; screen_view event for apps; session_start event; visitor_id or user_pseudo_id; user_id where available; bot filtering; consent status; reporting date range
+Dependencies:
+  Events: [page-view]
 
-Source Data: Digital Analytics; Web Analytics; App Analytics; Tag Management; Consent Management Platform; Customer Identity where available
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
 
 Report Attributes: |
-  Dimensions: date, channel group, source / medium, campaign, landing page, page path, device category, country, region, browser, operating system, consent status. Metrics: unique visitors, sessions, page views, engaged sessions, new users, returning users. KPIs: traffic growth, acquisition reach, conversion rate.
+  Date; Default Channel Grouping; Session Source / Medium; Campaign Name; Landing Page; Device Category; Country/Region; New vs Returning User; Login Status; Consent Status
 
-Dashboard Usage: [Executive Traffic Overview, Acquisition Performance Dashboard, Audience Growth Dashboard, Content Performance Dashboard, Campaign Performance Dashboard]
+Dashboard Usage: [Executive Traffic Overview, Acquisition Performance Dashboard, Audience Growth Dashboard, Campaign Performance Dashboard, E-commerce Conversion Funnel Dashboard]
 
 Segment Eligibility: |
   true
 
+Related Metrics: [session, new-users, engaged-sessions, product-view, add-to-cart]
 
+Derived KPIs: [order-conversion-rate-visitor, conversion-rate, sign-up-rate, new-customer-conversion-rate]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -87,4 +420,5 @@ Created At: 2026-06-14T01:01:37.466163+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-15T03:32:08.1+00:00
 
