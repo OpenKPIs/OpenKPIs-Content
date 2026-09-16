@@ -1,91 +1,390 @@
 # Metric: Time on Property Page
-# Generated: 2026-08-19T17:33:01.818Z
+# Generated: 2026-09-16T19:42:11.912Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Metric Name: Time on Property Page
-Formula: SUM(time_spent) / COUNT(visits)
+Formula: SUM over listing page views (LEAST(SUM(engagement_time_msec per listing page view), 1800000) / 1000) / COUNT(page_view WHERE page_type = 'listing_detail' AND listing_id IS NOT NULL)
 
 Description: |
-  Measures the average duration a user spends on a property listing page, indicating user interest and engagement with the property details.
+  Real estate application of GA4's average engagement time concept: the average foreground engagement time, in seconds, per property listing detail page view, computed as total engaged time per listing detail page view, capped at 30 minutes per view and converted to seconds, divided by the number of listing detail page views. It shows how thoroughly prospective buyers and renters read a listing (photos, floor plans, price history, neighbourhood data) and is the primary depth-of-interest signal that sits between listing views and inquiry or tour requests.
 
 Category: Engagement
 
-Tags: [metric]
+Tags: [metric, Real Estate, Real Estate: Listing Discovery & Engagement]
 
-Industry: Real Estate Tech
+Industry: Other
 
 Priority: High
 
 Core Area: Discovery
 
-Scope: Session
+Scope: Event
 
-Measure Type: average
+Measure Type: Average
 
-Aggregation Window: Time based - Daily
+Aggregation Window: Daily, Weekly, Monthly
 
 GA4 Event: |
-  time_on_property_page
+  page_view
 
 Adobe Event: |
-  time_on_property_page
+  web.webpagedetails.pageViews
 
 W3 Data Layer: |
-  {"digitalData":{"event":{"eventInfo":{"type":"engagement","eventName":"time_on_property_page","timeStamp":"2023-10-05T14:48:00.000Z"},"attributes":{"timeSpent":120}}}}
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageID": "listing_detail:LST-48213",
+          "pageName": "listings:listing_detail:LST-48213",
+          "destinationURL": "https://www.example-realty.com/listings/austin-tx/lst-48213",
+          "language": "en-US",
+          "sysEnv": "web"
+        },
+        "category": {
+          "primaryCategory": "listings",
+          "subCategory1": "for_sale",
+          "pageType": "listing_detail"
+        },
+        "attributes": {
+          "listingID": "LST-48213",
+          "propertyType": "condo",
+          "listingType": "for_sale",
+          "listingCity": "Austin",
+          "listingRegion": "TX",
+          "priceBand": "400k-500k",
+          "listingStatus": "active"
+        }
+      },
+      "product": [
+        {
+          "productInfo": {
+            "productID": "LST-48213",
+            "productName": "2 Bed Condo - Downtown Austin"
+          },
+          "category": {
+            "primaryCategory": "listings",
+            "productType": "condo"
+          },
+          "attributes": {
+            "listingType": "for_sale",
+            "listingCity": "Austin",
+            "listingRegion": "TX",
+            "priceBand": "400k-500k",
+            "listingStatus": "active"
+          }
+        }
+      ],
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "pageView",
+            "eventAction": "page_view",
+            "type": "page"
+          }
+        }
+      ]
+    }
+  }
 
 GA4 Data Layer: |
-  {"event":"time_on_property_page","timeSpent":120}
+  {
+    "event": "page_view",
+    "page_type": "listing_detail",
+    "content_group": "listing_detail",
+    "page_location": "https://www.example-realty.com/listings/austin-tx/lst-48213",
+    "page_title": "2 Bed Condo - Downtown Austin",
+    "listing_id": "LST-48213",
+    "property_type": "condo",
+    "listing_type": "for_sale",
+    "listing_city": "Austin",
+    "listing_region": "TX",
+    "price_band": "400k-500k",
+    "listing_status": "active"
+  }
 
 Adobe Client Data Layer: |
-  {"event":"time_on_property_page","eventData":{"timeSpent":120}}
+  {
+    "event": "pageView",
+    "page": {
+      "pageInfo": {
+        "pageName": "listings:listing_detail:LST-48213",
+        "pageURL": "https://www.example-realty.com/listings/austin-tx/lst-48213",
+        "siteSection": "listings",
+        "pageType": "listing_detail",
+        "language": "en-US"
+      }
+    },
+    "listing": {
+      "listingID": "LST-48213",
+      "listingName": "2 Bed Condo - Downtown Austin",
+      "propertyType": "condo",
+      "listingType": "for_sale",
+      "listingCity": "Austin",
+      "listingRegion": "TX",
+      "priceBand": "400k-500k",
+      "listingStatus": "active"
+    },
+    "trafficType": "external"
+  }
 
 XDM Mapping: |
-  {"_experience":{"analytics":{"event1":{"name":"time_on_property_page","timeSpent":120}}}}
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "timestamp": "2026-09-16T14:48:00.000Z",
+    "web": {
+      "webPageDetails": {
+        "name": "listings:listing_detail:LST-48213",
+        "URL": "https://www.example-realty.com/listings/austin-tx/lst-48213",
+        "siteSection": "listings",
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "LST-48213",
+        "name": "2 Bed Condo - Downtown Austin"
+      }
+    ],
+    "_tenant": {
+      "pageType": "listing_detail",
+      "listing": {
+        "listingID": "LST-48213",
+        "propertyType": "condo",
+        "listingType": "for_sale",
+        "listingCity": "Austin",
+        "listingRegion": "TX",
+        "priceBand": "400k-500k",
+        "listingStatus": "active"
+      },
+      "trafficType": "external"
+    }
+  }
 
 Google Analytics SQL: |
   -- ==========================================
-  -- 1. GOOGLE BIGQUERY SQL (GA4 Export)
+  -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
-  SELECT user_pseudo_id, 
-         TIMESTAMP_DIFF(MAX(CASE WHEN event_name = 'page_view' AND param.key = 'page_location' AND param.value.string_value LIKE '%property%' THEN event_timestamp END), 
-                       MIN(CASE WHEN event_name = 'page_view' AND param.key = 'page_location' AND param.value.string_value LIKE '%property%' THEN event_timestamp END), SECOND) AS time_on_property_page
-  FROM `your-project.analytics_123456789.events_*`, 
-       UNNEST(event_params) AS param
-  WHERE _TABLE_SUFFIX BETWEEN '20230101' AND '20231231'
-  GROUP BY user_pseudo_id
+  -- Time on Property Page: average foreground engaged seconds per listing detail page view (ratio of sums).
+  -- Engaged time comes only from the engagement_time_msec parameter; timestamps are used for ordering and
+  -- attribution, never to compute durations. GA4 known-bot filtering is applied before export.
+  -- event_date in the export is already in the property reporting time zone.
+  WITH base AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      event_name,
+      event_timestamp,
+      user_pseudo_id,
+      (SELECT MAX(IF(key = 'page_type', value.string_value, NULL)) FROM UNNEST(event_params)) AS page_type,
+      (SELECT MAX(IF(key = 'listing_id', COALESCE(value.string_value, CAST(value.int_value AS STRING)), NULL)) FROM UNNEST(event_params)) AS listing_id,
+      (SELECT MAX(IF(key = 'page_location', value.string_value, NULL)) FROM UNNEST(event_params)) AS page_location,
+      (SELECT MAX(IF(key = 'ga_session_id', value.int_value, NULL)) FROM UNNEST(event_params)) AS ga_session_id,
+      (SELECT MAX(IF(key = 'engagement_time_msec', value.int_value, NULL)) FROM UNNEST(event_params)) AS engagement_time_msec,
+      (SELECT MAX(IF(key = 'traffic_type', value.string_value, NULL)) FROM UNNEST(event_params)) AS traffic_type,
+      (SELECT MAX(IF(key = 'debug_mode', COALESCE(value.int_value, SAFE_CAST(value.string_value AS INT64)), NULL)) FROM UNNEST(event_params)) AS debug_mode
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+  ),
+  
+  -- Internal traffic, debug hits and developer/QA hosts are removed from numerator and denominator alike.
+  clean AS (
+    SELECT *
+    FROM base
+    WHERE COALESCE(traffic_type, '') <> 'internal'
+      AND COALESCE(debug_mode, 0) = 0
+      AND ga_session_id IS NOT NULL
+      AND page_location IS NOT NULL
+      AND NOT REGEXP_CONTAINS(LOWER(COALESCE(NET.HOST(page_location), '')), r'(^localhost$|^127\.0\.0\.1$|staging|^dev\.|^qa\.|\.dev\.|\.qa\.)')
+  ),
+  
+  -- Denominator: every listing detail page_view, including zero-engagement and bounced views.
+  -- next_view_ts closes the attribution window when the same listing URL is viewed again in the session.
+  listing_views AS (
+    SELECT
+      event_date,
+      user_pseudo_id,
+      ga_session_id,
+      page_location,
+      event_timestamp AS view_ts,
+      ROW_NUMBER() OVER (PARTITION BY user_pseudo_id, ga_session_id, page_location ORDER BY event_timestamp) AS view_seq,
+      LEAD(event_timestamp) OVER (PARTITION BY user_pseudo_id, ga_session_id, page_location ORDER BY event_timestamp) AS next_view_ts
+    FROM clean
+    WHERE event_name = 'page_view'
+      AND page_type = 'listing_detail'
+      AND listing_id IS NOT NULL
+  ),
+  
+  -- Numerator source: engagement_time_msec from every event type (user_engagement, page_view, scroll, ...).
+  engagement_hits AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      page_location,
+      event_timestamp,
+      engagement_time_msec
+    FROM clean
+    WHERE engagement_time_msec > 0
+  ),
+  
+  -- Each engagement hit is attributed to the most recent preceding listing page_view on the same
+  -- user_pseudo_id + ga_session_id + page_location; engaged time is capped per view at 30 minutes.
+  per_view AS (
+    SELECT
+      v.event_date,
+      v.user_pseudo_id,
+      v.ga_session_id,
+      v.page_location,
+      v.view_seq,
+      LEAST(COALESCE(SUM(e.engagement_time_msec), 0), 1800000) AS capped_engaged_msec
+    FROM listing_views AS v
+    LEFT JOIN engagement_hits AS e
+      ON  e.user_pseudo_id = v.user_pseudo_id
+      AND e.ga_session_id  = v.ga_session_id
+      AND e.page_location  = v.page_location
+      AND e.event_timestamp >= v.view_ts
+      AND (v.next_view_ts IS NULL OR e.event_timestamp < v.next_view_ts)
+    GROUP BY v.event_date, v.user_pseudo_id, v.ga_session_id, v.page_location, v.view_seq
+  )
+  
+  SELECT
+    event_date,
+    COUNT(*) AS listing_page_views,
+    ROUND(SUM(capped_engaged_msec) / 1000, 1) AS total_engaged_seconds,
+    ROUND(SAFE_DIVIDE(SUM(capped_engaged_msec) / 1000, COUNT(*)), 2) AS avg_engaged_seconds_per_listing_view,
+    ROUND(APPROX_QUANTILES(capped_engaged_msec, 100)[OFFSET(50)] / 1000, 2) AS median_engaged_seconds_per_listing_view
+  FROM per_view
+  GROUP BY event_date
+  ORDER BY event_date
 
 AEP Query Service SQL: |
   -- ==========================================
-  -- 2. ADOBE AEP QUERY SERVICE SQL (XDM Dataset)
+  -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
-  SELECT identityMap.ecid AS user_id, 
-         TIMESTAMPDIFF(SECOND, MIN(CASE WHEN eventType = 'web.pageview' AND page.url LIKE '%property%' THEN timestamp END), 
-                             MAX(CASE WHEN eventType = 'web.pageview' AND page.url LIKE '%property%' THEN timestamp END)) AS time_on_property_page
-  FROM your_aep_dataset
-  WHERE timestamp BETWEEN '2023-01-01T00:00:00Z' AND '2023-12-31T23:59:59Z'
-  GROUP BY identityMap.ecid
+  -- Time on Property Page, Adobe methodology: average seconds spent per listing detail page view (ratio of sums).
+  -- Adobe does not collect a foreground engagement timer, so this query follows Adobe Analytics hit-gap
+  -- time-spent logic: time on a page view = seconds until the next hit (any eventType, including pings and
+  -- link clicks) from the same ECID in the same session. The last hit of a session receives 0 seconds, as
+  -- Adobe records no time for an exit page without a following ping. Results therefore differ from the
+  -- GA4 foreground engagement figure and must not be compared one-to-one.
+  -- _tenant is the organisation tenant namespace in the XDM schema; replace it with your tenant id.
+  -- Replace your_aep_web_events_dataset with the name of the web ExperienceEvent dataset.
+  WITH hits AS (
+    SELECT
+      _id AS hit_id,
+      identityMap['ECID'][0].id AS ecid,
+      timestamp AS hit_ts,
+      eventType AS event_type,
+      _tenant.pageType AS page_type,
+      _tenant.listing.listingID AS listing_id,
+      _tenant.trafficType AS traffic_type,
+      LOWER(regexp_extract(COALESCE(web.webPageDetails.URL, ''), '^[a-zA-Z]+://([^/:?#]+)', 1)) AS page_host,
+      environment.browserDetails.userAgent AS user_agent
+    FROM your_aep_web_events_dataset
+    -- UTC prefilter widened by one day on each side for partition pruning; the exact window is applied on the local date below.
+    WHERE timestamp >= date_sub(current_date(), 29)
+      AND timestamp <  date_add(current_date(), 1)
+      AND identityMap['ECID'][0].id IS NOT NULL
+  ),
+  
+  -- Internal traffic, developer/QA hosts and bot user agents are removed before sessionisation so they never create gaps.
+  clean AS (
+    SELECT *
+    FROM hits
+    WHERE COALESCE(traffic_type, '') <> 'internal'
+      AND NOT (page_host RLIKE '(^localhost$|^127\\.0\\.0\\.1$|staging|^dev\\.|^qa\\.|\\.dev\\.|\\.qa\\.)')
+      AND NOT (LOWER(COALESCE(user_agent, '')) RLIKE 'bot|crawl|spider|slurp|headless|lighthouse|pingdom|monitor')
+  ),
+  
+  -- Sessions: a new session starts after more than 30 minutes of inactivity for the same ECID.
+  flagged AS (
+    SELECT
+      *,
+      CASE
+        WHEN LAG(hit_ts) OVER (PARTITION BY ecid ORDER BY hit_ts, hit_id) IS NULL THEN 1
+        WHEN unix_timestamp(hit_ts) - unix_timestamp(LAG(hit_ts) OVER (PARTITION BY ecid ORDER BY hit_ts, hit_id)) > 1800 THEN 1
+        ELSE 0
+      END AS is_new_session
+    FROM clean
+  ),
+  
+  sessionized AS (
+    SELECT
+      *,
+      SUM(is_new_session) OVER (PARTITION BY ecid ORDER BY hit_ts, hit_id
+                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session_seq
+    FROM flagged
+  ),
+  
+  -- Seconds until the next hit of any eventType in the same session; NULL for the last hit of a session.
+  with_next AS (
+    SELECT
+      *,
+      LEAD(hit_ts) OVER (PARTITION BY ecid, session_seq ORDER BY hit_ts, hit_id) AS next_hit_ts
+    FROM sessionized
+  ),
+  
+  -- Denominator: every listing detail page view; exit views keep 0 seconds; each view is capped at 1800 s.
+  -- Replace America/New_York with the reporting time zone of the property.
+  listing_views AS (
+    SELECT
+      to_date(from_utc_timestamp(hit_ts, 'America/New_York')) AS event_date,
+      LEAST(COALESCE(unix_timestamp(next_hit_ts) - unix_timestamp(hit_ts), 0), 1800) AS seconds_spent
+    FROM with_next
+    WHERE event_type = 'web.webpagedetails.pageViews'
+      AND page_type = 'listing_detail'
+      AND listing_id IS NOT NULL
+      AND to_date(from_utc_timestamp(hit_ts, 'America/New_York')) BETWEEN date_sub(current_date(), 28) AND date_sub(current_date(), 1)
+  )
+  
+  SELECT
+    event_date,
+    COUNT(*) AS listing_page_views,
+    SUM(seconds_spent) AS total_seconds_spent,
+    ROUND(CAST(SUM(seconds_spent) AS DOUBLE) / NULLIF(COUNT(*), 0), 2) AS avg_seconds_spent_per_listing_view,
+    percentile_approx(seconds_spent, 0.5) AS median_seconds_spent_per_listing_view
+  FROM listing_views
+  GROUP BY event_date
+  ORDER BY event_date
 
 Calculation Notes: |
-  Exclude sessions with less than 5 seconds to filter out accidental clicks. Consider session timeout as 30 minutes of inactivity.
+  1️⃣ Engaged time only: sum the engagement_time_msec parameter carried by user_engagement (and by the page_view/scroll hits that flush it) while the tab is in the foreground and focused; wall-clock gaps between hits, background-tab time and idle time are never used, so timestamp-difference methods are not an acceptable substitute in GA4. Adobe Analytics exports no foreground-engagement field, so the AEP figure follows Adobe's time-spent method (gap to the next hit in the visit, exit hits count 0) and is reported as its own series, never compared one-to-one with the GA4 figure.
+  2️⃣ Listing page identification: a hit counts only when page_type = 'listing_detail' and a non-null listing_id is present; search results, map view, saved searches, agent profiles and gallery-only overlays are excluded.
+  3️⃣ Last page of a session: engagement on the final listing page is captured by the user_engagement hit GA4 sends on page hide or unload, so it is included; when that hit is lost (browser kill, crash) the page view still counts in the denominator with zero engaged time, which is never imputed.
+  4️⃣ Attribution to the page view: engaged milliseconds are attributed to the listing page view that shares the same user_pseudo_id, ga_session_id and page_location and precedes the engagement hit; single-page app listing transitions must fire a fresh page_view on history change so time is not merged across listings.
+  5️⃣ Denominator: every listing detail page_view in the period, including zero-engagement and bounced views; a 30-minute inactivity session timeout applies, and a listing re-opened in a new session is a new view.
+  6️⃣ Outlier cap: engaged time per listing page view is capped at 1,800,000 ms (30 minutes) before aggregation to neutralise kiosk displays and pinned tabs; report the median alongside the mean because the distribution is right-skewed.
+  7️⃣ Exclusions: known bots and spiders (GA4 relies on its built-in known-bot filtering; the AEP side additionally filters user-agent and data-centre IP lists), traffic_type = 'internal' (brokerage staff, agents previewing their own listings in the back office) and developer/QA hosts (localhost, staging, dev and qa hostnames) are removed from both numerator and denominator; timestamps are bucketed in the property's reporting time zone.
 
 Business Use Case: |
-  Executives use this metric to identify high-interest properties and optimize content or features to increase user engagement.
+  1️⃣ The listing detail page Product Manager reviews the metric weekly by Device Category; when mobile time per listing view drops more than 15% week over week after a release, they open an investigation into gallery or floor-plan load failures and roll back or A/B test the change.
+  2️⃣ The Performance Marketing team compares time per listing view by Default Channel Grouping and campaign each month; campaigns that deliver listing views with engagement below 50% of the organic benchmark have bids cut and budget moved to sources that produce engaged house hunters.
+  3️⃣ The Listings Operations team flags active listings whose time per view sits in the bottom quartile of their Property Type and Price Band cohort for 14 days and asks the listing agent to add professional photos, a floor plan or a virtual tour.
+  4️⃣ Sales leadership uses the metric by Listing City/Region in the monthly market review; regions where engagement is rising but inquiry rate is flat trigger a review of the contact-agent form and lead routing for that market.
 
+Dependencies:
+  Events: [page-view]
+  Metrics: [property-listing-views]
+  Dimensions: [page-type, property-type, property-price-band, listing-status, device-category]
 
-Source Data: Digital Analytics
+Source Data: Digital Analytics (GA4)
 
 Report Attributes: |
-  ["Property Type","Geographic Location","User Demographics"]
+  Property Type; Listing City/Region; Price Band; Listing Status; Device Category; Default Channel Grouping; New vs Returning User
 
-Dashboard Usage: [User Engagement Dashboard, Property Insights Dashboard]
+Dashboard Usage: [Listing Engagement Dashboard, Listing Detail Page Performance, Marketing Channel Quality Dashboard]
 
 Segment Eligibility: |
   true
 
+Related Metrics: [property-listing-views, property-view-count]
 
+Derived KPIs: [qualified-property-inquiry-rate]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -97,4 +396,5 @@ Created At: 2026-08-19T14:01:41.619118+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-16T19:42:11.329+00:00
 
