@@ -1,10 +1,10 @@
 # Metric: Filter Applications
-# Generated: 2026-09-14T06:46:06.600Z
+# Generated: 2026-09-16T23:20:56.705Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Metric Name: Filter Applications
-Formula: COUNT(filter_apply events WHERE filter_action = 'apply') — one event per committed filter change: each auto-applied facet selection = 1; a multi-select batch confirmed with a single Apply control = 1 regardless of the number of values; after 2-second duplicate collapse and standard traffic exclusions
+Formula: COUNT(filter_apply events WHERE filter_action contains 'apply'; a mixed add/remove batch counts once) — one event per committed filter change: each auto-applied facet selection = 1; a multi-select batch confirmed with a single Apply control = 1 regardless of the number of values; after 2-second duplicate collapse and standard traffic exclusions
 
 Description: |
   Filter Applications counts every time a shopper applies a filter (facet or refinement) on a product listing page or site search results page, recorded through the unified filter_apply event with filter_action = 'apply', the filter name and value, the list context and the post-filter results count. Removals, sort changes, pagination and reloads of an already-filtered URL are excluded, so the metric isolates deliberate narrowing behaviour and shows merchandising and discovery teams which attributes shoppers actually use to find products.
@@ -75,6 +75,7 @@ GA4 Data Layer: |
     "filter_action": "apply",
     "item_list_id": "plp_womens_running_shoes",
     "item_list_name": "Category Grid - Womens Running Shoes",
+    "page_type": "category",
     "search_term": null,
     "search_results_count": 37
   }
@@ -132,7 +133,8 @@ XDM Mapping: |
         "itemListName": "Category Grid - Womens Running Shoes",
         "searchTerm": null,
         "resultsCount": 37
-      }
+      },
+      "trafficType": "external"
     },
     "_experience": {
       "analytics": {
@@ -315,7 +317,8 @@ AEP Query Service SQL: |
   -- Filter Applications from XDM ExperienceEvents: one count per committed filter change (web.webInteraction.name = 'filter_apply', action containing 'apply').
   -- Window: 30 complete local days ending 4 days ago (T+3 late-data window); set the time zone to the reporting property zone.
   -- Sessions: 30-minute inactivity timeout with no midnight split, computed over all web events before the filter selection.
-  -- Fields read from _yourtenant.productFilter with the Analytics mapping as fallback (eVar20 list id, eVar21 list name, eVar23 name, eVar24 value, eVar25 action, prop2 results count).
+  -- Fields read from _tenant.productFilter with the Analytics mapping as fallback (eVar20 list id, eVar21 list name, eVar23 name, eVar24 value, eVar25 action, prop2 results count).
+  -- _tenant is the organisation's tenant namespace (replace with your own _<tenantId>). Traffic exclusions mirror the GA4 side and Item List Views: internal traffic (_tenant.trafficType), QA/staging/dev hostnames and bot user agents.
   WITH web_events AS (
     SELECT
       COALESCE(identityMap['ECID'][0].id, endUserIDs._experience.ecid.id) AS ecid,
@@ -327,14 +330,15 @@ AEP Query Service SQL: |
       lower(regexp_extract(web.webPageDetails.URL, '^https?://([^/:?#]+)', 1)) AS hostname,
       lower(environment.browserDetails.userAgent) AS user_agent,
       device.type AS device_type,
+      lower(_tenant.trafficType) AS traffic_type,
       web.webPageDetails.siteSection AS site_section,
-      COALESCE(_yourtenant.productFilter.filterName, _experience.analytics.customDimensions.eVars.eVar23) AS filter_name,
-      COALESCE(_yourtenant.productFilter.filterValue, _experience.analytics.customDimensions.eVars.eVar24) AS filter_value,
-      COALESCE(_yourtenant.productFilter.filterAction, _experience.analytics.customDimensions.eVars.eVar25) AS filter_action,
-      COALESCE(_yourtenant.productFilter.itemListId, _experience.analytics.customDimensions.eVars.eVar20) AS item_list_id,
-      COALESCE(_yourtenant.productFilter.itemListName, _experience.analytics.customDimensions.eVars.eVar21) AS item_list_name,
-      _yourtenant.productFilter.searchTerm AS search_term,
-      trim(COALESCE(CAST(_yourtenant.productFilter.resultsCount AS STRING), _experience.analytics.customDimensions.props.prop2)) AS results_count_raw
+      COALESCE(_tenant.productFilter.filterName, _experience.analytics.customDimensions.eVars.eVar23) AS filter_name,
+      COALESCE(_tenant.productFilter.filterValue, _experience.analytics.customDimensions.eVars.eVar24) AS filter_value,
+      COALESCE(_tenant.productFilter.filterAction, _experience.analytics.customDimensions.eVars.eVar25) AS filter_action,
+      COALESCE(_tenant.productFilter.itemListId, _experience.analytics.customDimensions.eVars.eVar20) AS item_list_id,
+      COALESCE(_tenant.productFilter.itemListName, _experience.analytics.customDimensions.eVars.eVar21) AS item_list_name,
+      _tenant.productFilter.searchTerm AS search_term,
+      trim(COALESCE(CAST(_tenant.productFilter.resultsCount AS STRING), _experience.analytics.customDimensions.props.prop2)) AS results_count_raw
     FROM your_aep_web_events_dataset
     WHERE timestamp >= to_timestamp(date_sub(current_date(), 35))
       AND timestamp < to_timestamp(date_sub(current_date(), 2))
@@ -349,6 +353,7 @@ AEP Query Service SQL: |
       ) AS session
     FROM web_events
     WHERE ecid IS NOT NULL
+      AND COALESCE(traffic_type, '') NOT IN ('internal', 'developer')
       AND COALESCE(hostname, '') NOT RLIKE 'localhost|(^|[.])(staging|stage|dev|qa|uat|test)[.]'
       AND COALESCE(user_agent, '') NOT RLIKE '(bot|spider|crawler|headless|lighthouse)'
   ),
@@ -451,14 +456,23 @@ AEP Query Service SQL: |
   ORDER BY c.event_date, filter_applications DESC
 
 Calculation Notes: |
-  1️⃣ Counted unit: one committed filter change carrying filter_name, filter_value, filter_action = 'apply', item_list_id, item_list_name, search_term (search results pages only) and search_results_count measured after the filter is applied. On auto-apply facets (checkbox or swatch reloads the grid immediately) each selection is one application; on Apply-button drawers (typical mobile pattern) the whole batch is one application, with the selected values sent pipe-delimited in filter_value. Range sliders (price, size, rating) count on release/commit, never on drag.,2️⃣ Exclusions: filter_action = 'remove', individual chip removal and 'Clear all' are not counted and are reported separately as Filter Removals; a batch that both adds and removes values counts once as an application when at least one value is added. Sort changes (sort_apply, reported under the Sort Option dimension), pagination, infinite-scroll loads, page refreshes and back/forward navigation to a filtered URL do not count. Pre-filtered landings reached from navigation menus, campaigns, email or organic results (filters encoded in the URL on arrival) are not shopper applications and are excluded.,3️⃣ Page-type separation: applications are split by item_list_name and page type into Product Listing Page (category/collection grids) and Search Results Page. A filter applied on a results page never creates a new search and is never added into Site Searches or Search Results Views; search_term is populated only for the search results page context and must be null on category listings. Hits with no resolvable list context stay in the total under '(not set)' and must remain below 2% of daily volume.,4️⃣ Zero-result filters are retained: an application returning search_results_count = 0 stays in the count because it identifies filter dead ends and attribute combinations with no sellable stock. Facet values rendered with a zero count should be disabled in the UI; applications against them indicate a front-end defect. Null or non-numeric search_results_count is counted but flagged as an instrumentation defect.,5️⃣ Duplicate and traffic hygiene: filter_apply hits sharing user_pseudo_id, ga_session_id, item_list_id, filter_name and filter_value within 2 seconds collapse into one application (double-bound click and change handlers). Internal IP ranges, QA and staging hostnames, debug_mode traffic, known bots and synthetic monitoring are removed, using the same exclusions applied to Item List Views so per-list ratios stay symmetric. GA4 has no recommended filter event, so filter_apply is maintained as a governed custom event with fixed parameter names across web and app.,6️⃣ Timing and sessions: events are dated by client timestamp in the property reporting time zone; sessions follow the GA4 30-minute inactivity timeout (Adobe Analytics: 30-minute visit timeout) with no midnight split in session-level reporting. Daily totals are provisional until T+3 to absorb late-arriving app and Measurement Protocol hits.,7️⃣ Value action by industry: E-commerce/Retail — facet or refinement applied on a category grid or product search results page (filter_apply with item_list_name); Travel — fare, stops or amenity filter on availability results; Media — genre, format or date filter on a content library; SaaS — filter applied on a marketplace, integration or template gallery; Education — subject, level or format filter on a course catalog. Filters on internal tools such as order history or account tables are excluded from this metric.
+  1️⃣ Counted unit: one committed filter change carrying filter_name, filter_value, filter_action = 'apply', item_list_id, item_list_name, search_term (search results pages only) and search_results_count measured after the filter is applied. On auto-apply facets (checkbox or swatch reloads the grid immediately) each selection is one application; on Apply-button drawers (typical mobile pattern) the whole batch is one application, with the selected values sent pipe-delimited in filter_value. Range sliders (price, size, rating) count on release/commit, never on drag.
+  2️⃣ Exclusions: filter_action = 'remove', individual chip removal and 'Clear all' are filter removal actions and are excluded from the count; a batch that both adds and removes values counts once as an application when at least one value is added. Sort changes (sort_apply, reported under the Sort Option dimension), pagination, infinite-scroll loads, page refreshes and back/forward navigation to a filtered URL do not count. Pre-filtered landings reached from navigation menus, campaigns, email or organic results (filters encoded in the URL on arrival) are not shopper applications and are excluded.
+  3️⃣ Page-type separation: applications are split by item_list_name and page type into Product Listing Page (category/collection grids) and Search Results Page. A filter applied on a results page never creates a new search and is never added into Site Searches, and post-filter result clicks stay attributed to the original search in Search Result Click-Through Rate; search_term is populated only for the search results page context and must be null on category listings. Hits with no resolvable list context stay in the total under '(not set)' and must remain below 2% of daily volume.
+  4️⃣ Zero-result filters are retained: an application returning search_results_count = 0 stays in the count because it identifies filter dead ends and attribute combinations with no sellable stock. Facet values rendered with a zero count should be disabled in the UI; applications against them indicate a front-end defect. Null or non-numeric search_results_count is counted but flagged as an instrumentation defect.
+  5️⃣ Duplicate and traffic hygiene: filter_apply hits sharing user_pseudo_id, ga_session_id, item_list_id, filter_name and filter_value within 2 seconds collapse into one application (double-bound click and change handlers). Internal IP ranges, QA and staging hostnames, debug_mode traffic, known bots and synthetic monitoring are removed, using the same exclusions applied to Item List Views so per-list ratios stay symmetric. GA4 has no recommended filter event, so filter_apply is maintained as a governed custom event with fixed parameter names across web and app; the Filter Apply event spec (filter-apply) is a planned dependency not yet published in the catalog.
+  6️⃣ Timing and sessions: events are dated by client timestamp in the property reporting time zone; sessions follow the GA4 30-minute inactivity timeout (Adobe Analytics: 30-minute visit timeout) with no midnight split in session-level reporting. Daily totals are provisional until T+3 to absorb late-arriving app and Measurement Protocol hits.
+  7️⃣ Value action by industry: E-commerce/Retail — facet or refinement applied on a category grid or product search results page (filter_apply with item_list_name); Travel — fare, stops or amenity filter on availability results; Media — genre, format or date filter on a content library; SaaS — filter applied on a marketplace, integration or template gallery; Education — subject, level or format filter on a course catalog. Filters on internal tools such as order history or account tables are excluded from this metric.
 
 Business Use Case: |
-  1️⃣ Category merchandisers review Filter Applications by filter_name for each top-20 category every month; facets that receive less than 1% of the category's applications are moved below the fold or removed, and the most-applied attributes (size, price, brand, colour) are pinned to the first visible positions on mobile and desktop, in line with Baymard filtering guidance.,2️⃣ The Product Information Management team monitors applications that return search_results_count = 0 or fewer than three products each week; when a filter value repeatedly dead-ends, they correct missing or inconsistent attribute values on the affected SKUs and normalise the facet taxonomy (for example merging 'Navy' and 'Dark Blue') before the next catalog sync.,3️⃣ The Site Search product manager tracks search-results-page Filter Applications per 100 Site Searches after every relevance, synonym or ranking release; a sustained rise of more than 20% against the pre-release baseline signals that shoppers are compensating for weaker ranking with manual narrowing, and triggers a retune or rollback of the release.,4️⃣ The Buying and Assortment planning team pulls high-volume filter values (price bands, sizes, materials) with low post-filter results counts each quarter and feeds them into range reviews as evidence of demand the current assortment does not cover.
+  1️⃣ Category merchandisers review Filter Applications by filter_name for each top-20 category every month; facets that receive less than 1% of the category's applications are moved below the fold or removed, and the most-applied attributes (size, price, brand, colour) are pinned to the first visible positions on mobile and desktop, in line with Baymard filtering guidance.
+  2️⃣ The Product Information Management team monitors applications that return search_results_count = 0 or fewer than three products each week; when a filter value repeatedly dead-ends, they correct missing or inconsistent attribute values on the affected SKUs and normalise the facet taxonomy (for example merging 'Navy' and 'Dark Blue') before the next catalog sync.
+  3️⃣ The Site Search product manager tracks search-results-page Filter Applications per 100 Site Searches after every relevance, synonym or ranking release; a sustained rise of more than 20% against the pre-release baseline signals that shoppers are compensating for weaker ranking with manual narrowing, and triggers a retune or rollback of the release.
+  4️⃣ The Buying and Assortment planning team pulls high-volume filter values (price bands, sizes, materials) with low post-filter results counts each quarter and feeds them into range reviews as evidence of demand the current assortment does not cover.
 
 Dependencies:
   Events: [filter-apply]
-  Dimensions: [filter-value, item-list-name, item-list-id, internal-search-term]
+  Dimensions: [internal-search-term, page-type]
 
 Source Data: Digital Analytics (GA4)
 
@@ -470,9 +484,9 @@ Dashboard Usage: [Product Discovery & Merchandising Overview, Faceted Navigation
 Segment Eligibility: |
   true
 
-Related Metrics: [site-searches, search-results-views, item-list-views, item-list-clicks]
+Related Metrics: [site-searches, search-result-click-through-rate, item-list-views, item-list-clicks]
 
-Derived KPIs: [product-list-click-through-rate, search-to-purchase-conversion-rate]
+Derived KPIs: [filter-usage-rate]
 
 Data Sensitivity: Internal
 
@@ -486,5 +500,5 @@ Created At: 2026-09-14T06:45:57.113+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-14T06:46:06.275+00:00
+Last Modified At: 2026-09-16T23:20:56.359+00:00
 
