@@ -1,0 +1,327 @@
+# Metric: Site Searches
+# Generated: 2026-09-16T23:42:06.452Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Site Searches
+Formula: COUNT(search events) WHERE NORMALIZE(search_term) IS NOT NULL AND is_refire = FALSE — NORMALIZE = lower-case, trim, collapse internal whitespace; is_refire = TRUE when the collected is_refire flag is true OR (NORMALIZE(search_term) equals the previous normalised search_term in the same session AND page_number > 1); sort, filter and back/forward re-fires are excluded only through the is_refire flag set by the site at collection
+
+Description: |
+  Site Searches counts the internal search queries shoppers submit on the storefront, recorded through the unified search event with the query string and the number of results returned. Pagination, sort and filter reloads of the same query are excluded, which makes it the reliable volume base for Zero-Results Search Rate, Search-to-Purchase Conversion Rate and search-led merchandising decisions.
+
+Category: Engagement
+
+Tags: [metric, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  search
+
+Adobe Event: |
+  search
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageName": "search results",
+          "pageType": "search results"
+        },
+        "category": {
+          "primaryCategory": "search"
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "search",
+            "eventAction": "submit",
+            "type": "search"
+          },
+          "category": {
+            "primaryCategory": "site search"
+          },
+          "attributes": {
+            "searchTerm": "running shoes",
+            "searchResultsCount": 128,
+            "searchType": "submitted",
+            "searchSource": "header",
+            "searchScope": "product_catalog",
+            "pageNumber": 1,
+            "isRefire": false
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "search",
+    "search_term": "running shoes",
+    "search_results_count": 128,
+    "search_type": "submitted",
+    "search_source": "header",
+    "search_scope": "product_catalog",
+    "page_number": 1,
+    "is_refire": false
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "search",
+    "eventInfo": {
+      "eventName": "search",
+      "eventAction": "submit"
+    },
+    "search": {
+      "term": "running shoes",
+      "resultsCount": 128,
+      "type": "submitted",
+      "source": "header",
+      "scope": "product_catalog",
+      "pageNumber": 1,
+      "isRefire": false
+    },
+    "page": {
+      "pageInfo": {
+        "pageName": "search results",
+        "pageType": "search results"
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "siteSearch",
+    "web": {
+      "webPageDetails": {
+        "name": "search results",
+        "siteSection": "search"
+      }
+    },
+    "_tenant": {
+      "siteSearch": {
+        "keywords": "running shoes",
+        "resultsCount": 128,
+        "searchType": "submitted",
+        "searchSource": "header",
+        "searchScope": "product_catalog",
+        "pageNumber": 1,
+        "isRefire": false,
+        "submissions": {
+          "value": 1
+        }
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "running shoes",
+            "eVar2": "header",
+            "eVar3": "submitted"
+          },
+          "props": {
+            "prop1": "running shoes",
+            "prop2": "128"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH search_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      e.user_pseudo_id,
+      e.event_timestamp,
+      e.device.category AS device_category,
+      (SELECT MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS ga_session_id,
+      (SELECT MAX(IF(ep.key = 'search_term', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS search_term_raw,
+      (SELECT MAX(IF(ep.key = 'search_results_count', COALESCE(ep.value.int_value, SAFE_CAST(ep.value.string_value AS INT64), SAFE_CAST(ep.value.double_value AS INT64)), NULL)) FROM UNNEST(e.event_params) AS ep) AS search_results_count,
+      (SELECT MAX(IF(ep.key = 'search_type', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS search_type,
+      (SELECT MAX(IF(ep.key = 'search_scope', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS search_scope,
+      (SELECT MAX(IF(ep.key = 'page_number', COALESCE(ep.value.int_value, SAFE_CAST(ep.value.string_value AS INT64)), NULL)) FROM UNNEST(e.event_params) AS ep) AS page_number,
+      (SELECT MAX(IF(ep.key = 'is_refire', LOWER(COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING))), NULL)) FROM UNNEST(e.event_params) AS ep) AS is_refire_flag,
+      (SELECT MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS traffic_type
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                              AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name = 'search'
+  ),
+  normalised AS (
+    SELECT
+      *,
+      NULLIF(REGEXP_REPLACE(LOWER(TRIM(search_term_raw)), r'\s+', ' '), '') AS search_term_norm
+    FROM search_events
+    WHERE COALESCE(search_scope, 'product_catalog') = 'product_catalog'
+      AND COALESCE(traffic_type, 'external') <> 'internal'
+  ),
+  sequenced AS (
+    SELECT
+      *,
+      IF(ga_session_id IS NULL, NULL,
+         LAG(search_term_norm) OVER (PARTITION BY user_pseudo_id, ga_session_id ORDER BY event_timestamp)) AS prev_term_norm
+    FROM normalised
+    WHERE search_term_norm IS NOT NULL
+  ),
+  counted AS (
+    SELECT
+      *,
+      CASE
+        WHEN is_refire_flag IN ('true', '1') THEN TRUE
+        WHEN search_term_norm = prev_term_norm AND COALESCE(page_number, 1) > 1 THEN TRUE
+        ELSE FALSE
+      END AS is_refire
+    FROM sequenced
+  )
+  SELECT
+    event_date,
+    device_category,
+    COUNT(*) AS site_searches,
+    COUNT(DISTINCT CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING))) AS sessions_with_search,
+    COUNTIF(search_results_count = 0) AS zero_result_searches,
+    COUNTIF(search_results_count IS NULL) AS null_results_count_searches,
+    SAFE_DIVIDE(COUNTIF(search_results_count IS NULL), COUNT(*)) AS null_results_count_share
+  FROM counted
+  WHERE is_refire = FALSE
+  GROUP BY event_date, device_category
+  ORDER BY event_date, device_category;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Time zone: replace 'America/New_York' with the property reporting time zone (IANA name) so event_date matches GA4 event_date.
+  WITH all_hits AS (
+    SELECT
+      timestamp,
+      eventType,
+      identityMap['ECID'][0].id AS ecid,
+      device.type AS device_type,
+      _yourtenant.siteSearch.keywords AS search_term_raw,
+      CAST(_yourtenant.siteSearch.resultsCount AS INT) AS search_results_count,
+      _yourtenant.siteSearch.searchScope AS search_scope,
+      CAST(_yourtenant.siteSearch.pageNumber AS INT) AS page_number,
+      _yourtenant.siteSearch.isRefire AS is_refire_flag,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY identityMap['ECID'][0].id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM your_xdm_web_experience_event_dataset
+    -- UTC bounds padded by one day on each side; the event_date filter below sets the exact reporting window.
+    WHERE timestamp >= to_timestamp(date_sub(current_date(), 31))
+      AND timestamp < to_timestamp(date_add(current_date(), 1))
+      AND identityMap['ECID'][0].id IS NOT NULL
+  ),
+  search_events AS (
+    SELECT
+      CAST(from_utc_timestamp(timestamp, 'America/New_York') AS DATE) AS event_date, -- set to the property reporting time zone
+      timestamp,
+      ecid,
+      session.num AS session_num,
+      device_type,
+      search_results_count,
+      page_number,
+      is_refire_flag,
+      NULLIF(regexp_replace(LOWER(TRIM(search_term_raw)), '\\s+', ' '), '') AS search_term_norm
+    FROM all_hits
+    WHERE eventType = 'siteSearch'
+      AND COALESCE(search_scope, 'product_catalog') = 'product_catalog'
+  ),
+  sequenced AS (
+    SELECT
+      *,
+      LAG(search_term_norm) OVER (PARTITION BY ecid, session_num ORDER BY timestamp) AS prev_term_norm
+    FROM search_events
+    WHERE search_term_norm IS NOT NULL
+      AND event_date BETWEEN date_sub(current_date(), 30) AND date_sub(current_date(), 1)
+  ),
+  counted AS (
+    SELECT
+      *,
+      CASE
+        WHEN COALESCE(is_refire_flag, FALSE) = TRUE THEN TRUE
+        WHEN search_term_norm = prev_term_norm AND COALESCE(page_number, 1) > 1 THEN TRUE
+        ELSE FALSE
+      END AS is_refire
+    FROM sequenced
+  )
+  SELECT
+    event_date,
+    device_type,
+    COUNT(*) AS site_searches,
+    COUNT(DISTINCT CONCAT(ecid, '.', CAST(session_num AS STRING))) AS sessions_with_search,
+    SUM(CASE WHEN search_results_count = 0 THEN 1 ELSE 0 END) AS zero_result_searches,
+    SUM(CASE WHEN search_results_count IS NULL THEN 1 ELSE 0 END) AS null_results_count_searches,
+    CAST(SUM(CASE WHEN search_results_count IS NULL THEN 1 ELSE 0 END) AS DOUBLE) / NULLIF(COUNT(*), 0) AS null_results_count_share
+  FROM counted
+  WHERE is_refire = FALSE
+  GROUP BY event_date, device_type
+  ORDER BY event_date, device_type;
+
+Calculation Notes: |
+  1️⃣ Counted unit: one fresh query submission — search box submit, Enter key, or selection of an autocomplete suggestion that loads a results page — carrying a non-empty search_term and a search_results_count parameter. Typeahead suggestion impressions, voice-search attempts that never load results and empty or whitespace-only terms are excluded.
+  2️⃣ Re-fire suppression: pagination (page_number > 1), sort changes and filter or facet applications on an unchanged normalised search_term within the same session are NOT new searches; they belong to Filter Applications and Search Results Views. A deliberate resubmission of the identical term from the search box after leaving the results page (e.g. PDP → new search box submit) counts again, while back/forward navigation to a cached results page does not.
+  3️⃣ Results-page-view angle: GA4 enhanced measurement fires view_search_results on every results page load that carries a query parameter (q, s, search, query, keyword), so raw view_search_results counts equal Search Results Views, not Site Searches. Apply the re-fire rule before reporting; the ratio Search Results Views ÷ Site Searches exposes pagination depth; establish a site-specific baseline and alert on a sustained shift of more than 20%, which flags tagging drift. In Adobe the submission counter is the XDM field _tenant.siteSearch.submissions.value = 1, set only when searchType is submitted or suggestion and isRefire is false, never on every results-page load. Its sum is an upper bound on the aep_sql count: any gap equals pagination repeats the site did not flag with isRefire plus the product-catalog scope, empty-term and missing-ECID exclusions the SQL applies, and a sustained gap is monitored as a tagging defect.
+  4️⃣ Zero-result searches are retained: search_results_count = 0 remains in the count because it is the numerator input for Zero-Results Search Rate. Hits with a null or non-numeric search_results_count are still counted as searches but monitored as an instrumentation defect; a null share above 2% of daily Site Searches blocks downstream rate reporting until fixed.
+  5️⃣ Scope filters: only product-catalog search is counted. Store locator lookups, help-centre/FAQ search, order-status lookups and blog search are excluded by search scope and reported under their own metrics. Internal IP ranges, QA environments, known bots and synthetic monitoring traffic are removed; terms matching email, phone or card-number patterns are redacted to '(redacted)' at collection but the submission is still counted.
+  6️⃣ Timing and sessions: events are attributed to their client timestamp in the property reporting time zone; the re-fire comparison window ends at the GA4 30-minute inactivity session timeout (Adobe: 30-minute visit timeout) and never spans sessions. Daily totals are provisional until T+3 to absorb late-arriving and Measurement Protocol hits.
+  7️⃣ Value action by industry: E-commerce/Retail — product catalog query (only the search event is counted); Media — article or video library query; SaaS — in-app or documentation search; Education — course catalog query; Finance — product or help query on public pages. Vertical-specific listing searches with their own payloads (e.g. real-estate property search) are tracked as separate metrics and are not summed into this count.
+
+Business Use Case: |
+  1️⃣ The Site Search Merchandising team reviews the weekly top-100 search terms by Site Searches every Monday; when a term's volume rises more than 30% week over week while its results count is zero or low, they add synonyms, redirects or curated result sets in the search platform before the next trading week.
+  2️⃣ The Product (Discovery UX) team tracks Site Searches per 100 sessions by device after every header or navigation release; a sustained drop of more than 15% against the pre-release baseline triggers a rollback or an A/B test restoring search box prominence on mobile.
+  3️⃣ Buying and Merchandising planners pull high-volume search terms that map to out-of-stock or unassorted categories each month and feed them into assortment and replenishment reviews as evidence of unmet demand.
+  4️⃣ The Performance Marketing team compares rising seasonal and branded internal search terms against paid search keyword lists each fortnight, adding high-intent terms to campaigns and aligning homepage promotions and landing pages with what shoppers are already searching for.
+
+Dependencies:
+  Events: [search]
+  Dimensions: [internal-search-term, search-results-count]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Search Term; Search Results Count; Search Type (Submitted / Suggestion); Device Category; Session Source / Medium; Landing Page; New vs Returning User; Country/Region; Date
+
+Dashboard Usage: [Site Search Performance, Product Discovery & Merchandising Overview, Weekly Merchandising Trading Review, Search Demand & Assortment Gaps]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [search-result-click-through-rate, search-results-views, unique-searchers, filter-applications]
+
+Derived KPIs: [zero-results-search-rate, search-to-purchase-conversion-rate, search-exit-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-14T06:46:41.698+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-16T23:42:06.059+00:00
+
