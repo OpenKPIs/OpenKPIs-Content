@@ -1,7 +1,7 @@
 # KPI: Zero-Results Search Rate
-# Generated: 2026-09-16T17:37:01.063Z
+# Generated: 2026-09-16T17:37:09.613Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Zero-Results Search Rate
 Formula: (Searches where search_results_count = 0 / Total Searches, zero-result searches included) × 100
@@ -11,29 +11,301 @@ Description: |
 
 Category: Experience
 
+Tags: [kpi, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  view_search_results
 
+Adobe Event: |
+  internalSearch
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "search results",
+        "destinationURL": "https://www.example.com/search?q=waterproof+trail+shoes"
+      },
+      "category": {
+        "primaryCategory": "search",
+        "pageType": "search_results"
+      }
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "view_search_results",
+          "eventAction": "search",
+          "type": "search"
+        },
+        "attributes": {
+          "search_term": "waterproof trail shoes",
+          "search_term_original": "waterproof trail shoes",
+          "search_results_count": 0,
+          "search_type": "standard",
+          "search_method": "enter_key"
+        }
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "view_search_results",
+    "search_term": "waterproof trail shoes",
+    "search_term_original": "waterproof trail shoes",
+    "search_results_count": 0,
+    "search_type": "standard",
+    "search_method": "enter_key",
+    "page_type": "search_results"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "internalSearch",
+    "eventInfo": {
+      "eventName": "internalSearch",
+      "eventAction": "search"
+    },
+    "page": {
+      "pageInfo": {
+        "pageName": "search results",
+        "pageType": "search_results"
+      }
+    },
+    "search": {
+      "search_term": "waterproof trail shoes",
+      "search_term_original": "waterproof trail shoes",
+      "search_results_count": 0,
+      "search_type": "standard",
+      "search_method": "enter_key"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "siteSearch.resultsView",
+    "timestamp": "2026-09-16T14:05:12.000Z",
+    "web": {
+      "webPageDetails": {
+        "name": "search results",
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "siteSearch": {
+      "phrase": "waterproof trail shoes"
+    },
+    "_tenant": {
+      "search": {
+        "search_term": "waterproof trail shoes",
+        "search_term_original": "waterproof trail shoes",
+        "search_results_count": 0,
+        "search_type": "standard",
+        "search_method": "enter_key"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "waterproof trail shoes",
+            "eVar2": "0",
+            "eVar3": "standard"
+          }
+        },
+        "event1to100": {
+          "event1": {
+            "value": 1
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Zero-Results Search Rate = zero-result searches / all classifiable submitted searches x 100 (daily, property time zone)
+  WITH search_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS report_date,
+      user_pseudo_id,
+      event_timestamp,
+      MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+      MAX(IF(ep.key = 'search_term', ep.value.string_value, NULL)) AS search_term,
+      MAX(IF(ep.key = 'search_type', ep.value.string_value, NULL)) AS search_type,
+      MAX(IF(ep.key = 'search_method', ep.value.string_value, NULL)) AS search_method,
+      MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type,
+      MAX(IF(ep.key = 'debug_mode', COALESCE(CAST(ep.value.int_value AS STRING), ep.value.string_value), NULL)) AS debug_mode,
+      MAX(IF(ep.key = 'search_results_count',
+             COALESCE(ep.value.int_value,
+                      CAST(ep.value.double_value AS INT64),
+                      SAFE_CAST(ep.value.string_value AS INT64)),
+             NULL)) AS search_results_count
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY))
+                            AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND event_name = 'view_search_results'
+    GROUP BY report_date, user_pseudo_id, event_timestamp, event_bundle_sequence_id
+  ),
+  qualified AS (
+    SELECT
+      report_date,
+      user_pseudo_id,
+      ga_session_id,
+      event_timestamp,
+      REGEXP_REPLACE(LOWER(TRIM(search_term)), r'\s+', ' ') AS search_term_norm,
+      search_results_count
+    FROM search_events
+    WHERE search_term IS NOT NULL
+      AND TRIM(search_term) != ''
+      AND COALESCE(search_type, 'standard') != 'redirect'
+      AND COALESCE(search_method, '') NOT IN ('pagination', 'sort', 'filter', 'typeahead_impression')
+      AND COALESCE(traffic_type, '') NOT IN ('internal', 'qa', 'synthetic')
+      AND COALESCE(debug_mode, '0') = '0'
+  ),
+  deduplicated AS (
+    SELECT
+      *,
+      LAG(event_timestamp) OVER (
+        PARTITION BY user_pseudo_id, ga_session_id, search_term_norm
+        ORDER BY event_timestamp
+      ) AS prev_same_term_ts
+    FROM qualified
+  ),
+  searches AS (
+    SELECT *
+    FROM deduplicated
+    WHERE prev_same_term_ts IS NULL
+       OR event_timestamp - prev_same_term_ts > 30 * 1000000
+  )
+  SELECT
+    report_date,
+    COUNT(*) AS total_search_events,
+    COUNTIF(search_results_count IS NOT NULL) AS total_searches,
+    COUNTIF(search_results_count = 0) AS zero_result_searches,
+    ROUND(SAFE_DIVIDE(COUNTIF(search_results_count = 0),
+                      COUNTIF(search_results_count IS NOT NULL)) * 100, 2) AS zero_results_search_rate_pct,
+    ROUND(SAFE_DIVIDE(COUNTIF(search_results_count IS NOT NULL), COUNT(*)) * 100, 2) AS results_count_coverage_pct,
+    report_date > DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY) AS is_provisional
+  FROM searches
+  GROUP BY report_date
+  ORDER BY report_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Zero-Results Search Rate = zero-result searches / all classifiable submitted searches x 100 (daily, reporting time zone)
+  WITH search_events AS (
+    SELECT
+      to_date(from_utc_timestamp(timestamp, 'America/New_York')) AS report_date,
+      identityMap['ECID'][0].id AS ecid,
+      COALESCE(_experience.analytics.session.num, 0) AS session_num,
+      timestamp,
+      _tenant.search.search_term AS search_term,
+      _tenant.search.search_type AS search_type,
+      _tenant.search.search_method AS search_method,
+      CAST(_tenant.search.search_results_count AS INT) AS search_results_count
+    FROM aep_web_events_dataset
+    WHERE eventType = 'siteSearch.resultsView'
+      AND timestamp >= date_sub(current_date(), 90)
+      AND COALESCE(environment.type, 'browser') != 'bot'
+      AND COALESCE(_tenant.traffic_type, '') NOT IN ('internal', 'qa', 'synthetic')
+  ),
+  qualified AS (
+    SELECT
+      report_date,
+      ecid,
+      session_num,
+      timestamp,
+      regexp_replace(lower(trim(search_term)), '\\s+', ' ') AS search_term_norm,
+      search_results_count
+    FROM search_events
+    WHERE search_term IS NOT NULL
+      AND trim(search_term) != ''
+      AND COALESCE(search_type, 'standard') != 'redirect'
+      AND COALESCE(search_method, '') NOT IN ('pagination', 'sort', 'filter', 'typeahead_impression')
+  ),
+  deduplicated AS (
+    SELECT
+      *,
+      LAG(timestamp) OVER (
+        PARTITION BY ecid, session_num, search_term_norm
+        ORDER BY timestamp
+      ) AS prev_same_term_ts
+    FROM qualified
+  ),
+  searches AS (
+    SELECT *
+    FROM deduplicated
+    WHERE prev_same_term_ts IS NULL
+       OR unix_timestamp(timestamp) - unix_timestamp(prev_same_term_ts) > 30
+  )
+  SELECT
+    report_date,
+    COUNT(*) AS total_search_events,
+    SUM(CASE WHEN search_results_count IS NOT NULL THEN 1 ELSE 0 END) AS total_searches,
+    SUM(CASE WHEN search_results_count = 0 THEN 1 ELSE 0 END) AS zero_result_searches,
+    ROUND(
+      SUM(CASE WHEN search_results_count = 0 THEN 1 ELSE 0 END) * 100.0
+      / NULLIF(SUM(CASE WHEN search_results_count IS NOT NULL THEN 1 ELSE 0 END), 0), 2) AS zero_results_search_rate_pct,
+    ROUND(
+      SUM(CASE WHEN search_results_count IS NOT NULL THEN 1 ELSE 0 END) * 100.0
+      / NULLIF(COUNT(*), 0), 2) AS results_count_coverage_pct,
+    report_date > date_sub(current_date(), 3) AS is_provisional
+  FROM searches
+  GROUP BY report_date
+  ORDER BY report_date;
 
+Calculation Notes: |
+  1️⃣ Numerator: submitted search events (unified search / view_search_results) whose search_results_count parameter equals 0 after the search engine has applied all merchandising rules (synonyms, spell correction, boosts). Denominator: every qualifying search event in the same window, zero-result searches included, so the rate can never exceed 100%.
+  2️⃣ Only submitted queries count, from Enter, the search button or a selected suggestion. Typeahead suggestion impressions, keystroke-level autocomplete calls and empty or whitespace-only queries are excluded from both sides. Keyword redirects that send the shopper straight to a category or landing page without rendering a results page carry search_type = 'redirect' and are also excluded from both sides.
+  3️⃣ Deduplication: pagination, sort changes and facet refinements on an existing results page are not new searches. Identical normalised terms resubmitted within 30 seconds in the same session (reloads, back-button re-renders) collapse into one search. Sessions follow the standard 30-minute inactivity timeout.
+  4️⃣ Auto-corrected or 'did you mean' queries that render products count as non-zero, and the typed query is kept in search_term_original for diagnosis. A search counts as zero-result only when the final rendered product count is 0. Results narrowed to zero by facets after a successful query belong to a separate filter-level measure and do not enter this KPI.
+  5️⃣ Events with a null or non-numeric search_results_count cannot be classified and are left out of both sides. Report their share of all search events as an instrumentation coverage check, and treat coverage below 98% as a data-quality incident before the rate is published.
+  6️⃣ Exclude known bots, internal and QA traffic and synthetic monitoring. Attribute events to the property reporting time zone by event timestamp, and treat each day as provisional until 72 hours after close so late-arriving hits and the daily export can settle.
+  7️⃣ Before any term-level breakdown, normalise search terms (lowercase, trim, collapse whitespace) and redact patterns that look like email addresses, phone numbers or order numbers. Suppress terms under a minimum volume threshold in shared reports.
 
+Business Use Case: |
+  1️⃣ Site Search Merchandising team: when the weekly rate goes above the agreed threshold or rises 2 percentage points week over week, they pull the top zero-result terms by volume and ship synonyms, keyword redirects or missing product attributes in the search console within the same sprint.
+  2️⃣ Category Buying and Assortment Planning: every month they review zero-result terms that name brands, products or specifications the catalog does not carry, and feed the high-volume ones into range reviews and supplier onboarding as evidence of demand.
+  3️⃣ Search Product Manager: for each relevance-model or search-engine release run as an A/B test, they compare the rate by device category between control and variant, and roll back or hold any variant that raises zero-result searches without improving search conversion.
+  4️⃣ E-commerce Operations: when the daily rate spikes suddenly (for example, above twice its trailing 28-day median), they check product feed ingestion, index rebuild status and out-of-stock suppression rules before the next trading day.
 
+Dependencies:
+  Metrics: [site-searches]
+  Dimensions: [internal-search-term]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Search Term; Search Results Count; Search Type; Device Category; Traffic Source; Page Type; Date
 
+Dashboard Usage: [Site Search Performance, Product Discovery & Merchandising Health, E-commerce Weekly Trading Review]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [search-result-click-through-rate, conversion-rate, add-to-cart-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +315,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-16T17:37:00.681+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-16T17:37:09.362+00:00
 
