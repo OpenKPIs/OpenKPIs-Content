@@ -1,5 +1,5 @@
 # Event: Property Inquiry
-# Generated: 2026-08-27T13:30:18.800Z
+# Generated: 2026-09-16T19:29:45.830Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -7,43 +7,176 @@ Event Name: Property Inquiry
 Event Serialization: always
 
 Description: |
-  Tracks when a user submits an inquiry form to express interest in a property, initiating the engagement process.
+  Real-estate specialisation of the GA4 generate_lead event, fired once when a prospective buyer or renter successfully submits an inquiry on a listing, whether that is a request for information, a viewing request, a callback request or an offer enquiry. It is the primary lead-capture conversion for portals and brokerage sites, and it links listing discovery to the agent pipeline through the property, the listing market and the inquiry intent.
 
 Category: Conversion
 
-Tags: [event]
+Tags: [event, Real Estate]
 
-Industry: Technology
+Industry: Other
 
 Priority: High
 
 Core Area: Discovery
 
+Scope: Event
 
-Event Type: custom
+Event Type: standard
 
-Aggregation Window: Event
+Aggregation Window: Event, Session, User, Daily, Weekly, Monthly
 
 GA4 Event: |
   generate_lead
 
 Adobe Event: |
-  generate_lead
+  lead.submit
 
 W3 Data Layer: |
-  {"event":"generate_lead","category":{"primaryCategory":"Real Estate"},"eventInfo":{"type":"interactions","action":"submit_form","eventName":"generate_lead"},"attributes":{"location":"Downtown","propertyId":"12345","propertyType":"Apartment"}}
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageID": "listing-detail-MLS-78451236",
+          "pageName": "real-estate:listing-detail",
+          "sysEnv": "desktop"
+        },
+        "category": {
+          "primaryCategory": "Real Estate",
+          "subCategory1": "Listing Detail",
+          "pageType": "listing_detail"
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "generate_lead",
+            "eventAction": "submit_form",
+            "type": "interaction",
+            "timeStamp": "2026-09-16T14:32:05.000Z"
+          },
+          "category": {
+            "primaryCategory": "Conversion",
+            "subCategory1": "Lead"
+          },
+          "attributes": {
+            "inquiryId": "INQ-20260916-000123",
+            "propertyId": "MLS-78451236",
+            "propertyType": "apartment",
+            "listingType": "sale",
+            "listingLocation": "austin_downtown",
+            "inquiryType": "schedule_viewing",
+            "formId": "listing_sidebar",
+            "leadSource": "listing_page",
+            "value": 150,
+            "currency": "USD"
+          }
+        }
+      ]
+    }
+  }
 
 GA4 Data Layer: |
-  {"event":"generate_lead","eventParams":{"location":"Downtown","property_id":"12345","property_type":"Apartment"}}
+  {
+    "event": "generate_lead",
+    "inquiry_id": "INQ-20260916-000123",
+    "property_id": "MLS-78451236",
+    "property_type": "apartment",
+    "listing_type": "sale",
+    "listing_location": "austin_downtown",
+    "inquiry_type": "schedule_viewing",
+    "form_id": "listing_sidebar",
+    "lead_source": "listing_page",
+    "value": 150,
+    "currency": "USD"
+  }
 
 Adobe Client Data Layer: |
-  {"event":"generate_lead","eventInfo":{"location":"Downtown","propertyId":"12345","propertyType":"Apartment"}}
+  {
+    "event": "lead.submit",
+    "eventInfo": {
+      "eventName": "lead.submit",
+      "eventAction": "submit_form",
+      "unifiedEvent": "generate_lead"
+    },
+    "lead": {
+      "inquiryId": "INQ-20260916-000123",
+      "inquiryType": "schedule_viewing",
+      "formId": "listing_sidebar",
+      "leadSource": "listing_page",
+      "value": 150,
+      "currency": "USD"
+    },
+    "property": {
+      "propertyId": "MLS-78451236",
+      "propertyType": "apartment",
+      "listingType": "sale",
+      "listingLocation": "austin_downtown"
+    }
+  }
 
 XDM Mapping: |
-  {"_experience":{"analytics":{"customEvent":{"eventName":"generate_lead","propertyId":"12345","propertyType":"Apartment"}}}}
+  {
+    "eventType": "leadOperation.newLead",
+    "timestamp": "2026-09-16T14:32:05.000Z",
+    "web": {
+      "webPageDetails": {
+        "name": "real-estate:listing-detail"
+      },
+      "webInteraction": {
+        "name": "lead.submit",
+        "type": "other"
+      }
+    },
+    "_tenant": {
+      "inquiry": {
+        "inquiryId": "INQ-20260916-000123",
+        "inquiryType": "schedule_viewing",
+        "formId": "listing_sidebar",
+        "leadSource": "listing_page",
+        "leadValue": 150,
+        "currencyCode": "USD"
+      },
+      "property": {
+        "propertyId": "MLS-78451236",
+        "propertyType": "apartment",
+        "listingType": "sale",
+        "listingLocation": "austin_downtown"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "event1to100": {
+          "event1": {
+            "value": 1
+          }
+        },
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "MLS-78451236",
+            "eVar11": "schedule_viewing",
+            "eVar12": "sale",
+            "eVar13": "austin_downtown",
+            "eVar14": "listing_sidebar",
+            "eVar15": "listing_page"
+          }
+        }
+      }
+    }
+  }
 
 Parameters: |
-  {"user_id":"string - unique identifier for the user","timestamp":"string - ISO 8601 format of the inquiry time","inquiry_id":"string - unique identifier for the inquiry","property_id":"string - unique identifier for the property"}
+  {
+    "inquiry_id": "string - Opaque inquiry reference returned by the lead backend; used for deduplication and the CRM outcome join, never derived from contact details",
+    "property_id": "string - Listing or property identifier (MLS number or internal listing ID)",
+    "property_type": "string - Property classification, e.g. apartment, detached_house, townhouse, land, commercial",
+    "listing_type": "string - Transaction type of the listing: sale, rent, new_development",
+    "listing_location": "string - Market of the listing at city, neighbourhood or postcode-district level, e.g. austin_downtown",
+    "inquiry_type": "string - Intent of the submission: request_info, schedule_viewing, request_callback, make_offer",
+    "form_id": "string - Identifier of the inquiry form or placement, e.g. listing_sidebar, gallery_modal, agent_profile",
+    "lead_source": "string - Surface that produced the lead: listing_page, search_results, saved_search_alert, agent_page",
+    "value": "number - Expected lead value from the lead-value model for this inquiry_type and listing_type; never the asking price",
+    "currency": "string - ISO 4217 currency code of value, e.g. USD; required whenever value is sent"
+  }
 
 Calculation Notes: |
   Ensure inquiries are deduplicated based on inquiry_id. Exclude test inquiries from analysis.
@@ -51,22 +184,30 @@ Calculation Notes: |
 Business Use Case: |
   Executives can analyze inquiry trends to allocate marketing resources effectively and improve property listings.
 
+Dependencies:
+  Events: [property-search]
+  Metrics: [property-listing-views]
+  Dimensions: [property-type]
 
-Source Data: Digital Analytics
+Source Data: Digital Analytics (GA4)
 
     Report Attributes: |
-  ["property_id","user_id","inquiry_date"]
+  Property Type; Listing Type (Sale / Rent); Listing Location; Inquiry Type; Lead Source; Inquiry Form; Device Category; Session Default Channel Group; Campaign
 
-    Dashboard Usage: [Conversion Dashboard, Marketing Insights]
+    Dashboard Usage: [Lead Generation Performance, Listing Performance, Marketing Channel Attribution, Agent Lead Routing]
 
     Segment Eligibility: |
   true
 
-    
-    
-    
-    
-    Data Sensitivity: internal
+    Related Dimensions: [property-type, inquiry-type, traffic-source]
+
+    Derived Dimensions: [property-type, inquiry-type]
+
+    Derived Metrics: [property-inquiry-count, listing-to-inquiry-conversion-rate]
+
+    Derived KPIs: [lead-conversion-rate, qualified-property-inquiry-rate]
+
+    Data Sensitivity: Internal
 
     Contains PII: No
 
@@ -78,4 +219,5 @@ Source Data: Digital Analytics
 
     Last Modified By: devyendarm
 
-    
+    Last Modified At: 2026-09-16T19:29:45.297+00:00
+
