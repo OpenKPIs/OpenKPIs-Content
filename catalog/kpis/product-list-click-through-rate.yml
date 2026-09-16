@@ -1,7 +1,7 @@
 # KPI: Product List Click-Through Rate
-# Generated: 2026-09-16T17:36:13.653Z
+# Generated: 2026-09-16T17:36:22.957Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Product List Click-Through Rate
 Formula: (Item List Clicks [count of select_item events] / Item List Views [count of view_item_list events]) × 100, where both counts are grouped by the same item_list_id / item_list_name over the same date range
@@ -11,29 +11,322 @@ Description: |
 
 Category: Engagement
 
+Tags: [kpi, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  select_item
 
+Adobe Event: |
+  select_item
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "plp-womens-running-shoes",
+        "pageName": "category:women:running-shoes",
+        "pageType": "Product Listing"
+      },
+      "category": {
+        "primaryCategory": "Women",
+        "subCategory1": "Running Shoes"
+      }
+    },
+    "productList": [
+      {
+        "listInfo": {
+          "listID": "plp_womens_running_shoes",
+          "listName": "Category Grid - Women's Running Shoes",
+          "placement": "main_grid"
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU_12345",
+              "productName": "Trail Runner 5",
+              "manufacturer": "Acme Sports"
+            },
+            "category": {
+              "primaryCategory": "Footwear",
+              "subCategory1": "Running Shoes"
+            },
+            "price": {
+              "basePrice": 129.99,
+              "currency": "USD"
+            },
+            "attributes": {
+              "index": 0
+            }
+          },
+          {
+            "productInfo": {
+              "productID": "SKU_67890",
+              "productName": "Road Racer 3",
+              "manufacturer": "Acme Sports"
+            },
+            "category": {
+              "primaryCategory": "Footwear",
+              "subCategory1": "Running Shoes"
+            },
+            "price": {
+              "basePrice": 109.99,
+              "currency": "USD"
+            },
+            "attributes": {
+              "index": 1
+            }
+          }
+        ]
+      }
+    ],
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "view_item_list",
+          "eventAction": "list_view",
+          "type": "impression"
+        },
+        "category": {
+          "primaryCategory": "ecommerce"
+        },
+        "attributes": {
+          "listID": "plp_womens_running_shoes",
+          "listName": "Category Grid - Women's Running Shoes",
+          "itemCount": 2
+        }
+      },
+      {
+        "eventInfo": {
+          "eventName": "select_item",
+          "eventAction": "list_click",
+          "type": "interaction"
+        },
+        "category": {
+          "primaryCategory": "ecommerce"
+        },
+        "attributes": {
+          "listID": "plp_womens_running_shoes",
+          "listName": "Category Grid - Women's Running Shoes",
+          "productID": "SKU_67890",
+          "index": 1
+        }
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "select_item",
+    "page_type": "product_listing",
+    "ecommerce": {
+      "item_list_id": "plp_womens_running_shoes",
+      "item_list_name": "Category Grid - Women's Running Shoes",
+      "items": [
+        {
+          "item_id": "SKU_67890",
+          "item_name": "Road Racer 3",
+          "item_brand": "Acme Sports",
+          "item_category": "Footwear",
+          "item_category2": "Running Shoes",
+          "item_list_id": "plp_womens_running_shoes",
+          "item_list_name": "Category Grid - Women's Running Shoes",
+          "index": 1,
+          "price": 109.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "select_item",
+    "eventInfo": {
+      "path": "component.productlist-grid"
+    },
+    "page": {
+      "pageType": "Product Listing",
+      "pageName": "category:women:running-shoes"
+    },
+    "productList": {
+      "listId": "plp_womens_running_shoes",
+      "listName": "Category Grid - Women's Running Shoes",
+      "placement": "main_grid"
+    },
+    "product": [
+      {
+        "productId": "SKU_67890",
+        "productName": "Road Racer 3",
+        "brand": "Acme Sports",
+        "category": "Footwear/Running Shoes",
+        "position": 1,
+        "price": 109.99,
+        "currency": "USD"
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "web": {
+      "webPageDetails": {
+        "name": "category:women:running-shoes",
+        "pageViewsType": "Product Listing"
+      },
+      "webInteraction": {
+        "name": "select_item",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU_67890",
+        "name": "Road Racer 3",
+        "productCategories": [
+          {
+            "categoryID": "footwear-running-shoes",
+            "categoryName": "Footwear/Running Shoes"
+          }
+        ],
+        "priceTotal": 109.99,
+        "currencyCode": "USD",
+        "quantity": 1
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "plp_womens_running_shoes",
+            "eVar11": "Category Grid - Women's Running Shoes",
+            "eVar12": "1"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Product List Click-Through Rate = select_item events / view_item_list events x 100, at list-view grain.
+  -- item_list_id / item_list_name are read from event_params first, then from items[] (GA4 export stores them there for most web streams).
+  WITH list_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      event_name,
+      device.category AS device_category,
+      (SELECT MAX(IF(ep.key = 'item_list_id', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS param_list_id,
+      (SELECT MAX(IF(ep.key = 'item_list_name', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS param_list_name,
+      (SELECT MAX(IF(ep.key = 'page_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS page_type,
+      (SELECT MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS traffic_type,
+      (SELECT MAX(NULLIF(it.item_list_id, '(not set)')) FROM UNNEST(items) AS it) AS items_list_id,
+      (SELECT MAX(NULLIF(it.item_list_name, '(not set)')) FROM UNNEST(items) AS it) AS items_list_name
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 31 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name IN ('view_item_list', 'select_item')
+  ),
+  normalized AS (
+    SELECT
+      event_date,
+      event_name,
+      device_category,
+      page_type,
+      COALESCE(NULLIF(param_list_id, ''), NULLIF(items_list_id, ''), NULLIF(param_list_name, ''), NULLIF(items_list_name, ''), '(not set)') AS item_list_id,
+      COALESCE(NULLIF(param_list_name, ''), NULLIF(items_list_name, ''), '(not set)') AS item_list_name
+    FROM list_events
+    WHERE COALESCE(traffic_type, '') NOT IN ('internal', 'developer')
+  )
+  SELECT
+    event_date,
+    item_list_id,
+    item_list_name,
+    device_category,
+    COUNTIF(event_name = 'select_item') AS item_list_clicks,
+    COUNTIF(event_name = 'view_item_list') AS item_list_views,
+    ROUND(100 * SAFE_DIVIDE(COUNTIF(event_name = 'select_item'), COUNTIF(event_name = 'view_item_list')), 2) AS product_list_ctr_pct,
+    item_list_id = '(not set)' AS is_not_set_bucket,
+    COUNTIF(event_name = 'view_item_list') >= 1000 AS meets_min_volume
+  FROM normalized
+  GROUP BY event_date, item_list_id, item_list_name, device_category
+  ORDER BY event_date DESC, item_list_views DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Product List Click-Through Rate = select_item interactions / view_item_list interactions x 100, at list-view grain.
+  -- List ID and name come from eVar10 / eVar11 (mapped from the ACDL productList object).
+  WITH list_events AS (
+    SELECT
+      to_date(timestamp) AS event_date,
+      web.webInteraction.name AS interaction_name,
+      web.webPageDetails.pageViewsType AS page_type,
+      device.type AS device_type,
+      COALESCE(NULLIF(_experience.analytics.customDimensions.eVars.eVar10, ''),
+               NULLIF(_experience.analytics.customDimensions.eVars.eVar11, ''),
+               '(not set)') AS item_list_id,
+      COALESCE(NULLIF(_experience.analytics.customDimensions.eVars.eVar11, ''), '(not set)') AS item_list_name
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 31)
+      AND timestamp < current_date()
+      AND web.webInteraction.name IN ('view_item_list', 'select_item')
+  )
+  SELECT
+    event_date,
+    item_list_id,
+    item_list_name,
+    device_type,
+    SUM(CASE WHEN interaction_name = 'select_item' THEN 1 ELSE 0 END) AS item_list_clicks,
+    SUM(CASE WHEN interaction_name = 'view_item_list' THEN 1 ELSE 0 END) AS item_list_views,
+    ROUND(100.0 * SUM(CASE WHEN interaction_name = 'select_item' THEN 1 ELSE 0 END)
+          / NULLIF(SUM(CASE WHEN interaction_name = 'view_item_list' THEN 1 ELSE 0 END), 0), 2) AS product_list_ctr_pct,
+    item_list_id = '(not set)' AS is_not_set_bucket,
+    SUM(CASE WHEN interaction_name = 'view_item_list' THEN 1 ELSE 0 END) >= 1000 AS meets_min_volume
+  FROM list_events
+  GROUP BY event_date, item_list_id, item_list_name, device_type
+  ORDER BY event_date DESC, item_list_views DESC;
 
+Calculation Notes: |
+  1️⃣ Grain and slicing: the KPI uses list-view grain. The numerator is select_item events and the denominator is view_item_list events, and both are joined on item_list_id, falling back to item_list_name when no ID is sent. Recommendation, search-results and category lists are slices of this KPI by item_list_name or recommendation placement, so they do not get separate specs. The search-result-click-through-rate metric covers search-result lists only, and it must reconcile to this KPI filtered to those lists.,2️⃣ Do not mix grains: the item-impression ratio (select_item divided by the number of items[] entries in view_item_list) answers a different question and must not be blended with this KPI or shown under the same name. Report it separately if position-level analysis is needed. A list view counts once however many products it contains.,3️⃣ Denominator hygiene: view_item_list fires once per list render that meets the viewability rule (at least 50% of the list container in the viewport for at least 1 second). Below-the-fold carousels that are never scrolled into view are excluded. Re-renders of the same list within the same page_view (SPA re-hydration, sort toggle that returns identical results, carousel auto-rotation) are de-duplicated. Each new infinite-scroll batch or pagination page counts as a new list view.,4️⃣ Numerator hygiene: count only clicks on product tiles, including quick-view opens and swatch clicks that navigate to the PDP. Exclude banners, editorial or content cards, filter chips and sponsored placements that do not carry an items[] payload. A select_item without item_list_id or item_list_name goes into a '(not set)' bucket. That bucket is included in the site-level total but kept out of list-level rankings, and a (not set) share above 5% is treated as a tagging defect.,5️⃣ Ratios above 100%: several clicks from one list view are all counted, so a list-level value above 100% usually means a back-navigation restore from bfcache that did not re-fire view_item_list, or select_item firing on hover or touchstart. Fix this in the tag by re-firing view_item_list on pageshow when event.persisted is true. Never cap the value in reporting, because capping hides the defect.,6️⃣ Exclusions and session rules: remove known bots and spiders, internal IP ranges, staging hostnames and QA traffic before aggregating. The KPI is event-scoped, so the GA4 30-minute inactivity timeout does not affect the ratio. Session- or user-scoped cuts (for example, the share of sessions with at least one list click) are separate reads and must use distinct session or user counts in both numerator and denominator.,7️⃣ Timing and significance: events are dated by event_timestamp in the property reporting time zone. Daily values stay provisional for 72 hours to allow for late-arriving GA4 export hits. Compare lists or test variants only when each has at least 1,000 list views in the window, and use a two-proportion z-test before acting on differences below 2 percentage points.
 
+Business Use Case: |
+  1️⃣ The Merchandising team reviews category-page list CTR every week. When a category's rate falls more than 15% below its trailing four-week baseline, a merchandiser re-ranks the grid (boosting in-stock, high-margin and top-rated SKUs, and demoting out-of-stock SKUs) and checks recovery in the following week's read.,2️⃣ The Personalization product manager uses recommendation-carousel CTR, sliced by item_list_name and placement, as the primary metric for algorithm A/B tests. The variant ships only when it shows a statistically significant CTR lift and no drop in downstream item-view-to-cart rate.,3️⃣ The Site Search team monitors search-results list CTR for the top 200 queries by volume. Queries with high result counts but CTR below the site median are triaged for synonym, boosting or relevance-rule changes in the search engine.,4️⃣ The UX and Product Design team compares list CTR by device category on product listing pages. When mobile trails desktop by more than 20% relative, they open a tile-redesign test (image ratio, price and promo badge placement, rating display) and track CTR as the success metric.
 
+Dependencies:
+  Metrics: [item-list-clicks, item-list-views]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Item List Name; Item List ID; Recommendation Placement; Page Type; Item Category; Device Category; Traffic Source; Internal Search Term
 
+Dashboard Usage: [Merchandising Performance Dashboard, Product Discovery & Site Search Dashboard, Personalization & Recommendations Test Readout, E-commerce Funnel Overview]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [search-result-click-through-rate, item-view-to-cart-rate, add-to-cart-rate, item-purchase-conversion-rate, merchandising-conversion-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +336,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-16T17:36:12.202+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-16T17:36:22.559+00:00
 
