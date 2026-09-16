@@ -1,17 +1,17 @@
 # Metric: Time to First Purchase
-# Generated: 2026-09-14T06:47:04.025Z
+# Generated: 2026-09-16T23:20:37.212Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Metric Name: Time to First Purchase
-Formula: MEDIAN(TIMESTAMP_DIFF(first_purchase_ts, sign_up_ts, HOUR)) and AVG(TIMESTAMP_DIFF(first_purchase_ts, sign_up_ts, HOUR)) over customers where sign_up_ts IS NOT NULL AND first_purchase_ts >= sign_up_ts, with sign_up_ts = MIN(sign_up event or customers.created_at) and first_purchase_ts = MIN(completed purchase timestamp per customer); days = hours / 24
+Formula: MEDIAN(TIMESTAMP_DIFF(first_purchase_ts, sign_up_ts, HOUR)) and AVG(TIMESTAMP_DIFF(first_purchase_ts, sign_up_ts, HOUR)) over customers where sign_up_ts IS NOT NULL AND first_purchase_ts >= sign_up_ts AND first_purchase_ts <= sign_up_ts + 90 days AND customer NOT IN (internal traffic, debug, staff/internal/test/marketplace/B2B-import accounts), with sign_up_ts = MIN(sign_up event timestamp per customer) and first_purchase_ts = MIN(completed, non-test purchase timestamp per customer); days = hours / 24
 
 Description: |
   E-commerce specialisation of the canonical metric Time to First Value: the elapsed time per registered customer between account creation (sign_up) and that customer's first completed purchase, reported as the median and mean in hours or days for a sign-up cohort. It measures how quickly a new account turns into revenue, and it only covers customers who have both a sign-up and a completed order, so guest checkouts without an account are left out by design.
 
 Category: Conversion
 
-Tags: [metric, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP), E-commerce: Customer Retention, Loyalty & LTV]
+Tags: [metric, E-commerce: Top-of-Funnel & Marketing Acquisition, E-commerce: Customer Retention, Loyalty & LTV]
 
 Industry: E-commerce
 
@@ -358,8 +358,10 @@ Google Analytics SQL: |
     QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_ts) = 1
   ),
   
-  -- Completed orders only: drop test orders and orders voided, fraud-declined or cancelled before capture.
+  -- Completed orders only: drop test orders and orders voided, fraud-declined or cancelled before payment.
   -- A later refund does not disqualify the order.
+  -- your-project.commerce.orders is a generic stand-in name for the backend order table (Shopify-style columns:
+  -- order_number, test BOOLEAN, financial_status, cancel_reason, processed_at, cancelled_at); map to your export.
   completed_purchases AS (
     SELECT
       p.user_id,
@@ -368,10 +370,10 @@ Google Analytics SQL: |
     FROM purchases_dedup AS p
     LEFT JOIN `your-project.commerce.orders` AS o
       ON o.order_number = p.transaction_id
-    WHERE COALESCE(o.is_test_order, FALSE) = FALSE
-      AND COALESCE(LOWER(o.financial_status), '') != 'voided'
+    WHERE COALESCE(o.test, FALSE) = FALSE
+      AND COALESCE(LOWER(o.financial_status), 'paid') IN ('paid', 'partially_refunded', 'refunded')
       AND COALESCE(LOWER(o.cancel_reason), '') != 'fraud'
-      AND NOT (o.cancelled_at IS NOT NULL AND (o.captured_at IS NULL OR o.cancelled_at < o.captured_at))
+      AND NOT (o.cancelled_at IS NOT NULL AND o.processed_at IS NOT NULL AND o.cancelled_at <= o.processed_at)
   ),
   
   -- End: earliest completed purchase per customer
@@ -434,7 +436,10 @@ AEP Query Service SQL: |
       eventType AS event_type,
       timestamp AS event_ts,
       commerce.order.purchaseID AS transaction_id,
-      commerce.order.priceTotal AS order_value
+      commerce.order.priceTotal AS order_value,
+      -- _tenant is the organisation's tenant namespace (e.g. _yourorg); trafficType and debugMode mirror GA4 traffic_type / debug_mode
+      COALESCE(lower(_tenant.trafficType), '') AS traffic_type,
+      COALESCE(_tenant.debugMode, FALSE) AS is_debug
     FROM web_experience_events_dataset
     WHERE timestamp >= date_sub(current_date(), 455)
       AND timestamp < current_date()
@@ -442,12 +447,18 @@ AEP Query Service SQL: |
       AND identityMap['CRMID'][0].id IS NOT NULL
   ),
   
-  -- Staff, internal, test, marketplace or B2B bulk-imported accounts
+  -- Internal traffic, debug hits and staff, test, marketplace or B2B bulk-imported accounts, keyed on the same CRMID identity.
+  -- customer_profile_dataset is a generic stand-in name for your profile-class dataset carrying CRMID in identityMap.
   excluded_customers AS (
     SELECT DISTINCT customer_id
-    FROM crm_customer_profile_dataset
-    WHERE is_internal = TRUE
-       OR LOWER(account_type) IN ('staff', 'internal', 'test', 'marketplace_import', 'b2b_import')
+    FROM base_events
+    WHERE traffic_type = 'internal'
+       OR is_debug = TRUE
+    UNION
+    SELECT DISTINCT identityMap['CRMID'][0].id AS customer_id
+    FROM customer_profile_dataset
+    WHERE identityMap['CRMID'][0].id IS NOT NULL
+      AND LOWER(_tenant.accountType) IN ('staff', 'internal', 'test', 'marketplace_import', 'b2b_import')
   ),
   
   -- Anchor: earliest sign_up per customer
@@ -474,8 +485,10 @@ AEP Query Service SQL: |
       AND order_value > 0
   ),
   
-  -- Completed orders only: drop test orders and orders voided, fraud-declined or cancelled before capture.
+  -- Completed orders only: drop test orders and orders voided, fraud-declined or cancelled before payment.
   -- A later refund does not disqualify the order.
+  -- commerce_orders_dataset is a generic stand-in name for the backend order dataset (Shopify-style columns:
+  -- order_number, test BOOLEAN, financial_status, cancel_reason, processed_at, cancelled_at); map to your ingestion.
   completed_purchases AS (
     SELECT
       p.customer_id,
@@ -485,10 +498,10 @@ AEP Query Service SQL: |
     LEFT JOIN commerce_orders_dataset AS o
       ON o.order_number = p.transaction_id
     WHERE p.hit_rank = 1
-      AND COALESCE(o.is_test_order, FALSE) = FALSE
-      AND COALESCE(LOWER(o.financial_status), '') <> 'voided'
+      AND COALESCE(o.test, FALSE) = FALSE
+      AND COALESCE(LOWER(o.financial_status), 'paid') IN ('paid', 'partially_refunded', 'refunded')
       AND COALESCE(LOWER(o.cancel_reason), '') <> 'fraud'
-      AND NOT (o.cancelled_at IS NOT NULL AND (o.captured_at IS NULL OR o.cancelled_at < o.captured_at))
+      AND NOT (o.cancelled_at IS NOT NULL AND o.processed_at IS NOT NULL AND o.cancelled_at <= o.processed_at)
   ),
   
   -- End: earliest completed purchase per customer
@@ -537,10 +550,19 @@ AEP Query Service SQL: |
   ORDER BY sign_up_cohort_week DESC
 
 Calculation Notes: |
-  1️⃣ Population is customers with both a sign_up and at least one completed purchase, joined on the authenticated user_id (web) or customer_id (backend). Guest checkouts with no account are excluded. Customers who signed up but never bought are not counted as zero; track them separately in the cohort's sign-up-to-purchase conversion rate.,2️⃣ Anchor and end timestamps: the start is the customer's earliest sign_up event, or customers.created_at in the order platform. The end is the earliest purchase with a distinct transaction_id, or MIN(orders.created_at). Duplicate purchase hits for the same transaction_id are collapsed to the first occurrence before taking the minimum.,3️⃣ A completed purchase has value > 0 after discounts, and its order status was not voided, fraud-declined or cancelled before payment capture. A later refund does not disqualify the order. Test orders, internal or staff accounts and marketplace or B2B bulk-imported customers are filtered out.,4️⃣ Negative intervals are excluded. This happens when a guest order placed before registration is later linked to the new account, for example through the post-purchase "create an account" prompt. Report their share alongside the metric so that guest-to-account conversion does not quietly shrink the population.,5️⃣ Right-censoring: cohorts are keyed to sign-up date, not purchase date. A cohort is reported as final only after a fixed maturity window, typically 90 days. Purchases after that window are excluded so a recent cohort is not flattered by counting only its fastest buyers. Immature cohorts are labelled provisional.,6️⃣ The interval spans sessions and devices, so no 30-minute session timeout applies. Cross-device accuracy depends on user_id being set at both sign_up and purchase. Compute all timestamps in UTC, and use the median as the headline value because the distribution is heavily right-skewed. Publish the mean, P75 and P90 alongside it.,7️⃣ Source precedence: use web/app analytics (GA4 sign_up with method; purchase with transaction_id, value, currency, items[]) when user_id coverage is at least 95% of orders. Otherwise, or for customers created through POS, call centre or account import, use the order platform's customers and orders tables as the system of record.
+  1️⃣ Population is customers with both a sign_up and at least one completed purchase, joined on the authenticated user_id (web) or customer_id (backend). Guest checkouts with no account are excluded. Customers who signed up but never bought are not counted as zero; track them separately in the cohort's sign-up-to-purchase conversion rate.
+  2️⃣ Anchor and end timestamps: the start is the customer's earliest sign_up event. The end is the earliest completed purchase with a distinct transaction_id. Duplicate purchase hits for the same transaction_id are collapsed to the first occurrence before taking the minimum.
+  3️⃣ A completed purchase has value > 0 after discounts, and its order status was not voided, fraud-declined or cancelled before payment capture. A later refund does not disqualify the order. Test orders, internal or staff accounts and marketplace or B2B bulk-imported customers are filtered out.
+  4️⃣ Negative intervals are excluded. This happens when a guest order placed before registration is later linked to the new account, for example through the post-purchase "create an account" prompt. Report their share alongside the metric so that guest-to-account conversion does not quietly shrink the population.
+  5️⃣ Right-censoring: cohorts are keyed to sign-up date, not purchase date. A cohort is reported as final only after a fixed maturity window, typically 90 days. Purchases after that window are excluded so a recent cohort is not flattered by counting only its fastest buyers. Immature cohorts are labelled provisional.
+  6️⃣ The interval spans sessions and devices, so no 30-minute session timeout applies. Cross-device accuracy depends on user_id being set at both sign_up and purchase. Compute all timestamps in UTC, and use the median as the headline value because the distribution is heavily right-skewed. Publish the mean, P75 and P90 alongside it.
+  7️⃣ Source scope: both timestamps come from web/app analytics (GA4 sign_up with method; purchase with transaction_id, value, currency, items[]); the order platform's orders table is joined only to confirm order status and drop test orders. Publish the metric when user_id coverage is at least 95% of orders. Customers created through POS, call centre or account import have no sign_up event and fall outside this metric's population.
 
 Business Use Case: |
-  1️⃣ Lifecycle Marketing (CRM team): when the median for a weekly sign-up cohort rises more than 20% above the trailing 8-week baseline, move the welcome-series first-order incentive earlier so it lands before the median hour mark, then re-measure the next mature cohort.,2️⃣ Performance Marketing: at the monthly channel review, rank acquisition channels and sign-up methods by median time to first purchase together with cohort conversion. Shift budget away from channels whose registrants take much longer to buy, because that delay extends CAC payback.,3️⃣ Merchandising: when first-purchase P75 is high for customers whose first viewed category is a considered-purchase range, add curated best-seller and review-led modules to the post-registration landing experience and PDP recommendations for that category.,4️⃣ Product (Account & Checkout squad): after a change to the registration or checkout flow, such as social login or saved payment at sign-up, compare median time to first purchase between control and variant sign-up cohorts before rolling the change out to all traffic.
+  1️⃣ Lifecycle Marketing (CRM team): when the median for a weekly sign-up cohort rises more than 20% above the trailing 8-week baseline, move the welcome-series first-order incentive earlier so it lands before the median hour mark, then re-measure the next mature cohort.
+  2️⃣ Performance Marketing: at the monthly channel review, rank acquisition channels and sign-up methods by median time to first purchase together with cohort conversion. Shift budget away from channels whose registrants take much longer to buy, because that delay extends CAC payback.
+  3️⃣ Merchandising: when first-purchase P75 is high for customers whose Item Category of First Purchase is a considered-purchase range, add curated best-seller and review-led modules for that category to the post-registration landing experience and welcome emails of new registrants who browse it.
+  4️⃣ Product (Account & Checkout squad): after a change to the registration or checkout flow, such as social login or saved payment at sign-up, compare median time to first purchase between control and variant sign-up cohorts before rolling the change out to all traffic.
 
 Dependencies:
   Events: [sign-up, purchase]
@@ -556,9 +578,9 @@ Dashboard Usage: [New Customer Acquisition & Activation, Lifecycle Marketing Wel
 Segment Eligibility: |
   true
 
-Related Metrics: [time-to-first-value, days-since-last-purchase, orders-per-customer, new-users]
+Related Metrics: [time-to-first-value, days-since-last-purchase, orders-per-customer, new-users, time-between-purchases]
 
-Derived KPIs: [new-customer-conversion-rate, second-purchase-conversion-rate, time-between-purchases]
+Derived KPIs: [new-customer-conversion-rate]
 
 Data Sensitivity: Internal
 
@@ -572,5 +594,5 @@ Created At: 2026-09-14T06:46:55.623+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-14T06:47:03.757+00:00
+Last Modified At: 2026-09-16T23:20:36.939+00:00
 
