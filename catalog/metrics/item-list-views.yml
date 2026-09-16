@@ -1,10 +1,10 @@
 # Metric: Item List Views
-# Generated: 2026-09-14T06:46:35.815Z
+# Generated: 2026-09-16T21:19:59.647Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Metric Name: Item List Views
-Formula: COUNT(events WHERE event_name = 'view_item_list')
+Formula: COUNT(view_item_list events WHERE items[] is non-empty AND traffic is not internal, developer, debug or staging), with repeat renders sharing the same session + item_list_id + ordered item_id sequence within 2 seconds deduplicated to one
 
 Description: |
   Item List Views counts every time a shopper is served a merchandised product list (category and listing grids, search results grids, recommendation and cross-sell carousels), recorded as one view_item_list event per rendered list state. It is the exposure base for list-level merchandising analysis and the denominator of Product List Click-Through Rate, so its firing discipline directly determines whether list, slot and placement performance can be compared.
@@ -75,7 +75,7 @@ W3 Data Layer: |
             "primaryCategory": "Dresses"
           },
           "attributes": {
-            "index": 1,
+            "index": 0,
             "itemListId": "category_womens_dresses",
             "itemListName": "Womens Dresses Grid"
           },
@@ -93,7 +93,7 @@ W3 Data Layer: |
             "primaryCategory": "Dresses"
           },
           "attributes": {
-            "index": 2,
+            "index": 1,
             "itemListId": "category_womens_dresses",
             "itemListName": "Womens Dresses Grid"
           },
@@ -109,7 +109,9 @@ W3 Data Layer: |
 GA4 Data Layer: |
   {
     "event": "view_item_list",
+    "page_type": "Product Listing Page",
     "ecommerce": {
+      "currency": "USD",
       "item_list_id": "category_womens_dresses",
       "item_list_name": "Womens Dresses Grid",
       "items": [
@@ -120,8 +122,7 @@ GA4 Data Layer: |
           "item_category": "Dresses",
           "item_list_id": "category_womens_dresses",
           "item_list_name": "Womens Dresses Grid",
-          "price": 89,
-          "currency": "USD"
+          "price": 89
         },
         {
           "item_id": "SKU-10517",
@@ -130,8 +131,7 @@ GA4 Data Layer: |
           "item_category": "Dresses",
           "item_list_id": "category_womens_dresses",
           "item_list_name": "Womens Dresses Grid",
-          "price": 119,
-          "currency": "USD"
+          "price": 119
         }
       ]
     }
@@ -176,7 +176,7 @@ Adobe Client Data Layer: |
 
 XDM Mapping: |
   {
-    "eventType": "web.webinteraction.linkClicks",
+    "eventType": "merchandising.itemListViews",
     "timestamp": "2026-09-14T10:15:30.000Z",
     "web": {
       "webPageDetails": {
@@ -185,10 +185,7 @@ XDM Mapping: |
       },
       "webInteraction": {
         "name": "view_item_list",
-        "type": "other",
-        "linkClicks": {
-          "value": 1
-        }
+        "type": "other"
       }
     },
     "productListItems": [
@@ -225,6 +222,15 @@ XDM Mapping: |
           }
         }
       }
+    },
+    "_yourtenant": {
+      "merchandising": {
+        "itemListViews": {
+          "value": 1
+        },
+        "pageType": "Product Listing Page"
+      },
+      "trafficType": "external"
     }
   }
 
@@ -250,7 +256,8 @@ Google Analytics SQL: |
           MAX(IF(p.key = 'traffic_type', p.value.string_value, NULL)) AS traffic_type,
           MAX(IF(p.key = 'debug_mode', COALESCE(CAST(p.value.int_value AS STRING), p.value.string_value), NULL)) AS debug_mode,
           MAX(IF(p.key = 'item_list_id', p.value.string_value, NULL)) AS item_list_id,
-          MAX(IF(p.key = 'item_list_name', p.value.string_value, NULL)) AS item_list_name
+          MAX(IF(p.key = 'item_list_name', p.value.string_value, NULL)) AS item_list_name,
+          MAX(IF(p.key = 'page_type', p.value.string_value, NULL)) AS page_type
         FROM UNNEST(e.event_params) AS p
       ) AS ep,
       (
@@ -276,6 +283,7 @@ Google Analytics SQL: |
       COALESCE(default_channel_group, 'Unassigned') AS default_channel_group,
       COALESCE(ep.item_list_id, it.item_list_id, '(not set)') AS item_list_id,
       COALESCE(ep.item_list_name, it.item_list_name, '(not set)') AS item_list_name,
+      COALESCE(ep.page_type, '(not set)') AS page_type,
       it.item_signature
     FROM raw_events
     WHERE it.item_count > 0
@@ -296,6 +304,7 @@ Google Analytics SQL: |
     event_date,
     item_list_id,
     item_list_name,
+    page_type,
     device_category,
     default_channel_group,
     COUNTIF(user_pseudo_id IS NULL OR prev_list_timestamp IS NULL OR event_timestamp - prev_list_timestamp > 2000000) AS item_list_views,
@@ -303,7 +312,7 @@ Google Analytics SQL: |
     COUNTIF(user_pseudo_id IS NOT NULL AND prev_list_timestamp IS NOT NULL AND event_timestamp - prev_list_timestamp <= 2000000) AS rerenders_collapsed,
     COUNT(DISTINCT CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING))) AS sessions_with_item_list_view
   FROM flagged
-  GROUP BY event_date, item_list_id, item_list_name, device_category, default_channel_group
+  GROUP BY event_date, item_list_id, item_list_name, page_type, device_category, default_channel_group
   ORDER BY event_date, item_list_views DESC
 
 AEP Query Service SQL: |
@@ -313,6 +322,7 @@ AEP Query Service SQL: |
   -- Item List Views from XDM ExperienceEvents: one count per rendered list state (web.webInteraction.name = 'view_item_list').
   -- Window: 30 complete local days ending 4 days ago (72-hour late-data window); set the time zone to the reporting property zone.
   -- Sessions: 30-minute inactivity timeout reset at local midnight, computed over all web events before the list filter.
+  -- List renders carry eventType 'merchandising.itemListViews' (not a link click); rows are selected on web.webInteraction.name.
   WITH web_events AS (
     SELECT
       COALESCE(identityMap['ECID'][0].id, endUserIDs._experience.ecid.id) AS ecid,
@@ -324,6 +334,9 @@ AEP Query Service SQL: |
       device.type AS device_type,
       channel.typeAtSource AS marketing_channel,
       web.webPageDetails.siteSection AS site_section,
+      _yourtenant.merchandising.pageType AS page_type,
+      -- Internal/developer traffic flag: tenant custom field _yourtenant.trafficType ('internal', 'developer' or 'external').
+      lower(_yourtenant.trafficType) AS traffic_type,
       _experience.analytics.customDimensions.eVars.eVar20 AS item_list_id,
       _experience.analytics.customDimensions.eVars.eVar21 AS item_list_name,
       _experience.analytics.customDimensions.eVars.eVar22 AS list_type,
@@ -346,6 +359,7 @@ AEP Query Service SQL: |
       AND event_date BETWEEN date_sub(current_date(), 33) AND date_sub(current_date(), 4)
       AND COALESCE(hostname, '') NOT RLIKE 'localhost|(^|[.])(staging|stage|dev|qa|uat|test)[.]'
       AND COALESCE(user_agent, '') NOT RLIKE '(bot|spider|crawler|headless|lighthouse)'
+      AND COALESCE(traffic_type, '') NOT IN ('internal', 'developer')
   ),
   flagged AS (
     SELECT
@@ -364,6 +378,7 @@ AEP Query Service SQL: |
     COALESCE(item_list_name, '(not set)') AS item_list_name,
     COALESCE(list_type, '(not set)') AS list_type,
     COALESCE(site_section, '(not set)') AS site_section,
+    COALESCE(page_type, '(not set)') AS page_type,
     COALESCE(device_type, '(not set)') AS device_type,
     COALESCE(marketing_channel, 'Unassigned') AS marketing_channel,
     SUM(CASE WHEN prev_list_ts IS NULL OR CAST(event_ts AS DOUBLE) - CAST(prev_list_ts AS DOUBLE) > 2 THEN 1 ELSE 0 END) AS item_list_views,
@@ -371,17 +386,17 @@ AEP Query Service SQL: |
     SUM(CASE WHEN prev_list_ts IS NOT NULL AND CAST(event_ts AS DOUBLE) - CAST(prev_list_ts AS DOUBLE) <= 2 THEN 1 ELSE 0 END) AS rerenders_collapsed,
     COUNT(DISTINCT concat_ws('-', ecid, CAST(event_date AS STRING), CAST(session.num AS STRING))) AS sessions_with_item_list_view
   FROM flagged
-  GROUP BY 1, 2, 3, 4, 5, 6, 7
+  GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
   ORDER BY event_date, item_list_views DESC
 
 Calculation Notes: |
   1️⃣ Unit of count is the list render, not the product: one view_item_list event carrying items[] for all tiles in that render counts once, regardless of how many items it contains; item-level impressions are a separate measure derived by unnesting items[] (GA4 caps items[] at 200 per event, so oversized grids must be split into batches and each batch counts as a view).
   2️⃣ A new list state is a new view: pagination, infinite-scroll batch loads, and filter or sort changes that re-render the grid each emit a fresh event; carousel arrow navigation that reveals already-loaded tiles does not, unless the implementation lazy-loads a new batch.
-  3️⃣ Deduplicate single-page-application re-renders: events sharing the same session, item_list_id and identical first item_id / index sequence within 2 seconds are collapsed to one, which removes double fires from hydration and virtual-DOM refresh cycles.
+  3️⃣ Deduplicate single-page-application re-renders: events sharing the same session, item_list_id and identical ordered item_id sequence within 2 seconds are collapsed to one, which removes double fires from hydration and virtual-DOM refresh cycles.
   4️⃣ Only lists that reach the viewport qualify when the implementation supports it (at least 50% of the list container visible for 1 second); below-the-fold carousels fired on page load inflate the denominator and depress Product List Click-Through Rate, so the firing rule must be documented per placement and held constant across compared periods.
   5️⃣ Search results grids fire view_item_list with item_list_id = 'search_results' in addition to view_search_results; do not sum the two events, and exclude zero-result pages where items[] is empty.
   6️⃣ Exclude internal and developer traffic (traffic_type filter), known bots and spiders, and QA or staging hostnames; consent-mode modelled events are reported separately from observed events when used as a click-through-rate denominator.
-  7️⃣ Session attribution follows the 30-minute inactivity timeout and midnight boundary of the reporting property time zone; daily totals are final only after the 72-hour late-hit processing window, so trailing-day comparisons should use complete days.
+  7️⃣ Session attribution: GA4 sessions follow the 30-minute inactivity timeout and are not split at midnight, so a session spanning midnight counts in sessions_with_item_list_view on each date on which it has a qualifying view_item_list event; in the AEP SQL, sessions restart at local midnight in the reporting time zone. Daily totals are final only after the 72-hour late-hit processing window, so trailing-day comparisons should use complete days.
 
 Business Use Case: |
   1️⃣ Merchandising team, weekly category review: when a category grid or carousel ranks in the top decile of Item List Views but the bottom quartile of Item List Clicks, the category manager re-sequences the first two rows or swaps the placement's merchandising rule and measures the change the following week.
@@ -396,7 +411,7 @@ Dependencies:
 Source Data: Digital Analytics (GA4)
 
 Report Attributes: |
-  Item List Name; Item List ID; Item Category; Page Type; Device Category; Default Channel Grouping; Recommendation Placement; Date
+  Item List Name; Item List ID; Page Type; Device Category; Default Channel Grouping; Date
 
 Dashboard Usage: [Product Discovery & Merchandising Performance, Product List & Placement Performance, Site Search & Browse Funnel, Recommendation Placement Monitoring]
 
@@ -419,5 +434,5 @@ Created At: 2026-09-14T06:46:27.36+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-14T06:46:35.592+00:00
+Last Modified At: 2026-09-16T21:19:59.247+00:00
 
