@@ -1,10 +1,10 @@
 # Metric: Item List Clicks
-# Generated: 2026-09-14T06:46:21.481Z
+# Generated: 2026-09-16T21:19:36.735Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Metric Name: Item List Clicks
-Formula: COUNT(select_item events), after 2-second duplicate collapse and standard traffic exclusions; item scope = COUNT(UNNEST(items)) within select_item
+Formula: COUNT(select_item events) after the 2-second duplicate collapse and standard traffic exclusions; at item scope, one item per event (a payload with more than one item counts as one click, using the first item, and is flagged as a defect)
 
 Description: |
   Item List Clicks counts every select_item interaction in which a shopper chooses a product from a merchandised list, such as a category grid, search results page, cross-sell carousel or recommendation module, keyed by item_list_id, item_list_name and the item's position (index). It is the numerator of Product List Click-Through Rate and shows merchandising and search teams which lists, placements and slots actually turn product exposure into product-detail traffic.
@@ -170,6 +170,7 @@ Google Analytics SQL: |
   -- Item List Clicks: deduplicated select_item events by day and list, GA4 BigQuery export.
   -- Window: last 30 days, excluding the most recent 72 hours (late-hit processing window).
   -- The same traffic exclusions must be applied to Item List Views to keep the click-through ratio symmetric.
+  -- Known bots and spiders are excluded by GA4 before the BigQuery export, so no user-agent filter is needed here.
   WITH select_item_hits AS (
     SELECT
       PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
@@ -264,6 +265,9 @@ AEP Query Service SQL: |
       web.webInteraction.name AS interaction_name,
       LOWER(COALESCE(web.webPageDetails.URL, '')) AS page_url,
       LOWER(COALESCE(environment.browserDetails.userAgent, '')) AS user_agent,
+      -- Internal/developer traffic flags: replace _tenant with your tenant namespace
+      LOWER(COALESCE(_tenant.trafficType, '')) AS traffic_type,
+      LOWER(COALESCE(CAST(_tenant.debugMode AS STRING), '')) AS debug_mode,
       productListItems,
       _experience.analytics.customDimensions.eVars.eVar20 AS evt_item_list_id,
       _experience.analytics.customDimensions.eVars.eVar21 AS evt_item_list_name,
@@ -293,6 +297,8 @@ AEP Query Service SQL: |
     FROM sessionized
     WHERE eventType = 'web.webinteraction.linkClicks'
       AND interaction_name = 'select_item'
+      AND traffic_type NOT IN ('internal', 'developer')
+      AND debug_mode NOT IN ('true', '1')
       AND page_url NOT LIKE '%://localhost%'
       AND page_url NOT LIKE '%://staging.%'
       AND page_url NOT LIKE '%://qa.%'
@@ -333,11 +339,11 @@ AEP Query Service SQL: |
   ORDER BY event_date DESC, item_list_clicks DESC;
 
 Calculation Notes: |
-  1️⃣ Count only the GA4 unified select_item event (Adobe equivalent: a product-list click custom link carrying list name and position). Exclude select_promotion (internal banner/promo tile clicks), view_item_list impressions, and direct PDP entries from paid, email or organic landings; these belong to Promotion Clicks, Item List Views and Product Detail Views respectively.
+  1️⃣ Count only the GA4 unified select_item event (Adobe equivalent: a product-list click custom link carrying list name and position). Exclude select_promotion (internal banner/promo tile clicks), view_item_list impressions, and direct PDP entries from paid, email or organic landings; these belong to Promotion Clicks, Item List Views and Product View respectively.
   2️⃣ Grain rule: the event-scoped value is one per select_item hit; when reported by item_id, item_name or index, count at item scope by unnesting items[], which equals the event count on a correct implementation because exactly one item is sent per selection. Payloads carrying more than one item are an implementation defect and must be flagged rather than multiplied.
   3️⃣ item_list_id and item_list_name resolve item-level first, then fall back to the event-level value, matching GA4 precedence. Hits with both values missing are retained in the total but reported under "(not set)"; they must stay below 2% of volume, otherwise the list taxonomy is broken and Product List Click-Through Rate by list is not trustworthy.
-  4️⃣ Deduplicate accidental double-fires: collapse select_item hits sharing user_pseudo_id, ga_session_id, item_list_id, item_id and index within 2 seconds into one click. Clicks that open the PDP in a new tab still count once; the subsequent view_item is counted separately under Product Detail Views.
-  5️⃣ Apply the standard exclusions used for Item List Views so the click-through ratio stays symmetric: internal and developer traffic filters, known bots and spiders, QA/staging hostnames, and test orders. Never apply a filter to clicks that is not also applied to views.
+  4️⃣ Deduplicate accidental double-fires: collapse select_item hits sharing user_pseudo_id, ga_session_id, item_list_id, item_id and index within 2 seconds into one click. Clicks that open the PDP in a new tab still count once; the subsequent view_item is counted separately under Product View.
+  5️⃣ Apply the standard exclusions used for Item List Views so the click-through ratio stays symmetric: internal and developer traffic filters, known bots and spiders, and QA/staging hostnames. Never apply a filter to clicks that is not also applied to views.
   6️⃣ Sessions follow the GA4 30-minute inactivity timeout (no midnight or campaign-change split); a click belongs to the session in which the event fired. Dates are assigned in the property reporting time zone, and daily figures are considered final only after the 72-hour late-hit processing window closes.
   7️⃣ Index is 1-based position within the rendered list at click time, recorded after sorting, filtering and pagination (page 2 of a 24-item grid starts at 25). Infinite-scroll and lazy-loaded modules must continue the sequence, not restart at 1, otherwise position-level click analysis mixes slots.
 
@@ -349,12 +355,12 @@ Business Use Case: |
 
 Dependencies:
   Events: [select-item]
-  Dimensions: [item-list-id, item-list-name, item-id, item-name]
+  Dimensions: [item-list-id, item-list-name, item-id, product-name, item-category]
 
 Source Data: Digital Analytics (GA4)
 
 Report Attributes: |
-  Item List Name; Item List ID; Item ID / SKU; Item Name; Item Position (Index); Item Category; Item Brand; Device Category; Session Source / Medium; Search Term
+  Item List Name; Item List ID; Item ID / SKU; Item Name; Item Position (Index); Item Category; Item Brand; Device Category; Session Source / Medium; Page Type
 
 Dashboard Usage: [Product Discovery & Merchandising Performance, Site Search Effectiveness, Recommendation Module Performance, Category Page Optimization]
 
@@ -363,7 +369,7 @@ Segment Eligibility: |
 
 Related Metrics: [item-list-views, product-view, search-result-click-through-rate]
 
-Derived KPIs: [product-list-click-through-rate, recommendation-click-through-rate, search-result-click-through-rate]
+Derived KPIs: [product-list-click-through-rate, recommendation-click-through-rate]
 
 Data Sensitivity: Internal
 
@@ -377,5 +383,5 @@ Created At: 2026-09-14T06:46:12.654+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-14T06:46:21.219+00:00
+Last Modified At: 2026-09-16T21:19:36.306+00:00
 
