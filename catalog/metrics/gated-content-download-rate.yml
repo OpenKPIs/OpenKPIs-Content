@@ -1,5 +1,5 @@
 # Metric: Gated Content Download Rate
-# Generated: 2026-09-15T22:57:25.670Z
+# Generated: 2026-09-16T22:40:51.346Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -7,7 +7,7 @@ Metric Name: Gated Content Download Rate
 Formula: Gated Content Download Rate = (Session × Asset Pairs with an Accepted Gated Asset Download ÷ Session × Asset Pairs with a Gated Content Landing Page View) × 100
 
 Description: |
-  Percentage of sessions that view a gated content landing page (whitepaper, analyst report, benchmark guide or technical eBook) and go on to clear the gate with an accepted asset download, measured per asset. It tells Demand Generation and Content Marketing how efficiently each gated asset turns landing page traffic into known, contactable prospects and where form friction is holding downloads back.
+  Percentage of session × asset pairs (sessions viewing a given gated asset's landing page, such as a whitepaper, analyst report, benchmark guide or technical eBook) that go on to clear the gate with an accepted download of that asset in the same session. It tells Demand Generation and Content Marketing how efficiently each gated asset turns landing page traffic into known, contactable prospects and where form friction is holding downloads back.
 
 Category: Conversion
 
@@ -119,7 +119,20 @@ GA4 Data Layer: |
     "form_submission_status": "accepted",
     "file_name": "cloud-security-benchmark-report.pdf",
     "file_extension": "pdf",
-    "link_url": "https://www.example.com/assets/cloud-security-benchmark-report.pdf"
+    "link_url": "https://www.example.com/assets/cloud-security-benchmark-report.pdf",
+    "landing_page_view": {
+      "event": "page_view",
+      "page_type": "gated_resource",
+      "content_group": "gated_resource",
+      "content_access": "gated",
+      "content_id": "asset-12345",
+      "content_name": "Cloud Security Benchmark Report",
+      "content_type": "analyst_report",
+      "content_topic": "cloud security",
+      "content_format": "pdf",
+      "gate_type": "lead_form",
+      "form_id": "form-67890"
+    }
   }
 
 Adobe Client Data Layer: |
@@ -153,6 +166,29 @@ Adobe Client Data Layer: |
       "id": "form-67890",
       "name": "Gated Content Lead Form",
       "submissionStatus": "accepted"
+    },
+    "landing_page_view": {
+      "event": "page_view",
+      "page": {
+        "pageName": "Resources | Cloud Security Benchmark Report",
+        "pageURL": "https://www.example.com/resources/cloud-security-benchmark-report",
+        "siteSection": "resources",
+        "pageType": "gated_resource",
+        "contentGroup": "gated_resource"
+      },
+      "content": {
+        "id": "asset-12345",
+        "name": "Cloud Security Benchmark Report",
+        "type": "analyst_report",
+        "topic": "cloud security",
+        "format": "pdf",
+        "access": "gated",
+        "gateType": "lead_form"
+      },
+      "form": {
+        "id": "form-67890",
+        "name": "Gated Content Lead Form"
+      }
     }
   }
 
@@ -191,6 +227,35 @@ XDM Mapping: |
         "id": "form-67890",
         "name": "Gated Content Lead Form",
         "submissionStatus": "accepted"
+      }
+    },
+    "landing_page_view": {
+      "eventType": "web.webpagedetails.pageViews",
+      "web": {
+        "webPageDetails": {
+          "name": "Resources | Cloud Security Benchmark Report",
+          "URL": "https://www.example.com/resources/cloud-security-benchmark-report",
+          "siteSection": "resources",
+          "pageViews": {
+            "value": 1
+          }
+        }
+      },
+      "_tenant": {
+        "content": {
+          "id": "asset-12345",
+          "name": "Cloud Security Benchmark Report",
+          "type": "analyst_report",
+          "topic": "cloud security",
+          "format": "pdf",
+          "access": "gated",
+          "contentGroup": "gated_resource",
+          "gateType": "lead_form"
+        },
+        "form": {
+          "id": "form-67890",
+          "name": "Gated Content Lead Form"
+        }
       }
     }
   }
@@ -240,6 +305,7 @@ Google Analytics SQL: |
   ),
   landing AS (
     -- Denominator: every session x gated asset with a landing page view
+    -- content_group / content_access / content_id come from the landing page page_view push (ga4_data_layer.landing_page_view)
     SELECT
       session_key,
       content_id,
@@ -374,6 +440,7 @@ AEP Query Service SQL: |
   ),
   landing AS (
     -- Denominator: every session x gated asset with a landing page view
+    -- _tenant.content fields are populated on the landing page web.webpagedetails.pageViews event (xdm_mapping.landing_page_view)
     SELECT
       session_key,
       content_id,
@@ -451,7 +518,7 @@ AEP Query Service SQL: |
 Calculation Notes: |
   1️⃣ Denominator is the full base population: every session with a page view of a gated asset landing page (content access = gated), counted once per session × asset. Do not restrict it to sessions that started the form.
   2️⃣ Numerator is the subset of those session × asset pairs where the same session records an accepted gated asset file download for the same content ID (GA4 file_download; AEP web.webinteraction.linkClicks with type download) carrying form_submission_status = accepted.
-  3️⃣ Count a download as successful only when the gate submission behind it was accepted by the marketing automation platform. Exclude failed validation, honeypot or CAPTCHA rejections, duplicate rapid submits and repeat downloads of the same asset in the same session.
+  3️⃣ Count a download as successful only when the gate submission behind it was accepted by the marketing automation platform. The accepted gate submission fires generate_lead (form_id, content_id); only after that acceptance does the site release the asset and push file_download with form_submission_status = accepted and the same form_id and content_id, so the SQL reads acceptance from the file_download event and generate_lead is the upstream dependency that sets it. Exclude failed validation, honeypot or CAPTCHA rejections, duplicate rapid submits and repeat downloads of the same asset in the same session.
   4️⃣ Apply the same exclusions to numerator and denominator: ungated assets, internal traffic (GA4 traffic_type = internal from the office IP rule; the same IP ranges on environment.ipV4 in AEP), known bots and crawlers, sandbox/QA form IDs (the whole session × asset pair is dropped) and staging or preview hostnames. Employee email domains and test addresses are only known at submission, so the marketing automation platform rejects them before a submission is marked accepted, which keeps them out of the numerator. GA4 excludes known bots and spiders automatically, while the AEP query removes bot, crawler, spider and headless user agents (environment.browserDetails.userAgent) because Web SDK data is not bot-filtered by default.
   5️⃣ Sessions end after 30 minutes of inactivity (GA4 ga_session_id; AEP SESS_TIMEOUT over all experience events before any event filter). A download counts only when it falls in the same session as the landing page view, and sessions that cross midnight are dated by session start.
   6️⃣ Take numerator and denominator from the same consent basis. Do not divide consent-mode modelled conversions by observed page views, and report the observed-only rate alongside any modelled rate.
@@ -464,7 +531,7 @@ Business Use Case: |
   4️⃣ Product Marketing: when an asset has a high download rate but a weak lead-to-opportunity rate, product marketing ungates the executive summary, keeps the full report gated, and compares pipeline created per 1,000 landing page sessions before and after the change.
 
 Dependencies:
-  Events: [page-view, form-submit, generate-lead, file-download]
+  Events: [page-view, generate-lead, file-download]
   Metrics: [gated-content-landing-page-sessions, gated-content-downloads]
   Dimensions: [content-id, content-type, content-format, gate-type, device-category]
 
@@ -480,7 +547,7 @@ Segment Eligibility: |
 
 Related Metrics: [gated-content-landing-page-sessions, gated-content-downloads, form-start-rate, form-abandonment-rate, landing-page-conversion-rate]
 
-Derived KPIs: [lead-conversion-rate, cost-per-lead, mql-conversion-rate, content-influenced-pipeline]
+Derived KPIs: [lead-conversion-rate]
 
 Data Sensitivity: Internal
 
@@ -490,9 +557,9 @@ Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-09-15T22:57:11.854+00:00
+Created At: 2026-09-16T22:40:39.931+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-15T22:57:25.235+00:00
+Last Modified At: 2026-09-16T22:40:50.739+00:00
 
