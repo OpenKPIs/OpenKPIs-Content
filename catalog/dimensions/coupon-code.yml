@@ -1,12 +1,12 @@
 # Dimension: Coupon Code
-# Generated: 2026-09-14T07:34:38.551Z
+# Generated: 2026-09-17T03:20:56.081Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Coupon Code
 
 Description: |
-  Coupon Code is the exact promotional, discount or voucher code a customer successfully applied, captured at order level (GA4 Order coupon, the purchase `coupon` parameter) and at item level (GA4 Item coupon, `items[].coupon`), with in-store redemptions joined from POS on transaction_id. It lets Marketing, Merchandising and Finance break down orders, revenue and checkout behaviour by the specific code redeemed across web, app and store, while the kind of offer, internal promotion banners and discount values stay in Promotion Type, Promotion Name and the Discount Amount metric.
+  Coupon Code is the exact promotional, discount or voucher code a customer successfully applied, captured at order level (GA4 Order coupon, the purchase `coupon` parameter) and at item level (GA4 Item coupon, `items[].coupon`), with in-store redemptions joined from POS on transaction_id. It lets Marketing, Merchandising and Finance break down orders, revenue and checkout behaviour by the specific code redeemed across web, app and store. The kind of offer is covered by the Promotion Type dimension, and internal promotion banners and discount values by the GA4 standard fields item promotion name and item discount amount, so none of these are part of this dimension.
 
 Category: Monetization
 
@@ -208,10 +208,20 @@ Google Analytics SQL: |
   -- ==========================================
   -- Coupon Code by scope: order-level purchase coupon (event_params.coupon) and item-level items.coupon,
   -- normalised with UPPER(TRIM()), stacked codes split, settled OMS/POS code preferred on a shared transaction_id.
+  -- Settled single-use codes are mapped to their campaign/batch prefix before splitting and exclusion; raw codes stay in the governed order tables.
+  -- Revenue is gross on the order date: settled gross (OMS/POS) where a settled row exists, else web gross purchase_revenue.
+  -- Refunds are not netted here; report them by refund date from the refund/return records.
   WITH coupon_exclusions AS (
     SELECT DISTINCT UPPER(TRIM(coupon_code)) AS coupon_code
     FROM `your-project.reference.coupon_code_exclusions`
     WHERE coupon_code IS NOT NULL
+  ),
+  coupon_code_batch_map AS (
+    SELECT UPPER(TRIM(raw_code)) AS raw_code, ANY_VALUE(UPPER(TRIM(coupon_code))) AS coupon_code
+    FROM `your-project.reference.coupon_code_batch_map`
+    WHERE raw_code IS NOT NULL
+      AND coupon_code IS NOT NULL
+    GROUP BY 1
   ),
   purchase_events AS (
     SELECT
@@ -232,13 +242,17 @@ Google Analytics SQL: |
   ),
   settled_orders AS (
     SELECT
-      transaction_id,
-      order_date,
-      transaction_channel,
-      net_order_revenue,
-      order_coupon_code AS settled_order_coupon_raw
-    FROM `your-project.oms.settled_orders`
-    WHERE order_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+      so.transaction_id,
+      ANY_VALUE(so.order_date) AS order_date,
+      ANY_VALUE(so.transaction_channel) AS transaction_channel,
+      ANY_VALUE(so.gross_order_revenue) AS gross_order_revenue,
+      STRING_AGG(COALESCE(m.coupon_code, UPPER(TRIM(raw_code))), ',' ORDER BY code_pos) AS settled_order_coupon_raw
+    FROM `your-project.oms.settled_orders` AS so
+    LEFT JOIN UNNEST(SPLIT(COALESCE(so.order_coupon_code, ''), ',')) AS raw_code WITH OFFSET AS code_pos
+    LEFT JOIN coupon_code_batch_map AS m
+      ON UPPER(TRIM(raw_code)) = m.raw_code
+    WHERE so.order_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+    GROUP BY so.transaction_id
   ),
   orders AS (
     SELECT
@@ -246,7 +260,7 @@ Google Analytics SQL: |
       COALESCE(s.order_date, p.order_date) AS order_date,
       COALESCE(s.transaction_channel, p.digital_channel, '(not set)') AS transaction_channel,
       COALESCE(p.device_category, '(not set)') AS device_category,
-      COALESCE(s.net_order_revenue, p.order_revenue) AS order_revenue,
+      COALESCE(s.gross_order_revenue, p.order_revenue) AS order_revenue,
       IF(s.transaction_id IS NOT NULL, s.settled_order_coupon_raw, p.order_coupon_raw) AS order_coupon_raw,
       p.items
     FROM purchase_events AS p
@@ -363,10 +377,20 @@ AEP Query Service SQL: |
   -- ==========================================
   -- Coupon Code by scope: order-level eVar30 and item-level productListItems[].eVar31 on commerce.purchases,
   -- normalised with UPPER(TRIM()), stacked codes split, settled OMS/POS code preferred on a shared purchaseID.
+  -- Settled single-use codes are mapped to their campaign/batch prefix before splitting and exclusion; raw codes stay in the governed order tables.
+  -- Revenue is gross on the order date: settled gross (OMS/POS) where a settled row exists, else web gross priceTotal.
+  -- Refunds are not netted here; report them by refund date from the refund/return records.
   WITH coupon_exclusions AS (
     SELECT DISTINCT UPPER(TRIM(coupon_code)) AS coupon_code
     FROM aep_coupon_code_exclusions
     WHERE coupon_code IS NOT NULL
+  ),
+  coupon_code_batch_map AS (
+    SELECT UPPER(TRIM(raw_code)) AS raw_code, MAX(UPPER(TRIM(coupon_code))) AS coupon_code
+    FROM aep_coupon_code_batch_map
+    WHERE raw_code IS NOT NULL
+      AND coupon_code IS NOT NULL
+    GROUP BY UPPER(TRIM(raw_code))
   ),
   purchase_events AS (
     SELECT
@@ -384,15 +408,39 @@ AEP Query Service SQL: |
       AND e.commerce.order.purchaseID NOT IN ('', '(not set)')
       AND to_date(e.timestamp) BETWEEN date_sub(current_date(), 30) AND date_sub(current_date(), 1)
   ),
+  settled_code_split AS (
+    SELECT
+      b.transaction_id,
+      b.order_date,
+      b.transaction_channel,
+      b.gross_order_revenue,
+      c.code_pos,
+      UPPER(TRIM(c.raw_code)) AS code_norm
+    FROM aep_backend_dataset b
+    LATERAL VIEW OUTER posexplode(split(COALESCE(b.order_coupon_code, ''), ',')) c AS code_pos, raw_code
+    WHERE b.order_date BETWEEN date_sub(current_date(), 30) AND date_sub(current_date(), 1)
+  ),
+  settled_code_mapped AS (
+    SELECT
+      r.transaction_id,
+      r.order_date,
+      r.transaction_channel,
+      r.gross_order_revenue,
+      r.code_pos,
+      COALESCE(m.coupon_code, r.code_norm) AS mapped_code
+    FROM settled_code_split r
+    LEFT JOIN coupon_code_batch_map m
+      ON r.code_norm = m.raw_code
+  ),
   settled_orders AS (
     SELECT
       transaction_id,
       order_date,
       transaction_channel,
-      net_order_revenue,
-      order_coupon_code AS settled_order_coupon_raw
-    FROM aep_backend_dataset
-    WHERE order_date BETWEEN date_sub(current_date(), 30) AND date_sub(current_date(), 1)
+      gross_order_revenue,
+      concat_ws(',', transform(array_sort(collect_list(struct(code_pos, mapped_code))), x -> x.mapped_code)) AS settled_order_coupon_raw
+    FROM settled_code_mapped
+    GROUP BY transaction_id, order_date, transaction_channel, gross_order_revenue
   ),
   orders AS (
     SELECT
@@ -400,7 +448,7 @@ AEP Query Service SQL: |
       COALESCE(s.order_date, p.order_date) AS order_date,
       COALESCE(s.transaction_channel, p.digital_channel, '(not set)') AS transaction_channel,
       COALESCE(p.device_category, '(not set)') AS device_category,
-      COALESCE(s.net_order_revenue, p.order_revenue) AS order_revenue,
+      COALESCE(s.gross_order_revenue, p.order_revenue) AS order_revenue,
       CASE WHEN s.transaction_id IS NOT NULL THEN s.settled_order_coupon_raw ELSE p.order_coupon_raw END AS order_coupon_raw,
       p.product_list_items
     FROM (SELECT * FROM purchase_events WHERE rn = 1) p
@@ -557,12 +605,12 @@ AEP Query Service SQL: |
   ORDER BY s.order_date DESC, s.coupon_scope, s.orders DESC;
 
 Calculation Notes: |
-  1️⃣ Normalisation: the reported value is UPPER(TRIM(code)). Commerce platforms (Shopify, Adobe Commerce, Salesforce Commerce) match codes case-insensitively, so 'save10' and 'SAVE10' are one row. Empty strings and the literals 'undefined', 'null' and '(not set)' become NULL and show as (not set); they never count as a coupon. The normalised value should match the Adobe Commerce Reports > Sales > Coupons report for the same period.
+  1️⃣ Normalisation: the reported value is UPPER(TRIM(code)). Commerce platforms (Shopify, Adobe Commerce, Salesforce Commerce) match codes case-insensitively, so 'save10' and 'SAVE10' are one row. Empty strings and the literals 'undefined', 'null' and '(not set)' become NULL and show as (not set); they never count as a coupon. The normalised value matches the Adobe Commerce Reports > Sales > Coupons report for the same period only after the batch-prefix mapping and the exclusion list (see 7️⃣) have been applied to the Adobe Commerce figures.
   2️⃣ Order vs item level: Order coupon comes from the event-level `coupon` parameter on purchase and Item coupon from `items[].coupon`, and the two are never coalesced. An order-level code is not copied onto every item, and an item-level code is not promoted to the order. Break Order coupon down by order metrics (transactions, purchase revenue) and Item coupon by item metrics (item revenue, items purchased). Mixing scopes over-attributes revenue.
   3️⃣ Stacked codes: GA4 takes one string per scope, so orders with several codes send a comma-delimited list in the order the codes were applied. Split the list into one row per code for code-level reporting. Count orders as COUNT(DISTINCT transaction_id) and never sum order revenue across the split rows, because a two-code order would count twice. Also keep the unsplit string as the code combination for stacking analysis.
   4️⃣ Accepted codes only: the value is filled only after the platform has validated the code and applied the price adjustment. Invalid, expired, below-minimum-spend and ineligible-item attempts are excluded. So are codes entered on begin_checkout or add_payment_info and then removed before the order was placed. The authoritative value is the one on the final purchase event, or on the settled order record for offline orders.
-  5️⃣ Timing and persistence: the code is event-scoped and belongs only to the transaction it was redeemed on. It is not carried forward across sessions or onto the user's later orders. Refunds and returns keep the original code (the refund event and the OMS return record carry the original transaction_id), so net revenue per code is reduced in the period the refund is processed. The order date is not restated.
-  6️⃣ Omnichannel stitching: store redemptions come from the POS transaction-discount lines and join to digital orders on transaction_id. This covers BOPIS, endless-aisle and store-assisted orders. When a web purchase and a POS or OMS record share a transaction_id, count the order once and take the settled back-office code, since it reflects cashier overrides and customer-service adjustments made after checkout. Log web-vs-settled mismatches for the monthly reconciliation. Store-only receipts with no digital counterpart keep their POS code and carry Transaction Channel = Store.
+  5️⃣ Timing and persistence: the code is event-scoped and belongs only to the transaction it was redeemed on. It is not carried forward across sessions or onto the user's later orders. Refunds and returns keep the original code (the refund event and the OMS return record carry the original transaction_id), so refunds are attributed to the original code in the period the refund is processed. The reference queries report gross order and item revenue on the order date only (the settled gross amount where a settled OMS/POS row exists, otherwise the web gross amount) and never net refunds into that row, so the order date is not restated. Net revenue per code is that gross figure less refunds taken separately from the refund/return records by refund date.
+  6️⃣ Omnichannel stitching: store redemptions come from the POS transaction-discount lines and join to digital orders on transaction_id. This covers BOPIS, endless-aisle and store-assisted orders. When a web purchase and a POS or OMS record share a transaction_id, count the order once and take the settled back-office code, since it reflects cashier overrides and customer-service adjustments made after checkout. Log web-vs-settled mismatches for the monthly reconciliation. The reconciliation compares mapped values: settled single-use codes are first mapped to their campaign or batch prefix (see 7️⃣), so they line up with the prefix collected on the web. Store-only receipts with no digital counterpart keep their POS code and carry Transaction Channel = Store.
   7️⃣ Cardinality, privacy and exclusions: single-use codes (referral, win-back, customer-service goodwill batches) can make this dimension high-cardinality and push GA4 standard reports into the (other) row. They can also work as a pseudonymous key back to one customer. Map them to their parent campaign or batch prefix before collection and keep the raw unique code only in the governed order tables. Employee discount, QA/test and marketplace-partner reconciliation codes are removed through a maintained exclusion list. Promotion banners (select_promotion / view_promotion), offer types and discount values are out of scope.
 
 Business Use Case: |
@@ -601,5 +649,5 @@ Created At: 2026-09-14T07:34:29.968+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-14T07:34:38.359+00:00
+Last Modified At: 2026-09-17T03:20:55.778+00:00
 
