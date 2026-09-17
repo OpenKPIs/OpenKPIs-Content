@@ -1,12 +1,12 @@
 # Dimension: Cart Size Band
-# Generated: 2026-09-14T07:33:54.757Z
+# Generated: 2026-09-17T01:19:59.675Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Cart Size Band
 
 Description: |
-  Cart Size Band classifies every cart snapshot and completed order into one of five fixed unit-count bands (1, 2, 3-4, 5-9, 10+) by summing items[].quantity on the view_cart, begin_checkout and purchase payloads. It is the standard basket-size segmentation for comparing cart abandonment, checkout completion and order mix across small and large baskets, and it deliberately excludes order value, which is governed by Cart Value and Average Order Value.
+  Cart Size Band classifies every cart snapshot and completed order into one of five fixed unit-count bands (1, 2, 3-4, 5-9, 10+) by summing items[].quantity on the view_cart, begin_checkout and purchase payloads. It is the standard basket-size segmentation for comparing cart abandonment, checkout completion and order mix across small and large baskets, and it deliberately excludes order value, which is governed by Average Order Value.
 
 Category: Conversion
 
@@ -354,6 +354,10 @@ AEP Query Service SQL: |
     FROM aep_web_experience_event_dataset
     WHERE timestamp >= date_sub(current_date(), 28)
       AND timestamp < current_date()
+      -- Internal / QA / test traffic flag: replace _yourtenant with your tenant namespace
+      AND COALESCE(_yourtenant.trafficType, '') NOT IN ('internal', 'qa', 'test')
+      -- Known-bot user agents
+      AND NOT (LOWER(COALESCE(environment.browserDetails.userAgent, '')) RLIKE 'bot|crawler|spider|headless')
   ),
   cart_events AS (
     SELECT
@@ -468,6 +472,7 @@ AEP Query Service SQL: |
     COALESCE(s.session_cart_size_band_sort, 99) AS session_cart_size_band_sort,
     COUNT(*) AS events,
     COUNT(DISTINCT b.ecid) AS visitors,
+    COUNT(DISTINCT b.session_key) AS sessions,
     COUNT(DISTINCT b.transaction_id) AS orders,
     SUM(b.unit_count) AS units,
     CAST(COUNT(*) AS DOUBLE) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY b.event_date, b.event_name), 0) AS share_of_events
@@ -490,7 +495,7 @@ Calculation Notes: |
 Business Use Case: |
   1️⃣ Merchandising reviews the weekly purchase mix by Cart Size Band; when the 1 band exceeds its agreed share of orders for two consecutive weeks, the team launches multi-buy offers (e.g. buy 2, save 10%) and adds complementary-product modules to the cart page, then tracks movement of orders into the 2 and 3-4 bands.
   2️⃣ The Product team owning checkout compares checkout completion rate by band every sprint; when abandonment in the 5-9 or 10+ bands rises more than 3 percentage points against the prior four-week baseline, they audit quantity-edit controls, per-item stock limits and inventory reservation errors for large baskets before the next release.
-  3️⃣ CRM Marketing branches cart-abandonment journeys on the band of the abandoned cart: 1-unit carts receive a single-product reminder with reviews, 3-4 and larger carts receive a saved-basket link with a free-shipping threshold message, and campaign recovery rate is reported per band.
+  3️⃣ CRM Marketing branches cart-abandonment journeys on the band of the abandoned cart: 1-unit carts receive a single-product reminder with reviews, 2-unit and larger carts (2, 3-4, 5-9 and 10+) receive a saved-basket link with a free-shipping threshold message, and campaign recovery rate is reported per band.
   4️⃣ Customer Service and fulfilment planners use the forecast share of 5-9 and 10+ orders ahead of peak trading to plan packing capacity, carton mix and split-shipment messaging, raising staffing requests when the large-basket share exceeds last season's peak.
 
 Dependencies:
@@ -509,7 +514,7 @@ Segment Eligibility: |
 
 Related Dimensions: [item-category, device-category, traffic-source, customer-status, promotion-type, payment-method]
 
-Derived Dimensions: [single-item-vs-multi-item-order]
+Derived Dimensions: [number-of-shipments]
 
 Data Sensitivity: Internal
 
@@ -523,5 +528,5 @@ Created At: 2026-09-14T07:33:44.82+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-14T07:33:54.354+00:00
+Last Modified At: 2026-09-17T01:19:59.272+00:00
 
