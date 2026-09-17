@@ -1,0 +1,653 @@
+# Dimension: Coupon Code
+# Generated: 2026-09-17T03:42:10.498Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Coupon Code
+
+Description: |
+  Coupon Code is the exact promotional, discount or voucher code a customer successfully applied, captured at order level (GA4 Order coupon, the purchase `coupon` parameter) and at item level (GA4 Item coupon, `items[].coupon`), with in-store redemptions joined from POS on transaction_id. It lets Marketing, Merchandising and Finance break down orders, revenue and checkout behaviour by the specific code redeemed across web, app and store. The kind of offer is covered by the Promotion Type dimension, and internal promotion banners and discount values by the GA4 standard fields item promotion name and item discount amount, so none of these are part of this dimension.
+
+Category: Monetization
+
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "transaction": {
+        "transactionID": "T-100482",
+        "total": {
+          "basePrice": 142.5,
+          "voucherCode": "SPRING20,FREESHIP",
+          "voucherDiscount": 28.5,
+          "currency": "USD",
+          "shipping": 0,
+          "transactionTotal": 114
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU-24817",
+              "productName": "Merino Crew Sweater"
+            },
+            "category": {
+              "primaryCategory": "Apparel"
+            },
+            "quantity": 1,
+            "price": {
+              "basePrice": 89.5,
+              "voucherCode": "KNIT15",
+              "voucherDiscount": 13.43,
+              "currency": "USD"
+            }
+          },
+          {
+            "productInfo": {
+              "productID": "SKU-30112",
+              "productName": "Wool Beanie"
+            },
+            "category": {
+              "primaryCategory": "Accessories"
+            },
+            "quantity": 1,
+            "price": {
+              "basePrice": 53,
+              "voucherCode": "",
+              "voucherDiscount": 0,
+              "currency": "USD"
+            }
+          }
+        ],
+        "attributes": {
+          "transactionChannel": "Web"
+        }
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T-100482",
+      "value": 114,
+      "currency": "USD",
+      "shipping": 0,
+      "tax": 0,
+      "coupon": "SPRING20,FREESHIP",
+      "items": [
+        {
+          "item_id": "SKU-24817",
+          "item_name": "Merino Crew Sweater",
+          "item_category": "Apparel",
+          "price": 76.07,
+          "discount": 13.43,
+          "quantity": 1,
+          "coupon": "KNIT15"
+        },
+        {
+          "item_id": "SKU-30112",
+          "item_name": "Wool Beanie",
+          "item_category": "Accessories",
+          "price": 53,
+          "discount": 0,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "funnelStep": "purchase",
+      "transactionChannel": "Web"
+    },
+    "transaction": {
+      "purchaseID": "T-100482",
+      "currencyCode": "USD",
+      "priceTotal": 114,
+      "discountAmount": 28.5,
+      "couponCode": "SPRING20,FREESHIP",
+      "products": [
+        {
+          "SKU": "SKU-24817",
+          "name": "Merino Crew Sweater",
+          "category": "Apparel",
+          "quantity": 1,
+          "priceTotal": 76.07,
+          "discountAmount": 13.43,
+          "couponCode": "KNIT15"
+        },
+        {
+          "SKU": "SKU-30112",
+          "name": "Wool Beanie",
+          "category": "Accessories",
+          "quantity": 1,
+          "priceTotal": 53,
+          "discountAmount": 0,
+          "couponCode": null
+        }
+      ]
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100482",
+        "currencyCode": "USD",
+        "priceTotal": 114,
+        "discountAmount": 28.5
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-24817",
+        "name": "Merino Crew Sweater",
+        "quantity": 1,
+        "priceTotal": 76.07,
+        "discountAmount": 13.43,
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "eVar31": "KNIT15"
+              }
+            }
+          }
+        }
+      },
+      {
+        "SKU": "SKU-30112",
+        "name": "Wool Beanie",
+        "quantity": 1,
+        "priceTotal": 53,
+        "discountAmount": 0
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar30": "SPRING20,FREESHIP"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Coupon Code by scope: order-level purchase coupon (event_params.coupon) and item-level items.coupon,
+  -- normalised with UPPER(TRIM()), stacked codes split, settled OMS/POS code preferred on a shared transaction_id.
+  -- Settled single-use codes are mapped to their campaign/batch prefix before splitting and exclusion; raw codes stay in the governed order tables.
+  -- Revenue is gross on the order date: settled gross (OMS/POS) where a settled row exists, else web gross purchase_revenue.
+  -- Refunds are not netted here; report them by refund date from the refund/return records.
+  WITH coupon_exclusions AS (
+    SELECT DISTINCT UPPER(TRIM(coupon_code)) AS coupon_code
+    FROM `your-project.reference.coupon_code_exclusions`
+    WHERE coupon_code IS NOT NULL
+  ),
+  coupon_code_batch_map AS (
+    SELECT UPPER(TRIM(raw_code)) AS raw_code, ANY_VALUE(UPPER(TRIM(coupon_code))) AS coupon_code
+    FROM `your-project.reference.coupon_code_batch_map`
+    WHERE raw_code IS NOT NULL
+      AND coupon_code IS NOT NULL
+    GROUP BY 1
+  ),
+  purchase_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS order_date,
+      e.ecommerce.transaction_id AS transaction_id,
+      e.ecommerce.purchase_revenue AS order_revenue,
+      e.device.category AS device_category,
+      CASE WHEN e.platform = 'WEB' THEN 'Web' ELSE 'App' END AS digital_channel,
+      (SELECT MAX(IF(ep.key = 'coupon', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS order_coupon_raw,
+      e.items
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                              AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name = 'purchase'
+      AND e.ecommerce.transaction_id IS NOT NULL
+      AND e.ecommerce.transaction_id NOT IN ('', '(not set)')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY e.ecommerce.transaction_id ORDER BY e.event_timestamp DESC) = 1
+  ),
+  settled_orders AS (
+    SELECT
+      so.transaction_id,
+      ANY_VALUE(so.order_date) AS order_date,
+      ANY_VALUE(so.transaction_channel) AS transaction_channel,
+      ANY_VALUE(so.gross_order_revenue) AS gross_order_revenue,
+      STRING_AGG(COALESCE(m.coupon_code, UPPER(TRIM(raw_code))), ',' ORDER BY code_pos) AS settled_order_coupon_raw
+    FROM `your-project.oms.settled_orders` AS so
+    LEFT JOIN UNNEST(SPLIT(COALESCE(so.order_coupon_code, ''), ',')) AS raw_code WITH OFFSET AS code_pos
+    LEFT JOIN coupon_code_batch_map AS m
+      ON UPPER(TRIM(raw_code)) = m.raw_code
+    WHERE so.order_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+    GROUP BY so.transaction_id
+  ),
+  orders AS (
+    SELECT
+      COALESCE(s.transaction_id, p.transaction_id) AS transaction_id,
+      COALESCE(s.order_date, p.order_date) AS order_date,
+      COALESCE(s.transaction_channel, p.digital_channel, '(not set)') AS transaction_channel,
+      COALESCE(p.device_category, '(not set)') AS device_category,
+      COALESCE(s.gross_order_revenue, p.order_revenue) AS order_revenue,
+      IF(s.transaction_id IS NOT NULL, s.settled_order_coupon_raw, p.order_coupon_raw) AS order_coupon_raw,
+      p.items
+    FROM purchase_events AS p
+    FULL OUTER JOIN settled_orders AS s
+      ON p.transaction_id = s.transaction_id
+  ),
+  orders_clean AS (
+    SELECT
+      o.* EXCEPT (order_coupon_raw),
+      ARRAY(
+        SELECT code
+        FROM (
+          SELECT UPPER(TRIM(raw_code)) AS code, MIN(pos) AS first_pos
+          FROM UNNEST(SPLIT(COALESCE(o.order_coupon_raw, ''), ',')) AS raw_code WITH OFFSET AS pos
+          GROUP BY 1
+        )
+        WHERE code NOT IN ('', 'UNDEFINED', 'NULL', '(NOT SET)')
+          AND code NOT IN (SELECT coupon_code FROM coupon_exclusions)
+        ORDER BY first_pos
+      ) AS order_coupon_codes
+    FROM orders AS o
+  ),
+  item_lines AS (
+    SELECT
+      o.order_date,
+      o.transaction_channel,
+      o.device_category,
+      o.transaction_id,
+      line_pos,
+      it.quantity,
+      it.item_revenue,
+      ARRAY(
+        SELECT code
+        FROM (
+          SELECT UPPER(TRIM(raw_code)) AS code, MIN(pos) AS first_pos
+          FROM UNNEST(SPLIT(COALESCE(it.coupon, ''), ',')) AS raw_code WITH OFFSET AS pos
+          GROUP BY 1
+        )
+        WHERE code NOT IN ('', 'UNDEFINED', 'NULL', '(NOT SET)')
+          AND code NOT IN (SELECT coupon_code FROM coupon_exclusions)
+        ORDER BY first_pos
+      ) AS item_coupon_codes
+    FROM orders_clean AS o
+    CROSS JOIN UNNEST(o.items) AS it WITH OFFSET AS line_pos
+  ),
+  order_scope AS (
+    SELECT
+      o.order_date,
+      o.transaction_channel,
+      o.device_category,
+      'Order' AS coupon_scope,
+      COALESCE(order_code, '(not set)') AS coupon_code,
+      COUNT(DISTINCT o.transaction_id) AS orders,
+      SUM(o.order_revenue) AS revenue,
+      CAST(NULL AS INT64) AS items_purchased
+    FROM orders_clean AS o
+    LEFT JOIN UNNEST(o.order_coupon_codes) AS order_code
+    GROUP BY 1, 2, 3, 4, 5
+  ),
+  item_scope AS (
+    SELECT
+      l.order_date,
+      l.transaction_channel,
+      l.device_category,
+      'Item' AS coupon_scope,
+      COALESCE(item_code, '(not set)') AS coupon_code,
+      COUNT(DISTINCT l.transaction_id) AS orders,
+      SUM(l.item_revenue) AS revenue,
+      SUM(l.quantity) AS items_purchased
+    FROM item_lines AS l
+    LEFT JOIN UNNEST(l.item_coupon_codes) AS item_code
+    GROUP BY 1, 2, 3, 4, 5
+  ),
+  order_base AS (
+    SELECT order_date, transaction_channel, device_category, COUNT(DISTINCT transaction_id) AS all_orders
+    FROM orders_clean
+    GROUP BY 1, 2, 3
+  ),
+  item_base AS (
+    SELECT order_date, transaction_channel, device_category, SUM(quantity) AS all_items_purchased
+    FROM item_lines
+    GROUP BY 1, 2, 3
+  )
+  SELECT
+    s.order_date,
+    s.transaction_channel,
+    s.device_category,
+    s.coupon_scope,
+    s.coupon_code,
+    s.orders,
+    s.revenue,
+    s.items_purchased,
+    IF(s.coupon_scope = 'Order',
+       SAFE_DIVIDE(s.orders, ob.all_orders),
+       SAFE_DIVIDE(s.items_purchased, ib.all_items_purchased)) AS share_of_scope_base
+  FROM (
+    SELECT * FROM order_scope
+    UNION ALL
+    SELECT * FROM item_scope
+  ) AS s
+  LEFT JOIN order_base AS ob
+    ON s.order_date = ob.order_date
+   AND s.transaction_channel = ob.transaction_channel
+   AND s.device_category = ob.device_category
+  LEFT JOIN item_base AS ib
+    ON s.order_date = ib.order_date
+   AND s.transaction_channel = ib.transaction_channel
+   AND s.device_category = ib.device_category
+  ORDER BY s.order_date DESC, s.coupon_scope, s.orders DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Coupon Code by scope: order-level eVar30 and item-level productListItems[].eVar31 on commerce.purchases,
+  -- normalised with UPPER(TRIM()), stacked codes split, settled OMS/POS code preferred on a shared purchaseID.
+  -- Settled single-use codes are mapped to their campaign/batch prefix before splitting and exclusion; raw codes stay in the governed order tables.
+  -- Revenue is gross on the order date: settled gross (OMS/POS) where a settled row exists, else web gross priceTotal.
+  -- Refunds are not netted here; report them by refund date from the refund/return records.
+  WITH coupon_exclusions AS (
+    SELECT DISTINCT UPPER(TRIM(coupon_code)) AS coupon_code
+    FROM aep_coupon_code_exclusions
+    WHERE coupon_code IS NOT NULL
+  ),
+  coupon_code_batch_map AS (
+    SELECT UPPER(TRIM(raw_code)) AS raw_code, MAX(UPPER(TRIM(coupon_code))) AS coupon_code
+    FROM aep_coupon_code_batch_map
+    WHERE raw_code IS NOT NULL
+      AND coupon_code IS NOT NULL
+    GROUP BY UPPER(TRIM(raw_code))
+  ),
+  purchase_events AS (
+    SELECT
+      to_date(e.timestamp) AS order_date,
+      e.commerce.order.purchaseID AS transaction_id,
+      e.commerce.order.priceTotal AS order_revenue,
+      e.device.type AS device_category,
+      CASE WHEN e.environment.type = 'application' THEN 'App' ELSE 'Web' END AS digital_channel,
+      e._experience.analytics.customDimensions.eVars.eVar30 AS order_coupon_raw,
+      e.productListItems AS product_list_items,
+      ROW_NUMBER() OVER (PARTITION BY e.commerce.order.purchaseID ORDER BY e.timestamp DESC) AS rn
+    FROM aep_web_events_dataset e
+    WHERE e.eventType = 'commerce.purchases'
+      AND e.commerce.order.purchaseID IS NOT NULL
+      AND e.commerce.order.purchaseID NOT IN ('', '(not set)')
+      AND to_date(e.timestamp) BETWEEN date_sub(current_date(), 30) AND date_sub(current_date(), 1)
+  ),
+  settled_code_split AS (
+    SELECT
+      b.transaction_id,
+      b.order_date,
+      b.transaction_channel,
+      b.gross_order_revenue,
+      c.code_pos,
+      UPPER(TRIM(c.raw_code)) AS code_norm
+    FROM aep_backend_dataset b
+    LATERAL VIEW OUTER posexplode(split(COALESCE(b.order_coupon_code, ''), ',')) c AS code_pos, raw_code
+    WHERE b.order_date BETWEEN date_sub(current_date(), 30) AND date_sub(current_date(), 1)
+  ),
+  settled_code_mapped AS (
+    SELECT
+      r.transaction_id,
+      r.order_date,
+      r.transaction_channel,
+      r.gross_order_revenue,
+      r.code_pos,
+      COALESCE(m.coupon_code, r.code_norm) AS mapped_code
+    FROM settled_code_split r
+    LEFT JOIN coupon_code_batch_map m
+      ON r.code_norm = m.raw_code
+  ),
+  settled_orders AS (
+    SELECT
+      transaction_id,
+      order_date,
+      transaction_channel,
+      gross_order_revenue,
+      concat_ws(',', transform(array_sort(collect_list(struct(code_pos, mapped_code))), x -> x.mapped_code)) AS settled_order_coupon_raw
+    FROM settled_code_mapped
+    GROUP BY transaction_id, order_date, transaction_channel, gross_order_revenue
+  ),
+  orders AS (
+    SELECT
+      COALESCE(s.transaction_id, p.transaction_id) AS transaction_id,
+      COALESCE(s.order_date, p.order_date) AS order_date,
+      COALESCE(s.transaction_channel, p.digital_channel, '(not set)') AS transaction_channel,
+      COALESCE(p.device_category, '(not set)') AS device_category,
+      COALESCE(s.gross_order_revenue, p.order_revenue) AS order_revenue,
+      CASE WHEN s.transaction_id IS NOT NULL THEN s.settled_order_coupon_raw ELSE p.order_coupon_raw END AS order_coupon_raw,
+      p.product_list_items
+    FROM (SELECT * FROM purchase_events WHERE rn = 1) p
+    FULL OUTER JOIN settled_orders s
+      ON p.transaction_id = s.transaction_id
+  ),
+  order_code_split AS (
+    SELECT
+      o.transaction_id,
+      o.order_date,
+      o.transaction_channel,
+      o.device_category,
+      o.order_revenue,
+      UPPER(TRIM(c.raw_code)) AS code_norm
+    FROM orders o
+    LATERAL VIEW OUTER explode(split(COALESCE(o.order_coupon_raw, ''), ',')) c AS raw_code
+  ),
+  order_code_clean AS (
+    SELECT
+      r.transaction_id,
+      r.order_date,
+      r.transaction_channel,
+      r.device_category,
+      r.order_revenue,
+      CASE WHEN r.code_norm IN ('', 'UNDEFINED', 'NULL', '(NOT SET)') OR x.coupon_code IS NOT NULL
+           THEN NULL ELSE r.code_norm END AS coupon_code
+    FROM order_code_split r
+    LEFT JOIN coupon_exclusions x
+      ON r.code_norm = x.coupon_code
+  ),
+  order_codes AS (
+    SELECT DISTINCT transaction_id, order_date, transaction_channel, device_category, order_revenue, coupon_code
+    FROM (
+      SELECT
+        c.*,
+        MAX(CASE WHEN c.coupon_code IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY c.transaction_id) AS has_valid_code
+      FROM order_code_clean c
+    ) t
+    WHERE coupon_code IS NOT NULL OR has_valid_code = 0
+  ),
+  item_lines AS (
+    SELECT
+      o.transaction_id,
+      o.order_date,
+      o.transaction_channel,
+      o.device_category,
+      i.line_pos,
+      i.pli.quantity AS quantity,
+      i.pli.priceTotal AS item_revenue,
+      i.pli._experience.analytics.customDimensions.eVars.eVar31 AS item_coupon_raw
+    FROM orders o
+    LATERAL VIEW posexplode(o.product_list_items) i AS line_pos, pli
+  ),
+  item_code_split AS (
+    SELECT
+      l.transaction_id,
+      l.order_date,
+      l.transaction_channel,
+      l.device_category,
+      l.line_pos,
+      l.quantity,
+      l.item_revenue,
+      UPPER(TRIM(c.raw_code)) AS code_norm
+    FROM item_lines l
+    LATERAL VIEW OUTER explode(split(COALESCE(l.item_coupon_raw, ''), ',')) c AS raw_code
+  ),
+  item_code_clean AS (
+    SELECT
+      r.transaction_id,
+      r.order_date,
+      r.transaction_channel,
+      r.device_category,
+      r.line_pos,
+      r.quantity,
+      r.item_revenue,
+      CASE WHEN r.code_norm IN ('', 'UNDEFINED', 'NULL', '(NOT SET)') OR x.coupon_code IS NOT NULL
+           THEN NULL ELSE r.code_norm END AS coupon_code
+    FROM item_code_split r
+    LEFT JOIN coupon_exclusions x
+      ON r.code_norm = x.coupon_code
+  ),
+  item_codes AS (
+    SELECT DISTINCT transaction_id, line_pos, order_date, transaction_channel, device_category, quantity, item_revenue, coupon_code
+    FROM (
+      SELECT
+        c.*,
+        MAX(CASE WHEN c.coupon_code IS NOT NULL THEN 1 ELSE 0 END) OVER (PARTITION BY c.transaction_id, c.line_pos) AS has_valid_code
+      FROM item_code_clean c
+    ) t
+    WHERE coupon_code IS NOT NULL OR has_valid_code = 0
+  ),
+  order_scope AS (
+    SELECT
+      order_date,
+      transaction_channel,
+      device_category,
+      'Order' AS coupon_scope,
+      COALESCE(coupon_code, '(not set)') AS coupon_code,
+      COUNT(DISTINCT transaction_id) AS orders,
+      SUM(order_revenue) AS revenue,
+      CAST(NULL AS BIGINT) AS items_purchased
+    FROM order_codes
+    GROUP BY order_date, transaction_channel, device_category, COALESCE(coupon_code, '(not set)')
+  ),
+  item_scope AS (
+    SELECT
+      order_date,
+      transaction_channel,
+      device_category,
+      'Item' AS coupon_scope,
+      COALESCE(coupon_code, '(not set)') AS coupon_code,
+      COUNT(DISTINCT transaction_id) AS orders,
+      SUM(item_revenue) AS revenue,
+      CAST(SUM(quantity) AS BIGINT) AS items_purchased
+    FROM item_codes
+    GROUP BY order_date, transaction_channel, device_category, COALESCE(coupon_code, '(not set)')
+  ),
+  order_base AS (
+    SELECT order_date, transaction_channel, device_category, COUNT(DISTINCT transaction_id) AS all_orders
+    FROM orders
+    GROUP BY order_date, transaction_channel, device_category
+  ),
+  item_base AS (
+    SELECT order_date, transaction_channel, device_category, CAST(SUM(quantity) AS BIGINT) AS all_items_purchased
+    FROM item_lines
+    GROUP BY order_date, transaction_channel, device_category
+  )
+  SELECT
+    s.order_date,
+    s.transaction_channel,
+    s.device_category,
+    s.coupon_scope,
+    s.coupon_code,
+    s.orders,
+    s.revenue,
+    s.items_purchased,
+    CASE WHEN s.coupon_scope = 'Order'
+         THEN CAST(s.orders AS DOUBLE) / NULLIF(ob.all_orders, 0)
+         ELSE CAST(s.items_purchased AS DOUBLE) / NULLIF(ib.all_items_purchased, 0)
+    END AS share_of_scope_base
+  FROM (
+    SELECT * FROM order_scope
+    UNION ALL
+    SELECT * FROM item_scope
+  ) s
+  LEFT JOIN order_base ob
+    ON s.order_date = ob.order_date
+   AND s.transaction_channel = ob.transaction_channel
+   AND s.device_category = ob.device_category
+  LEFT JOIN item_base ib
+    ON s.order_date = ib.order_date
+   AND s.transaction_channel = ib.transaction_channel
+   AND s.device_category = ib.device_category
+  ORDER BY s.order_date DESC, s.coupon_scope, s.orders DESC;
+
+Calculation Notes: |
+  1️⃣ Normalisation: the reported value is UPPER(TRIM(code)). Commerce platforms (Shopify, Adobe Commerce, Salesforce Commerce) match codes case-insensitively, so 'save10' and 'SAVE10' are one row. Empty strings and the literals 'undefined', 'null' and '(not set)' become NULL and show as (not set); they never count as a coupon. The normalised value matches the Adobe Commerce Reports > Sales > Coupons report for the same period only after the batch-prefix mapping and the exclusion list (see 7️⃣) have been applied to the Adobe Commerce figures.
+  2️⃣ Order vs item level: Order coupon comes from the event-level `coupon` parameter on purchase and Item coupon from `items[].coupon`, and the two are never coalesced. An order-level code is not copied onto every item, and an item-level code is not promoted to the order. Break Order coupon down by order metrics (transactions, purchase revenue) and Item coupon by item metrics (item revenue, items purchased). Mixing scopes over-attributes revenue.
+  3️⃣ Stacked codes: GA4 takes one string per scope, so orders with several codes send a comma-delimited list in the order the codes were applied. Split the list into one row per code for code-level reporting. Count orders as COUNT(DISTINCT transaction_id) and never sum order revenue across the split rows, because a two-code order would count twice. Also keep the unsplit string as the code combination for stacking analysis.
+  4️⃣ Accepted codes only: the value is filled only after the platform has validated the code and applied the price adjustment. Invalid, expired, below-minimum-spend and ineligible-item attempts are excluded. So are codes entered on begin_checkout or add_payment_info and then removed before the order was placed. The authoritative value is the one on the final purchase event, or on the settled order record for offline orders.
+  5️⃣ Timing and persistence: the code is event-scoped and belongs only to the transaction it was redeemed on. It is not carried forward across sessions or onto the user's later orders. Refunds and returns keep the original code (the refund event and the OMS return record carry the original transaction_id), so refunds are attributed to the original code in the period the refund is processed. The reference queries report gross order and item revenue on the order date only (the settled gross amount where a settled OMS/POS row exists, otherwise the web gross amount) and never net refunds into that row, so the order date is not restated. Net revenue per code is that gross figure less refunds taken separately from the refund/return records by refund date.
+  6️⃣ Omnichannel stitching: store redemptions come from the POS transaction-discount lines and join to digital orders on transaction_id. This covers BOPIS, endless-aisle and store-assisted orders. When a web purchase and a POS or OMS record share a transaction_id, count the order once and take the settled back-office code, since it reflects cashier overrides and customer-service adjustments made after checkout. Log web-vs-settled mismatches for the monthly reconciliation. The reconciliation compares mapped values: settled single-use codes are first mapped to their campaign or batch prefix (see 7️⃣), so they line up with the prefix collected on the web. Store-only receipts with no digital counterpart keep their POS code and carry Transaction Channel = Store.
+  7️⃣ Cardinality, privacy and exclusions: single-use codes (referral, win-back, customer-service goodwill batches) can make this dimension high-cardinality and push GA4 standard reports into the (other) row. They can also work as a pseudonymous key back to one customer. Map them to their parent campaign or batch prefix before collection and keep the raw unique code only in the governed order tables. Employee discount, QA/test and marketplace-partner reconciliation codes are removed through a maintained exclusion list. Promotion banners (select_promotion / view_promotion), offer types and discount values are out of scope.
+
+Business Use Case: |
+  1️⃣ Affiliate and Performance Marketing managers review Coupon Code × session source/medium every week. When a code issued to a single affiliate or influencer starts showing orders from organic, direct or coupon-aggregator traffic, they deactivate or rotate the code in the commerce platform and hold back commission on the leaked orders.
+  2️⃣ The Merchandising promotions team compares each code's orders, average order value and return-adjusted item revenue with the non-coupon baseline for the same weeks once the code expires. They then decide whether to rerun the offer, raise its minimum spend or retire it from the promotional calendar.
+  3️⃣ At month-end close, Finance and Revenue Management match orders and net revenue per code in the digital record against the settled OMS/POS records to book the promotional markdown accrual. Any code with a variance above the agreed tolerance goes back to Marketing for correction before the numbers are signed off.
+  4️⃣ The CRM and Lifecycle Marketing team splits redemptions of their email and SMS codes by Transaction Channel. When a large share of a campaign's codes are redeemed in store, they credit those store sales to the campaign and move the next send's creative and audience toward store-proximate customers.
+
+Dependencies:
+  Events: [purchase]
+  Dimensions: [transaction-channel]
+
+Source Data: Digital Analytics (GA4) + POS / Order Management (joined on transaction_id)
+
+Report Attributes: |
+  Transaction Channel; Session Source / Medium; Device Category; Item Category; New vs Returning Customer; Store ID; Order Date
+
+Dashboard Usage: [Promotion Performance Dashboard, Checkout Funnel Dashboard, Affiliate Code Leakage Monitor, Monthly Promotional Markdown Reconciliation]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [promotion-type, transaction-channel, payment-method, traffic-source, customer-loyalty-tier]
+
+Derived Dimensions: [promotion-type]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-14T07:34:29.968+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-17T03:42:10.129+00:00
+
