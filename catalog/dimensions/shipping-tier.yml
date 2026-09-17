@@ -1,12 +1,12 @@
 # Dimension: Shipping Tier
-# Generated: 2026-09-14T07:34:53.245Z
+# Generated: 2026-09-17T03:18:35.226Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Shipping Tier
 
 Description: |
-  Shipping Tier is the delivery option the customer selects at checkout, recorded exactly as it was presented to them (for example Standard, Express, Next Day or Free Shipping), captured as the GA4 shipping_tier parameter on add_shipping_info and persisted onto the purchase. It lets checkout, merchandising and finance teams break down funnel progression, order value and shipping economics by the delivery promise the customer bought, independently of the carrier, service level or transport mode later used to fulfil the order.
+  Shipping Tier is the delivery option the customer selects at checkout, recorded exactly as it was presented to them (for example Standard, Express, Next Day or Free Shipping), captured as the GA4 shipping_tier parameter on add_shipping_info and, where implemented, also sent as a custom shipping_tier parameter on purchase; order-level reporting uses the purchase value when present and otherwise the last add_shipping_info selection in the same session before the purchase. It lets checkout, merchandising and finance teams break down funnel progression, order value and shipping economics by the delivery promise the customer bought, independently of the carrier, service level or transport mode later used to fulfil the order.
 
 Category: Conversion
 
@@ -53,18 +53,6 @@ W3 Data Layer: |
         "attributes": {
           "shippingTier": "Express (2-3 business days)",
           "checkoutStep": "shipping"
-        }
-      },
-      "transaction": {
-        "transactionID": "T-100482",
-        "total": {
-          "currency": "USD",
-          "basePrice": 129.98,
-          "voucherCode": "SUMMER10",
-          "voucherDiscount": 13,
-          "shipping": 12.95,
-          "shippingMethod": "Express (2-3 business days)",
-          "transactionTotal": 129.93
         }
       },
       "event": [
@@ -401,16 +389,16 @@ Calculation Notes: |
   4️⃣ Normalisation: labels are trimmed, case-folded and mapped through a governed lookup to a canonical tier code, so localised labels, date-bearing labels ('Express (2-3 business days)', 'Arrives by Friday') and A/B-tested wording roll up to one value (standard, expedited, express, next_day, same_day, free; the reference SQL applies this as a keyword CASE baseline). The raw presented label is kept in a separate field; unmapped labels resolve to '(other)' and are reviewed weekly rather than being set to null.
   5️⃣ Not applicable: orders without a ship-to-customer leg (digital goods, e-gift cards, buy online pick up in store, ship-to-store, in-store POS sales) carry '(not applicable)' and are excluded from tier-share denominators. Ship versus pickup is analysed with Fulfillment Strategy, not this dimension. In GA4 and AEP event data this is detectable only when the presented label names pickup, store or digital delivery; orders that skip shipping selection resolve to '(not set)' until joined to the order record (OMS).
   6️⃣ Split shipments: when one order holds shipments with different tiers (multiple addresses, or backordered lines sent at a different speed), the order-level value is 'multiple' and line-level analysis uses the tier on each shipment. Tier is never inferred from whichever shipment dispatched first. Web events carry one tier per order, so 'multiple' requires the OMS shipment-line join and is not produced by the event-level SQL.
-  7️⃣ Boundaries: the dimension holds the customer's choice only. Carrier service level, transport mode and carrier are separate dimensions, and shipping charges belong to the Shipping Revenue metric. A threshold promotion that zeroes the Standard charge leaves the tier as presented, and post-purchase upgrades or carrier substitutions made by customer service or the warehouse do not overwrite the original value.
+  7️⃣ Boundaries: the dimension holds the customer's choice only. Carrier service level, transport mode and carrier are separate dimensions, and shipping charges (GA4 ecommerce shipping value / XDM shipping.shippingAmount) are measured separately, not held in this dimension. A threshold promotion that zeroes the Standard charge leaves the tier as presented, and post-purchase upgrades or carrier substitutions made by customer service or the warehouse do not overwrite the original value.
 
 Business Use Case: |
   1️⃣ Checkout Product Manager: when the add_shipping_info to add_payment_info progression for one tier drops more than 3 points below its trailing 4-week baseline, run an A/B test on default option, option order and delivery-date wording for that tier, and roll back any release that shipped the change.
-  2️⃣ Finance (e-commerce P&L): at the monthly margin review, when Free Shipping and Express share of orders rises while Shipping Revenue per order falls, model contribution margin by tier and recommend a revised free-shipping threshold or Express price point to the pricing committee.
+  2️⃣ Finance (e-commerce P&L): at the monthly margin review, when Free Shipping and Express share of orders rises while shipping charges (GA4 ecommerce shipping value / XDM shipping.shippingAmount) per order fall, model contribution margin by tier and recommend a revised free-shipping threshold or Express price point to the pricing committee.
   3️⃣ Merchandising and Marketing: ahead of peak-season carrier cutoffs, compare Next Day and Express share and average order value by tier against the prior year, then schedule cutoff-date banners and gift-messaging promotions for the categories where premium-tier demand concentrates.
   4️⃣ Customer Service leadership: when 'where is my order' contacts per 100 orders for a premium tier exceed the Standard rate by an agreed margin, escalate to Operations with the affected tier and region so delivery-promise copy or cutoff times are corrected at checkout.
 
 Dependencies:
-  Events: [purchase]
+  Events: [add-shipping-info, purchase]
 
 Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
 
@@ -424,7 +412,7 @@ Segment Eligibility: |
 
 Related Dimensions: [service-level, shipment-mode, carrier, fulfillment-strategy, payment-method, delivery-region]
 
-Derived Dimensions: [free-shipping-flag, expedited-shipping-flag]
+Derived Dimensions: [delivery-promise-date]
 
 Data Sensitivity: Internal
 
@@ -438,5 +426,5 @@ Created At: 2026-09-14T07:34:44.747+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-14T07:34:53.005+00:00
+Last Modified At: 2026-09-17T03:18:34.688+00:00
 
