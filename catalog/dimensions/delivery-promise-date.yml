@@ -1,5 +1,5 @@
 # Dimension: Delivery Promise Date
-# Generated: 2026-09-14T18:46:13.230Z
+# Generated: 2026-09-17T23:45:18.892Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -115,7 +115,7 @@ GA4 Data Layer: |
     "ecommerce": {
       "transaction_id": "T-100482",
       "currency": "USD",
-      "value": 116.98,
+      "value": 129.93,
       "shipping": 12.95,
       "tax": 0,
       "coupon": "SUMMER10",
@@ -527,13 +527,13 @@ AEP Query Service SQL: |
   ORDER BY lb.delivery_promise_date, delivery_promise_window;
 
 Calculation Notes: |
-  1️⃣ Capture and precedence: delivery_promise_date is the promise presented for the selected delivery option when add_shipping_info fires and the promise sent on purchase; re-selections supersede earlier add_shipping_info values. The value stored on the order at placement is canonical when event and order disagree (Shopify delivery date promise, Salesforce Order Management delivery group, Adobe Commerce shipping estimate persisted to the order; OMS promised_delivery_date), which also covers wallet express checkouts (Apple Pay, Google Pay, Shop Pay, PayPal) where add_shipping_info frequently never fires.
+  1️⃣ Capture and precedence: delivery_promise_date is the promise presented for the selected delivery option when add_shipping_info fires and the promise sent on purchase; re-selections supersede earlier add_shipping_info values. The value stored on the order at placement is canonical when event and order disagree (Shopify delivery date promise, Salesforce Order Management delivery group, Adobe Commerce shipping estimate persisted to the order; OMS promised_delivery_date), which also covers wallet express checkouts (Apple Pay, Google Pay, Shop Pay, PayPal) where add_shipping_info frequently never fires. In Adobe, the same _yourtenant.delivery fields (promiseDate, promiseEarliestDate, promiseLatestDate mapped to eVar43, eVar44, eVar45) are sent on the commerce.checkouts shipping-selection event as well as on commerce.purchases, which is what the AEP session fallback reads.
   2️⃣ Promise windows: when checkout presents a range ('Arrives Sep 17 to Sep 19'), both bounds are stored and delivery_promise_date equals the latest date, because that is the date after which the commitment is breached. No day bands are derived; where grouping is required the promise window itself (earliest date to latest date) is the grouping value. Checkouts that display only transit text ('3-5 business days') are resolved to calendar dates by the OMS at order placement using the order timestamp, node cutoff and carrier holiday calendar, and never by parsing the label in reporting.
   3️⃣ Revisions: the promise in force at purchase is immutable. Backorder re-promises, split-shipment re-promises and customer-service commitments are held in separate revised-promise fields with revision timestamp and reason, and the carrier's estimated delivery date from tracking scans is not a promise and must never overwrite this value. Shipment On-Time Delivery Rate is evaluated against the original promise; any revised-promise view is reported as a separately labelled secondary measure.
   4️⃣ Time zone and timing: the value is a destination-local calendar date, not a timestamp. Deriving it by truncating a UTC timestamp shifts late-evening promises by one day and is prohibited; comparison with actual delivery uses the destination-local delivered date from delivery-confirmation, inclusive of the promised date.
   5️⃣ Session and order resolution: event attribution follows the GA4 30-minute inactivity timeout. When purchase lands in a later session than the shipping selection, the promise is resolved by joining transaction_id to the order record; a promise from an abandoned checkout is never carried into a later order.
   6️⃣ Split shipments and nulls: the promise is held per delivery group or shipment; the order-level value is the latest promise across its shipped delivery groups, while shipment-level analysis uses each group's own date. Digital goods, e-gift cards, buy online pick up in store and ship-to-store orders carry '(not applicable)'; pre-orders and made-to-order items without a dated commitment carry '(not set)'. Both are excluded from the Shipment On-Time Delivery Rate population and tracked as promise coverage rather than defaulted to a date.
-  7️⃣ Boundaries: this is not the actual delivery date (delivery-confirmation event), not the elapsed order-to-delivery time (average-delivery-time metric) and not the delivery option or carrier service purchased (shipping-tier, service-level). A shipment is on time when its destination-local delivered date is on or before delivery_promise_date.
+  7️⃣ Boundaries: this is not the actual delivery date (delivery-confirmation event), not the elapsed order-to-delivery time (average-delivery-time metric) and not the delivery option or carrier service purchased (shipping-tier, service-level). A shipment is on time when its destination-local delivered date is on or before delivery_promise_date. Order totals reconcile across payloads: GA4 value, ACDL/XDM priceTotal and W3C transactionTotal are all the order total including shipping and tax after coupon (129.98 items - 13.00 SUMMER10 + 12.95 shipping + 0.00 tax = 129.93), with shipping and tax also sent separately.
 
 Business Use Case: |
   1️⃣ Fulfilment Operations lead: when weekly Shipment On-Time Delivery Rate against Delivery Promise Date for a fulfilment node, carrier and destination region drops below target, compare promised versus delivered date distributions for that lane and add handling days or move the order cutoff time in the promise calculation before the next weekly release.
@@ -542,8 +542,10 @@ Business Use Case: |
   4️⃣ E-commerce Marketing and Merchandising: ahead of peak gifting dates, set 'order by' deadlines on banners and product pages from the last order date whose promise window still ends before the holiday, and withdraw the deadline messaging for any delivery option whose on-time rate against promise fell below target in the prior peak.
 
 Dependencies:
-  Events: [purchase]
+  Events: [purchase, delivery-confirmation]
+  Metrics: [shipping-info-added]
   Dimensions: [shipping-tier]
+  KPIs: [shipment-on-time-delivery-rate]
 
 Source Data: Digital Analytics (GA4) + Order Management (Shopify / Salesforce Order Management / Adobe Commerce)
 
@@ -557,7 +559,7 @@ Segment Eligibility: |
 
 Related Dimensions: [shipping-tier, service-level, carrier, delivery-region, fulfillment-strategy]
 
-Derived Dimensions: [delivery-promise-window, delivery-timeliness-status]
+Derived Dimensions: [shipment-status, delivery-exception-type]
 
 Data Sensitivity: Internal
 
@@ -571,5 +573,5 @@ Created At: 2026-09-14T18:45:55.4+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-14T18:46:12.842+00:00
+Last Modified At: 2026-09-17T23:45:18.528+00:00
 
