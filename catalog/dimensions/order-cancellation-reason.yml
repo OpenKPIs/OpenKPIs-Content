@@ -1,12 +1,12 @@
 # Dimension: Order Cancellation Reason
-# Generated: 2026-09-14T18:47:03.428Z
+# Generated: 2026-09-17T23:47:32.899Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Order Cancellation Reason
 
 Description: |
-  Order Cancellation Reason is the normalised cause recorded when an e-commerce order, or an individual order line, is cancelled before it ships, mapped from the platform's native field (Shopify cancel_reason, Salesforce Commerce Cloud and OMS cancel codes, Adobe Commerce cancellation reason or comment) to six governed values: Customer Changed Mind, Inventory Unavailable, Fraud, Payment Declined, Staff Error and Other. It is the standard breakdown for Order Cancellation Rate, letting merchandising, customer service and finance teams separate demand-side cancellations from stock, risk and operational failures and act on each, while carrier-level cancellations, in-transit exceptions, post-delivery returns and subscription cancellations are governed by their own specs.
+  Order Cancellation Reason is the normalised cause recorded when an e-commerce order is cancelled before it ships, taken from the order-cancellation event's cancellation_reason codes (customer_changed_mind, duplicate_order, out_of_stock, fraud, payment_declined, address_unserviceable, order_edit, other) and the platform's native field (Shopify cancel_reason, Salesforce Commerce Cloud and OMS cancel codes, Adobe Commerce cancellation reason or comment), mapped to five governed values: Customer Changed Mind, Inventory Unavailable, Fraud, Payment Declined and Other (a Shopify staff cancellation is sent with the other code and reports as Other). It is the standard breakdown for order-cancellation analysis, letting merchandising, customer service and finance teams separate demand-side cancellations from stock, risk and operational failures and act on each, while carrier-level cancellations, in-transit exceptions, post-delivery returns and subscription cancellations are governed by their own specs.
 
 Category: Operations
 
@@ -50,7 +50,6 @@ W3 Data Layer: |
           "tax": 8.99,
           "refundType": "order_cancellation",
           "cancellationReason": "customer_changed_mind",
-          "cancellationReasonRaw": "customer",
           "cancelInitiator": "customer"
         },
         "item": [
@@ -66,10 +65,7 @@ W3 Data Layer: |
               "basePrice": 114.99,
               "currency": "USD"
             },
-            "quantity": 1,
-            "attributes": {
-              "cancellationReason": "customer_changed_mind"
-            }
+            "quantity": 1
           }
         ]
       },
@@ -88,7 +84,6 @@ W3 Data Layer: |
             "transactionID": "ORD-100482",
             "refundType": "order_cancellation",
             "cancellationReason": "customer_changed_mind",
-            "cancellationReasonRaw": "customer",
             "cancelInitiator": "customer"
           }
         }
@@ -111,14 +106,12 @@ GA4 Data Layer: |
           "item_name": "Trail Running Shoe",
           "item_category": "Footwear",
           "price": 114.99,
-          "quantity": 1,
-          "cancellation_reason": "customer_changed_mind"
+          "quantity": 1
         }
       ]
     },
     "refund_type": "order_cancellation",
     "cancellation_reason": "customer_changed_mind",
-    "cancellation_reason_raw": "customer",
     "cancel_initiator": "customer"
   }
 
@@ -138,7 +131,6 @@ Adobe Client Data Layer: |
       "shipping": 5.99,
       "refund_type": "order_cancellation",
       "cancellation_reason": "customer_changed_mind",
-      "cancellation_reason_raw": "customer",
       "cancel_initiator": "customer",
       "items": [
         {
@@ -146,8 +138,7 @@ Adobe Client Data Layer: |
           "item_name": "Trail Running Shoe",
           "item_category": "Footwear",
           "price": 114.99,
-          "quantity": 1,
-          "cancellation_reason": "customer_changed_mind"
+          "quantity": 1
         }
       ]
     }
@@ -186,7 +177,6 @@ XDM Mapping: |
       "orderCancellation": {
         "refundType": "order_cancellation",
         "cancellationReason": "customer_changed_mind",
-        "cancellationReasonRaw": "customer",
         "cancelInitiator": "customer"
       }
     },
@@ -247,7 +237,6 @@ Google Analytics SQL: |
          MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) AS transaction_id,
          MAX(IF(ep.key = 'refund_type', ep.value.string_value, NULL)) AS refund_type,
          MAX(IF(ep.key = 'cancellation_reason', ep.value.string_value, NULL)) AS cancellation_reason,
-         MAX(IF(ep.key = 'cancellation_reason_raw', ep.value.string_value, NULL)) AS cancellation_reason_raw,
          MAX(IF(ep.key = 'cancel_initiator', ep.value.string_value, NULL)) AS cancel_initiator
        FROM UNNEST(e.event_params) AS ep) AS p,
       e.items
@@ -262,7 +251,6 @@ Google Analytics SQL: |
       COALESCE(h.ecommerce_transaction_id, h.p.transaction_id) AS transaction_id,
       h.p.refund_type,
       h.p.cancellation_reason,
-      h.p.cancellation_reason_raw,
       h.p.cancel_initiator,
       h.items
     FROM refund_hits AS h
@@ -272,7 +260,6 @@ Google Analytics SQL: |
       r.transaction_id,
       r.event_timestamp,
       NULLIF(LOWER(TRIM(r.cancellation_reason)), '') AS reason_code,
-      NULLIF(LOWER(TRIM(r.cancellation_reason_raw)), '') AS reason_raw_code,
       NULLIF(LOWER(TRIM(r.cancel_initiator)), '') AS initiator_code,
       COALESCE(ARRAY_LENGTH(r.items), 0) = 0 AS is_whole_order_action,
       r.items
@@ -281,15 +268,11 @@ Google Analytics SQL: |
       ON o.transaction_id = r.transaction_id
     WHERE LOWER(TRIM(r.refund_type)) = 'order_cancellation'
   ),
-  -- Line grain: the reason on each cancelled line (item-scoped cancellation_reason, else the hit-level value); a hit without items cancels every purchased line
+  -- Cancelled units and value per cancellation action, attributed to the action-level (order-level) cancellation_reason; a hit without items cancels every purchased line
   cancelled_lines AS (
     SELECT
       c.transaction_id,
-      COALESCE(
-        NULLIF(LOWER(TRIM((SELECT MAX(IF(ip.key = 'cancellation_reason', ip.value.string_value, NULL)) FROM UNNEST(i.item_params) AS ip))), ''),
-        c.reason_code
-      ) AS reason_code,
-      c.reason_raw_code,
+      c.reason_code,
       c.initiator_code,
       COALESCE(i.quantity, 0) AS units_cancelled,
       COALESCE(i.price, 0) * COALESCE(i.quantity, 0) AS value_cancelled
@@ -300,7 +283,6 @@ Google Analytics SQL: |
     SELECT
       c.transaction_id,
       c.reason_code,
-      c.reason_raw_code,
       c.initiator_code,
       pl.quantity AS units_cancelled,
       pl.line_value AS value_cancelled
@@ -318,7 +300,6 @@ Google Analytics SQL: |
     SELECT
       c.transaction_id,
       c.reason_code,
-      c.reason_raw_code,
       c.initiator_code,
       ROW_NUMBER() OVER (PARTITION BY c.transaction_id ORDER BY c.event_timestamp DESC) AS rn,
       MAX(IF(c.is_whole_order_action, 1, 0)) OVER (PARTITION BY c.transaction_id) AS has_whole_order_action
@@ -329,7 +310,6 @@ Google Analytics SQL: |
     SELECT
       r.transaction_id,
       r.reason_code,
-      r.reason_raw_code,
       r.initiator_code
     FROM ranked_cancellations AS r
     JOIN orders_placed AS o
@@ -341,13 +321,13 @@ Google Analytics SQL: |
            OR (o.units_ordered > 0 AND COALESCE(cu.units_cancelled, 0) >= o.units_ordered))
   ),
   grain_rows AS (
-    SELECT 'order' AS grain, transaction_id, reason_code, reason_raw_code, initiator_code, 0 AS units_cancelled, 0.0 AS value_cancelled
+    SELECT 'order' AS grain, transaction_id, reason_code, initiator_code, 0 AS units_cancelled, 0.0 AS value_cancelled
     FROM cancelled_orders
     UNION ALL
-    SELECT 'line' AS grain, transaction_id, reason_code, reason_raw_code, initiator_code, units_cancelled, value_cancelled
+    SELECT 'line' AS grain, transaction_id, reason_code, initiator_code, units_cancelled, value_cancelled
     FROM cancelled_lines
   ),
-  -- Governed code -> display label; Shopify native cancel_reason codes resolve through the same lookup when the governed code is absent
+  -- Event cancellation_reason code -> governed display label: all eight event codes mapped explicitly; order_edit maps to Other and is also counted separately
   labelled AS (
     SELECT
       r.grain,
@@ -355,13 +335,12 @@ Google Analytics SQL: |
       r.units_cancelled,
       r.value_cancelled,
       CASE
-        WHEN r.reason_code IS NULL AND r.reason_raw_code IS NULL THEN '(not set)'
-        WHEN r.resolved_reason_code = 'customer_changed_mind' THEN 'Customer Changed Mind'
-        WHEN r.resolved_reason_code = 'out_of_stock' THEN 'Inventory Unavailable'
-        WHEN r.resolved_reason_code = 'fraud' THEN 'Fraud'
-        WHEN r.resolved_reason_code = 'payment_declined' THEN 'Payment Declined'
-        WHEN r.resolved_reason_code = 'staff_error' THEN 'Staff Error'
-        WHEN r.resolved_reason_code = 'other' THEN 'Other'
+        WHEN r.reason_code IS NULL THEN '(not set)'
+        WHEN r.reason_code IN ('customer_changed_mind', 'duplicate_order') THEN 'Customer Changed Mind'
+        WHEN r.reason_code = 'out_of_stock' THEN 'Inventory Unavailable'
+        WHEN r.reason_code = 'fraud' THEN 'Fraud'
+        WHEN r.reason_code = 'payment_declined' THEN 'Payment Declined'
+        WHEN r.reason_code IN ('address_unserviceable', 'order_edit', 'other') THEN 'Other'
         ELSE '(unmapped)'
       END AS cancellation_reason,
       CASE
@@ -371,24 +350,8 @@ Google Analytics SQL: |
         WHEN r.initiator_code = 'system' THEN 'System'
         ELSE '(unmapped)'
       END AS cancel_initiator,
-      CASE WHEN r.reason_raw_code = 'order_edit' THEN 1 ELSE 0 END AS is_order_edit
-    FROM (
-      SELECT
-        g.*,
-        COALESCE(
-          g.reason_code,
-          CASE g.reason_raw_code
-            WHEN 'customer' THEN 'customer_changed_mind'
-            WHEN 'inventory' THEN 'out_of_stock'
-            WHEN 'fraud' THEN 'fraud'
-            WHEN 'declined' THEN 'payment_declined'
-            WHEN 'staff' THEN 'staff_error'
-            WHEN 'other' THEN 'other'
-            WHEN 'order_edit' THEN 'other'
-          END
-        ) AS resolved_reason_code
-      FROM grain_rows AS g
-    ) AS r
+      CASE WHEN r.reason_code = 'order_edit' THEN 1 ELSE 0 END AS is_order_edit
+    FROM grain_rows AS r
   ),
   totals AS (
     SELECT
@@ -403,7 +366,7 @@ Google Analytics SQL: |
     ROUND(SAFE_DIVIDE(COUNT(DISTINCT IF(l.grain = 'order', l.transaction_id, NULL)), MAX(t.orders_placed)), 4) AS cancellation_rate,
     ROUND(SAFE_DIVIDE(COUNT(DISTINCT IF(l.grain = 'order', l.transaction_id, NULL)), MAX(t.cancelled_orders_total)), 4) AS share_of_cancelled_orders,
     COUNT(DISTINCT IF(l.grain = 'order' AND l.is_order_edit = 1, l.transaction_id, NULL)) AS order_edit_cancelled_orders,
-    COUNT(DISTINCT IF(l.grain = 'line', l.transaction_id, NULL)) AS orders_with_cancelled_lines,
+    COUNT(DISTINCT IF(l.grain = 'line', l.transaction_id, NULL)) AS orders_with_cancellation_actions,
     COUNTIF(l.grain = 'line') AS cancelled_lines,
     SUM(IF(l.grain = 'line', l.units_cancelled, 0)) AS units_cancelled,
     ROUND(SUM(IF(l.grain = 'line', l.value_cancelled, 0)), 2) AS cancelled_value
@@ -458,7 +421,6 @@ AEP Query Service SQL: |
       c.transaction_id,
       c.event_ts,
       c.reason_code,
-      c.reason_raw_code,
       c.initiator_code,
       c.items,
       COALESCE(size(c.items), 0) <= 0 AS is_whole_order_action
@@ -467,7 +429,6 @@ AEP Query Service SQL: |
         commerce.order.purchaseID AS transaction_id,
         timestamp AS event_ts,
         NULLIF(LOWER(TRIM(_tenant.orderCancellation.cancellationReason)), '') AS reason_code,
-        NULLIF(LOWER(TRIM(_tenant.orderCancellation.cancellationReasonRaw)), '') AS reason_raw_code,
         NULLIF(LOWER(TRIM(_tenant.orderCancellation.cancelInitiator)), '') AS initiator_code,
         productListItems AS items
       FROM aep_web_events_dataset
@@ -479,17 +440,16 @@ AEP Query Service SQL: |
     JOIN orders_placed o
       ON o.transaction_id = c.transaction_id
   ),
-  -- Line grain: cancelled productListItems carry the event's reason; an event without productListItems cancels every purchased line
+  -- Cancelled units and value per cancellation action, attributed to the action-level (order-level) cancellationReason; an event without productListItems cancels every purchased line
   cancelled_lines AS (
     SELECT
       x.transaction_id,
       x.reason_code,
-      x.reason_raw_code,
       x.initiator_code,
       COALESCE(x.pli.quantity, 0) AS units_cancelled,
       CAST(COALESCE(x.pli.priceTotal, 0) AS DOUBLE) AS value_cancelled
     FROM (
-      SELECT transaction_id, reason_code, reason_raw_code, initiator_code, explode(items) AS pli
+      SELECT transaction_id, reason_code, initiator_code, explode(items) AS pli
       FROM cancellation_events
       WHERE NOT is_whole_order_action
     ) x
@@ -497,7 +457,6 @@ AEP Query Service SQL: |
     SELECT
       c.transaction_id,
       c.reason_code,
-      c.reason_raw_code,
       c.initiator_code,
       pl.quantity AS units_cancelled,
       CAST(pl.line_value AS DOUBLE) AS value_cancelled
@@ -515,7 +474,6 @@ AEP Query Service SQL: |
     SELECT
       c.transaction_id,
       c.reason_code,
-      c.reason_raw_code,
       c.initiator_code,
       ROW_NUMBER() OVER (PARTITION BY c.transaction_id ORDER BY c.event_ts DESC) AS rn,
       MAX(CASE WHEN c.is_whole_order_action THEN 1 ELSE 0 END) OVER (PARTITION BY c.transaction_id) AS has_whole_order_action
@@ -526,7 +484,6 @@ AEP Query Service SQL: |
     SELECT
       r.transaction_id,
       r.reason_code,
-      r.reason_raw_code,
       r.initiator_code
     FROM ranked_cancellations r
     LEFT JOIN order_units ou
@@ -538,13 +495,13 @@ AEP Query Service SQL: |
            OR (ou.units_ordered > 0 AND COALESCE(cu.units_cancelled, 0) >= ou.units_ordered))
   ),
   grain_rows AS (
-    SELECT 'order' AS grain, transaction_id, reason_code, reason_raw_code, initiator_code, 0 AS units_cancelled, CAST(0 AS DOUBLE) AS value_cancelled
+    SELECT 'order' AS grain, transaction_id, reason_code, initiator_code, 0 AS units_cancelled, CAST(0 AS DOUBLE) AS value_cancelled
     FROM cancelled_orders
     UNION ALL
-    SELECT 'line' AS grain, transaction_id, reason_code, reason_raw_code, initiator_code, units_cancelled, value_cancelled
+    SELECT 'line' AS grain, transaction_id, reason_code, initiator_code, units_cancelled, value_cancelled
     FROM cancelled_lines
   ),
-  -- Governed code -> display label; Shopify native cancel_reason codes resolve through the same lookup when the governed code is absent
+  -- Event cancellation_reason code -> governed display label: all eight event codes mapped explicitly; order_edit maps to Other and is also counted separately
   labelled AS (
     SELECT
       r.grain,
@@ -552,13 +509,12 @@ AEP Query Service SQL: |
       r.units_cancelled,
       r.value_cancelled,
       CASE
-        WHEN r.reason_code IS NULL AND r.reason_raw_code IS NULL THEN '(not set)'
-        WHEN r.resolved_reason_code = 'customer_changed_mind' THEN 'Customer Changed Mind'
-        WHEN r.resolved_reason_code = 'out_of_stock' THEN 'Inventory Unavailable'
-        WHEN r.resolved_reason_code = 'fraud' THEN 'Fraud'
-        WHEN r.resolved_reason_code = 'payment_declined' THEN 'Payment Declined'
-        WHEN r.resolved_reason_code = 'staff_error' THEN 'Staff Error'
-        WHEN r.resolved_reason_code = 'other' THEN 'Other'
+        WHEN r.reason_code IS NULL THEN '(not set)'
+        WHEN r.reason_code IN ('customer_changed_mind', 'duplicate_order') THEN 'Customer Changed Mind'
+        WHEN r.reason_code = 'out_of_stock' THEN 'Inventory Unavailable'
+        WHEN r.reason_code = 'fraud' THEN 'Fraud'
+        WHEN r.reason_code = 'payment_declined' THEN 'Payment Declined'
+        WHEN r.reason_code IN ('address_unserviceable', 'order_edit', 'other') THEN 'Other'
         ELSE '(unmapped)'
       END AS cancellation_reason,
       CASE
@@ -568,24 +524,8 @@ AEP Query Service SQL: |
         WHEN r.initiator_code = 'system' THEN 'System'
         ELSE '(unmapped)'
       END AS cancel_initiator,
-      CASE WHEN r.reason_raw_code = 'order_edit' THEN 1 ELSE 0 END AS is_order_edit
-    FROM (
-      SELECT
-        g.*,
-        COALESCE(
-          g.reason_code,
-          CASE g.reason_raw_code
-            WHEN 'customer' THEN 'customer_changed_mind'
-            WHEN 'inventory' THEN 'out_of_stock'
-            WHEN 'fraud' THEN 'fraud'
-            WHEN 'declined' THEN 'payment_declined'
-            WHEN 'staff' THEN 'staff_error'
-            WHEN 'other' THEN 'other'
-            WHEN 'order_edit' THEN 'other'
-          END
-        ) AS resolved_reason_code
-      FROM grain_rows g
-    ) r
+      CASE WHEN r.reason_code = 'order_edit' THEN 1 ELSE 0 END AS is_order_edit
+    FROM grain_rows r
   ),
   totals AS (
     SELECT
@@ -600,7 +540,7 @@ AEP Query Service SQL: |
     ROUND(CAST(COUNT(DISTINCT CASE WHEN l.grain = 'order' THEN l.transaction_id END) AS DOUBLE) / NULLIF(MAX(t.orders_placed), 0), 4) AS cancellation_rate,
     ROUND(CAST(COUNT(DISTINCT CASE WHEN l.grain = 'order' THEN l.transaction_id END) AS DOUBLE) / NULLIF(MAX(t.cancelled_orders_total), 0), 4) AS share_of_cancelled_orders,
     COUNT(DISTINCT CASE WHEN l.grain = 'order' AND l.is_order_edit = 1 THEN l.transaction_id END) AS order_edit_cancelled_orders,
-    COUNT(DISTINCT CASE WHEN l.grain = 'line' THEN l.transaction_id END) AS orders_with_cancelled_lines,
+    COUNT(DISTINCT CASE WHEN l.grain = 'line' THEN l.transaction_id END) AS orders_with_cancellation_actions,
     SUM(CASE WHEN l.grain = 'line' THEN 1 ELSE 0 END) AS cancelled_lines,
     SUM(CASE WHEN l.grain = 'line' THEN l.units_cancelled ELSE 0 END) AS units_cancelled,
     ROUND(SUM(CASE WHEN l.grain = 'line' THEN l.value_cancelled ELSE 0 END), 2) AS cancelled_value
@@ -610,11 +550,11 @@ AEP Query Service SQL: |
   ORDER BY cancelled_orders DESC, units_cancelled DESC;
 
 Calculation Notes: |
-  1️⃣ Capture and platform mapping: the value is sent as cancellation_reason on the order-cancellation event (GA4 refund with refund_type = order_cancellation, Adobe order:cancel), with cancel_initiator as a parameter on the same hit. Both are collected as the Order Cancellation event's lowercase snake_case codes and mapped to display labels in reporting: customer_changed_mind → Customer Changed Mind, out_of_stock → Inventory Unavailable, fraud → Fraud, payment_declined → Payment Declined, staff_error → Staff Error, other → Other; cancel_initiator customer → Customer, merchant → Merchant, system → System. Native codes map through a governed lookup: Shopify cancel_reason customer → Customer Changed Mind, inventory → Inventory Unavailable, fraud → Fraud, declined → Payment Declined, staff → Staff Error, other → Other; Salesforce Commerce Cloud Order cancelCode and OMS reason codes map through the merchant's code table; Adobe Commerce, which has no native reason enum, maps the configured cancellation reason attribute or the cancellation comment in sales_order_status_history by keyword. The raw platform code is kept in a separate field for audit.
+  1️⃣ Capture and platform mapping: the value is sent as cancellation_reason on the order-cancellation event (GA4 refund with refund_type = order_cancellation, Adobe order:cancel), with cancel_initiator as a parameter on the same hit. All eight event codes map explicitly to display labels in reporting: customer_changed_mind → Customer Changed Mind, duplicate_order → Customer Changed Mind, out_of_stock → Inventory Unavailable, fraud → Fraud, payment_declined → Payment Declined, address_unserviceable → Other, order_edit → Other (flagged as an order edit, see 5️⃣), other → Other; cancel_initiator customer → Customer, merchant → Merchant, system → System. These five labels are the complete governed set. Platform codes are translated to an event code before the event is sent: Shopify cancel_reason customer → customer_changed_mind (Customer Changed Mind), inventory → out_of_stock (Inventory Unavailable), fraud → fraud (Fraud), declined → payment_declined (Payment Declined), staff → other (Other), other → other (Other); Salesforce Commerce Cloud Order cancelCode and OMS reason codes map through the merchant's code table; Adobe Commerce, which has no native reason enum, maps the configured cancellation reason attribute or the cancellation comment in sales_order_status_history by keyword. The raw platform code stays in the OMS record for audit and is not sent on the event.
   2️⃣ Reason is independent of initiator: cancel_initiator is recorded, never inferred from the reason, and the two are cross-tabulated rather than collapsed. A customer self-service cancellation after a delivery-date slip is Customer Changed Mind / Customer; a staff cancellation for an oversold SKU is Inventory Unavailable / Merchant; an automated risk-screen void is Fraud / System. Payment Declined applies only to accepted orders voided when capture or re-authorisation fails; authorisation failures that never created an order are checkout payment failures and never enter this dimension.
   3️⃣ Scope boundaries: only whole-order or order-line cancellations effective before the affected lines ship. Voided carrier labels or freight bookings on an order that remains live belong to Shipment Cancellation; failed, lost, damaged or refused deliveries belong to Delivery Exception Type; any reason captured after delivery belongs to Return Reason; subscription and recurring-order cancellations are out of scope even when they run through the same OMS.
-  4️⃣ Order versus line grain: a partial cancellation carries the reason on each cancelled line and does not make the order a cancelled order in Order Cancellation Rate. When every line is eventually cancelled, the order-level value is the reason on the action that cancelled the final open line, while line-level analysis keeps each line's own reason; units and value by reason are always summed at line grain.
-  5️⃣ Precedence, restatement and unresolved values: the OMS record is authoritative over the client-side hit. A reason reclassified within 30 days of cancellation (for example Other to Fraud after chargeback review) replaces the earlier value and prior periods are restated. Cancellations with no reason resolve to '(not set)' and unmapped native codes to '(unmapped)', both kept distinct from the governed Other and reviewed weekly; cancel-and-reissue order edits map to Other with raw code order_edit so they can be excluded from customer-intent analysis.
+  4️⃣ Order-level grain: the reason is recorded once per cancellation action (the event's cancellation_reason), never per line, because neither the event nor its XDM productListItems carry a line-level reason. A partial cancellation does not make the order a cancelled order; when every line is eventually cancelled, the order-level value is the reason on the action that cancelled the final open line. Units and value cancelled are attributed to the reason of the cancellation action that removed them.
+  5️⃣ Precedence, restatement and unresolved values: corrections are made upstream, not in reporting. When a reason is reclassified within 30 days of cancellation (for example Other to Fraud after chargeback review), the order-management system sends a corrected server-side order:cancel / refund event for the same transaction_id carrying the updated cancellation_reason code; because both queries take the reason from the latest cancellation event per order, the corrected value replaces the earlier one and prior periods are restated on the next run. Cancellations with no reason resolve to '(not set)' and codes outside the eight event codes to '(unmapped)', both kept distinct from the governed Other and reviewed weekly; cancel-and-reissue order edits (event code order_edit) map to Other and are counted separately as order-edit cancellations so they can be excluded from customer-intent analysis.
   6️⃣ Timing, sessions and denominators: merchant and system cancellations arrive server-side, never start or extend a session and are not subject to the 30-minute timeout; channel, device and customer attributes are inherited from the originating purchase by transaction_id. A reason-level cancellation rate is reported by order-placed cohort as orders cancelled with that reason / all orders placed in the cohort (distinct purchase transaction_id, including orders later cancelled, excluding test orders); reason mix (share of cancelled orders) is a separate view and is never labelled a rate. The latest cohort is immature until the pre-ship window (typically 7–14 days) has elapsed.
   7️⃣ Exclusions and sensitivity: test, draft and deleted-without-cancel-status orders are excluded. Free-text staff or customer cancellation comments are never exposed as the dimension value because they can contain names, addresses or payment details; only the governed value and raw platform code are reportable, which keeps the dimension non-PII.
 
@@ -622,7 +562,7 @@ Business Use Case: |
   1️⃣ Merchandising and Inventory Planning: when Inventory Unavailable cancellations for a category exceed 1% of all orders placed for that category in a week, the planner raises the channel safety-stock buffer, escalates OMS-to-storefront inventory sync latency and removes the affected SKUs from paid shopping feeds until availability recovers.
   2️⃣ Customer Service Operations lead: when Customer Changed Mind cancellations placed within two hours of ordering rise for two consecutive weeks, the team reviews the top raw reasons and order-confirmation content, then extends the self-service edit window for address and variant changes so edits stop turning into cancellations.
   3️⃣ Finance (Payments and Risk): at the weekly risk review, when Fraud and Payment Declined cancellations as a percentage of all orders placed rise for a payment method or ship-to country, the payments manager tunes fraud-screen thresholds and compares cancelled-order value against chargeback losses to confirm good orders are not being declined.
-  4️⃣ Store and Fulfilment Operations manager: when Staff Error cancellations on ship-from-store or BOPIS orders at a location exceed the network baseline, the manager audits pick validation and inventory accuracy at that store and schedules retraining before routing volume back to it.
+  4️⃣ Store and Fulfilment Operations manager: in the weekly fulfilment review, Inventory Unavailable cancellations are broken down by fulfillment-strategy; when their cancellation rate for ship-from-store or BOPIS orders exceeds 2% of orders placed with that strategy (or twice the ship-from-warehouse rate), the manager raises the store inventory safety buffer used for order routing, runs cycle counts on the affected SKUs and pauses ship-from-store or BOPIS eligibility for those SKUs until the rate falls back below the threshold.
 
 Dependencies:
   Events: [order-cancellation, purchase]
@@ -637,9 +577,9 @@ Dashboard Usage: [Order Cancellation Rate by Reason, Pre-Shipment Order Health, 
 Segment Eligibility: |
   true
 
-Related Dimensions: [order-status, delivery-exception-type, shipment-status, payment-method, fulfillment-strategy, shipment-cancellation, order-status-check]
+Related Dimensions: [order-status, delivery-exception-type, shipment-status, payment-method, fulfillment-strategy, return-reason]
 
-Derived Dimensions: [cancellation-reason-group, merchant-controllable-cancellation-flag]
+Derived Dimensions: [refund-type]
 
 Data Sensitivity: Internal
 
@@ -653,5 +593,5 @@ Created At: 2026-09-14T18:46:53.925+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-14T18:47:02.921+00:00
+Last Modified At: 2026-09-17T23:47:32.645+00:00
 
