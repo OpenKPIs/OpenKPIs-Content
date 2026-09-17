@@ -1,5 +1,5 @@
 # Dimension: Acquisition Cohort
-# Generated: 2026-09-15T13:35:23.400Z
+# Generated: 2026-09-17T23:56:57.620Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -235,7 +235,17 @@ Google Analytics SQL: |
         WHEN o.cancelled_at IS NOT NULL                                                   -- cancel or void timestamp
           AND o.cancelled_at < TIMESTAMP_ADD(COALESCE(orig.created_at, o.created_at), INTERVAL 14 DAY) THEN FALSE
         ELSE TRUE                                                                         -- full refunds still anchor
-      END AS is_valid_order
+      END AS is_valid_order,                                                              -- cohort anchor eligibility
+      CASE
+        WHEN IFNULL(o.is_test, FALSE) OR IFNULL(o.is_draft, FALSE) OR IFNULL(o.is_deleted, FALSE) THEN FALSE
+        WHEN UPPER(o.order_status) IN ('CREATED', 'FAILED') THEN FALSE
+        WHEN o.cancelled_at IS NOT NULL OR LOWER(IFNULL(o.cancel_reason, '')) = 'fraud' THEN FALSE  -- any cancel or void, whenever it happens
+        WHEN LOWER(IFNULL(o.order_type, '')) IN ('replacement', 'warranty', 'exchange')
+          AND COALESCE(o.grand_total, 0) = 0 THEN FALSE
+        WHEN LOWER(IFNULL(o.customer_group, '')) IN ('wholesale', 'b2b', 'employee') THEN FALSE
+        WHEN IFNULL(o.is_marketplace_order, FALSE) THEN FALSE
+        ELSE TRUE
+      END AS is_valid_activity_order                                                      -- feeds order_activity counts
     FROM `your-project.commerce.orders` AS o
     LEFT JOIN `your-project.commerce.orders` AS orig ON orig.order_id = o.original_order_id
     LEFT JOIN customer_merge AS m ON m.customer_id = o.customer_id
@@ -331,7 +341,7 @@ Google Analytics SQL: |
     FROM orders_resolved AS o
     JOIN acquisition_cohort AS ac USING (customer_key)
     CROSS JOIN params AS p
-    WHERE o.is_valid_order
+    WHERE o.is_valid_activity_order
       AND o.placed_at >= ac.anchor_placed_at
     GROUP BY 1, 2
   ),
@@ -482,7 +492,17 @@ AEP Query Service SQL: |
         WHEN o.cancelled_at IS NOT NULL                                                   -- cancel or void timestamp
           AND o.cancelled_at < COALESCE(orig.created_at, o.created_at) + INTERVAL 14 DAYS THEN false
         ELSE true                                                                         -- full refunds still anchor
-      END AS is_valid_order
+      END AS is_valid_order,                                                              -- cohort anchor eligibility
+      CASE
+        WHEN COALESCE(o.is_test, false) OR COALESCE(o.is_draft, false) OR COALESCE(o.is_deleted, false) THEN false
+        WHEN upper(o.order_status) IN ('CREATED', 'FAILED') THEN false
+        WHEN o.cancelled_at IS NOT NULL OR lower(COALESCE(o.cancel_reason, '')) = 'fraud' THEN false  -- any cancel or void, whenever it happens
+        WHEN lower(COALESCE(o.order_type, '')) IN ('replacement', 'warranty', 'exchange')
+          AND COALESCE(o.grand_total, 0) = 0 THEN false
+        WHEN lower(COALESCE(o.customer_group, '')) IN ('wholesale', 'b2b', 'employee') THEN false
+        WHEN COALESCE(o.is_marketplace_order, false) THEN false
+        ELSE true
+      END AS is_valid_activity_order                                                      -- feeds order_activity counts
     FROM commerce_orders_dataset AS o
     LEFT JOIN commerce_orders_dataset AS orig ON orig.order_id = o.original_order_id
     LEFT JOIN customer_merge AS m ON m.customer_id = o.customer_id
@@ -613,7 +633,7 @@ AEP Query Service SQL: |
       FROM orders_resolved AS o
       JOIN acquisition_cohort AS ac ON ac.customer_key = o.customer_key
       CROSS JOIN params AS p
-      WHERE o.is_valid_order
+      WHERE o.is_valid_activity_order
         AND o.placed_at >= ac.anchor_placed_at
     ) oc
     GROUP BY acquisition_cohort, cohort_period_index
@@ -629,20 +649,26 @@ AEP Query Service SQL: |
       w.eventType,
       w.purchase_id,
       w.order_total,
-      SESS_TIMEOUT(w.event_ts, 60 * 30) OVER (
-        PARTITION BY w.ecid ORDER BY w.event_ts
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-      ).num AS session_num
+      w.session_num
     FROM (
+      -- sessions are built over ALL hits of the ECID (anonymous + authenticated) before the CRMID filter
       SELECT
-        identityMap['CRMID'][0].id AS crm_id,
-        identityMap['ECID'][0].id  AS ecid,
-        timestamp                  AS event_ts,
-        eventType,
-        commerce.order.purchaseID  AS purchase_id,
-        commerce.order.priceTotal  AS order_total
-      FROM web_events_dataset
-      WHERE timestamp >= TIMESTAMP '2024-12-31 00:00:00'
+        raw.*,
+        SESS_TIMEOUT(raw.event_ts, 60 * 30) OVER (
+          PARTITION BY raw.ecid ORDER BY raw.event_ts
+          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ).num AS session_num
+      FROM (
+        SELECT
+          identityMap['CRMID'][0].id AS crm_id,
+          identityMap['ECID'][0].id  AS ecid,
+          timestamp                  AS event_ts,
+          eventType,
+          commerce.order.purchaseID  AS purchase_id,
+          commerce.order.priceTotal  AS order_total
+        FROM web_events_dataset
+        WHERE timestamp >= TIMESTAMP '2024-12-31 00:00:00'
+      ) raw
     ) w
     CROSS JOIN params AS p
     LEFT JOIN customer_merge AS m ON m.customer_id = w.crm_id
@@ -731,9 +757,9 @@ Calculation Notes: |
   2️⃣ Immutability: the value is written to the customer profile once and never reassigned. Because cancellations can arrive days after checkout, the assignment stays provisional for 14 days after placement. If the anchor order is cancelled inside that window, the next valid order becomes the anchor. After that the value is locked, and later cancellations, back-dated imports and profile merges cannot move the customer. On a merge, the surviving profile keeps the earliest locked cohort. A lapsed customer who buys again stays in the original cohort; reactivation is recorded in customer-status, not by creating a new cohort.
   3️⃣ Customer identity: the key is the platform customer ID (Shopify customer.id, Adobe Commerce customer_id, SFCC customerNo). Guest orders are linked to that customer through a normalised, hashed email (trimmed, lower-cased, SHA-256), so a guest first order and a later account order count as one customer. Orders that have neither an ID nor an email are left out of cohort counts. Before the first assignment, load legacy-platform order history; otherwise every existing customer appears newly acquired in the migration month. On the digital side, sessions join to the cohort through the user_id sent at login and purchase. Traffic identified only by user_pseudo_id or ECID cannot carry a first-order cohort.
   4️⃣ Granularity, format and time zone: monthly YYYY-MM is the default. Weekly cohorts use ISO 8601 YYYY-Www: weeks start on Monday and belong to the year that contains their Thursday, so 2027-01-01 falls in 2026-W53. Daily cohorts use YYYY-MM-DD. Granularity is stored in a companion cohort_granularity attribute and shown on every report, and one table or chart never mixes granularities. Period boundaries follow the store's reporting time zone as an IANA zone, so daylight saving time is handled correctly, rather than UTC. For example, an order at 23:30 on 31 January in America/Chicago is 05:30 UTC on 1 February but belongs to 2026-01.
-  5️⃣ Period index and censoring: Cohort Period Index is the number of whole calendar periods, at the cohort's granularity, between the cohort period and the activity period. Period 0 is the acquisition period. The first order always falls in period 0, so period-0 purchase retention is 100% by definition, and repeat orders placed later in the same month also count in period 0. A cell whose period has not yet ended for that cohort is right-censored and shown as null, not zero. The current, still-open period is left out of trend comparisons. Retention and LTV denominators always use the full cohort size at period 0, never the customers who were active in the previous period. Whether retention is calculated as standard, rolling or cumulative is defined by retention-type, not by this dimension.
+  5️⃣ Period index and censoring: Cohort Period Index is the number of whole calendar periods, at the cohort's granularity, between the cohort period and the activity period. Period 0 is the acquisition period. The first order always falls in period 0, so period-0 purchase retention is 100% except for customers whose anchor order was cancelled after the 14-day lock, who remain in cohort_size but are not counted as period-0 purchasers; repeat orders placed later in the same month also count in period 0. A cell whose period has not yet ended for that cohort is right-censored and shown as null, not zero. The current, still-open period is left out of trend comparisons. Retention and LTV denominators always use the full cohort size at period 0, never the customers who were active in the previous period. Whether retention is calculated as standard, rolling or cumulative is defined by retention-type, not by this dimension. Period activity (purchasing customers, orders, revenue) counts only orders that were never cancelled or voided: an order cancelled after the 14-day lock can still be the cohort anchor, but it is not counted as activity in any period.
   6️⃣ Value action by industry: E-commerce/Retail = first completed order, as in Shopify's customer cohort analysis, which groups customers by first-order month. GA4 default = first_visit (web) or first_open (app) date, the 'First touch (acquisition date)' inclusion criterion in Cohort exploration. Adobe Analytics Cohort Analysis = the configured inclusion metric, set to Orders for purchase cohorts. Education = first enrollment (industry variant enrollment-cohort). SaaS = account sign-up, or activation where the plan defines acquisition as activation. Cohorts built on different anchors cannot be compared directly: a GA4 acquisition-date cohort includes visitors who never buy, so it is larger and starts earlier than the first-order cohort for the same customers.
-  7️⃣ Boundaries and timing: this dimension records when a customer was acquired, not through which channel (first-touch-channel-grouping). It is not a retention calculation method (retention-type), and it is not a lifecycle state such as new, returning, lapsed or reactivated (customer-status), which changes over time while the cohort does not. Purchase frequency (purchase-count-band) and recency-frequency-monetary position (rfm-segment) are separate breakdowns. Customer Retention Rate, Customer Lifetime Value and Second-Purchase Conversion Rate are reported by this key. Assignment is user-scoped and does not depend on the 30-minute session timeout: a session that crosses midnight at month-end keeps the cohort of its order timestamp, not the session start.
+  7️⃣ Boundaries and timing: this dimension records when a customer was acquired, not through which channel (first-touch-channel-grouping). It is not a retention calculation method (retention-type), and it is not a lifecycle state such as new, returning, lapsed or reactivated (customer-status), which changes over time while the cohort does not. Purchase frequency (purchase-count-band) is derived from the same anchor, counting valid orders from the acquisition order onward; recency-frequency-monetary position (rfm-segment) is a separate breakdown. Customer Retention Rate, Customer Lifetime Value and Second-Purchase Conversion Rate are reported by this key. Assignment is user-scoped and does not depend on the 30-minute session timeout: a session that crosses midnight at month-end keeps the cohort of its order timestamp, not the session start.
 
 Business Use Case: |
   1️⃣ CRM & Retention Marketing manager: at the monthly cohort review, if a new cohort's period-1 repeat purchase rate is more than 20% below the average of the previous six cohorts, audit that cohort's first-order categories, discount codes and post-purchase email flow, then send the cohort's non-repeaters a second-purchase offer before day 60.
@@ -743,7 +769,6 @@ Business Use Case: |
 
 Dependencies:
   Events: [purchase]
-  Dimensions: [transaction-id]
 
 Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Adobe Commerce / Salesforce Commerce Cloud)
 
@@ -755,9 +780,9 @@ Dashboard Usage: [Customer Cohort Retention Triangle, Cohort LTV Curves & CAC Pa
 Segment Eligibility: |
   true
 
-Related Dimensions: [enrollment-cohort, first-touch-channel-grouping, purchase-count-band, rfm-segment]
+Related Dimensions: [enrollment-cohort, first-touch-channel-grouping, rfm-segment, customer-status, retention-type]
 
-Derived Dimensions: [acquisition-cohort-quarter, acquisition-cohort-year, cohort-period-index]
+Derived Dimensions: [purchase-count-band]
 
 Data Sensitivity: Internal
 
@@ -771,5 +796,5 @@ Created At: 2026-09-15T13:35:13.865+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-15T13:35:22.937+00:00
+Last Modified At: 2026-09-17T23:56:56.956+00:00
 
