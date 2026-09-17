@@ -1,12 +1,12 @@
 # Dimension: Checkout Step
-# Generated: 2026-09-14T07:34:09.659Z
+# Generated: 2026-09-17T01:20:32.408Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Checkout Step
 
 Description: |
-  Checkout Step is the ordered cart-to-order stage a session reached or dropped out at, drawn from a fixed five-value sequence: View Cart, Begin Checkout, Shipping Info, Payment Info and Purchase. In GA4 the value is derived from the standard ecommerce event name because no standard step parameter exists, and in Adobe Analytics it maps to the checkout funnel stage (Cart Views, Checkouts, custom shipping and payment stages, Orders), so the dimension carries the stage label and its ordinal while the funnel rates across stages stay with the checkout KPIs.
+  Checkout Step is the ordered cart-to-order stage a session reached or dropped out at, drawn from a fixed five-value sequence: View Cart, Begin Checkout, Shipping Info, Payment Info and Purchase. In GA4 the value is derived from the standard ecommerce event name because no standard step parameter exists, and in Adobe it is read from _tenant.checkout.stepNumber alongside the native Cart Views, Checkouts and Orders events (commerce.checkouts.value is set only at Begin Checkout, while the shipping and payment stages are sent as checkout-step hits that do not set it), so the dimension carries the stage label and its ordinal while the funnel rates across stages stay with the checkout KPIs.
 
 Category: Conversion
 
@@ -84,8 +84,8 @@ W3 Data Layer: |
         "attributes": {
           "checkoutStep": 2,
           "checkoutStepName": "Begin Checkout",
-          "paymentType": "",
-          "shippingTier": ""
+          "paymentType": "credit_card",
+          "shippingTier": "standard"
         }
       }
     ]
@@ -94,8 +94,6 @@ W3 Data Layer: |
 GA4 Data Layer: |
   {
     "event": "begin_checkout",
-    "checkout_step": 2,
-    "checkout_step_name": "Begin Checkout",
     "ecommerce": {
       "currency": "USD",
       "value": 116.98,
@@ -183,8 +181,11 @@ XDM Mapping: |
     "_tenant": {
       "checkout": {
         "stepName": "Begin Checkout",
-        "stepNumber": 2,
-        "sourceEventType": "commerce.checkouts"
+        "stepNumber": 2
+      },
+      "trafficType": "external",
+      "order": {
+        "isTestOrder": false
       }
     }
   }
@@ -195,7 +196,19 @@ Google Analytics SQL: |
   -- ==========================================
   -- Checkout Step: event-level stage mapping and furthest step reached per session
   -- Scan one extra day on each side so sessions that cross midnight keep all their hits
-  WITH checkout_events AS (
+  -- Session start date comes from the first event of the session across ALL events, not only checkout events
+  WITH session_bounds AS (
+    SELECT
+      user_pseudo_id,
+      (SELECT MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) FROM UNNEST(event_params) AS ep) AS ga_session_id,
+      ARRAY_AGG(PARSE_DATE('%Y%m%d', event_date) ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS session_start_date
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 29 DAY))
+                            AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+    GROUP BY user_pseudo_id, ga_session_id
+    HAVING ga_session_id IS NOT NULL
+  ),
+  checkout_events AS (
     SELECT
       user_pseudo_id,
       PARSE_DATE('%Y%m%d', event_date) AS event_date,
@@ -233,20 +246,23 @@ Google Analytics SQL: |
   ),
   session_steps AS (
     SELECT
-      user_pseudo_id,
-      ga_session_id,
-      MIN(event_date) AS session_start_date,
-      ARRAY_AGG(device_category IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS device_category,
-      MAX(step_ordinal) AS furthest_step_ordinal,
-      COUNTIF(step_ordinal = 1) > 0 AS reached_view_cart,
-      COUNTIF(step_ordinal = 2) > 0 AS reached_begin_checkout,
-      COUNTIF(step_ordinal = 3) > 0 AS reached_shipping_info,
-      COUNTIF(step_ordinal = 4) > 0 AS reached_payment_info,
-      COUNTIF(step_ordinal = 5) > 0 AS reached_purchase,
+      v.user_pseudo_id,
+      v.ga_session_id,
+      ANY_VALUE(b.session_start_date) AS session_start_date,
+      ARRAY_AGG(v.device_category IGNORE NULLS ORDER BY v.event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS device_category,
+      MAX(v.step_ordinal) AS furthest_step_ordinal,
+      COUNTIF(v.step_ordinal = 1) > 0 AS reached_view_cart,
+      COUNTIF(v.step_ordinal = 2) > 0 AS reached_begin_checkout,
+      COUNTIF(v.step_ordinal = 3) > 0 AS reached_shipping_info,
+      COUNTIF(v.step_ordinal = 4) > 0 AS reached_payment_info,
+      COUNTIF(v.step_ordinal = 5) > 0 AS reached_purchase,
       COUNT(*) AS checkout_step_hits,
-      COUNT(DISTINCT transaction_id) AS distinct_orders
-    FROM valid_events
-    GROUP BY user_pseudo_id, ga_session_id
+      COUNT(DISTINCT v.transaction_id) AS distinct_orders
+    FROM valid_events AS v
+    JOIN session_bounds AS b
+      ON b.user_pseudo_id = v.user_pseudo_id
+     AND b.ga_session_id = v.ga_session_id
+    GROUP BY v.user_pseudo_id, v.ga_session_id
   )
   SELECT
     CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING)) AS session_key,
@@ -277,8 +293,10 @@ AEP Query Service SQL: |
   -- ==========================================
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
-  -- Checkout Step: XDM commerce event types mapped to stage label and ordinal, furthest step per visit
+  -- Checkout Step: _tenant.checkout.stepNumber plus native XDM commerce events mapped to stage label and ordinal, furthest step per visit
+  -- commerce.checkouts.value is set only at step 2; steps 3 and 4 are checkout-step hits identified by _tenant.checkout.stepNumber
   -- Sessions are built with SESS_TIMEOUT (30 minutes of inactivity) over all hits of the ECID before filtering
+  -- Exclusions: internal/QA traffic (tenant flag), known bots (user agent), test-mode orders
   WITH sessionized AS (
     SELECT
       identityMap['ECID'][0].id AS ecid,
@@ -286,7 +304,11 @@ AEP Query Service SQL: |
       eventType,
       device.type AS device_type,
       commerce.order.purchaseID AS purchase_id,
+      commerce.checkouts.value AS checkouts_value,
       CAST(_tenant.checkout.stepNumber AS INT) AS tenant_step_number,
+      _tenant.trafficType AS traffic_type,
+      environment.browserDetails.userAgent AS user_agent,
+      CAST(_tenant.order.isTestOrder AS BOOLEAN) AS is_test_order,
       SESS_TIMEOUT(timestamp, 60 * 30) OVER (
         PARTITION BY identityMap['ECID'][0].id
         ORDER BY timestamp
@@ -306,20 +328,43 @@ AEP Query Service SQL: |
       device_type,
       purchase_id,
       CASE
-        WHEN eventType = 'commerce.productListViews' THEN 1
-        WHEN eventType = 'commerce.checkouts' AND tenant_step_number IN (3, 4) THEN tenant_step_number
-        WHEN eventType = 'commerce.checkouts' THEN 2
-        WHEN eventType = 'commerce.purchases' THEN 5
+        -- Source of truth: _tenant.checkout.stepNumber
+        WHEN tenant_step_number IN (3, 4) AND eventType = 'web.webinteraction.linkClicks' AND COALESCE(checkouts_value, 0) = 0 THEN tenant_step_number
+        WHEN tenant_step_number IN (1, 2, 5) AND eventType <> 'web.webinteraction.linkClicks' THEN tenant_step_number
+        -- Fallback when stepNumber is missing
+        WHEN tenant_step_number IS NULL AND eventType = 'commerce.productListViews' THEN 1
+        WHEN tenant_step_number IS NULL AND eventType = 'commerce.checkouts' AND checkouts_value > 0 THEN 2
+        WHEN tenant_step_number IS NULL AND eventType = 'commerce.purchases' THEN 5
       END AS step_ordinal
     FROM sessionized
-    WHERE eventType IN ('commerce.productListViews', 'commerce.checkouts', 'commerce.purchases')
+    WHERE (eventType IN ('commerce.productListViews', 'commerce.checkouts', 'commerce.purchases')
+           OR (eventType = 'web.webinteraction.linkClicks' AND tenant_step_number IN (3, 4)))
+      AND COALESCE(traffic_type, '') NOT IN ('internal', 'qa')
+      AND NOT COALESCE(lower(user_agent) RLIKE '(bot|crawler|spider|headless|lighthouse)', FALSE)
+      AND NOT COALESCE(is_test_order, FALSE)
       AND NOT (eventType = 'commerce.purchases' AND (purchase_id IS NULL OR purchase_id = ''))
+  ),
+  session_bounds AS (
+    SELECT
+      ecid,
+      session.num AS session_num,
+      to_date(MIN(timestamp)) AS session_start_date
+    FROM sessionized
+    GROUP BY ecid, session.num
+  ),
+  step_events AS (
+    SELECT c.*, b.session_start_date
+    FROM checkout_events AS c
+    JOIN session_bounds AS b
+      ON b.ecid = c.ecid
+     AND b.session_num = c.session_num
+    WHERE c.step_ordinal IS NOT NULL
   ),
   session_steps AS (
     SELECT
       ecid,
       session_num,
-      to_date(MIN(timestamp)) AS session_start_date,
+      MIN(session_start_date) AS session_start_date,
       MIN_BY(device_type, timestamp) AS device_type,
       MAX(step_ordinal) AS furthest_step_ordinal,
       MAX(CASE WHEN step_ordinal = 1 THEN 1 ELSE 0 END) = 1 AS reached_view_cart,
@@ -329,7 +374,7 @@ AEP Query Service SQL: |
       MAX(CASE WHEN step_ordinal = 5 THEN 1 ELSE 0 END) = 1 AS reached_purchase,
       COUNT(*) AS checkout_step_hits,
       COUNT(DISTINCT purchase_id) AS distinct_orders
-    FROM checkout_events
+    FROM step_events
     GROUP BY ecid, session_num
   )
   SELECT
@@ -359,7 +404,7 @@ AEP Query Service SQL: |
 
 Calculation Notes: |
   1️⃣ Controlled value set with a fixed ordinal: 1 = View Cart (view_cart), 2 = Begin Checkout (begin_checkout), 3 = Shipping Info (add_shipping_info), 4 = Payment Info (add_payment_info), 5 = Purchase (purchase). Event scope stores the stage of the hit itself. Session scope stores the highest ordinal reached (MAX over the session), which is also the exit step for every session that did not reach Purchase. Values outside this list are rejected at ingestion, and the stored label never changes when page names or checkout templates are redesigned.
-  2️⃣ Source mapping: GA4 has no standard step parameter, so the step is a CASE mapping on event_name. The Universal Analytics checkout_step / checkout_option fields are retired and must not be merged into GA4-era history, and any custom step parameter an implementation sends is used for sub-step labelling only, never as the source of truth. In Adobe Analytics, Cart Views (scView), Checkouts (scCheckout) and Orders (purchase) are native; the shipping and payment stages need one custom success event each (XDM: commerce.productListViews, commerce.checkouts, commerce.purchases plus the implementation's shipping and payment stage fields).
+  2️⃣ Source mapping: GA4 has no standard step parameter, so the step is a CASE mapping on event_name. The Universal Analytics checkout_step / checkout_option fields are retired and must not be merged into GA4-era history, and any custom step parameter an implementation sends is used for sub-step labelling only, never as the source of truth. In Adobe Analytics / AEP, every checkout hit carries _tenant.checkout.stepNumber (1–5) and _tenant.checkout.stepName, which is the source of truth there. Cart Views (scView, commerce.productListViews), Checkouts (scCheckout, commerce.checkouts) and Orders (purchase, commerce.purchases) are native; commerce.checkouts.value is set only on the Begin Checkout hit (step 2). Steps 3 and 4 are sent with eventType web.webinteraction.linkClicks (custom-link hits) carrying _tenant.checkout.stepNumber = 3 or 4 and no commerce.checkouts.value, so native Checkouts are not inflated. Queries read the step from stepNumber for all five steps and fall back to the eventType (and commerce.checkouts.value for step 2) only when stepNumber is missing.
   3️⃣ Non-linear paths: steps are not backfilled. A buy-now or express-wallet session that fires begin_checkout without view_cart, or jumps from Begin Checkout straight to Purchase because the wallet sheet (Apple Pay, Google Pay, PayPal, Shop Pay) collapses shipping and payment, keeps its true highest ordinal. Closed-funnel reports must require every prior step, while open-funnel reports accept entry at any step. Segment express and standard checkouts by payment_type before reading drop-off between steps 2 and 4.
   4️⃣ Deduplication: repeated hits of the same step in one session (reloads, back-button returns, re-edited addresses, payment retries after a decline) count once per session per step when reporting step reach. Event-scope hit counts keep every occurrence. Purchase is valid only with a non-null transaction_id, and duplicate purchase hits are collapsed on transaction_id. On one-page checkouts, add_shipping_info and add_payment_info must fire when the section is completed, not on page load, otherwise steps 3 and 4 are overstated.
   5️⃣ Session and timing rules: a session is user_pseudo_id + ga_session_id with the 30-minute inactivity timeout in GA4, and a visit in Adobe Analytics (30 minutes of inactivity, 12 hours of activity or 2,500 hits). GA4 sessions that cross midnight span two event_date partitions, so derive the session step across adjacent daily tables and date it to session start (event_timestamp is UTC microseconds, event_date follows the property time zone). A checkout resumed after the timeout starts a new session, so session-scope exit steps understate user-level completion; recovery analyses use user scope over a defined lookback such as 7 days.
@@ -373,7 +418,7 @@ Business Use Case: |
   4️⃣ Merchandising compares Shipping Info exits by cart value band against the free-shipping threshold each month. When exits cluster just below the threshold, they test a lower threshold or add near-threshold product recommendations in the cart and measure the effect on checkout completion and average order value.
 
 Dependencies:
-  Events: [add-to-cart, checkout-initiation, purchase]
+  Events: [checkout-initiation, purchase]
   Metrics: [begin-checkout]
 
 Source Data: Digital Analytics (GA4 / Adobe Analytics)
@@ -388,7 +433,7 @@ Segment Eligibility: |
 
 Related Dimensions: [buyer-journey-stage, payment-method, device-category, traffic-source, customer-status, promotion-type]
 
-Derived Dimensions: [checkout-abandonment-step]
+Derived Dimensions: [checkout-type]
 
 Data Sensitivity: Internal
 
@@ -402,5 +447,5 @@ Created At: 2026-09-14T07:34:00.728+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-14T07:34:09.335+00:00
+Last Modified At: 2026-09-17T01:20:32.044+00:00
 
