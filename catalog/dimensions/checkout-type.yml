@@ -1,12 +1,12 @@
 # Dimension: Checkout Type
-# Generated: 2026-09-14T07:34:24.197Z
+# Generated: 2026-09-17T03:20:06.902Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Checkout Type
 
 Description: |
-  Labels each checkout and order as Guest or Registered, based on whether the shopper was signed in to a merchant account (a login state or a populated user_id) at begin_checkout and at purchase. Baymard's checkout research and the order reports in Shopify, Salesforce Commerce Cloud and Adobe Commerce all use this split to show how much revenue relies on guest checkout and where forced sign-in loses conversions.
+  Labels each checkout and order with one of three lowercase values, guest, registered or unknown, based on whether the shopper was signed in to a merchant account (a login state or a populated user_id) at begin_checkout and at purchase. unknown is used when the sign-in signal is missing. Baymard's checkout research uses this split, Adobe Commerce records it on every order (sales_order.customer_is_guest) and Salesforce Commerce Cloud reports registered versus guest orders; retailers use it to show how much revenue relies on guest checkout and where forced sign-in loses conversions.
 
 Category: Conversion
 
@@ -101,6 +101,9 @@ Adobe Client Data Layer: |
     "eventInfo": {
       "path": "transaction"
     },
+    "site": {
+      "trafficType": "external"
+    },
     "user": {
       "profileID": "CUST-000482193",
       "loginStatus": "logged_in"
@@ -149,7 +152,8 @@ XDM Mapping: |
         "customDimensions": {
           "eVars": {
             "eVar21": "registered",
-            "eVar22": "logged_in"
+            "eVar22": "logged_in",
+            "eVar23": "external"
           }
         }
       }
@@ -161,6 +165,7 @@ Google Analytics SQL: |
   -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
   -- Checkout Type (guest / registered / unknown) at begin_checkout (first per session) and at purchase (latest per transaction_id)
+  -- Filters: internal traffic (traffic_type = 'internal') is removed from all rows, NULL treated as external; purchase rows are anti-joined on transaction_id to your-project.commerce.order_exclusions (test, internal staff and assisted orders).
   WITH checkout_events AS (
     SELECT
       PARSE_DATE('%Y%m%d', event_date) AS event_date,
@@ -178,6 +183,7 @@ Google Analytics SQL: |
     WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
                             AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
       AND event_name IN ('begin_checkout', 'purchase')
+      AND COALESCE((SELECT p.value.string_value FROM UNNEST(event_params) AS p WHERE p.key = 'traffic_type' LIMIT 1), 'external') <> 'internal'
     GROUP BY event_date, event_name, event_timestamp, user_pseudo_id, user_id, event_bundle_sequence_id
   ),
   classified AS (
@@ -205,16 +211,19 @@ Google Analytics SQL: |
   ),
   orders AS (
     SELECT
-      event_date,
+      c.event_date,
       'purchase' AS checkout_step,
-      checkout_type,
-      transaction_id AS unit_key,
-      COALESCE(purchase_revenue, 0) AS revenue
-    FROM classified
-    WHERE event_name = 'purchase'
-      AND transaction_id IS NOT NULL
-      AND transaction_id NOT IN ('', '(not set)')
-    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp DESC) = 1
+      c.checkout_type,
+      c.transaction_id AS unit_key,
+      COALESCE(c.purchase_revenue, 0) AS revenue
+    FROM classified AS c
+    LEFT JOIN `your-project.commerce.order_exclusions` AS excl
+      ON excl.transaction_id = c.transaction_id
+    WHERE c.event_name = 'purchase'
+      AND c.transaction_id IS NOT NULL
+      AND c.transaction_id NOT IN ('', '(not set)')
+      AND excl.transaction_id IS NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY c.transaction_id ORDER BY c.event_timestamp DESC) = 1
   ),
   combined AS (
     SELECT * FROM checkout_starts
@@ -240,6 +249,7 @@ AEP Query Service SQL: |
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
   -- Checkout Type (guest / registered / unknown) at checkout start (first per session) and at purchase (latest per purchaseID)
+  -- Filters: internal traffic (eVar23 traffic type = 'internal') is removed from all rows, NULL treated as external; purchase rows are anti-joined on purchaseID to order_exclusions_dataset (test, internal staff and assisted orders).
   WITH checkout_events AS (
     SELECT
       timestamp,
@@ -260,6 +270,7 @@ AEP Query Service SQL: |
     WHERE timestamp >= date_sub(current_date(), 30)
       AND timestamp < current_date()
       AND (commerce.checkouts.value > 0 OR commerce.purchases.value > 0)
+      AND COALESCE(LOWER(_experience.analytics.customDimensions.eVars.eVar23), 'external') <> 'internal'
   ),
   classified AS (
     SELECT
@@ -297,16 +308,19 @@ AEP Query Service SQL: |
     SELECT event_date, checkout_step, checkout_type, unit_key, revenue
     FROM (
       SELECT
-        event_date,
-        checkout_step,
-        checkout_type,
-        purchase_id AS unit_key,
-        CAST(COALESCE(order_total, 0) AS DOUBLE) AS revenue,
-        ROW_NUMBER() OVER (PARTITION BY purchase_id ORDER BY timestamp DESC) AS rn
-      FROM classified
-      WHERE checkout_step = 'purchase'
-        AND purchase_id IS NOT NULL
-        AND purchase_id <> ''
+        c.event_date,
+        c.checkout_step,
+        c.checkout_type,
+        c.purchase_id AS unit_key,
+        CAST(COALESCE(c.order_total, 0) AS DOUBLE) AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY c.purchase_id ORDER BY c.timestamp DESC) AS rn
+      FROM classified c
+      LEFT JOIN order_exclusions_dataset excl
+        ON excl.purchase_id = c.purchase_id
+      WHERE c.checkout_step = 'purchase'
+        AND c.purchase_id IS NOT NULL
+        AND c.purchase_id <> ''
+        AND excl.purchase_id IS NULL
     ) o
     WHERE rn = 1
   ),
@@ -337,12 +351,12 @@ AEP Query Service SQL: |
   ORDER BY event_date, checkout_step, checkout_type;
 
 Calculation Notes: |
-  1️⃣ Classification rule: the value is 'registered' when the checkout step or order was carried out in an authenticated session (login_status = logged_in, or user_id populated with the merchant customer ID). Otherwise it is 'guest'. Values are the lowercase literals guest / registered. If the authentication signal is missing, record 'unknown'. Never default it to guest, because that inflates guest share whenever tagging breaks.
+  1️⃣ Classification rule: the value is 'registered' when the checkout step or order was carried out in an authenticated session (login_status = logged_in, or user_id populated with the merchant customer ID). Otherwise it is 'guest'. Values are the lowercase literals guest / registered / unknown. If the authentication signal is missing, record 'unknown'. Never default it to guest, because that inflates guest share whenever tagging breaks.
   2️⃣ Evaluation points and precedence: the value is captured on begin_checkout (checkout type at start) and on purchase (checkout type at order). For order-level reporting, the purchase value wins. A shopper who starts as a guest and signs in mid-checkout counts as registered for the order and stays guest on the begin_checkout row, so step-to-step funnels show the switch instead of hiding it.
   3️⃣ Post-purchase account creation (the 'save your details' prompt on the confirmation page) does not reclassify the order. It stays guest, and the new account is attributed through Registration Type. A recognised-but-unauthenticated shopper (a remembered cookie or soft login that asks for a password at checkout) counts as guest unless the order is placed while authenticated.
   4️⃣ Express and wallet checkouts (Apple Pay, Google Pay, PayPal, Shop Pay) started from the product page or cart without a merchant sign-in count as guest. A wallet or payment-provider identity is not a merchant account. user_id must be set only after merchant authentication. A hashed email collected in the guest contact step must never fill user_id, or guest orders will be misclassified as registered.
-  5️⃣ Source of truth: the commerce platform's order record decides the order-level value (Adobe Commerce sales_order.customer_is_guest; SFCC Customer.isAuthenticated() / isRegistered() at order placement; for Shopify, whether the order was placed while signed in to a customer account). The GA4 purchase value is joined on transaction_id and used only for session and journey analysis. If the two disagree, keep the platform value and track the mismatch rate as a tagging-quality control.
-  6️⃣ Exclusions and filters: exclude test orders, orders placed by internal staff accounts, and orders keyed in by call-centre or store associates on the shopper's behalf (assisted orders count toward neither value in the digital split). Cancelled and fraud-declined orders keep their classification but follow the purchase filters used by the downstream KPI. Checkouts with no purchase keep the begin_checkout value so abandonment can be split by checkout type.
+  5️⃣ Digital split and reconciliation: the SQL gives the digital (tagged) order split, built from web begin_checkout and purchase events only. Reconciling it against the platform order record (Adobe Commerce sales_order.customer_is_guest; SFCC Customer.isAuthenticated() / isRegistered() at order placement; for Shopify, whether the order was placed while signed in to a customer account) on transaction_id is a separate data-quality check. Track the mismatch rate from that check as a tagging-quality control.
+  6️⃣ Exclusions and filters: both queries drop internal traffic on every row, begin_checkout included (GA4: the traffic_type event parameter set by the internal-traffic rule is not 'internal', with a missing value treated as external; AEP: eVar23 traffic type is not 'internal', missing treated as external). Purchase rows are then anti-joined on transaction_id (AEP: purchaseID) to an order exclusion table (your-project.commerce.order_exclusions / order_exclusions_dataset) listing test orders, orders placed by internal staff accounts and orders keyed in by call-centre or store associates on the shopper's behalf, so assisted orders count toward neither value in the digital split. Cancelled and fraud-declined orders keep their classification but follow the purchase filters used by the downstream KPI. Checkouts with no purchase keep the begin_checkout value so abandonment can be split by checkout type.
   7️⃣ Session and timing: evaluation uses the GA4 30-minute inactivity timeout. If a session expires mid-checkout and the shopper resumes, the new session's begin_checkout is re-evaluated independently. Scope boundaries: this dimension does not describe lifecycle stage (a guest can be a returning customer matched on email, which Customer Status covers), how the account was created (Registration Type) or loyalty tier. Guest Checkout Rate (guest orders ÷ total orders) is built on this dimension but governed as its own KPI.
 
 Business Use Case: |
@@ -367,7 +381,7 @@ Segment Eligibility: |
 
 Related Dimensions: [registration-type, customer-status, customer-loyalty-tier, payment-method, device-category]
 
-Derived Dimensions: [registration-type]
+Derived Dimensions: [guest-checkout-flag]
 
 Data Sensitivity: Internal
 
@@ -381,5 +395,5 @@ Created At: 2026-09-14T07:34:15.699+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-14T07:34:23.867+00:00
+Last Modified At: 2026-09-17T03:20:06.491+00:00
 
