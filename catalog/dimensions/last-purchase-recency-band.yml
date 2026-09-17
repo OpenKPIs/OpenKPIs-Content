@@ -1,12 +1,12 @@
 # Dimension: Last Purchase Recency Band
-# Generated: 2026-09-15T13:35:40.607Z
+# Generated: 2026-09-17T23:54:16.464Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Last Purchase Recency Band
 
 Description: |
-  Last Purchase Recency Band groups each customer by the number of calendar days between their most recent completed order and the analysis date, using default bands of 0-30, 31-90, 91-180, 181-365 and 366+ days plus No purchase for registered customers who have never ordered. It is the standard recency cut behind Klaviyo and Shopify win-back and lapsed-customer segments and the 12-month active-customer convention, and it measures elapsed time only, leaving the churn decision to Customer Churn Rate and lifecycle labels to Customer Status.
+  Last Purchase Recency Band groups each customer by the number of calendar days between their most recent completed order and the analysis date, using default bands of 0-30, 31-90, 91-180, 181-365 and 366+ days plus No purchase for registered customers who have never ordered. It is the standard recency cut behind Klaviyo and Shopify win-back and lapsed-customer segments and the 12-month active-customer convention, and it measures elapsed time only, leaving the churn decision to the business's churn definition and lifecycle labels to Customer Status.
 
 Category: Retention
 
@@ -316,12 +316,12 @@ AEP Query Service SQL: |
   ORDER BY snapshot_date, band_sort_key;
 
 Calculation Notes: |
-  1️⃣ Calculation: days_since_last_purchase = DATE_DIFF(analysis_date, DATE(last_qualifying_order_placed_at), DAY). Both dates are converted to the store reporting time zone (for example, the Shopify store time zone) before the calendar-day difference is taken, so a customer who ordered on the analysis date is day 0. Elapsed 24-hour periods are not used. Band edges include both ends and do not overlap: "0-30 days" (0 to 30), "31-90 days", "91-180 days", "181-365 days", "366+ days" and "No purchase". Sort keys run 1 to 6 so reports list the bands by recency instead of alphabetically. The input is the Days Since Last Purchase metric, so the band always matches that metric for the same customer and analysis date.
+  1️⃣ Calculation: days_since_last_purchase = DATE_DIFF(analysis_date, DATE(last_qualifying_order_placed_at), DAY). Both dates are converted to the store reporting time zone (for example, the Shopify store time zone) before the calendar-day difference is taken, so a customer who ordered on the analysis date is day 0. Elapsed 24-hour periods are not used. Band edges include both ends and do not overlap: "0-30 days" (0 to 30), "31-90 days", "91-180 days", "181-365 days", "366+ days" and "No purchase". Sort keys run 1 to 6 so reports list the bands by recency instead of alphabetically. The input is the days_since_last_purchase value computed in the SQL from the qualifying orders in the commerce order table for each customer and analysis date.
   2️⃣ Qualifying order: an order placed on any storefront (web, app, or POS stitched to the same customer) with a completed or paid financial status. Recency is based on the order placed timestamp, not the fulfilment, delivery or payment-capture date. Excluded: cancelled, voided and fraud-rejected orders, test and staff orders, unconverted draft orders, and zero-value replacement or warranty re-ship orders. Returned or refunded orders still count, because the customer did buy on that date. Marketplace orders count only when they can be matched to the same customer ID.
   3️⃣ Customer key and population: the resolved customer ID from the commerce platform or CRM customer master. For merged or de-duplicated accounts, use the latest qualifying order across every source ID. Guest orders are assigned to a customer only through a deterministic match on a verified, hashed email. Unmatched guest orders are left out of the population. "No purchase" applies only to registered accounts with zero qualifying orders, never to anonymous visitors or guests. Accounts removed under GDPR or CCPA erasure requests are taken out of the population and are not left in "No purchase".
   4️⃣ Point-in-time rule: the band is a snapshot evaluated at the analysis date. It is not stored on the customer record. Trend reports rebuild it for each snapshot date (daily, week-end or month-end) using only orders placed on or before that date. This avoids look-ahead bias, where a later repeat order would move a customer out of a band they really held at the time. Late-arriving orders, such as offline POS uploads or marketplace syncs, restate snapshots within a 3-day reprocessing window. Snapshots older than that are frozen.
   5️⃣ Configurable thresholds: 30, 90, 180 and 365 days are the documented defaults. They match the standard win-back and lapsed-flow windows and the 12-month active-customer window. Businesses with long natural buying cycles (furniture, appliances, mattresses) may change the edges through governed configuration. Any change requires a version increment, restated history, and band labels that show the new day ranges. Dashboard-level re-cuts are not permitted. The 365-day edge is a fixed day count, not a calendar year, so leap years do not move customers between bands.
-  6️⃣ Guardrail: this is a raw elapsed-time band, not a churn or lifecycle judgment. The union of the four bands from 0-30 to 181-365 must reconcile to the Active Customers count (at least one qualifying order in the trailing 365 days) and to the active base used by Customer Retention Rate. The churn threshold is defined only by Customer Churn Rate. A customer in "181-365 days" is not churned just because of the band. Read the band next to Time Between Purchases, because 120 days without an order is normal for some categories and a warning sign for consumables.
+  6️⃣ Guardrail: this is a raw elapsed-time band, not a churn or lifecycle judgment. The union of the four bands from 0-30 to 181-365 equals the customers with at least one qualifying order in the trailing 365 days (the active_customers_0_365_days column in the SQL). Any churn threshold belongs to the business's churn definition, not to this band, and Customer Retention Rate (customer-retention-rate) measures retention separately. A customer in "181-365 days" is not churned just because of the band. Read the band next to the customer's typical gap between orders, because 120 days without an order is normal for some categories and a warning sign for consumables.
   7️⃣ Distinction: Customer Status (customer-status) gives rule-based lifecycle labels such as New, Active, At Risk and Churned. RFM Segment (rfm-segment) combines recency with frequency and monetary value, so this band is only one of its three inputs. Purchase Count Band (purchase-count-band) buckets order frequency. None of these may be relabelled or used in place of this dimension. Subscription auto-renewal orders count as qualifying orders by default. Win-back programmes that target discretionary purchases may filter them out using the order-source flag, and must document that filter on the dashboard.
 
 Business Use Case: |
@@ -336,7 +336,7 @@ Dependencies:
 Source Data: Commerce Platform Orders (Shopify / Adobe Commerce) + CRM Customer Master
 
 Report Attributes: |
-  last-purchase-recency-band; customer-status; rfm-segment; purchase-count-band; acquisition-channel; loyalty-tier; country
+  last-purchase-recency-band; customer-status; rfm-segment; purchase-count-band; customer-loyalty-tier; acquisition-cohort
 
 Dashboard Usage: [Customer Retention & Win-back Performance, Active Customer Base Health, Customer Lifetime Value & Cohort Analysis, Monthly CRM Lifecycle Review]
 
@@ -345,7 +345,7 @@ Segment Eligibility: |
 
 Related Dimensions: [customer-status, rfm-segment, purchase-count-band]
 
-Derived Dimensions: [active-customer-flag, lapsed-customer-flag, win-back-eligibility-flag]
+Derived Dimensions: [rfm-segment, customer-status]
 
 Data Sensitivity: Internal
 
@@ -359,5 +359,5 @@ Created At: 2026-09-15T13:35:29.377+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-15T13:35:40.307+00:00
+Last Modified At: 2026-09-17T23:54:15.893+00:00
 
