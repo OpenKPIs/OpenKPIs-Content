@@ -1,84 +1,212 @@
 # KPI: Sign Up Conversion Rate
-# Generated: 2026-08-26T14:03:36.754Z
+# Generated: 2026-09-18T00:11:01.789Z
 # Contributed by: dev-user
 # Last modified by: devyendarm
 
 KPI Name: Sign Up Conversion Rate
-Formula: (Completed Sign Ups / Initiated Sign Ups) × 100
+Formula: (Unique Users Who Completed sign_up / Unique Users Who Started the Registration Form) × 100
 
 Description: |
-  The Sign Up Conversion Rate measures the percentage of users who successfully complete the sign-up process out of the total number of users who initiated the sign-up process.
+  Sign Up Conversion Rate is the percentage of users who start the account registration form and go on to complete it, creating a customer account. It isolates the efficiency of the sign-up flow itself, showing how much form friction, field count, verification steps and social-login options cost the store in registered customers.
 
 Category: Conversion
 
+Tags: [kpi, E-commerce: Top-of-Funnel & Marketing Acquisition, registration, funnel]
 
-Industry: [Retail]
+Industry: [["E-commerce"]]
 
 Priority: High
 
-Core Area: Generic
+Core Area: Authentication
 
-Scope: Session
+Scope: User
 
-Measure Type: rate
+Measure Type: Percentage
 
-Aggregation Window: Time based - Daily
+Aggregation Window: Daily, Weekly, Monthly
 
 GA4 Event: |
   sign_up
 
 Adobe Event: |
-  signUpSuccess
+  sign_up
 
 W3 Data Layer: |
-  {"page":{"name":"sign_up","category":"conversion"},"user":{"loggedIn":true,"completedSignUp":true}}
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "account:register",
+        "siteSection": "account"
+      }
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "sign_up",
+          "eventAction": "registration_complete"
+        },
+        "attributes": {
+          "method": "email",
+          "formType": "registration"
+        }
+      }
+    ],
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "loginStatus": "logged_in",
+              "accountType": "new"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
 GA4 Data Layer: |
-  {"event":"sign_up_completed","event_label":"sign_up","event_category":"conversion"}
+  {
+    "event": "sign_up",
+    "method": "email",
+    "form_type": "registration",
+    "form_id": "account_register"
+  }
 
 Adobe Client Data Layer: |
-  {"events":[{"name":"signUpSuccess","label":"sign_up","category":"conversion"}]}
+  {
+    "event": "sign_up",
+    "eventInfo": {
+      "method": "email"
+    },
+    "form": {
+      "formType": "registration",
+      "formId": "account_register"
+    },
+    "user": {
+      "loginStatus": "logged_in",
+      "accountType": "new"
+    }
+  }
 
 XDM Mapping: |
-  {"_experience":{"analytics":{"custom1":"sign_up_conversion_rate"}}}
+  {
+    "eventType": "userAccount.createProfile",
+    "web": {
+      "webInteraction": {
+        "name": "sign_up",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "_tenant": {
+      "form": {
+        "formType": "registration",
+        "formId": "account_register"
+      },
+      "signUp": {
+        "method": "email"
+      }
+    }
+  }
 
 Google Analytics SQL: |
   -- ==========================================
   -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
+  -- Sign Up Conversion Rate: users who completed sign_up / all users who started the registration form, per day.
+  WITH events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_day,
+      user_pseudo_id,
+      event_name,
+      MAX(IF(ep.key = 'form_type', ep.value.string_value, NULL)) AS form_type
+    FROM `your-project.analytics_123456789.events_*`
+    LEFT JOIN UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name IN ('form_start', 'sign_up')
+    GROUP BY event_day, user_pseudo_id, event_name, event_timestamp
+  ),
+  user_day AS (
+    SELECT
+      event_day,
+      user_pseudo_id,
+      MAX(IF(event_name = 'form_start' AND form_type = 'registration', 1, 0)) AS started_sign_up,
+      MAX(IF(event_name = 'sign_up', 1, 0)) AS completed_sign_up
+    FROM events
+    GROUP BY event_day, user_pseudo_id
+  )
   SELECT
-    COUNTIF(event_name = 'sign_up_completed') / COUNTIF(event_name = 'sign_up') AS sign_up_conversion_rate
-  FROM `your-project.analytics_123456789.events_*`
-  WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)) AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+    event_day,
+    COUNTIF(started_sign_up = 1) AS users_started_sign_up,
+    COUNTIF(started_sign_up = 1 AND completed_sign_up = 1) AS users_completed_sign_up,
+    ROUND(SAFE_DIVIDE(COUNTIF(started_sign_up = 1 AND completed_sign_up = 1), COUNTIF(started_sign_up = 1)) * 100, 2) AS sign_up_conversion_rate_pct
+  FROM user_day
+  GROUP BY event_day
+  ORDER BY event_day;
 
 AEP Query Service SQL: |
   -- ==========================================
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
+  -- Sign Up Conversion Rate: identities that completed sign_up / all identities that started the registration form, per day.
+  WITH user_day AS (
+    SELECT
+      DATE(timestamp) AS event_day,
+      identityMap['ECID'][0].id AS ecid,
+      MAX(CASE WHEN web.webInteraction.name = 'form_start'
+                AND _tenant.form.formType = 'registration' THEN 1 ELSE 0 END) AS started_sign_up,
+      MAX(CASE WHEN web.webInteraction.name = 'sign_up' THEN 1 ELSE 0 END) AS completed_sign_up
+    FROM web_experience_events
+    WHERE timestamp >= DATE_SUB(CURRENT_DATE, 30)
+      AND timestamp < CURRENT_DATE
+      AND web.webInteraction.name IN ('form_start', 'sign_up')
+    GROUP BY DATE(timestamp), identityMap['ECID'][0].id
+  )
   SELECT
-    (COUNT(CASE WHEN event_name = 'signUpSuccess' THEN 1 END) / COUNT(CASE WHEN event_name = 'sign_up' THEN 1 END)) AS sign_up_conversion_rate
-  FROM aep_backend_dataset
-  WHERE _day_ BETWEEN TO_DATE(CURRENT_DATE - 7) AND TO_DATE(CURRENT_DATE - 1)
+    event_day,
+    SUM(started_sign_up) AS users_started_sign_up,
+    SUM(CASE WHEN started_sign_up = 1 AND completed_sign_up = 1 THEN 1 ELSE 0 END) AS users_completed_sign_up,
+    ROUND(100.0 * SUM(CASE WHEN started_sign_up = 1 AND completed_sign_up = 1 THEN 1 ELSE 0 END)
+          / NULLIF(SUM(started_sign_up), 0), 2) AS sign_up_conversion_rate_pct
+  FROM user_day
+  GROUP BY event_day
+  ORDER BY event_day;
 
 Calculation Notes: |
-  Exclude incomplete sign-up attempts and consider only successful sign-up completions within the defined time period.
+  1️⃣ Denominator is every unique user who fired form_start with form_type = registration in the period, including those who abandoned; numerator is the subset of those users who also fired sign_up.
+  2️⃣ Count each user once per reporting window: repeated form starts or duplicate sign_up hits (page refresh, double submit) do not inflate either side.
+  3️⃣ Guest checkout and newsletter-only subscriptions are excluded; only full account creation (including social login via the method parameter) counts as sign_up.
+  4️⃣ Sign-ups that start in one session and complete in another within the same window are credited to the window of completion; use a 30-minute session timeout when reporting at Session level.
+  5️⃣ Filter internal, QA and bot traffic, and exclude accounts later rejected by email verification or fraud checks when reconciling to the customer database.
+  6️⃣ This is the funnel-completion rate of the registration form; the share of all site visitors who sign up is tracked separately as Sign Up Rate.
 
 Business Use Case: |
-  The executive team uses the Sign Up Conversion Rate to assess the effectiveness of the sign-up process and identify areas for improvement to increase the conversion rate.
+  1️⃣ The Product team reviews the rate weekly by device type and sign-up method and, when mobile falls behind desktop, prioritises A/B tests that remove optional fields or add social login.
+  2️⃣ The Marketing team compares the rate by traffic source after a campaign launch and reallocates spend away from channels whose visitors start but abandon registration.
+  3️⃣ The Customer Service team is alerted when the daily rate drops sharply after a release and escalates verification-email or form-validation defects to engineering the same day.
 
+Dependencies:
+  Events: [sign_up, form_start]
+  Metrics: [unique-visitors]
+  Dimensions: [registration-type]
 
-Source Data: Digital Analytics
+Source Data: Digital Analytics (GA4)
 
 Report Attributes: |
-  ["Date","Source","Device Type"]
+  Date; Device Category; Traffic Source / Medium; Sign Up Method; Landing Page; Country
 
-Dashboard Usage: [Conversion Rate Dashboard, User Acquisition Dashboard]
+Dashboard Usage: [Customer Acquisition Dashboard, Registration Funnel Dashboard, Conversion Rate Dashboard]
 
 Segment Eligibility: |
   true
 
+Related KPIs: [sign-up-rate]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -90,4 +218,5 @@ Created At: 2026-05-29T04:17:23.246936+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T00:11:01.38+00:00
 
