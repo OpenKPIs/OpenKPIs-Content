@@ -1,7 +1,7 @@
 # Metric: Orders Delivered
-# Generated: 2026-09-18T17:22:33.361Z
+# Generated: 2026-09-18T17:22:43.541Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Orders Delivered
 Formula: COUNT(DISTINCT order_id) WHERE order_delivery_status = 'delivered' AND delivered_at >= period_start AND delivered_at < period_end, where delivered_at = MAX(package_delivered_at) across all packages of the order
@@ -11,6 +11,19 @@ Description: |
 
 Category: Operations
 
+Tags: [metric, Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly
 
 
 
@@ -18,23 +31,240 @@ Category: Operations
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Source: backend OMS + carrier tracking tables (offline, no events_* export)
+  -- Orders Delivered: distinct orders whose last package has a terminal DELIVERED / proof-of-delivery scan, or whose
+  -- BOPIS / curbside order was collected (picked_up_at), bucketed by delivered date in the merchant reporting time zone.
+  -- First delivered scan per tracking number counts once; packages whose latest scan was later reversed (in transit,
+  -- lost, returned) are dropped. Scans are read up to 14 days after the period so late carrier webhooks and reversals
+  -- are captured on every restatement, and 30 days before it so earlier packages of split shipments are seen.
+  WITH scans AS (
+    SELECT
+      tracking_number,
+      UPPER(status_code) AS status_code,
+      event_timestamp
+    FROM `your-project.carrier.tracking_events`
+    WHERE event_timestamp >= TIMESTAMP '2026-08-02 00:00:00'
+      AND event_timestamp < TIMESTAMP '2026-10-16 00:00:00'
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY tracking_number, UPPER(status_code), event_timestamp
+      ORDER BY ingested_at
+    ) = 1
+  ),
+  tracking_status AS (
+    SELECT
+      tracking_number,
+      MIN(IF(status_code IN ('DL', 'DELIVERED', 'PROOF_OF_DELIVERY'), event_timestamp, NULL)) AS first_delivered_at,
+      ARRAY_AGG(status_code ORDER BY event_timestamp DESC LIMIT 1)[OFFSET(0)] AS latest_status
+    FROM scans
+    GROUP BY tracking_number
+  ),
+  shipment_delivery AS (
+    SELECT
+      s.order_id,
+      s.shipment_id,
+      s.carrier,
+      s.service_level,
+      IF(t.latest_status IN ('DL', 'DELIVERED', 'PROOF_OF_DELIVERY'), t.first_delivered_at, NULL) AS delivered_at
+    FROM `your-project.oms.shipments` AS s
+    LEFT JOIN tracking_status AS t
+      ON t.tracking_number = s.tracking_number
+  ),
+  order_shipments AS (
+    SELECT
+      order_id,
+      COUNT(shipment_id) AS shipment_count,
+      COUNT(delivered_at) AS delivered_shipment_count,
+      MAX(delivered_at) AS last_delivered_at,
+      ARRAY_AGG(STRUCT(carrier, service_level) ORDER BY delivered_at DESC LIMIT 1)[OFFSET(0)] AS last_pkg
+    FROM shipment_delivery
+    GROUP BY order_id
+  ),
+  order_delivery AS (
+    SELECT
+      o.order_id,
+      o.fulfillment_method,
+      IF(o.fulfillment_method IN ('bopis', 'curbside'), o.picked_up_at, os.last_delivered_at) AS delivered_at,
+      IF(o.fulfillment_method IN ('bopis', 'curbside'), 'store_pickup', os.last_pkg.carrier) AS carrier,
+      IF(o.fulfillment_method IN ('bopis', 'curbside'), 'pickup', os.last_pkg.service_level) AS service_level
+    FROM `your-project.oms.orders` AS o
+    LEFT JOIN order_shipments AS os
+      ON os.order_id = o.order_id
+    WHERE o.order_status NOT IN ('cancelled', 'refunded_before_shipment')
+      AND COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_employee_order, FALSE) = FALSE
+      AND COALESCE(o.is_digital_only, FALSE) = FALSE
+      AND COALESCE(o.is_gift_card_only, FALSE) = FALSE
+      AND COALESCE(o.is_marketplace_3p_fulfilled, FALSE) = FALSE
+      AND (
+        (o.fulfillment_method IN ('bopis', 'curbside')
+          AND o.pickup_status = 'picked_up'
+          AND o.picked_up_at IS NOT NULL)
+        OR (o.fulfillment_method NOT IN ('bopis', 'curbside')
+          AND os.shipment_count > 0
+          AND os.delivered_shipment_count = os.shipment_count)
+      )
+  )
+  SELECT
+    DATE(delivered_at, 'America/New_York') AS delivered_date,
+    fulfillment_method,
+    carrier,
+    service_level,
+    COUNT(DISTINCT order_id) AS orders_delivered
+  FROM order_delivery
+  WHERE DATE(delivered_at, 'America/New_York') >= DATE '2026-09-01'
+    AND DATE(delivered_at, 'America/New_York') < DATE '2026-10-01'
+  GROUP BY delivered_date, fulfillment_method, carrier, service_level
+  ORDER BY delivered_date, orders_delivered DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Source: backend OMS + carrier tracking datasets ingested into AEP (aep_backend_dataset)
+  -- Orders Delivered: distinct orders whose last package has a terminal DELIVERED / proof-of-delivery scan, or whose
+  -- BOPIS / curbside order was collected (picked_up_at), bucketed by delivered date in the merchant reporting time zone.
+  -- First delivered scan per tracking number counts once; packages whose latest scan was later reversed are dropped.
+  -- Scans are read 30 days before and 14 days after the period (split shipments, late webhooks and reversals).
+  WITH scans AS (
+    SELECT tracking_number, status_code, event_timestamp
+    FROM (
+      SELECT
+        tracking_number,
+        UPPER(status_code) AS status_code,
+        event_timestamp,
+        ROW_NUMBER() OVER (
+          PARTITION BY tracking_number, UPPER(status_code), event_timestamp
+          ORDER BY ingested_at
+        ) AS rn
+      FROM aep_backend_dataset_carrier_tracking_events
+      WHERE event_timestamp >= TIMESTAMP '2026-08-02 00:00:00'
+        AND event_timestamp < TIMESTAMP '2026-10-16 00:00:00'
+    ) dedup
+    WHERE rn = 1
+  ),
+  first_delivered AS (
+    SELECT
+      tracking_number,
+      MIN(CASE WHEN status_code IN ('DL', 'DELIVERED', 'PROOF_OF_DELIVERY') THEN event_timestamp END) AS first_delivered_at
+    FROM scans
+    GROUP BY tracking_number
+  ),
+  latest_scan AS (
+    SELECT tracking_number, status_code AS latest_status
+    FROM (
+      SELECT
+        tracking_number,
+        status_code,
+        ROW_NUMBER() OVER (PARTITION BY tracking_number ORDER BY event_timestamp DESC) AS rn
+      FROM scans
+    ) ranked
+    WHERE rn = 1
+  ),
+  shipment_delivery AS (
+    SELECT
+      s.order_id,
+      s.shipment_id,
+      s.carrier,
+      s.service_level,
+      CASE WHEN l.latest_status IN ('DL', 'DELIVERED', 'PROOF_OF_DELIVERY') THEN f.first_delivered_at END AS delivered_at
+    FROM aep_backend_dataset_oms_shipments s
+    LEFT JOIN first_delivered f
+      ON f.tracking_number = s.tracking_number
+    LEFT JOIN latest_scan l
+      ON l.tracking_number = s.tracking_number
+  ),
+  order_shipments AS (
+    SELECT
+      order_id,
+      COUNT(shipment_id) AS shipment_count,
+      COUNT(delivered_at) AS delivered_shipment_count,
+      MAX(delivered_at) AS last_delivered_at
+    FROM shipment_delivery
+    GROUP BY order_id
+  ),
+  last_package AS (
+    SELECT order_id, carrier, service_level
+    FROM (
+      SELECT
+        order_id,
+        carrier,
+        service_level,
+        ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY delivered_at DESC NULLS LAST) AS rn
+      FROM shipment_delivery
+    ) ranked
+    WHERE rn = 1
+  ),
+  order_delivery AS (
+    SELECT
+      o.order_id,
+      o.fulfillment_method,
+      CASE WHEN o.fulfillment_method IN ('bopis', 'curbside') THEN o.picked_up_at ELSE os.last_delivered_at END AS delivered_at,
+      CASE WHEN o.fulfillment_method IN ('bopis', 'curbside') THEN 'store_pickup' ELSE lp.carrier END AS carrier,
+      CASE WHEN o.fulfillment_method IN ('bopis', 'curbside') THEN 'pickup' ELSE lp.service_level END AS service_level
+    FROM aep_backend_dataset_oms_orders o
+    LEFT JOIN order_shipments os
+      ON os.order_id = o.order_id
+    LEFT JOIN last_package lp
+      ON lp.order_id = o.order_id
+    WHERE o.order_status NOT IN ('cancelled', 'refunded_before_shipment')
+      AND COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_employee_order, FALSE) = FALSE
+      AND COALESCE(o.is_digital_only, FALSE) = FALSE
+      AND COALESCE(o.is_gift_card_only, FALSE) = FALSE
+      AND COALESCE(o.is_marketplace_3p_fulfilled, FALSE) = FALSE
+      AND (
+        (o.fulfillment_method IN ('bopis', 'curbside')
+          AND o.pickup_status = 'picked_up'
+          AND o.picked_up_at IS NOT NULL)
+        OR (o.fulfillment_method NOT IN ('bopis', 'curbside')
+          AND os.shipment_count > 0
+          AND os.delivered_shipment_count = os.shipment_count)
+      )
+  )
+  SELECT
+    TO_DATE(FROM_UTC_TIMESTAMP(delivered_at, 'America/New_York')) AS delivered_date,
+    fulfillment_method,
+    carrier,
+    service_level,
+    COUNT(DISTINCT order_id) AS orders_delivered
+  FROM order_delivery
+  WHERE TO_DATE(FROM_UTC_TIMESTAMP(delivered_at, 'America/New_York')) >= DATE '2026-09-01'
+    AND TO_DATE(FROM_UTC_TIMESTAMP(delivered_at, 'America/New_York')) < DATE '2026-10-01'
+  GROUP BY
+    TO_DATE(FROM_UTC_TIMESTAMP(delivered_at, 'America/New_York')),
+    fulfillment_method,
+    carrier,
+    service_level
+  ORDER BY delivered_date, orders_delivered DESC;
 
+Calculation Notes: |
+  1️⃣ Order-level completion. An order counts once, and only when its last outstanding package receives a terminal delivered status. delivered_at is MAX(package_delivered_at) across the order's shipments. When one package of a split shipment is still in transit, the order stays out of the count, even though its first package's delivery can be reported as a partial delivery.,2️⃣ Source of truth. The carrier tracking status is authoritative: normalised through the OMS or tracking aggregator, with scan codes DL, DELIVERED and courier proof-of-delivery. The 'delivery-confirmation' event is the backend OMS status record fed by these carrier webhooks, not a web or app hit. If the OMS order status and the carrier scan disagree, the carrier scan wins. Orders marked delivered in the OMS with no carrier scan go to reconciliation and stay out of the count.,3️⃣ Exclusions. Leave out cancelled and fully refunded-before-shipment orders, test and internal or employee orders, digital-only goods, gift cards, and orders fulfilled by third-party marketplace sellers without shared tracking. Also leave out return-to-sender, refused, lost-in-transit and failed-attempt statuses. Failed attempts belong in the failed-delivery-rate numerator, not here.,4️⃣ Fulfillment method. Carrier ship-to-home, ship-from-store and same-day local courier count when proof of delivery is captured. BOPIS and curbside orders count at customer collection (picked_up_at), not at ready-for-pickup. fulfillment_method must be kept on every row so pickup-completion-rate and carrier-only views can filter on it.,5️⃣ Timing and time zone. Carrier scans arrive in the local time of the delivery address. Convert them to UTC, then bucket by the merchant's reporting time zone. Late carrier webhooks can arrive up to 72 hours after the physical delivery, so restate the trailing 14 days on every daily load. Close monthly figures only after that window has settled.,6️⃣ Deduplication and reversals. Carriers often resend delivered scans, so keep the first terminal delivered scan per tracking number. If a delivered status is later reversed (a mis-scan corrected to in-transit or to lost), remove the order from the count as of the restatement date. A customer claim of item-not-received does not remove the order; flag it for delivery-accuracy analysis instead.,7️⃣ Sessions and attribution. Delivery happens outside any web or app session, so no session-timeout rule applies. The backend delivery-confirmation record carries no session_id and never starts or extends a session. To attribute deliveries to acquisition channels, join on order_id to the originating purchase event. Never assign a traffic source to the delivery record itself.
 
+Business Use Case: |
+  1️⃣ Fulfillment Operations managers review Orders Delivered each day against Orders Shipped from the prior three to five days. When the gap exceeds the carrier's service-level transit window for a node, they escalate that carrier lane and move volume to a backup carrier for the affected ZIP3 zones.,2️⃣ The Logistics and Carrier Management team uses Orders Delivered by carrier and service level as the denominator in the monthly carrier scorecard. They calculate on-time and failed-delivery rates on that consistent base, then enforce SLA penalty clauses or renegotiate zone rates when a carrier falls below the contracted on-time threshold.,3️⃣ Customer Service workforce planners forecast delivered-order volume per day from the in-transit backlog. Before peak weeks, they staff post-delivery contact queues (item-not-received, damage and return initiation) to the expected delivered volume, not the order-placement volume.,4️⃣ Finance tracks delivered orders by delivered_at when revenue recognition or marketplace payouts depend on proof of delivery. Before closing the period, they reconcile Orders Delivered against recognised revenue and hold back orders still in transit at month-end.
 
+Dependencies:
+  Events: [purchase, delivery-confirmation]
 
+Source Data: Backend: OMS order status + Carrier Tracking (webhooks from carrier/AfterShip)
 
+Report Attributes: |
+  Carrier; Service Level; Fulfillment Method; Fulfillment Node / Distribution Center; Delivery Region; Sales Channel; Promised Delivery Date
 
+Dashboard Usage: [Fulfillment & Last-Mile Performance, Carrier Scorecard, Customer Delivery Promise Tracker, Weekly Operations Review]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [average-delivery-time, shipment-volume, units-sold]
 
+Derived KPIs: [shipment-on-time-delivery-rate, failed-delivery-rate, pickup-completion-rate, delivery-accuracy-rate]
 
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +274,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T17:22:32.834+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T17:22:43.222+00:00
 
