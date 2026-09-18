@@ -1,108 +1,316 @@
 # KPI: Customer Retention Rate
-# Generated: 2026-09-11T22:30:34.908Z
+# Generated: 2026-09-18T16:58:38.378Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 KPI Name: Customer Retention Rate
-Formula: ((Number of Customers at End of Period - New Customers Acquired During Period) / Number of Customers at Start of Period) × 100
+Formula: ((Customers at End of Period − New Customers Acquired During Period) / Customers at Start of Period) × 100
 
 Description: |
-  Measures the percentage of customers who continue to use a service or make purchases over a specific period. It indicates customer loyalty and the effectiveness of retention strategies.
+  Customer Retention Rate measures the percentage of the customers active at the start of a period who are still buying at its end, calculated as ((customers at end of period − new customers acquired in the period) ÷ customers at start of period) × 100. It is the standard gauge of customer loyalty and of how well lifecycle, loyalty and service programmes keep the existing customer base purchasing.
 
 Category: Retention
 
-Tags: [kpi]
+Tags: [kpi, E-commerce: Customer Retention, Loyalty & LTV, Retail]
 
-Industry: [E-commerce & SaaS]
+Industry: [["E-commerce & SaaS, E-commerce"]]
 
 Priority: High
 
-Core Area: Generic
+Core Area: Monetization
 
 Scope: User
 
-Measure Type: percentage
+Measure Type: Percentage
 
-Aggregation Window: Time based - Monthly
+Aggregation Window: Time based - Monthly, Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "transaction": {
+        "transactionID": "T-100245",
+        "total": {
+          "basePrice": 79,
+          "shipping": 5.5,
+          "transactionTotal": 84.5,
+          "currency": "USD"
+        },
+        "profile": {
+          "profileInfo": {
+            "profileID": "CUST-000123"
+          }
+        }
+      },
+      "user": [
+        {
+          "profile": [
+            {
+              "profileInfo": {
+                "profileID": "CUST-000123",
+                "loginStatus": "logged_in"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "user_id": "CUST-000123",
+    "ecommerce": {
+      "transaction_id": "T-100245",
+      "value": 84.5,
+      "currency": "USD",
+      "shipping": 5.5,
+      "tax": 0,
+      "items": [
+        {
+          "item_id": "SKU-4471",
+          "item_name": "Organic Cotton Tee",
+          "item_category": "Apparel",
+          "price": 39.5,
+          "quantity": 2
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "user": {
+      "customerId": "CUST-000123",
+      "loginStatus": "logged_in"
+    },
+    "transaction": {
+      "purchaseID": "T-100245",
+      "total": 84.5,
+      "currency": "USD",
+      "products": [
+        {
+          "sku": "SKU-4471",
+          "name": "Organic Cotton Tee",
+          "category": "Apparel",
+          "price": 39.5,
+          "quantity": 2
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "CUST-000123",
+          "primary": true
+        }
+      ]
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100245",
+        "priceTotal": 84.5,
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-4471",
+        "name": "Organic Cotton Tee",
+        "quantity": 2,
+        "priceTotal": 79
+      }
+    ]
+  }
 
 Google Analytics SQL: |
   -- ==========================================
   -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
-  SELECT
-    COUNT(DISTINCT CASE WHEN current_period.active THEN user_id END) AS retained_users,
-    COUNT(DISTINCT user_id) AS total_users,
-    COUNT(DISTINCT CASE WHEN current_period.active THEN user_id END) / COUNT(DISTINCT user_id) AS retention_rate
-  FROM (
+  -- Customer Retention Rate for the last complete month vs the month before it.
+  -- CRR = ((customers at end - new customers) / customers at start) * 100
+  WITH params AS (
     SELECT
-      user_id,
-      MAX(IF(event_name = 'login', 1, 0)) AS active
-    FROM `your-project.crm.user_events`
-    WHERE event_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) AND CURRENT_DATE()
+      DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH), MONTH) AS cur_start,
+      LAST_DAY(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH), MONTH) AS cur_end,
+      DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 2 MONTH), MONTH) AS prev_start,
+      LAST_DAY(DATE_SUB(CURRENT_DATE(), INTERVAL 2 MONTH), MONTH) AS prev_end
+  ),
+  purchase_events AS (
+    SELECT
+      e.user_id,
+      PARSE_DATE('%Y%m%d', e.event_date) AS purchase_date,
+      MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) AS transaction_id,
+      MAX(IF(ep.key = 'value', COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64)), NULL)) AS order_value
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.event_params) AS ep
+    WHERE e.event_name = 'purchase'
+      AND e.user_id IS NOT NULL
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 26 MONTH))
+                            AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+    GROUP BY e.user_id, e.event_date, e.event_timestamp, e.user_pseudo_id
+  ),
+  orders AS (
+    -- one row per transaction; drop test and zero-value orders
+    SELECT user_id, MIN(purchase_date) AS purchase_date, transaction_id
+    FROM purchase_events
+    WHERE transaction_id IS NOT NULL
+      AND order_value > 0
+    GROUP BY user_id, transaction_id
+  ),
+  first_purchase AS (
+    SELECT user_id, MIN(purchase_date) AS first_purchase_date
+    FROM orders
     GROUP BY user_id
-  ) AS current_period
-  JOIN (
-    SELECT DISTINCT user_id
-    FROM `your-project.crm.user_events`
-    WHERE event_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 60 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
-  ) AS previous_period
-  ON current_period.user_id = previous_period.user_id;
+  ),
+  start_base AS (
+    SELECT DISTINCT o.user_id
+    FROM orders AS o, params AS p
+    WHERE o.purchase_date BETWEEN p.prev_start AND p.prev_end
+  ),
+  end_base AS (
+    SELECT DISTINCT o.user_id
+    FROM orders AS o, params AS p
+    WHERE o.purchase_date BETWEEN p.cur_start AND p.cur_end
+  ),
+  new_customers AS (
+    SELECT f.user_id
+    FROM first_purchase AS f, params AS p
+    WHERE f.first_purchase_date BETWEEN p.cur_start AND p.cur_end
+  )
+  SELECT
+    (SELECT cur_start FROM params) AS period_start,
+    (SELECT cur_end FROM params) AS period_end,
+    (SELECT COUNT(*) FROM start_base) AS customers_at_start,
+    (SELECT COUNT(*) FROM end_base) AS customers_at_end,
+    (SELECT COUNT(*) FROM new_customers) AS new_customers,
+    (SELECT COUNT(*) FROM end_base AS e JOIN start_base AS s USING (user_id)) AS retained_from_start,
+    ROUND(SAFE_DIVIDE(
+      (SELECT COUNT(*) FROM end_base) - (SELECT COUNT(*) FROM new_customers),
+      (SELECT COUNT(*) FROM start_base)
+    ) * 100, 2) AS customer_retention_rate_pct,
+    ROUND(SAFE_DIVIDE(
+      (SELECT COUNT(*) FROM end_base AS e JOIN start_base AS s USING (user_id)),
+      (SELECT COUNT(*) FROM start_base)
+    ) * 100, 2) AS cohort_retention_rate_pct;
 
 AEP Query Service SQL: |
   -- ==========================================
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
-  SELECT
-    COUNT(DISTINCT CASE WHEN current_period.active THEN user_id END) AS retained_users,
-    COUNT(DISTINCT user_id) AS total_users,
-    COUNT(DISTINCT CASE WHEN current_period.active THEN user_id END) / COUNT(DISTINCT user_id) AS retention_rate
-  FROM (
+  -- Customer Retention Rate for the last complete month vs the month before it.
+  -- CRR = ((customers at end - new customers) / customers at start) * 100
+  WITH params AS (
     SELECT
-      user_id,
-      MAX(CASE WHEN event_name = 'login' THEN 1 ELSE 0 END) AS active
-    FROM aep_backend_dataset.user_events
-    WHERE event_date BETWEEN DATEADD(day, -30, CURRENT_DATE()) AND CURRENT_DATE()
-    GROUP BY user_id
-  ) AS current_period
-  JOIN (
-    SELECT DISTINCT user_id
-    FROM aep_backend_dataset.user_events
-    WHERE event_date BETWEEN DATEADD(day, -60, CURRENT_DATE()) AND DATEADD(day, -30, CURRENT_DATE())
-  ) AS previous_period
-  ON current_period.user_id = previous_period.user_id;
+      add_months(trunc(current_date(), 'MM'), -1) AS cur_start,
+      date_sub(trunc(current_date(), 'MM'), 1) AS cur_end,
+      add_months(trunc(current_date(), 'MM'), -2) AS prev_start,
+      date_sub(add_months(trunc(current_date(), 'MM'), -1), 1) AS prev_end
+  ),
+  orders AS (
+    -- one row per purchase ID; drop test and zero-value orders
+    SELECT
+      identityMap['CRMID'][0].id AS customer_id,
+      commerce.order.purchaseID AS purchase_id,
+      MIN(CAST(timestamp AS DATE)) AS purchase_date
+    FROM commerce_experience_event_dataset
+    WHERE eventType = 'commerce.purchases'
+      AND commerce.purchases.value > 0
+      AND commerce.order.priceTotal > 0
+      AND commerce.order.purchaseID IS NOT NULL
+      AND identityMap['CRMID'][0].id IS NOT NULL
+      AND timestamp >= add_months(trunc(current_date(), 'MM'), -26)
+    GROUP BY identityMap['CRMID'][0].id, commerce.order.purchaseID
+  ),
+  first_purchase AS (
+    SELECT customer_id, MIN(purchase_date) AS first_purchase_date
+    FROM orders
+    GROUP BY customer_id
+  ),
+  start_base AS (
+    SELECT DISTINCT o.customer_id
+    FROM orders o CROSS JOIN params p
+    WHERE o.purchase_date BETWEEN p.prev_start AND p.prev_end
+  ),
+  end_base AS (
+    SELECT DISTINCT o.customer_id
+    FROM orders o CROSS JOIN params p
+    WHERE o.purchase_date BETWEEN p.cur_start AND p.cur_end
+  ),
+  new_customers AS (
+    SELECT f.customer_id
+    FROM first_purchase f CROSS JOIN params p
+    WHERE f.first_purchase_date BETWEEN p.cur_start AND p.cur_end
+  ),
+  counts AS (
+    SELECT
+      (SELECT COUNT(*) FROM start_base) AS customers_at_start,
+      (SELECT COUNT(*) FROM end_base) AS customers_at_end,
+      (SELECT COUNT(*) FROM new_customers) AS new_customers,
+      (SELECT COUNT(*) FROM end_base e JOIN start_base s ON e.customer_id = s.customer_id) AS retained_from_start
+  )
+  SELECT
+    p.cur_start AS period_start,
+    p.cur_end AS period_end,
+    c.customers_at_start,
+    c.customers_at_end,
+    c.new_customers,
+    c.retained_from_start,
+    ROUND(CASE WHEN c.customers_at_start = 0 THEN NULL
+          ELSE (c.customers_at_end - c.new_customers) * 100.0 / c.customers_at_start END, 2) AS customer_retention_rate_pct,
+    ROUND(CASE WHEN c.customers_at_start = 0 THEN NULL
+          ELSE c.retained_from_start * 100.0 / c.customers_at_start END, 2) AS cohort_retention_rate_pct
+  FROM counts c CROSS JOIN params p;
 
 Calculation Notes: |
-  1️⃣ Exclude churned customers due to involuntary reasons.  
-  2️⃣ Focus on voluntary churn for analysis.  
-  3️⃣ Analyze seasonal variations in customer behavior.  
-  4️⃣ Adjust strategies based on seasonal trends.  
-  5️⃣ Monitor payment failure impacts on customer retention.  
-  6️⃣ Use data to identify patterns in customer behavior.  
-  7️⃣ Implement targeted interventions for at-risk customers.
+  1️⃣ A customer is an identified buyer (logged-in user_id / CRM ID) with at least one completed purchase in the period; anonymous or guest orders that cannot be tied to a customer ID are excluded from all three counts, so report the share of identified revenue alongside the rate.
+  2️⃣ Customers at start of period (the denominator) is the full base of customers who purchased in the prior period of equal length, not only those who were exposed to a retention campaign or visited the site.
+  3️⃣ New customers are those whose first-ever completed purchase falls inside the current period; use a lookback of at least 24 months of order history so returning customers are not misclassified as new.
+  4️⃣ Count purchases once per transaction_id: deduplicate repeated purchase hits, and exclude test orders, zero-value orders and orders fully cancelled or refunded within the period.
+  5️⃣ Choose the period to match the category's natural purchase cycle (monthly for grocery and consumables, quarterly or yearly for apparel, electronics and home) and never compare rates across different period lengths.
+  6️⃣ Customers at end minus new customers can include lapsed customers who reactivated; report reactivated customers separately and use the cohort-intersection value (start-base customers who purchased again) when a strict cohort view capped at 100% is needed.
+  7️⃣ Value action by industry: E-commerce and Retail use a repeat purchase; subscription businesses use an active paid subscription at period end (see Subscriber Retention Rate).
 
 Business Use Case: |
-  Executives use this KPI to assess the effectiveness of customer loyalty programs and make strategic decisions on marketing investments.
+  1️⃣ The CRM and Lifecycle Marketing team reviews the monthly rate by acquisition cohort and first-touch channel, and when a cohort falls more than 5 points below the trailing average it launches a win-back email and SMS journey for that cohort.
+  2️⃣ The Loyalty Programme Manager compares retention of loyalty members against non-members each quarter and uses the gap to justify tier benefits or to redesign rewards that are not lifting repeat purchase.
+  3️⃣ Finance and the executive team use the yearly rate with Customer Lifetime Value to forecast revenue from the existing base and to set the acquisition budget ceiling for the next planning cycle.
+  4️⃣ Merchandising reviews retention by first-purchased product category and promotes or bundles the categories whose buyers return most often in new-customer offers.
 
+Dependencies:
+  Events: [purchase]
+  Dimensions: [customer-status, acquisition-cohort, first-touch-channel-grouping]
+  KPIs: [orders]
 
-Source Data: CRM
+Source Data: Digital Analytics (GA4) + Commerce Order History
 
 Report Attributes: |
-  ["Customer Segment","Geography","Product Category"]
+  Acquisition Cohort; First-Touch Channel Grouping; Customer Loyalty Tier; First-Purchased Product Category; Country
 
-Dashboard Usage: [Executive Overview, Marketing Performance]
+Dashboard Usage: [Executive Overview, Customer Retention & Loyalty, CRM & Lifecycle Marketing]
 
 Segment Eligibility: |
   true
 
-Related KPIs: [Churn Rate, Customer Lifetime Value, Repeat Purchase Rate]
+Related KPIs: [customer-lifetime-value, average-order-value, marketing-sourced-new-customer-rate, new-customer-conversion-rate, subscriber-retention-rate, subscriber-churn-rate]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -110,8 +318,9 @@ Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-09-11T22:30:34.264108+00:00
+Created At: 2026-09-11T21:30:33.374508+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T16:58:38.082+00:00
 
