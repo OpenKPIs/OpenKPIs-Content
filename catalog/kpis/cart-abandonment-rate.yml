@@ -1,18 +1,19 @@
 # KPI: Cart abandonment rate
-# Generated: 2026-08-26T14:03:30.450Z
+# Generated: 2026-09-18T16:56:25.380Z
 # Contributed by: swapnamagantius
 # Last modified by: devyendarm
 
 KPI Name: Cart abandonment rate
-Formula: ((Carts Created - Purchases Completed) / Carts Created) × 100
+Formula: ((Carts Created - Carts Converted to Purchase) / Carts Created) × 100
 
 Description: |
-  Measures the percentage of shopping carts initiated but not converted into purchases, indicating potential issues in the checkout process.
+  Cart abandonment rate measures the percentage of shopping carts that are created (at least one item added via add_to_cart) but do not result in a completed purchase within the same session. It is a critical e-commerce conversion KPI because it highlights friction in the checkout journey, such as unexpected shipping costs, forced account creation, payment failures or intent gaps, that suppresses revenue, and it is the complement of Cart-to-Purchase Rate.
 
 Category: Conversion
 
+Tags: [kpi, E-commerce: Cart & Checkout Funnel Analytics]
 
-Industry: [E-commerce]
+Industry: [["E-commerce"]]
 
 Priority: High
 
@@ -20,74 +21,223 @@ Core Area: Checkout
 
 Scope: Session
 
-Measure Type: percentage
+Measure Type: Percentage
 
-Aggregation Window: Time based - Daily
+Aggregation Window: Daily, Weekly, Monthly
 
 GA4 Event: |
-  begin_checkout
+  add_to_cart
 
 Adobe Event: |
-  scCheckout
+  scAdd
 
 W3 Data Layer: |
-  {"cart":{"items":[{"price":29.99,"quantity":1,"productID":"12345","productName":"Sample Product"}],"status":"abandoned"},"event":"checkout"}
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "add_to_cart"
+        }
+      }
+    ],
+    "cart": {
+      "cartID": "cart_8f2a91",
+      "price": {
+        "basePrice": 29.99,
+        "currency": "USD",
+        "cartTotal": 29.99
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU_12345",
+            "productName": "Sample Product"
+          },
+          "category": {
+            "primaryCategory": "Apparel"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 29.99
+          }
+        }
+      ]
+    }
+  }
 
 GA4 Data Layer: |
-  {"event":"begin_checkout","ecommerce":{"checkout":{"products":[{"id":"12345","name":"Sample Product","price":29.99,"quantity":1}],"actionField":{"step":1,"option":"abandoned"}}}}
+  {
+    "event": "add_to_cart",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 29.99,
+      "items": [
+        {
+          "item_id": "SKU_12345",
+          "item_name": "Sample Product",
+          "item_category": "Apparel",
+          "price": 29.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
 Adobe Client Data Layer: |
-  {"event":"scCheckout","ecommerce":{"checkout":{"step":1,"option":"abandoned","products":[{"id":"12345","name":"Sample Product","price":29.99,"quantity":1}]}}}
+  {
+    "event": "scAdd",
+    "eventInfo": {
+      "eventName": "scAdd"
+    },
+    "cart": {
+      "cartID": "cart_8f2a91",
+      "currency": "USD",
+      "total": 29.99,
+      "items": [
+        {
+          "productID": "SKU_12345",
+          "productName": "Sample Product",
+          "category": "Apparel",
+          "price": 29.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
 XDM Mapping: |
-  {"_experience":{"analytics":{"event1":"commerce.checkout","customDimensions":{"cartStatus":"abandoned"}}}}
+  {
+    "eventType": "commerce.productListAdds",
+    "commerce": {
+      "productListAdds": {
+        "value": 1
+      },
+      "cart": {
+        "cartID": "cart_8f2a91"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU_12345",
+        "name": "Sample Product",
+        "priceTotal": 29.99,
+        "quantity": 1,
+        "currencyCode": "USD"
+      }
+    ]
+  }
 
 Google Analytics SQL: |
   -- ==========================================
   -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
+  -- Cart abandonment rate = cart sessions (>= 1 add_to_cart) with no purchase at/after the first add / all cart sessions
+  WITH cart_events AS (
+    SELECT
+      user_pseudo_id,
+      (SELECT MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) FROM UNNEST(event_params) AS ep) AS ga_session_id,
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      event_name,
+      event_timestamp
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name IN ('add_to_cart', 'purchase')
+      AND ARRAY_LENGTH(items) > 0
+  ),
+  carts AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      MIN(IF(event_name = 'add_to_cart', event_date, NULL)) AS cart_date,
+      MIN(IF(event_name = 'add_to_cart', event_timestamp, NULL)) AS first_add_ts,
+      MAX(IF(event_name = 'purchase', event_timestamp, NULL)) AS last_purchase_ts
+    FROM cart_events
+    WHERE ga_session_id IS NOT NULL
+    GROUP BY user_pseudo_id, ga_session_id
+    HAVING MIN(IF(event_name = 'add_to_cart', event_timestamp, NULL)) IS NOT NULL
+  )
   SELECT
-    COUNTIF(event_name = 'begin_checkout') AS total_checkouts,
-    COUNTIF(event_name = 'purchase') AS total_purchases,
-    (COUNTIF(event_name = 'begin_checkout') - COUNTIF(event_name = 'purchase')) / COUNTIF(event_name = 'begin_checkout') AS cart_abandonment_rate
-  FROM
-    `your-project.analytics_123456789.events_*`
-  WHERE
-    _TABLE_SUFFIX BETWEEN '20230101' AND '20231231';
+    cart_date,
+    COUNT(*) AS carts_created,
+    COUNTIF(last_purchase_ts IS NULL OR last_purchase_ts < first_add_ts) AS abandoned_carts,
+    ROUND(100 * SAFE_DIVIDE(COUNTIF(last_purchase_ts IS NULL OR last_purchase_ts < first_add_ts), COUNT(*)), 2) AS cart_abandonment_rate_pct
+  FROM carts
+  GROUP BY cart_date
+  ORDER BY cart_date;
 
 AEP Query Service SQL: |
   -- ==========================================
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
+  -- Cart abandonment rate = cart sessions (>= 1 commerce.productListAdds) with no purchase at/after the first add / all cart sessions
+  WITH sessionized AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS ecid,
+      timestamp,
+      eventType,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY endUserIDs._experience.ecid.id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM commerce_experience_event_dataset
+    WHERE timestamp >= date_sub(current_date, 30)
+      AND timestamp < current_date
+  ),
+  carts AS (
+    SELECT
+      ecid,
+      session.num AS session_num,
+      MIN(CASE WHEN eventType = 'commerce.productListAdds' THEN CAST(timestamp AS DATE) END) AS cart_date,
+      MIN(CASE WHEN eventType = 'commerce.productListAdds' THEN timestamp END) AS first_add_ts,
+      MAX(CASE WHEN eventType = 'commerce.purchases' THEN timestamp END) AS last_purchase_ts
+    FROM sessionized
+    WHERE eventType IN ('commerce.productListAdds', 'commerce.purchases')
+    GROUP BY ecid, session.num
+    HAVING MIN(CASE WHEN eventType = 'commerce.productListAdds' THEN timestamp END) IS NOT NULL
+  )
   SELECT
-    COUNT(CASE WHEN event = 'scCheckout' THEN 1 END) AS total_checkouts,
-    COUNT(CASE WHEN event = 'purchase' THEN 1 END) AS total_purchases,
-    (COUNT(CASE WHEN event = 'scCheckout' THEN 1 END) - COUNT(CASE WHEN event = 'purchase' THEN 1 END)) / COUNT(CASE WHEN event = 'scCheckout' THEN 1 END) AS cart_abandonment_rate
-  FROM
-    your_project.adobe_analytics_dataset.events
-  WHERE
-    event IN ('scCheckout', 'purchase')
-    AND event_date BETWEEN '2023-01-01' AND '2023-12-31';
+    cart_date,
+    COUNT(*) AS carts_created,
+    SUM(CASE WHEN last_purchase_ts IS NULL OR last_purchase_ts < first_add_ts THEN 1 ELSE 0 END) AS abandoned_carts,
+    ROUND(100.0 * SUM(CASE WHEN last_purchase_ts IS NULL OR last_purchase_ts < first_add_ts THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS cart_abandonment_rate_pct
+  FROM carts
+  GROUP BY cart_date
+  ORDER BY cart_date;
 
 Calculation Notes: |
-  Exclude carts with no items and consider session timeout rules.
+  1️⃣ Carts Created (denominator) = every session (GA4 user_pseudo_id + ga_session_id; Adobe ECID + 30-minute session) with at least one add_to_cart event carrying one or more items, whether or not checkout was started.
+  2️⃣ Abandoned cart (numerator) = a cart session with no purchase event at or after the first add_to_cart in that session; a purchase that happened before the first add does not convert the cart.
+  3️⃣ Session timeout is 30 minutes of inactivity (GA4 default; SESS_TIMEOUT 1800 s in AEP); sessions crossing midnight are attributed to the date of the first add_to_cart.
+  4️⃣ Exclude internal/test traffic, bot-filtered hits and add_to_cart events with an empty items array; a cart later emptied with remove_from_cart still counts as created and abandoned.
+  5️⃣ Where the commerce platform keeps a persistent cart_id (Shopify checkouts, Salesforce Commerce baskets, Adobe Commerce quotes), a cart-level backend calculation is preferred for cross-session carts; the session-based digital version reads higher because a purchase in a later session counts as abandoned.
+  6️⃣ Cart Abandonment Rate = 100 - Cart-to-Purchase Rate over the same base; do not confuse it with Checkout Abandonment Rate, whose base is begin_checkout. Baymard's documented average is roughly 70%.
 
 Business Use Case: |
-  Executives use this KPI to identify and address barriers in the checkout process to improve conversion rates.
+  1️⃣ The E-commerce Product team reviews the rate weekly; when it rises more than 3 points above the trailing 8-week baseline, they break it down by device and checkout step to locate the friction (shipping-cost reveal, forced account creation, payment errors) and prioritise the fix.
+  2️⃣ The CRM & Marketing team sizes abandoned-cart email, SMS and retargeting programmes from the abandoned-cart volume and measures the Abandoned Cart Recovery Rate against it.
+  3️⃣ Merchandising & Pricing monitors spikes by product category and after price, promotion or free-shipping-threshold changes, and adjusts thresholds, offers or delivery messaging when abandonment climbs.
+  4️⃣ E-commerce leadership compares the monthly rate with the Baymard benchmark to set conversion-rate optimisation targets and approve checkout investment.
 
+Dependencies:
+  Events: [add-to-cart, purchase]
+  Metrics: [add-to-cart]
+  KPIs: [cart-to-purchase-rate]
 
-Source Data: Digital Analytics
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
 
 Report Attributes: |
-  ["Device Type","Geography","Traffic Source"]
+  Device Category; Traffic Source / Medium; Country; New vs Returning User; Product Category; Cart Value Band
 
-Dashboard Usage: [E-commerce Performance Dashboard]
+Dashboard Usage: [E-commerce Performance Dashboard, Cart & Checkout Funnel Dashboard]
 
 Segment Eligibility: |
   true
 
+Related KPIs: [cart-to-purchase-rate, checkout-completion-rate, checkout-conversion-rate, add-to-cart-rate, cart-conversion-rate, abandoned-cart-recovery-rate]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -99,4 +249,5 @@ Created At: 2026-06-17T01:04:26.668+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T16:56:24.841+00:00
 
