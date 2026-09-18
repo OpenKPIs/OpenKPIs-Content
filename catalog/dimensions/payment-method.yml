@@ -1,18 +1,18 @@
 # Dimension: Payment Method
-# Generated: 2026-09-04T12:30:22.594Z
+# Generated: 2026-09-18T16:56:52.827Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Payment Method
 
 Description: |
-  Payment Method identifies the normalized payment option selected or used by a customer for a checkout, subscription invoice, renewal, or other billable journey event. It supports analysis of conversion, payment preference, billing success, retention, and lifetime value without exposing account numbers, payment tokens, or other payment credentials.
+  Payment Method is the normalized payment option a customer selects at checkout and settles an order with, captured as the GA4 payment_type parameter on add_payment_info and purchase (for example credit_card, paypal, apple_pay, klarna, gift_card). It lets teams compare checkout conversion, order share, revenue, refunds and chargebacks by how customers pay, without ever exposing card numbers, tokens or other payment credentials.
 
 Category: Conversion
 
-Tags: [dimension]
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
 
-Industry: E-commerce & SaaS
+Industry: E-commerce & SaaS, E-commerce
 
 Priority: High
 
@@ -31,41 +31,242 @@ Adobe Event: |
   add_payment_info
 
 W3 Data Layer: |
-  {"digitalData":{"event":[{"eventInfo":{"eventName":"add_payment_info","eventAction":"add_payment_info"},"attributes":{"paymentMethod":"credit_card"}}],"transaction":{"attributes":{"paymentMethod":"credit_card"}}}}
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "add_payment_info",
+            "eventAction": "add_payment_info"
+          },
+          "attributes": {
+            "paymentMethod": "credit_card"
+          }
+        }
+      ],
+      "transaction": {
+        "total": {
+          "basePrice": 129.98,
+          "currency": "USD"
+        },
+        "attributes": {
+          "paymentMethod": "credit_card"
+        }
+      }
+    }
+  }
 
 GA4 Data Layer: |
-  {"event":"add_payment_info","ecommerce":{"payment_type":"credit_card"}}
+  {
+    "event": "add_payment_info",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 129.98,
+      "coupon": "SPRING10",
+      "payment_type": "credit_card",
+      "items": [
+        {
+          "item_id": "SKU_12345",
+          "item_name": "Trail Running Shoe",
+          "item_category": "Footwear",
+          "price": 64.99,
+          "quantity": 2
+        }
+      ]
+    }
+  }
 
 Adobe Client Data Layer: |
-  {"data":{"paymentMethod":"credit_card"},"event":"add_payment_info"}
+  {
+    "event": "add_payment_info",
+    "eventInfo": {
+      "checkoutStep": "payment"
+    },
+    "transaction": {
+      "paymentMethod": "credit_card",
+      "currency": "USD",
+      "value": 129.98
+    }
+  }
 
 XDM Mapping: |
-  {"commerce":{"order":{"payments":[{"paymentType":"credit_card"}]}}}
+  {
+    "eventType": "commerce.checkouts",
+    "commerce": {
+      "checkouts": {
+        "value": 1
+      },
+      "order": {
+        "currencyCode": "USD",
+        "priceTotal": 129.98,
+        "payments": [
+          {
+            "paymentType": "credit_card",
+            "paymentAmount": 129.98,
+            "currencyCode": "USD"
+          }
+        ]
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Payment Method (GA4 payment_type): checkout sessions, transactions and revenue by method, last 30 complete days
+  WITH ev AS (
+    SELECT
+      user_pseudo_id,
+      event_name,
+      event_timestamp,
+      (SELECT MAX(IF(key = 'ga_session_id', value.int_value, NULL)) FROM UNNEST(event_params)) AS ga_session_id,
+      (SELECT MAX(IF(key = 'payment_type', value.string_value, NULL)) FROM UNNEST(event_params)) AS payment_type_raw,
+      ecommerce.transaction_id,
+      ecommerce.purchase_revenue_in_usd AS revenue_usd
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name IN ('add_payment_info', 'purchase')
+  ),
+  last_selection AS (
+    -- customers may switch methods during checkout; the last selection in the session wins
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      ARRAY_AGG(LOWER(TRIM(payment_type_raw)) ORDER BY event_timestamp DESC LIMIT 1)[OFFSET(0)] AS selected_method
+    FROM ev
+    WHERE event_name = 'add_payment_info' AND payment_type_raw IS NOT NULL
+    GROUP BY user_pseudo_id, ga_session_id
+  ),
+  orders AS (
+    -- one row per transaction; the settled method sent on purchase overrides the checkout selection
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      transaction_id,
+      LOWER(TRIM(payment_type_raw)) AS settled_method,
+      revenue_usd
+    FROM ev
+    WHERE event_name = 'purchase' AND transaction_id IS NOT NULL AND transaction_id != '(not set)'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1
+  ),
+  sessions AS (
+    SELECT
+      CONCAT(COALESCE(s.user_pseudo_id, o.user_pseudo_id), '.', CAST(COALESCE(s.ga_session_id, o.ga_session_id) AS STRING)) AS session_key,
+      s.selected_method IS NOT NULL AS had_payment_info,
+      COALESCE(o.settled_method, s.selected_method, '(not set)') AS payment_method,
+      o.transaction_id,
+      o.revenue_usd
+    FROM last_selection s
+    FULL OUTER JOIN orders o
+      ON o.user_pseudo_id = s.user_pseudo_id AND o.ga_session_id = s.ga_session_id
+  )
+  SELECT
+    payment_method,
+    COUNT(DISTINCT IF(had_payment_info, session_key, NULL)) AS sessions_with_payment_info,
+    COUNT(DISTINCT transaction_id) AS transactions,
+    ROUND(SUM(revenue_usd), 2) AS purchase_revenue_usd,
+    ROUND(SAFE_DIVIDE(
+      COUNT(DISTINCT IF(had_payment_info AND transaction_id IS NOT NULL, session_key, NULL)),
+      COUNT(DISTINCT IF(had_payment_info, session_key, NULL))), 4) AS payment_to_purchase_rate,
+    ROUND(SAFE_DIVIDE(COUNT(DISTINCT transaction_id), SUM(COUNT(DISTINCT transaction_id)) OVER ()), 4) AS transaction_share
+  FROM sessions
+  GROUP BY payment_method
+  ORDER BY transactions DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Payment Method from XDM commerce.order.payments (Web SDK / Analytics source dataset), last 30 complete days
+  WITH tenders AS (
+    SELECT
+      _id AS event_id,
+      timestamp,
+      eventType,
+      commerce.order.purchaseID AS purchase_id,
+      commerce.order.priceTotal AS order_total,
+      posexplode(commerce.order.payments) AS (tender_seq, pmt)
+    FROM web_experience_events
+    WHERE timestamp >= date_sub(current_date, 30)
+      AND timestamp < current_date
+      AND eventType IN ('commerce.checkouts', 'commerce.purchases')
+      AND commerce.order.payments IS NOT NULL
+  ),
+  primary_tender AS (
+    -- split tender: the largest settled amount is primary, ties broken by tender sequence
+    SELECT event_id, eventType, purchase_id, order_total, lower(trim(pmt.paymentType)) AS payment_method
+    FROM (
+      SELECT t.*, ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY pmt.paymentAmount DESC NULLS LAST, tender_seq ASC) AS rn
+      FROM tenders t
+    ) r
+    WHERE rn = 1
+  ),
+  orders AS (
+    SELECT purchase_id, payment_method, order_total
+    FROM (
+      SELECT p.*, ROW_NUMBER() OVER (PARTITION BY purchase_id ORDER BY event_id) AS dup
+      FROM primary_tender p
+      WHERE eventType = 'commerce.purchases' AND purchase_id IS NOT NULL
+    ) d
+    WHERE dup = 1
+  ),
+  selections AS (
+    SELECT payment_method, COUNT(DISTINCT event_id) AS payment_selection_events
+    FROM primary_tender
+    WHERE eventType = 'commerce.checkouts'
+    GROUP BY payment_method
+  ),
+  order_totals AS (
+    SELECT payment_method, COUNT(*) AS orders, ROUND(SUM(order_total), 2) AS order_revenue
+    FROM orders
+    GROUP BY payment_method
+  )
+  SELECT
+    COALESCE(s.payment_method, o.payment_method) AS payment_method,
+    COALESCE(s.payment_selection_events, 0) AS payment_selection_events,
+    COALESCE(o.orders, 0) AS orders,
+    COALESCE(o.order_revenue, 0) AS order_revenue,
+    ROUND(COALESCE(o.orders, 0) / NULLIF(SUM(COALESCE(o.orders, 0)) OVER (), 0), 4) AS order_share
+  FROM selections s
+  FULL OUTER JOIN order_totals o ON s.payment_method = o.payment_method
+  ORDER BY orders DESC;
 
 Calculation Notes: |
-  Record the value known at the timestamp of each payment_method_selected, payment_attempted, purchase_completed, refund, chargeback, or subscription invoice event. If the customer changes methods during checkout, retain each selection on its event and assign the successfully settled method to the completed transaction; for split tender, assign the method with the largest settled amount as primary and resolve equal amounts by tender sequence. Failed attempts retain the attempted method, refunds inherit the original settled method, and recurring off-session charges use the method actually presented to the processor rather than the customer's current default method. Exclude test, sandbox, employee quality-assurance, and processor replay events from production reporting.
+  1️⃣ Capture the GA4 recommended parameter payment_type on add_payment_info and repeat it on purchase; normalize to a controlled lowercase list (credit_card, debit_card, paypal, apple_pay, google_pay, shop_pay, klarna, afterpay, affirm, gift_card, store_credit, bank_transfer, cash_on_delivery), map unknown values to other and missing values to (not set).  
+  2️⃣ Keep every selection at event level when a customer switches methods during checkout; session- and order-level reporting use the last add_payment_info selection before purchase.  
+  3️⃣ A completed transaction carries the successfully settled method (purchase payment_type, or the payment processor record joined on transaction_id), which overrides the last checkout selection.  
+  4️⃣ Split tender: the method with the largest settled amount is the primary value, ties resolved by tender sequence; the full tender list stays in the order's payments array.  
+  5️⃣ Failed or declined attempts keep the attempted method; refunds and chargebacks inherit the original settled method of the transaction; recurring off-session charges use the method presented to the processor, not the customer's current default.  
+  6️⃣ Store only the method type: never collect card numbers, tokens, BIN, expiry dates or wallet account identifiers (card brand belongs in its own dimension).  
+  7️⃣ Exclude test, sandbox, internal QA and processor replay transactions and bot-flagged traffic from production reporting.
 
 Business Use Case: |
-  The Product and Finance teams compare checkout completion and recurring billing success by payment method, device, market, and customer tenure. If mobile customers in a priority market convert materially better with a wallet that has low availability, leadership can prioritize enabling that wallet and then monitor conversion, renewal success, and customer lifetime value after launch.
+  1️⃣ The E-commerce Product team reviews payment-to-purchase rate by payment method and device every week; when a wallet such as apple_pay converts materially better on mobile but is unavailable or hidden in a priority market, they prioritize enabling or surfacing it and track conversion after launch.  
+  2️⃣ Finance compares order share and revenue by settled method against processor fee rates each month; when high-fee methods gain share without a conversion benefit, they renegotiate processor pricing or change the default method order at checkout.  
+  3️⃣ The Finance risk team monitors refund and chargeback rates by settled method; when one method exceeds card-scheme chargeback thresholds, they tighten 3-D Secure or manual-review rules for that method only.  
+  4️⃣ Merchandising reviews buy-now-pay-later usage (klarna, afterpay, affirm) by order value band each quarter; when installment payments lift average order value in higher bands, they add installment messaging to product pages in those price ranges.
 
+Dependencies:
+  Events: [purchase]
+  Metrics: [payment-info-added, begin-checkout]
 
-Source Data: Billing and payment processors such as Stripe, Adyen, PayPal, or Braintree stitched with Digital Analytics (GA4 or Adobe Analytics), subscription billing, and the e-commerce order platform
+Source Data: Digital Analytics (GA4 / Adobe Analytics) + Payments (Stripe, Adyen, PayPal, Braintree)
 
 Report Attributes: |
-  ["Checkout Channel","Device Type","Country","Currency","Customer Type","Customer Tenure","Subscription Plan","Payment Processor","Payment Status","Payment Failure Reason","Acquisition Channel","Order Value Band"]
+  Device Category; Country; Currency; Checkout Type; New vs Returning Customer; Traffic Source; Order Value Band; Payment Status; Card Brand
 
-Dashboard Usage: [Checkout Conversion Dashboard, Payment Authorization and Failure Dashboard, Subscription Billing and Renewal Dashboard, Customer Retention Dashboard, Customer Lifetime Value Dashboard, Payment Method Adoption Dashboard, Executive Revenue Performance Dashboard]
+Dashboard Usage: [Checkout Funnel Dashboard, Payment Performance Dashboard, Revenue Performance Dashboard, Refunds and Chargebacks Dashboard, Customer Lifetime Value Dashboard]
 
 Segment Eligibility: |
   true
 
-Related Dimensions: [Payment Method Detail, Payment Processor, Payment Status, Payment Failure Reason, Card Brand, Billing Country, Currency, Checkout Channel, Device Type, Subscription Plan, Customer Tenure, Order]
+Related Dimensions: [checkout-type, checkout-step, coupon-code, shipping-tier, device-category, transaction-type, refund-type, order-status]
 
-Derived Dimensions: [Payment Method Family, Digital Wallet Indicator, Card-Based Payment Indicator, Alternative Payment Method Indicator, Recurring Payment Capability, Customer Preferred Payment Method, First Successful Payment Method, Latest Successful Payment Method]
+Derived Dimensions: [Payment Method Family, Digital Wallet Indicator, Buy Now Pay Later Indicator, First Purchase Payment Method]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -73,8 +274,9 @@ Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-09-04T12:30:22.138361+00:00
+Created At: 2026-09-03T19:30:25.23312+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T16:56:52.479+00:00
 
