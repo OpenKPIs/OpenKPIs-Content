@@ -1,12 +1,12 @@
 # Dimension: Return Method
-# Generated: 2026-09-16T17:46:55.849Z
+# Generated: 2026-09-18T17:43:28.533Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Return Method
 
 Description: |
-  Return Method records how a returned item gets back to the merchant: prepaid mail-in label, carrier or partner drop-off point, in-store return (including online orders returned in store, known as BORIS or buy online, return in store), scheduled carrier pickup, or a shipment the customer arranges and pays for (self-ship). It also covers returnless refunds (keep-it refunds, where the refund or replacement is issued and the item does not move). It is the catalog's single definition of the Channel of Return concept (standard catalog sub-domain 6), so no separate Channel of Return dimension should be created, and returns, store operations and finance teams use it to compare return cost, refund cycle time and resale recovery by method.
+  Return Method records how a returned item gets back to the merchant, with the values mail_in (prepaid label), carrier_drop_off (carrier counter, parcel locker or partner return point), in_store (including BORIS, buy online, return in store), scheduled_pickup, self_ship and returnless (refund or replacement issued without the item moving). Returns operations, store operations and finance teams use it to compare return cost, refund cycle time and resale recovery by method.
 
 Category: Operations
 
@@ -36,8 +36,8 @@ W3 Data Layer: |
       {
         "eventInfo": {
           "eventName": "refund",
-          "eventAction": "return_request_submitted",
-          "type": "returns_portal"
+          "eventAction": "refund_approved",
+          "type": "refund_approval"
         }
       }
     ],
@@ -142,7 +142,7 @@ Adobe Client Data Layer: |
     "eventInfo": {
       "linkName": "refund",
       "linkType": "other",
-      "source": "returns_portal"
+      "source": "refund_approval"
     },
     "transaction": {
       "orderID": "T-100482",
@@ -202,6 +202,11 @@ XDM Mapping: |
         "name": "Trail Running Shoe",
         "quantity": 1,
         "priceTotal": 129.99,
+        "_tenant": {
+          "returns": {
+            "rmaLineID": "RMA-55821-1"
+          }
+        },
         "_experience": {
           "analytics": {
             "customDimensions": {
@@ -218,6 +223,11 @@ XDM Mapping: |
         "name": "Merino Crew Sock 2-Pack",
         "quantity": 1,
         "priceTotal": 54.98,
+        "_tenant": {
+          "returns": {
+            "rmaLineID": "RMA-55821-2"
+          }
+        },
         "_experience": {
           "analytics": {
             "customDimensions": {
@@ -247,7 +257,7 @@ XDM Mapping: |
         "returnMethod": "carrier_drop_off",
         "returnMethodSelected": "carrier_drop_off",
         "mixedMethod": true,
-        "returnSource": "returns_portal"
+        "returnSource": "refund_approval"
       }
     }
   }
@@ -256,79 +266,85 @@ Google Analytics SQL: |
   -- ==========================================
   -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
-  -- Return Method at return-line (RMA line) grain from the unified refund event.
-  -- The web data only carries the method the customer selected in the returns portal.
-  -- Reporting uses the effective method: a store POS return, carrier acceptance scan or returns-platform override replaces the selection.
-  -- `your-project.returns_platform.rma_lines` is a stand-in name for the returns platform / OMS export (rma_line_id, effective_return_method);
-  -- when it has no row for a line, the portal value is reported. Unknown or free-text values are normalized to '(not set)'.
-  WITH refund_lines AS (
+  -- Return Method at return-line (RMA line) grain. The base is every completed customer return line in the returns platform / OMS,
+  -- so in-store (BORIS) returns at POS, agent-created RMAs and returnless refunds are counted even when there is no returns-portal hit.
+  -- `your-project.returns_platform.rma_lines` is a stand-in name for the returns platform / OMS RMA-line export
+  -- (rma_line_id, rma_id, order_id, sku, item_category, quantity, refund_amount, return_origin, line_status, completed_at, updated_at,
+  --  selected_return_method, effective_return_method). effective_return_method is the method observed at first custody
+  -- (POS return transaction, carrier acceptance scan, drop-off receipt), locked once the refund is issued.
+  -- The GA4 refund event (sent once the RMA is confirmed and the refund approved) carries return_method and return_method_selected;
+  -- it is LEFT JOINed on rma_line_id only to fill the selected method when the platform did not store one.
+  -- Unknown or free-text values are normalized to '(not set)'.
+  WITH rma_base AS (
     SELECT
-      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
-      e.event_timestamp,
-      e.ecommerce.transaction_id AS transaction_id,
-      (SELECT MAX(IF(ep.key = 'rma_id', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS rma_id,
-      (SELECT MAX(IF(ep.key = 'return_method', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS event_return_method,
-      (SELECT MAX(IF(ep.key = 'return_method_selected', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS event_return_method_selected,
-      (SELECT MAX(IF(ep.key = 'mixed_method', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) FROM UNNEST(e.event_params) AS ep) AS mixed_method_raw,
-      it.item_id,
-      it.item_category,
-      COALESCE(it.quantity, 1) AS quantity,
-      COALESCE(it.item_refund, it.price * COALESCE(it.quantity, 1), 0) AS line_value,
+      b.rma_line_id,
+      b.rma_id,
+      b.order_id AS transaction_id,
+      b.sku AS item_id,
+      b.item_category,
+      COALESCE(b.quantity, 1) AS quantity,
+      COALESCE(b.refund_amount, 0) AS line_value,
+      b.effective_return_method AS platform_effective_method,
+      b.selected_return_method AS platform_selected_method
+    FROM `your-project.returns_platform.rma_lines` AS b
+    WHERE b.line_status = 'completed'
+      -- Exclusions: pre-shipment cancellations, carrier return-to-origin parcels and warehouse recalls are not customer returns;
+      -- exchanges and store-credit returns stay in
+      AND COALESCE(b.return_origin, 'customer') NOT IN ('pre_shipment_cancellation', 'carrier_return_to_origin', 'warehouse_recall')
+      AND DATE(b.completed_at) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY b.rma_line_id ORDER BY b.updated_at DESC) = 1
+  ),
+  web_lines AS (
+    -- Web refund lines, one row per RMA line (latest event wins); used only for the selected method
+    SELECT
       (SELECT MAX(IF(ip.key = 'rma_line_id', ip.value.string_value, NULL)) FROM UNNEST(it.item_params) AS ip) AS rma_line_id,
-      (SELECT MAX(IF(ip.key = 'return_method', ip.value.string_value, NULL)) FROM UNNEST(it.item_params) AS ip) AS item_return_method,
-      (SELECT MAX(IF(ip.key = 'return_method_selected', ip.value.string_value, NULL)) FROM UNNEST(it.item_params) AS ip) AS item_return_method_selected
+      COALESCE(
+        (SELECT MAX(IF(ip.key = 'return_method_selected', ip.value.string_value, NULL)) FROM UNNEST(it.item_params) AS ip),
+        (SELECT MAX(IF(ep.key = 'return_method_selected', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep)
+      ) AS web_return_method_selected
     FROM `your-project.analytics_123456789.events_*` AS e,
       UNNEST(e.items) AS it
-    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY))
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY))
                               AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
       AND e.event_name = 'refund'
-  ),
-  deduped AS (
-    -- One row per return line: the latest portal submission wins
-    SELECT
-      *,
-      COALESCE(rma_line_id, CONCAT(COALESCE(rma_id, transaction_id, '(not set)'), '|', COALESCE(item_id, '(not set)'))) AS rma_line_key
-    FROM refund_lines
     QUALIFY ROW_NUMBER() OVER (
-      PARTITION BY COALESCE(rma_line_id, CONCAT(COALESCE(rma_id, transaction_id, '(not set)'), '|', COALESCE(item_id, '(not set)')))
-      ORDER BY event_timestamp DESC
+      PARTITION BY (SELECT MAX(IF(ip.key = 'rma_line_id', ip.value.string_value, NULL)) FROM UNNEST(it.item_params) AS ip)
+      ORDER BY e.event_timestamp DESC
     ) = 1
-  ),
-  normalized AS (
-    SELECT
-      event_date,
-      transaction_id,
-      rma_id,
-      rma_line_id,
-      rma_line_key,
-      item_id,
-      item_category,
-      quantity,
-      line_value,
-      CASE
-        WHEN LOWER(TRIM(COALESCE(item_return_method, event_return_method))) IN ('mail_in', 'carrier_drop_off', 'in_store', 'scheduled_pickup', 'self_ship', 'returnless')
-          THEN LOWER(TRIM(COALESCE(item_return_method, event_return_method)))
-        ELSE '(not set)'
-      END AS web_return_method,
-      CASE
-        WHEN LOWER(TRIM(COALESCE(item_return_method_selected, event_return_method_selected, item_return_method, event_return_method))) IN ('mail_in', 'carrier_drop_off', 'in_store', 'scheduled_pickup', 'self_ship', 'returnless')
-          THEN LOWER(TRIM(COALESCE(item_return_method_selected, event_return_method_selected, item_return_method, event_return_method)))
-        ELSE '(not set)'
-      END AS return_method_selected,
-      LOWER(COALESCE(mixed_method_raw, 'false')) IN ('true', '1') AS mixed_method
-    FROM deduped
   ),
   effective AS (
     SELECT
-      n.*,
+      r.*,
+      -- Observed method replaces the provisional selection; lines with no custody event yet keep the selection
       CASE
-        WHEN LOWER(TRIM(b.effective_return_method)) IN ('mail_in', 'carrier_drop_off', 'in_store', 'scheduled_pickup', 'self_ship', 'returnless')
-          THEN LOWER(TRIM(b.effective_return_method))
-        ELSE n.web_return_method
-      END AS return_method
-    FROM normalized AS n
-    LEFT JOIN `your-project.returns_platform.rma_lines` AS b
-      ON b.rma_line_id = n.rma_line_id
+        WHEN LOWER(TRIM(COALESCE(r.platform_effective_method, r.platform_selected_method, w.web_return_method_selected))) IN ('mail_in', 'carrier_drop_off', 'in_store', 'scheduled_pickup', 'self_ship', 'returnless')
+          THEN LOWER(TRIM(COALESCE(r.platform_effective_method, r.platform_selected_method, w.web_return_method_selected)))
+        ELSE '(not set)'
+      END AS return_method,
+      CASE
+        WHEN LOWER(TRIM(COALESCE(r.platform_selected_method, w.web_return_method_selected))) IN ('mail_in', 'carrier_drop_off', 'in_store', 'scheduled_pickup', 'self_ship', 'returnless')
+          THEN LOWER(TRIM(COALESCE(r.platform_selected_method, w.web_return_method_selected)))
+        ELSE '(not set)'
+      END AS return_method_selected
+    FROM rma_base AS r
+    LEFT JOIN web_lines AS w
+      ON w.rma_line_id = r.rma_line_id
+  ),
+  rma_mix AS (
+    -- mixed_method attribute: lines of the same RMA use different known methods ('(not set)' lines are not compared)
+    SELECT
+      rma_id,
+      COUNT(DISTINCT IF(return_method != '(not set)', return_method, NULL)) > 1 AS mixed_method
+    FROM effective
+    GROUP BY rma_id
+  ),
+  flagged AS (
+    SELECT
+      f.*,
+      COALESCE(m.mixed_method, FALSE) AS mixed_method
+    FROM effective AS f
+    LEFT JOIN rma_mix AS m
+      ON m.rma_id = f.rma_id
   )
   SELECT
     return_method,
@@ -337,12 +353,12 @@ Google Analytics SQL: |
     COUNT(DISTINCT IF(mixed_method, rma_id, NULL)) AS mixed_method_rmas,
     SUM(quantity) AS return_units,
     ROUND(SUM(line_value), 2) AS returned_value,
-    -- Share denominator = all return lines in the period
+    -- Share denominator = all completed customer return lines in the period
     SAFE_DIVIDE(COUNT(*), SUM(COUNT(*)) OVER ()) AS share_of_return_lines,
-    COUNTIF(return_method != return_method_selected) AS lines_switched_from_selection,
+    COUNTIF(return_method_selected != '(not set)' AND return_method != return_method_selected) AS lines_switched_from_selection,
     -- Switch rate denominator = all return lines with this effective method
-    SAFE_DIVIDE(COUNTIF(return_method != return_method_selected), COUNT(*)) AS selection_switch_rate
-  FROM effective
+    SAFE_DIVIDE(COUNTIF(return_method_selected != '(not set)' AND return_method != return_method_selected), COUNT(*)) AS selection_switch_rate
+  FROM flagged
   GROUP BY return_method
   ORDER BY return_lines DESC;
 
@@ -350,64 +366,81 @@ AEP Query Service SQL: |
   -- ==========================================
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
-  -- Return Method at return-line grain from the refund interaction in the web ExperienceEvent dataset.
-  -- Line level: productListItems[].eVar61 (effective as sent by the portal) / eVar62 (selected); event level: _tenant.returns.* with eVar60 = RMA ID.
-  -- Web data only carries the portal selection. The effective method (store POS, carrier scan, returns-platform override)
-  -- comes from aep_returns_platform_dataset, a stand-in name for the returns platform / OMS dataset (rma_id, sku, effective_return_method).
+  -- Return Method at return-line (RMA line) grain. The base is every completed customer return line in aep_returns_platform_dataset,
+  -- a stand-in name for the returns platform / OMS RMA-line dataset (rma_line_id, rma_id, order_id, sku, quantity, refund_amount,
+  -- return_origin, line_status, completed_at, updated_at, selected_return_method, effective_return_method), so in-store (BORIS) returns,
+  -- agent-created RMAs and returnless refunds are counted even without a returns-portal hit.
+  -- The web refund interaction (sent once the RMA is confirmed and the refund approved) is LEFT JOINed on the RMA line ID
+  -- (productListItems[]._tenant.returns.rmaLineID) only to fill the selected method (line eVar62, then _tenant.returns.returnMethodSelected).
   -- Unknown or free-text values are normalized to '(not set)'.
-  WITH refund_lines AS (
-    SELECT
-      CAST(e.timestamp AS DATE) AS event_date,
-      e.timestamp AS event_ts,
-      e.commerce.order.purchaseID AS transaction_id,
-      COALESCE(e._tenant.returns.rmaID, e._experience.analytics.customDimensions.eVars.eVar60) AS rma_id,
-      COALESCE(pli._experience.analytics.customDimensions.eVars.eVar61, e._tenant.returns.returnMethod, e._experience.analytics.customDimensions.eVars.eVar61) AS web_method_raw,
-      COALESCE(pli._experience.analytics.customDimensions.eVars.eVar62, e._tenant.returns.returnMethodSelected, e._experience.analytics.customDimensions.eVars.eVar62,
-               pli._experience.analytics.customDimensions.eVars.eVar61, e._tenant.returns.returnMethod) AS selected_method_raw,
-      COALESCE(e._tenant.returns.mixedMethod, FALSE) AS mixed_method,
-      pli.SKU AS sku,
-      COALESCE(pli.quantity, 1) AS quantity,
-      COALESCE(pli.priceTotal, 0) AS line_value
-    FROM aep_web_events_dataset AS e
-    LATERAL VIEW explode(e.productListItems) plv AS pli
-    WHERE e.web.webInteraction.name = 'refund'
-      AND e.timestamp >= date_sub(current_date(), 28)
-      AND e.timestamp < current_date()
-  ),
-  deduped AS (
-    -- One row per return line (RMA + SKU): the latest portal submission wins
+  WITH rma_base AS (
     SELECT *
     FROM (
       SELECT
-        r.*,
-        CONCAT(COALESCE(r.rma_id, r.transaction_id, '(not set)'), '|', COALESCE(r.sku, '(not set)')) AS rma_line_key,
-        ROW_NUMBER() OVER (
-          PARTITION BY COALESCE(r.rma_id, r.transaction_id, '(not set)'), COALESCE(r.sku, '(not set)')
-          ORDER BY r.event_ts DESC
-        ) AS rn
-      FROM refund_lines AS r
+        b.rma_line_id,
+        b.rma_id,
+        b.order_id AS transaction_id,
+        b.sku,
+        COALESCE(b.quantity, 1) AS quantity,
+        COALESCE(b.refund_amount, 0) AS line_value,
+        b.effective_return_method AS platform_effective_method,
+        b.selected_return_method AS platform_selected_method,
+        ROW_NUMBER() OVER (PARTITION BY b.rma_line_id ORDER BY b.updated_at DESC) AS rn
+      FROM aep_returns_platform_dataset AS b
+      WHERE b.line_status = 'completed'
+        -- Exclusions: pre-shipment cancellations, carrier return-to-origin parcels and warehouse recalls are not customer returns
+        AND COALESCE(b.return_origin, 'customer') NOT IN ('pre_shipment_cancellation', 'carrier_return_to_origin', 'warehouse_recall')
+        AND b.completed_at >= date_sub(current_date(), 28)
+        AND b.completed_at < current_date()
     ) AS x
     WHERE rn = 1
   ),
-  normalized AS (
-    SELECT
-      d.*,
-      CASE WHEN LOWER(TRIM(d.web_method_raw)) IN ('mail_in', 'carrier_drop_off', 'in_store', 'scheduled_pickup', 'self_ship', 'returnless')
-           THEN LOWER(TRIM(d.web_method_raw)) ELSE '(not set)' END AS web_return_method,
-      CASE WHEN LOWER(TRIM(d.selected_method_raw)) IN ('mail_in', 'carrier_drop_off', 'in_store', 'scheduled_pickup', 'self_ship', 'returnless')
-           THEN LOWER(TRIM(d.selected_method_raw)) ELSE '(not set)' END AS return_method_selected
-    FROM deduped AS d
+  web_lines AS (
+    -- Web refund lines, one row per RMA line ID (latest event wins); used only for the selected method
+    SELECT rma_line_id, web_return_method_selected
+    FROM (
+      SELECT
+        pli._tenant.returns.rmaLineID AS rma_line_id,
+        COALESCE(pli._experience.analytics.customDimensions.eVars.eVar62, e._tenant.returns.returnMethodSelected) AS web_return_method_selected,
+        ROW_NUMBER() OVER (PARTITION BY pli._tenant.returns.rmaLineID ORDER BY e.timestamp DESC) AS rn
+      FROM aep_web_events_dataset AS e
+      LATERAL VIEW explode(e.productListItems) plv AS pli
+      WHERE e.web.webInteraction.name = 'refund'
+        AND pli._tenant.returns.rmaLineID IS NOT NULL
+        AND e.timestamp >= date_sub(current_date(), 90)
+        AND e.timestamp < current_date()
+    ) AS y
+    WHERE rn = 1
   ),
   effective AS (
     SELECT
-      n.*,
-      CASE WHEN LOWER(TRIM(b.effective_return_method)) IN ('mail_in', 'carrier_drop_off', 'in_store', 'scheduled_pickup', 'self_ship', 'returnless')
-           THEN LOWER(TRIM(b.effective_return_method))
-           ELSE n.web_return_method END AS return_method
-    FROM normalized AS n
-    LEFT JOIN aep_returns_platform_dataset AS b
-      ON b.rma_id = n.rma_id
-     AND b.sku = n.sku
+      r.*,
+      -- Observed method replaces the provisional selection; lines with no custody event yet keep the selection
+      CASE WHEN LOWER(TRIM(COALESCE(r.platform_effective_method, r.platform_selected_method, w.web_return_method_selected))) IN ('mail_in', 'carrier_drop_off', 'in_store', 'scheduled_pickup', 'self_ship', 'returnless')
+           THEN LOWER(TRIM(COALESCE(r.platform_effective_method, r.platform_selected_method, w.web_return_method_selected)))
+           ELSE '(not set)' END AS return_method,
+      CASE WHEN LOWER(TRIM(COALESCE(r.platform_selected_method, w.web_return_method_selected))) IN ('mail_in', 'carrier_drop_off', 'in_store', 'scheduled_pickup', 'self_ship', 'returnless')
+           THEN LOWER(TRIM(COALESCE(r.platform_selected_method, w.web_return_method_selected)))
+           ELSE '(not set)' END AS return_method_selected
+    FROM rma_base AS r
+    LEFT JOIN web_lines AS w
+      ON w.rma_line_id = r.rma_line_id
+  ),
+  rma_mix AS (
+    -- mixed_method attribute: lines of the same RMA use different known methods ('(not set)' lines are not compared)
+    SELECT
+      rma_id,
+      COUNT(DISTINCT CASE WHEN return_method <> '(not set)' THEN return_method END) > 1 AS mixed_method
+    FROM effective
+    GROUP BY rma_id
+  ),
+  flagged AS (
+    SELECT
+      f.*,
+      COALESCE(m.mixed_method, FALSE) AS mixed_method
+    FROM effective AS f
+    LEFT JOIN rma_mix AS m
+      ON m.rma_id = f.rma_id
   )
   SELECT
     return_method,
@@ -416,23 +449,23 @@ AEP Query Service SQL: |
     COUNT(DISTINCT CASE WHEN mixed_method THEN rma_id END) AS mixed_method_rmas,
     SUM(quantity) AS return_units,
     ROUND(SUM(line_value), 2) AS returned_value,
-    -- Share denominator = all return lines in the period
+    -- Share denominator = all completed customer return lines in the period
     COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (), 0) AS share_of_return_lines,
-    SUM(CASE WHEN return_method <> return_method_selected THEN 1 ELSE 0 END) AS lines_switched_from_selection,
+    SUM(CASE WHEN return_method_selected <> '(not set)' AND return_method <> return_method_selected THEN 1 ELSE 0 END) AS lines_switched_from_selection,
     -- Switch rate denominator = all return lines with this effective method
-    SUM(CASE WHEN return_method <> return_method_selected THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS selection_switch_rate
-  FROM effective
+    SUM(CASE WHEN return_method_selected <> '(not set)' AND return_method <> return_method_selected THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS selection_switch_rate
+  FROM flagged
   GROUP BY return_method
   ORDER BY return_lines DESC;
 
 Calculation Notes: |
-  1️⃣ Controlled vocabulary, lowercase snake_case only: mail_in (merchant-issued prepaid label or QR code; the customer packs the item and hands it to the carrier), carrier_drop_off (box-free or label-free drop-off at a carrier counter, parcel locker or third-party return point such as a Happy Returns Return Bar), in_store (return at a merchant-owned store, including BORIS), scheduled_pickup (carrier or courier collects the item at the customer's address), self_ship (the customer arranges and pays for the shipment), returnless (refund or replacement issued without a physical return) and (not set). Returns-platform labels from Shopify, Salesforce Commerce Cloud, Adobe Commerce, Narvar or Loop are mapped to these values in a governed lookup table; free-text values are never passed through.,2️⃣ Timing and precedence: the method the customer selects when the return request is submitted in the returns portal (unified refund event), or at RMA creation in the order management platform, is captured as the provisional value. Because the GA4 refund event reduces reported revenue, it is sent only when the RMA is confirmed and the refund amount is approved for processing, never on a method selection alone; abandoned or unconfirmed portal selections send no refund event. When the first physical custody event (carrier acceptance scan, drop-off point receipt or POS return transaction) shows a different method, that observed method replaces the provisional value for reporting. The selected method is kept as a separate attribute so selection-to-actual switching can be analysed.,3️⃣ BORIS handling: an online order returned at a store is always in_store, whatever its original fulfilment (ship-to-home, BOPIS, ship-to-store). The purchase side stays in Channel of Purchase and Fulfillment Type; do not combine the two into composite values such as online_in_store, because that breaks the purchase-channel × return-method cross-tab.,4️⃣ Grain: the value is assigned per return line (RMA line). When the lines of one RMA use different methods (for example a bulky item on scheduled_pickup and accessories via mail_in), each line keeps its own value; order-level rollups report the method with the highest returned merchandise value and set a mixed_method flag, rather than creating a synthetic 'mixed' member.,5️⃣ Exclusions: pre-shipment cancellations, carrier return-to-origin parcels (refused, undeliverable or address failures) and warehouse-initiated recalls are not customer returns and never get a Return Method. Exchanges and store-credit returns are included and use the physical method actually used. returnless lines stay in the dimension for refund and cost reconciliation but are excluded from reverse-logistics volume and transit-time views.,6️⃣ Identity and session rules: returns-portal hits are joined to the return by transaction_id / order number and RMA ID, not by GA4 session, so the 30-minute session timeout and cross-device journeys do not affect assignment. In-store returns are matched to the online order through the receipt barcode or order number scanned at POS; unmatched POS returns (no receipt, no order lookup) are excluded from online-order return analysis instead of being defaulted to in_store.,7️⃣ Data quality thresholds: the (not set) share must stay below 2% of completed returns per week, excluding legacy agent-created RMAs raised before the returns portal went live. A return is locked to its final method once the refund is issued; later carrier re-scans do not reclassify it, which keeps finance accruals stable after month-end close.
+  1️⃣ Controlled vocabulary, lowercase snake_case only: mail_in (merchant-issued prepaid label or QR code; the customer packs the item and hands it to the carrier), carrier_drop_off (box-free or label-free drop-off at a carrier counter, parcel locker or third-party return point such as a Happy Returns Return Bar), in_store (return at a merchant-owned store, including BORIS), scheduled_pickup (carrier or courier collects the item at the customer's address), self_ship (the customer arranges and pays for the shipment), returnless (refund or replacement issued without a physical return) and (not set). Returns-platform labels from Shopify, Salesforce Commerce Cloud, Adobe Commerce, Narvar or Loop are mapped to these values in a governed lookup table; free-text values are never passed through.,2️⃣ Timing and precedence: the method the customer selects in the returns portal is stored on the RMA in the returns platform / OMS when the return request is submitted (or at RMA creation by an agent), and this stored selection is the provisional value. Because the GA4 refund event reduces reported revenue, the unified refund event is sent only when the RMA is confirmed and the refund amount is approved for processing, and it carries return_method_selected from the RMA; abandoned or unconfirmed portal selections send no refund event. When the first physical custody event (carrier acceptance scan, drop-off point receipt or POS return transaction) shows a different method, that observed method replaces the provisional value for reporting. The selected method is kept as a separate attribute so selection-to-actual switching can be analysed.,3️⃣ BORIS handling: an online order returned at a store is always in_store, whatever its original fulfilment (ship-to-home, BOPIS, ship-to-store). The purchase side stays in Channel of Purchase and Fulfillment Type; do not combine the two into composite values such as online_in_store, because that breaks the purchase-channel × return-method cross-tab.,4️⃣ Grain: the value is assigned per return line (RMA line). When the lines of one RMA use different methods (for example a bulky item on scheduled_pickup and accessories via mail_in), each line keeps its own value; order-level rollups report the method with the highest returned merchandise value and set a mixed_method flag, rather than creating a synthetic 'mixed' member.,5️⃣ Exclusions: pre-shipment cancellations, carrier return-to-origin parcels (refused, undeliverable or address failures) and warehouse-initiated recalls are not customer returns and never get a Return Method. Exchanges and store-credit returns are included and use the physical method actually used. returnless lines stay in the dimension for refund and cost reconciliation but are excluded from reverse-logistics volume and transit-time views.,6️⃣ Identity and session rules: returns-portal hits are joined to the return by transaction_id / order number and RMA ID, not by GA4 session, so the 30-minute session timeout and cross-device journeys do not affect assignment. In-store returns are matched to the online order through the receipt barcode or order number scanned at POS; unmatched POS returns (no receipt, no order lookup) are excluded from online-order return analysis instead of being defaulted to in_store.,7️⃣ Data quality thresholds: the (not set) share must stay below 2% of completed returns per week, excluding legacy agent-created RMAs raised before the returns portal went live. A return is locked to its final method once the refund is issued; later carrier re-scans do not reclassify it, which keeps finance accruals stable after month-end close.
 
 Business Use Case: |
   1️⃣ The Customer Service returns operations manager reviews method mix and cost per return every week. When the mail_in share goes above the target and blended return shipping cost per unit exceeds budget, they make carrier_drop_off the default option in the returns portal for eligible ZIP codes and track the effect on cost and CSAT the following week.,2️⃣ Store operations and omnichannel leads monitor the in_store share of online-order returns by store each month. When a region's BORIS volume rises by more than 20% month over month, they adjust back-room labour, add return-counter hours and send resaleable units straight to store stock instead of the returns centre.,3️⃣ Finance calculates the monthly reverse-logistics accrual and prepares carrier contract renewals using return units and label spend by method. Where scheduled_pickup cost per unit is well above mail_in for comparable parcels, they tighten pickup eligibility (for example to bulky or high-value items only) before the next rate negotiation.,4️⃣ Retail marketing measures in-store purchases made within 7 days of an in_store return and, where the exchange or upsell rate beats the mail_in baseline, runs in-store return incentives (for example a bonus store-credit offer) for customers who live near a store.
 
 Dependencies:
-  Events: [refund]
+  Events: [return-initiated, refund-issued]
   Dimensions: [order-status]
 
 Source Data: Digital + Offline: Digital Analytics (GA4) returns portal + Returns Platform / OMS + Store POS
@@ -445,9 +478,9 @@ Dashboard Usage: [Returns & Refunds Performance, Reverse Logistics Cost, Omnicha
 Segment Eligibility: |
   true
 
-Related Dimensions: [order-status, carrier, store-zip-code-local-market, delivery-region, item-category]
+Related Dimensions: [order-status, carrier, store-zip-code-local-market, delivery-region, item-category, return-reason]
 
-Derived Dimensions: [mixed-return-method-flag, return-method-override-flag]
+Derived Dimensions: [refund-type]
 
 Data Sensitivity: Internal
 
@@ -461,5 +494,5 @@ Created At: 2026-09-16T17:46:45.944+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-16T17:46:55.415+00:00
+Last Modified At: 2026-09-18T17:43:28.16+00:00
 
