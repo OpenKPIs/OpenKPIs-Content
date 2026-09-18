@@ -1,12 +1,12 @@
 # Dimension: Support Channel
-# Generated: 2026-09-16T17:47:36.538Z
+# Generated: 2026-09-18T19:20:52.470Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Support Channel
 
 Description: |
-  The customer-facing channel through which a shopper opened an inbound support contact (Live Chat, Email, Phone, Contact Form, Social Media, Messaging or Self-Service Help Center), normalised from the helpdesk origin field: Zendesk via.channel, Salesforce Service Cloud Case Origin, or the Gorgias ticket channel. Unmapped origins fall under Other and empty origins under Unknown, and bot-contained chat sessions that never reach a human agent are classified as Self-Service Help Center. It is the standard breakdown for contact volume, deflection, handling cost and resolution performance, and covers only customer-initiated support, unlike Notification Channel, which classifies outbound brand messages.
+  The customer-facing channel through which a shopper opened an inbound support contact (Live Chat, Email, Phone, Contact Form, Social Media, Messaging or Self-Service Help Center), normalised from the helpdesk origin field: Zendesk via.channel, Salesforce Service Cloud Case Origin, or the Gorgias ticket channel. Unmapped origins fall under Other, an empty helpdesk origin falls back to the channel captured on the storefront support form (joined on ticket ID) and becomes Unknown only when both are missing, with a companion support_channel_source output (helpdesk, web or none), and bot-contained chat sessions that never reach a human agent are classified as Self-Service Help Center. It is the standard breakdown for contact volume, deflection, handling cost and resolution performance, and covers only customer-initiated support, unlike Notification Channel, which classifies outbound brand messages.
 
 Category: Experience
 
@@ -94,10 +94,7 @@ XDM Mapping: |
     "web": {
       "webInteraction": {
         "name": "support_contact",
-        "type": "other",
-        "linkClicks": {
-          "value": 1
-        }
+        "type": "other"
       }
     },
     "_experience": {
@@ -112,6 +109,10 @@ XDM Mapping: |
       }
     },
     "_tenant": {
+      "form": {
+        "formName": "support_contact",
+        "formType": "support"
+      },
       "support": {
         "supportChannel": "Contact Form",
         "contactReason": "Order Status",
@@ -136,8 +137,8 @@ Google Analytics SQL: |
       MAX(IF(ep.key = 'ticket_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS ticket_id
     FROM `your-project.analytics_123456789.events_*`,
       UNNEST(event_params) AS ep
-    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 91 DAY))
-                            AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 91 DAY))
+                            AND FORMAT_DATE('%Y%m%d', CURRENT_DATE('America/New_York'))
       AND event_name = 'submit_form'
     GROUP BY user_pseudo_id, event_timestamp, event_bundle_sequence_id
   ),
@@ -225,7 +226,10 @@ AEP Query Service SQL: |
       timestamp AS event_ts
     FROM web_events_dataset
     WHERE eventType = 'web.formFilledOut'
-      AND timestamp >= date_sub(current_date(), 91)
+      AND _tenant.form.formType = 'support'
+      AND to_date(from_utc_timestamp(timestamp, 'America/New_York'))
+          BETWEEN date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 91)
+              AND to_date(from_utc_timestamp(current_timestamp(), 'America/New_York'))
   ),
   web_support AS (
     SELECT ticket_id, web_support_channel, web_contact_reason
@@ -251,7 +255,9 @@ AEP Query Service SQL: |
       t.handed_to_agent,
       LOWER(TRIM(t.raw_channel)) AS raw_channel
     FROM helpdesk_support_tickets t
-    WHERE to_date(from_utc_timestamp(t.created_at, 'America/New_York')) >= date_sub(current_date(), 90)
+    WHERE to_date(from_utc_timestamp(t.created_at, 'America/New_York'))
+          BETWEEN date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 90)
+              AND to_date(from_utc_timestamp(current_timestamp(), 'America/New_York'))
       AND COALESCE(t.is_agent_initiated, false) = false
       AND COALESCE(t.is_system_generated, false) = false
       AND COALESCE(t.is_spam, false) = false
@@ -304,7 +310,7 @@ AEP Query Service SQL: |
   ORDER BY contact_date, support_channel;
 
 Calculation Notes: |
-  1️⃣ Canonical values and source mapping: Live Chat (Zendesk chat / Gorgias chat / Salesforce Chat), Email (Zendesk email / Case Origin = Email / Gorgias email), Phone (Zendesk voice / Case Origin = Phone / Gorgias phone), Contact Form (Zendesk web form / Case Origin = Web / Gorgias contact_form), Social Media (Zendesk facebook, twitter, instagram / Gorgias facebook, facebook-messenger, instagram-comment, instagram-direct-message), Messaging (Zendesk sms and native_messaging, WhatsApp, Gorgias sms / whatsapp), Self-Service Help Center (Zendesk help_center / Gorgias help-center). Anything unmapped goes to Other; null or empty origin goes to Unknown, never to Email by default.,2️⃣ The value is the channel of the first customer-authored message on the ticket and stays fixed for the life of the contact. If a chat is escalated to a phone callback, or an email thread moves to messaging, the ticket still reports as Live Chat or Email; channel switches belong in a separate transfer attribute and must not overwrite this value.,3️⃣ Exclusions: agent-initiated outbound tickets (proactive emails, outbound calls, Case Origin set by the agent on creation), system-generated tickets (Zendesk api or rule triggers, carrier and marketplace webhooks), spam, auto-replies and out-of-office bounces. Merged tickets keep only the surviving ticket's origin, so duplicates are not counted twice.,4️⃣ Bot and self-service handling: chatbot or help-center widget conversations that end without a human agent are classified as Self-Service Help Center and count toward deflection. They are classified as Live Chat only once the conversation is handed to a human queue, which avoids inflating assisted-contact volume with contained sessions.,5️⃣ Timing: the contact is attributed to the ticket created_at (or chat start timestamp) converted to the store's reporting time zone. Contacts reopened within the helpdesk reopen window (typically 4–7 days, per configured policy) stay on the original ticket and date, while a new ticket after that window is a new contact with its own channel.,6️⃣ Omnichannel stitching: digital contacts started on the storefront (chat launch, contact form submission, help-center article view followed by a submission) are joined to the helpdesk ticket through the ticket or conversation ID captured on the web event, within the same 30-minute-inactivity session. The web ticket_id carries the plain helpdesk ticket ID (e.g. 458213) so it joins directly. The helpdesk origin always wins over the web-side value when the two disagree, and the helpdesk ticket created_at also wins for dating the contact. Web analytics tools (GA4 / Adobe segments) only see web-captured values (Contact Form, Live Chat, Messaging widget, Help Center); Phone, Email and Social Media appear only after the helpdesk join, so the dimension stays segment-eligible for the web-captured values.,7️⃣ Scope rule: evaluate at contact (ticket) level. For customer-level reporting, use the most frequent channel over the look-back window, breaking ties by the most recent contact, and report it as the derived dimension Preferred Support Channel rather than as the raw attribute. Guest contacts without a customer ID stay in the population and are matched on the order number where one is present.
+  1️⃣ Canonical values and source mapping: Live Chat (Zendesk chat / Gorgias chat / Salesforce Chat), Email (Zendesk email / Case Origin = Email / Gorgias email), Phone (Zendesk voice / Case Origin = Phone / Gorgias phone), Contact Form (Zendesk web form / Case Origin = Web / Gorgias contact_form), Social Media (Zendesk facebook, twitter, instagram / Gorgias facebook, facebook-messenger, instagram-comment, instagram-direct-message), Messaging (Zendesk sms and native_messaging, WhatsApp, Gorgias sms / whatsapp), Self-Service Help Center (Zendesk help_center / Gorgias help-center). Anything unmapped goes to Other. A null or empty helpdesk origin falls back to the web-captured support_channel from the storefront support form (see 6️⃣); only when that is also missing does the value go to Unknown, never to Email by default.,2️⃣ The value is the channel of the first customer-authored message on the ticket and stays fixed for the life of the contact. If a chat is escalated to a phone callback, or an email thread moves to messaging, the ticket still reports as Live Chat or Email; channel switches belong in a separate transfer attribute and must not overwrite this value.,3️⃣ Exclusions: agent-initiated outbound tickets (proactive emails, outbound calls, Case Origin set by the agent on creation), system-generated tickets (Zendesk api or rule triggers, carrier and marketplace webhooks), spam, auto-replies and out-of-office bounces. Merged tickets keep only the surviving ticket's origin, so duplicates are not counted twice.,4️⃣ Bot and self-service handling: chatbot or help-center widget conversations that end without a human agent are classified as Self-Service Help Center and count toward deflection. They are classified as Live Chat only once the conversation is handed to a human queue, which avoids inflating assisted-contact volume with contained sessions.,5️⃣ Timing: the contact is attributed to the ticket created_at (or chat start timestamp) converted to the store's reporting time zone. Contacts reopened within the helpdesk reopen window (typically 4–7 days, per configured policy) stay on the original ticket and date, while a new ticket after that window is a new contact with its own channel.,6️⃣ Omnichannel stitching: digital contacts started on the storefront (chat launch, contact form submission, help-center article view followed by a submission) are joined to the helpdesk ticket through the ticket or conversation ID captured on the web event; the join is on ticket ID alone, using the earliest support-form submission (form_type = support) per ticket. The web ticket_id carries the plain helpdesk ticket ID (e.g. 458213) so it joins directly. The helpdesk origin always wins over the web-side value when the two disagree; when the helpdesk origin is empty, the web-captured value is used, and the output column support_channel_source reports helpdesk, web or none (none = Unknown). The helpdesk ticket created_at always dates the contact. Web analytics tools (GA4 / Adobe segments) only see web-captured values (Contact Form, Live Chat, Messaging widget, Help Center); Phone, Email and Social Media appear only after the helpdesk join, so the dimension stays segment-eligible for the web-captured values.,7️⃣ Scope rule: evaluate at contact (ticket) level. For customer-level reporting, use the most frequent channel over the look-back window, breaking ties by the most recent contact, and report it as the derived dimension Preferred Support Channel rather than as the raw attribute. Guest contacts without a customer ID stay in the population and are matched on the order number where one is present.
 
 Business Use Case: |
   1️⃣ The Customer Service workforce management lead reviews the daily Phone and Live Chat share against forecast; when the voice share runs more than 10% over plan for two consecutive days, they reassign cross-skilled chat agents to voice queues and revise the next week's staffing plan by interval.,2️⃣ The Digital CX product manager watches Contact Form and Email volume for order-status and return-status reasons; when it rises after a site release or a carrier incident, they add self-service tracking and return-status entry points to the order confirmation page and help center, then confirm the shift toward Self-Service Help Center in the following two weeks.,3️⃣ The Head of Customer Service combines this dimension with cost per contact during quarterly budget planning and moves spend from high-cost Phone coverage toward Live Chat and Messaging for low-complexity contact reasons such as returns initiation and refund status.,4️⃣ The Social Care team lead receives an alert when Social Media contacts exceed their seven-day baseline during a promotion or a fulfilment delay, and switches to the escalation playbook: a one-hour first-response target, a pinned public status reply, and routing of order-specific cases into private messaging.
@@ -338,5 +344,5 @@ Created At: 2026-09-16T17:47:23.779+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-16T17:47:34.476+00:00
+Last Modified At: 2026-09-18T19:20:52.156+00:00
 
