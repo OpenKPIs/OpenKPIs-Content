@@ -1,7 +1,7 @@
 # Metric: Orders Shipped
-# Generated: 2026-09-18T17:22:51.855Z
+# Generated: 2026-09-18T17:23:02.655Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Orders Shipped
 Formula: COUNT(DISTINCT order_id) WHERE MIN(shipments.shipped_at) per order_id falls within [period_start, period_end), with shipments restricted to outbound, carrier-accepted, non-voided records joined to orders on order_id
@@ -11,6 +11,19 @@ Description: |
 
 Category: Operations
 
+Tags: [metric, Post-Purchase Logistics & Fulfillment, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
 
 
 
@@ -18,23 +31,115 @@ Category: Operations
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Source: native OMS backend tables (offline fulfilment data; no GA4 events_* export involved)
+  -- Orders Shipped = COUNT(DISTINCT order) attributed to the date of its FIRST qualifying outbound dispatch
+  WITH qualified_shipments AS (
+    SELECT
+      s.shipment_id,
+      COALESCE(o.original_order_id, o.order_id) AS customer_order_id,
+      s.shipped_at,
+      ROW_NUMBER() OVER (PARTITION BY s.shipment_id ORDER BY s.updated_at DESC) AS shipment_version
+    FROM `your-project.oms.shipments` AS s
+    JOIN `your-project.oms.orders` AS o
+      ON o.order_id = s.order_id
+    WHERE s.direction = 'outbound'
+      AND s.shipment_status IN ('shipped', 'manifested', 'carrier_accepted')
+      AND COALESCE(s.is_voided, FALSE) = FALSE
+      AND s.shipped_at IS NOT NULL
+      AND COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_replacement_order, FALSE) = FALSE
+      AND o.fulfillment_method NOT IN ('bopis', 'curbside', 'digital')
+      AND o.fulfillment_owner IN ('retailer', 'drop_ship_vendor')
+  ),
+  first_dispatch AS (
+    SELECT
+      customer_order_id,
+      MIN(shipped_at) AS first_shipped_at
+    FROM qualified_shipments
+    WHERE shipment_version = 1
+    GROUP BY customer_order_id
+  )
+  SELECT
+    DATE(first_shipped_at, 'America/New_York') AS ship_date,
+    COUNT(DISTINCT customer_order_id) AS orders_shipped
+  FROM first_dispatch
+  WHERE DATE(first_shipped_at, 'America/New_York')
+        BETWEEN DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 30 DAY)
+            AND DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 1 DAY)
+  GROUP BY ship_date
+  ORDER BY ship_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Source: OMS backend datasets ingested into AEP (record/relational schemas, not web ExperienceEvents)
+  -- Orders Shipped = COUNT(DISTINCT order) attributed to the date of its FIRST qualifying outbound dispatch
+  WITH qualified_shipments AS (
+    SELECT
+      s.shipment_id,
+      COALESCE(o.original_order_id, o.order_id) AS customer_order_id,
+      s.shipped_at,
+      ROW_NUMBER() OVER (PARTITION BY s.shipment_id ORDER BY s.updated_at DESC) AS shipment_version
+    FROM oms_shipments_backend_dataset s
+    JOIN oms_orders_backend_dataset o
+      ON o.order_id = s.order_id
+    WHERE s.direction = 'outbound'
+      AND s.shipment_status IN ('shipped', 'manifested', 'carrier_accepted')
+      AND COALESCE(s.is_voided, FALSE) = FALSE
+      AND s.shipped_at IS NOT NULL
+      AND COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_replacement_order, FALSE) = FALSE
+      AND o.fulfillment_method NOT IN ('bopis', 'curbside', 'digital')
+      AND o.fulfillment_owner IN ('retailer', 'drop_ship_vendor')
+  ),
+  first_dispatch AS (
+    SELECT
+      customer_order_id,
+      MIN(shipped_at) AS first_shipped_at
+    FROM qualified_shipments
+    WHERE shipment_version = 1
+    GROUP BY customer_order_id
+  )
+  SELECT
+    TO_DATE(FROM_UTC_TIMESTAMP(first_shipped_at, 'America/New_York')) AS ship_date,
+    COUNT(DISTINCT customer_order_id) AS orders_shipped
+  FROM first_dispatch
+  WHERE TO_DATE(FROM_UTC_TIMESTAMP(first_shipped_at, 'America/New_York'))
+        BETWEEN DATE_SUB(CURRENT_DATE(), 30)
+            AND DATE_SUB(CURRENT_DATE(), 1)
+  GROUP BY TO_DATE(FROM_UTC_TIMESTAMP(first_shipped_at, 'America/New_York'))
+  ORDER BY ship_date;
 
+Calculation Notes: |
+  1️⃣ Timing: each order is attributed only to the period that contains its first dispatch timestamp, MIN(shipped_at) across all of its outbound shipments, converted to the merchant's reporting time zone before date bucketing. Later split shipments of the same order never re-count it in a subsequent day, week or month, so period values are additive and a multi-month total equals the sum of its months.,2️⃣ Dispatch definition: a shipment qualifies once its OMS status is shipped / manifested / handed to carrier, or the first carrier acceptance scan is received, whichever the OMS treats as system of record. Label-created-only records, voided or reprinted labels, and shipments cancelled before carrier handoff are excluded; if a label is voided and reissued, only the reissued shipment's timestamp is used.,3️⃣ Scope exclusions: return and exchange-return shipments (reverse logistics), test and internal QA orders, and orders with no physical fulfilment (e-gift cards, digital goods, service-only lines). BOPIS and curbside orders collected in store have no carrier dispatch and are excluded; ship-from-store and drop-ship orders are included. Zero-value replacement or reship orders raised for lost or damaged parcels are excluded here and reported separately so claims volume does not inflate throughput.,4️⃣ Grain versus Shipment Volume: Orders Shipped ≤ Shipment Volume for any period in which every shipment's parent order is also first shipped in that period; Shipment Volume ÷ Orders Shipped gives shipments per shipped order. Because Orders Shipped uses the first-ship date while Shipment Volume counts every dispatch on its own date, the two can diverge across period boundaries; always reconcile them over the same order cohort before reading the ratio as a split-shipment signal.,5️⃣ Post-dispatch changes: orders partially cancelled, intercepted by the carrier or returned to sender after first dispatch stay counted in their dispatch period and are flagged rather than removed, so closed periods are not restated for downstream events. Orders re-opened under a new order_id (for example an OMS order split or re-release) are de-duplicated to the original customer order through the parent/original order reference before counting.,6️⃣ Drop-ship and marketplace: vendor drop-ship orders count when the supplier's ship confirmation (ASN or tracking upload) is received, using the supplier-reported ship date. Marketplace orders fulfilled by third-party sellers are excluded unless the retailer is merchant of record or fulfils them from its own network; carry a fulfilment-owner flag so both views can be produced.,7️⃣ Late-arriving data: WMS, 3PL and carrier confirmations can post 24–72 hours after the physical dispatch. Restate the trailing three days on every daily refresh, de-duplicate shipment rows by shipment_id and tracking number, and freeze a period only after the 3PL reconciliation cut-off has passed.
 
+Business Use Case: |
+  1️⃣ The Fulfillment Operations manager compares Orders Shipped with orders released to the warehouse every morning; when shipped orders trail released orders for two consecutive days and the open-order backlog exceeds one day of average throughput, they authorise overtime shifts, add pick waves or reroute volume to a secondary DC or ship-from-store node.,2️⃣ Finance uses Orders Shipped at month-end and quarter-end close to reconcile revenue recognised at shipment against orders captured, releasing the deferred-revenue balance for orders dispatched and flagging any order captured before the cut-off that has not shipped for accrual review.,3️⃣ The Customer Service workforce planner watches Orders Shipped against order intake during peak and promotional events; when the gap widens beyond the promised dispatch SLA, they raise agent staffing for the forecast WISMO contact surge and trigger proactive delay notifications to the affected customers.,4️⃣ The Transportation and Carrier Management team reviews Orders Shipped alongside Shipment Volume by distribution center each week; when shipments per shipped order rises above target, they escalate inventory placement and order-routing rules with Merchandising planning to consolidate split orders and cut per-order parcel cost.
 
+Dependencies:
+  Events: [warehouse-dispatch-completion]
+  Dimensions: [order-status, number-of-shipments]
 
+Source Data: Backend OMS (Shipments + Orders) + WMS/3PL Ship Confirmations
 
+Report Attributes: |
+  Distribution Center; Origin Facility; Carrier; Fulfillment Method; Shipping Tier; Delivery Region; Number of Shipments; Order Priority; Sales Channel
 
+Dashboard Usage: [Daily Fulfillment Operations Scorecard, Peak Season Throughput Monitor, Month-End Revenue Recognition Reconciliation, Carrier & Split-Shipment Cost Review]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [shipment-volume, units-sold, warehouse-order-processing-time, average-delivery-time]
 
+Derived KPIs: [split-shipment-rate, shipment-on-time-delivery-rate]
 
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +149,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T17:22:51.439+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T17:23:02.378+00:00
 
