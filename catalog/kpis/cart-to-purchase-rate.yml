@@ -1,40 +1,251 @@
 # KPI: Cart-to-Purchase Rate
-# Generated: 2026-08-25T00:04:08.471Z
+# Generated: 2026-09-18T00:09:39.844Z
 # Contributed by: devyendar-maganti
-
+# Last modified by: devyendarm
 
 KPI Name: Cart-to-Purchase Rate
-Formula: SELECT 100.0 * COUNT(DISTINCT CASE WHEN purchase_session = 1 THEN session_id END) / NULLIF(COUNT(DISTINCT session_id), 0) AS cart_to_purchase_rate FROM (SELECT session_id, MAX(CASE WHEN event_name = 'add_to_cart' THEN 1 ELSE 0 END) AS has_add_to_cart, MAX(CASE WHEN event_name = 'purchase' THEN 1 ELSE 0 END) AS purchase_session FROM events GROUP BY session_id) s WHERE has_add_to_cart = 1;
+Formula: (Sessions with add_to_cart AND purchase / Sessions with add_to_cart) × 100
 
 Description: |
-  Cart-to-Purchase Rate measures the percentage of distinct sessions in which a user adds at least one item to the cart and subsequently completes a purchase within the same session. This KPI evaluates checkout conversion efficiency by quantifying how effectively cart creation activity translates into completed orders.
+  Cart-to-Purchase Rate measures the percentage of sessions containing at least one add_to_cart event that also contain a completed purchase within the same session. It shows how effectively cart-building activity turns into completed orders and isolates checkout and cart friction from upstream product-discovery performance.
 
-Category: Checkout
+Category: Conversion
 
-Tags: [cart, conversion, checkout]
+Tags: [kpi, E-commerce: Cart & Checkout Funnel Analytics, cart, conversion, checkout]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Checkout
 
+Scope: Session
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "purchase"
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "T12345",
+      "total": {
+        "basePrice": 49,
+        "currency": "USD",
+        "taxRate": 0.1,
+        "shipping": 5.99,
+        "transactionTotal": 59.89
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-12345",
+            "productName": "Triblend T-Shirt"
+          },
+          "category": {
+            "primaryCategory": "Apparel"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 15.25
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T12345",
+      "value": 59.89,
+      "currency": "USD",
+      "tax": 4.9,
+      "shipping": 5.99,
+      "coupon": "SUMMER_SALE",
+      "items": [
+        {
+          "item_id": "SKU-12345",
+          "item_name": "Triblend T-Shirt",
+          "item_category": "Apparel",
+          "item_variant": "Gray",
+          "price": 15.25,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "transaction": {
+      "transactionID": "T12345",
+      "revenue": 59.89,
+      "currency": "USD",
+      "tax": 4.9,
+      "shipping": 5.99,
+      "coupon": "SUMMER_SALE"
+    },
+    "product": [
+      {
+        "productID": "SKU-12345",
+        "productName": "Triblend T-Shirt",
+        "category": "Apparel",
+        "price": 15.25,
+        "quantity": 1
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "order": {
+        "purchaseID": "T12345",
+        "priceTotal": 59.89,
+        "currencyCode": "USD"
+      },
+      "purchases": {
+        "value": 1
+      },
+      "productListAdds": {
+        "value": 0
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-12345",
+        "name": "Triblend T-Shirt",
+        "quantity": 1,
+        "priceTotal": 15.25
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "session": {
+          "num": 1
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Cart-to-Purchase Rate: sessions with add_to_cart that also purchased / all sessions with add_to_cart
+  WITH session_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      CONCAT(user_pseudo_id, '-', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_key,
+      event_name,
+      ecommerce.transaction_id AS transaction_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name IN ('add_to_cart', 'purchase')
+  ),
+  sessions AS (
+    SELECT
+      session_key,
+      MIN(event_date) AS session_date,
+      MAX(IF(event_name = 'add_to_cart', 1, 0)) AS has_add_to_cart,
+      MAX(IF(event_name = 'purchase' AND transaction_id IS NOT NULL AND transaction_id != '(not set)', 1, 0)) AS has_purchase
+    FROM session_events
+    WHERE session_key IS NOT NULL
+    GROUP BY session_key
+  )
+  SELECT
+    session_date,
+    COUNTIF(has_add_to_cart = 1) AS cart_sessions,
+    COUNTIF(has_add_to_cart = 1 AND has_purchase = 1) AS cart_purchase_sessions,
+    ROUND(100 * SAFE_DIVIDE(COUNTIF(has_add_to_cart = 1 AND has_purchase = 1), COUNTIF(has_add_to_cart = 1)), 2) AS cart_to_purchase_rate_pct
+  FROM sessions
+  GROUP BY session_date
+  ORDER BY session_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Cart-to-Purchase Rate: sessions with a cart add that also purchased / all sessions with a cart add
+  WITH session_events AS (
+    SELECT
+      CAST(timestamp AS DATE) AS event_date,
+      CONCAT(identityMap['ECID'][0].id, '-', CAST(_experience.analytics.session.num AS STRING)) AS session_key,
+      eventType,
+      commerce.order.purchaseID AS purchase_id
+    FROM ecommerce_experience_event_dataset
+    WHERE timestamp >= DATE_SUB(CURRENT_DATE, 30)
+      AND timestamp < CURRENT_DATE
+      AND eventType IN ('commerce.productListAdds', 'commerce.purchases')
+  ),
+  sessions AS (
+    SELECT
+      session_key,
+      MIN(event_date) AS session_date,
+      MAX(CASE WHEN eventType = 'commerce.productListAdds' THEN 1 ELSE 0 END) AS has_add_to_cart,
+      MAX(CASE WHEN eventType = 'commerce.purchases' AND purchase_id IS NOT NULL THEN 1 ELSE 0 END) AS has_purchase
+    FROM session_events
+    WHERE session_key IS NOT NULL
+    GROUP BY session_key
+  )
+  SELECT
+    session_date,
+    SUM(has_add_to_cart) AS cart_sessions,
+    SUM(CASE WHEN has_add_to_cart = 1 AND has_purchase = 1 THEN 1 ELSE 0 END) AS cart_purchase_sessions,
+    ROUND(100.0 * SUM(CASE WHEN has_add_to_cart = 1 AND has_purchase = 1 THEN 1 ELSE 0 END) / NULLIF(SUM(has_add_to_cart), 0), 2) AS cart_to_purchase_rate_pct
+  FROM sessions
+  GROUP BY session_date
+  ORDER BY session_date;
 
+Calculation Notes: |
+  1️⃣ Denominator is every distinct session (user_pseudo_id + ga_session_id in GA4, session ID in AEP) with at least one add_to_cart event; sessions without a cart addition are excluded from the base.
+  2️⃣ Numerator is the subset of those sessions that also contain a purchase event with a non-null transaction_id; purchases in sessions without an add_to_cart (e.g. buy-now or reorder flows) are not counted.
+  3️⃣ Deduplicate purchases by transaction_id so page reloads of the confirmation page do not inflate the numerator.
+  4️⃣ A session ends after 30 minutes of inactivity (GA4 default); a cart added in one session and bought in a later session counts as not converted here, so pair with user-scoped Cart Conversion Rate for cross-session buying.
+  5️⃣ Exclude internal, test and bot traffic, and exclude zero-value test transactions; wrap the division in SAFE_DIVIDE / NULLIF to avoid divide-by-zero on low-traffic days.
+  6️⃣ Report daily with weekly and monthly roll-ups recomputed from session counts, never averaged from daily rates.
 
+Business Use Case: |
+  1️⃣ The E-commerce Conversion Manager reviews the rate daily; when it drops more than 10% week over week on a device type, they open a checkout-friction investigation and prioritise fixes in the cart and payment steps.
+  2️⃣ The Merchandising team compares the rate by product category and promotion; categories with high add-to-cart but low purchase completion trigger pricing, shipping-cost or stock-availability reviews.
+  3️⃣ The CRO / Product team uses the rate as the primary success metric for A/B tests on cart and checkout pages, shipping only variants that lift it with statistical significance.
+  4️⃣ The Marketing team breaks the rate down by traffic source to decide whether to extend cart-recovery email and retargeting budget to channels with low same-session completion.
 
+Dependencies:
+  Events: [add-to-cart, purchase]
+  Metrics: [add-to-cart, purchase]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Device Category; Traffic Source / Medium; Country; New vs Returning User; Item Category; Landing Page
 
+Dashboard Usage: [E-commerce Performance Dashboard, Conversion Funnel Analysis Dashboard, Checkout Optimization Dashboard]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [cart-conversion-rate, cart-abandonment-rate, checkout-conversion-rate, add-to-cart-rate, conversion-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +255,7 @@ Contributed By: devyendar-maganti
 
 Created At: 2026-08-25T00:04:05.72+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T00:09:39.471+00:00
 
