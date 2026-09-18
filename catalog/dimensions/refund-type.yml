@@ -1,0 +1,489 @@
+# Dimension: Refund Type
+# Generated: 2026-09-18T17:44:48.334Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Refund Type
+
+Description: |
+  Refund Type records how a refund was settled: whether it returned the full or a partial captured amount, and whether the money went back to the original payment method or was issued as store credit or a gift card. It is separate from Payment Method, which records how the customer paid, so Finance and Customer Service can see how much refunded value leaves the business and how much stays as customer balance.
+
+Category: Monetization
+
+Tags: [dimension, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Monetization
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  refund
+
+Adobe Event: |
+  refund
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageName": "account:orders:refund-confirmation"
+        }
+      },
+      "transaction": {
+        "transactionID": "T_12345",
+        "total": {
+          "basePrice": 42,
+          "currency": "USD",
+          "transactionTotal": 45.36
+        },
+        "attributes": {
+          "refundID": "RF_98765",
+          "refundType": "Partial Refund - Original Payment Method",
+          "refundScope": "Partial Refund",
+          "refundTender": "Original Payment Method",
+          "refundAmount": 22.68,
+          "refundTax": 1.68,
+          "refundProcessedAt": "2026-09-16T14:05:00-05:00",
+          "refundSource": "commerce_platform",
+          "orderType": "standard"
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU_12345",
+              "productName": "Stan and Friends Tee"
+            },
+            "category": {
+              "primaryCategory": "Apparel"
+            },
+            "quantity": 1,
+            "price": {
+              "basePrice": 21,
+              "currency": "USD"
+            }
+          }
+        ]
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "refund",
+    "refund_type": "Partial Refund - Original Payment Method",
+    "refund_scope": "Partial Refund",
+    "refund_tender": "Original Payment Method",
+    "refund_id": "RF_98765",
+    "order_type": "standard",
+    "order_total": 45.36,
+    "ecommerce": {
+      "transaction_id": "T_12345",
+      "value": 22.68,
+      "currency": "USD",
+      "shipping": 0,
+      "tax": 1.68,
+      "items": [
+        {
+          "item_id": "SKU_12345",
+          "item_name": "Stan and Friends Tee",
+          "item_category": "Apparel",
+          "price": 21,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "refund",
+    "eventInfo": {
+      "eventName": "refund",
+      "linkName": "refund",
+      "linkType": "o"
+    },
+    "transaction": {
+      "purchaseID": "T_12345",
+      "refundID": "RF_98765",
+      "refundType": "Partial Refund - Original Payment Method",
+      "refundScope": "Partial Refund",
+      "refundTender": "Original Payment Method",
+      "refundAmount": 22.68,
+      "orderTotal": 45.36,
+      "orderType": "standard",
+      "currencyCode": "USD",
+      "products": [
+        {
+          "sku": "SKU_12345",
+          "name": "Stan and Friends Tee",
+          "category": "Apparel",
+          "quantity": 1,
+          "price": 21
+        }
+      ]
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.backofficeCreditMemoIssued",
+    "timestamp": "2026-09-16T19:05:00Z",
+    "commerce": {
+      "order": {
+        "purchaseID": "T_12345",
+        "currencyCode": "USD",
+        "priceTotal": 45.36,
+        "taxAmount": 3.36,
+        "refunds": [
+          {
+            "refundTransactionID": "RF_98765",
+            "refundAmount": 22.68,
+            "refundPaymentType": "credit_card",
+            "currencyCode": "USD"
+          }
+        ]
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU_12345",
+        "name": "Stan and Friends Tee",
+        "quantity": 1,
+        "priceTotal": 21,
+        "currencyCode": "USD"
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "Partial Refund - Original Payment Method",
+            "eVar41": "standard",
+            "eVar42": "Partial Refund",
+            "eVar43": "Original Payment Method"
+          }
+        },
+        "event1to100": {
+          "event40": {
+            "value": 22.68
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Refund Type: record-grain governed Scope - Tender pair, reporting rollup, and order-grain value (Mixed Tender, restated Full Refund).
+  -- Base population for shares = all refund records with money movement on the reporting date (test and staff orders excluded).
+  WITH refund_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS refund_date,
+      e.event_timestamp,
+      e.ecommerce.transaction_id AS transaction_id,
+      COALESCE(e.ecommerce.refund_value_in_usd, 0) AS refund_value_usd,
+      ARRAY_LENGTH(e.items) AS item_rows,
+      (SELECT MAX(IF(ep.key = 'refund_id', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS refund_id,
+      (SELECT MAX(IF(ep.key = 'refund_type', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS refund_type_raw,
+      (SELECT MAX(IF(ep.key = 'refund_scope', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS refund_scope_raw,
+      (SELECT MAX(IF(ep.key = 'refund_tender', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS refund_tender_raw,
+      (SELECT MAX(IF(ep.key = 'order_type', LOWER(ep.value.string_value), NULL)) FROM UNNEST(e.event_params) AS ep) AS order_type
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY))
+                              AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name = 'refund'
+      AND e.ecommerce.transaction_id IS NOT NULL
+      AND e.ecommerce.transaction_id NOT IN ('', '(not set)')
+  ),
+  refund_records AS (
+    SELECT
+      refund_date,
+      transaction_id,
+      COALESCE(refund_id, CONCAT(transaction_id, '-', CAST(event_timestamp AS STRING))) AS refund_record_id,
+      refund_value_usd,
+      -- Explicit scope first, then the scope prefix of the governed pair; GA4 items convention as last fallback only
+      CASE
+        WHEN refund_scope_raw IN ('Full Refund', 'Partial Refund') THEN refund_scope_raw
+        WHEN refund_type_raw LIKE 'Full Refund - %' THEN 'Full Refund'
+        WHEN refund_type_raw LIKE 'Partial Refund - %' THEN 'Partial Refund'
+        WHEN IFNULL(item_rows, 0) = 0 THEN 'Full Refund'
+        ELSE 'Partial Refund'
+      END AS refund_scope,
+      -- Explicit tender first, then the tender suffix of any of the six governed Scope - Tender pairs
+      CASE
+        WHEN refund_tender_raw IN ('Original Payment Method', 'Store Credit', 'Gift Card') THEN refund_tender_raw
+        WHEN refund_type_raw LIKE '%- Original Payment Method' THEN 'Original Payment Method'
+        WHEN refund_type_raw LIKE '%- Store Credit' OR refund_type_raw = 'Store Credit' THEN 'Store Credit'
+        WHEN refund_type_raw LIKE '%- Gift Card' OR refund_type_raw = 'Gift Card' THEN 'Gift Card'
+        ELSE '(other)'
+      END AS refund_tender
+    FROM refund_events
+    WHERE refund_value_usd > 0
+      AND COALESCE(order_type, 'standard') NOT IN ('test', 'staff')
+  ),
+  record_typed AS (
+    SELECT
+      *,
+      -- Governed record value: one of the six Scope - Tender pairs
+      IF(refund_tender = '(other)', '(other)', CONCAT(refund_scope, ' - ', refund_tender)) AS refund_type_governed,
+      -- Reporting rollup: scope kept only for Original Payment Method
+      CASE refund_tender
+        WHEN 'Original Payment Method' THEN CONCAT(refund_scope, ' - Original Payment Method')
+        WHEN 'Store Credit' THEN 'Store Credit'
+        WHEN 'Gift Card' THEN 'Gift Card'
+        ELSE '(other)'
+      END AS refund_type_record
+    FROM refund_records
+  ),
+  purchases AS (
+    SELECT
+      ecommerce.transaction_id AS transaction_id,
+      MAX(COALESCE(ecommerce.purchase_revenue_in_usd, 0)) AS order_total_usd
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 455 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+    GROUP BY transaction_id
+  ),
+  order_rollup AS (
+    SELECT
+      r.transaction_id,
+      COUNT(DISTINCT r.refund_tender) AS tender_count,
+      MAX(r.refund_tender) AS single_tender,
+      SUM(r.refund_value_usd) AS cumulative_refund_usd,
+      MAX(p.order_total_usd) AS order_total_usd,
+      LOGICAL_OR(r.refund_scope = 'Full Refund') AS has_full_record
+    FROM record_typed AS r
+    LEFT JOIN purchases AS p
+      ON p.transaction_id = r.transaction_id
+    GROUP BY r.transaction_id
+  ),
+  order_typed AS (
+    SELECT
+      transaction_id,
+      CASE
+        WHEN tender_count > 1 THEN 'Mixed Tender'
+        WHEN single_tender = 'Original Payment Method' THEN
+          IF(has_full_record OR (order_total_usd > 0 AND cumulative_refund_usd >= order_total_usd - 0.01),
+             'Full Refund - Original Payment Method',
+             'Partial Refund - Original Payment Method')
+        WHEN single_tender IN ('Store Credit', 'Gift Card') THEN single_tender
+        ELSE '(other)'
+      END AS refund_type_order
+    FROM order_rollup
+  )
+  SELECT
+    r.refund_date,
+    r.refund_type_governed,
+    r.refund_type_record AS refund_type,
+    o.refund_type_order,
+    COUNT(DISTINCT r.refund_record_id) AS refund_records,
+    COUNT(DISTINCT r.transaction_id) AS refunded_orders,
+    ROUND(SUM(r.refund_value_usd), 2) AS refund_value_usd,
+    SAFE_DIVIDE(
+      SUM(r.refund_value_usd),
+      SUM(SUM(r.refund_value_usd)) OVER (PARTITION BY r.refund_date)
+    ) AS share_of_refund_value,
+    SAFE_DIVIDE(
+      COUNT(DISTINCT r.refund_record_id),
+      SUM(COUNT(DISTINCT r.refund_record_id)) OVER (PARTITION BY r.refund_date)
+    ) AS share_of_refund_records
+  FROM record_typed AS r
+  JOIN order_typed AS o
+    ON o.transaction_id = r.transaction_id
+  GROUP BY r.refund_date, r.refund_type_governed, refund_type, o.refund_type_order
+  ORDER BY r.refund_date, refund_value_usd DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Refund Type from credit memo events (eventType commerce.backofficeCreditMemoIssued, one row per commerce.order.refunds[] entry, eVar42 refund scope, eVar43 refund tender, eVar40 governed pair as fallback, eVar41 order type).
+  -- Base population for shares = all refund entries with money movement on the reporting date (test and staff orders excluded).
+  WITH credit_memos AS (
+    SELECT
+      to_date(from_utc_timestamp(e.timestamp, 'America/Chicago')) AS refund_date,
+      e.commerce.order.purchaseID AS transaction_id,
+      -- One row per refund entry (split tenders); each entry keeps its own ID and amount
+      COALESCE(rf.refundTransactionID, e._id) AS refund_record_id,
+      COALESCE(rf.refundAmount, CASE WHEN rf IS NULL THEN e._experience.analytics.event1to100.event40.value END, 0) AS refund_value,
+      COALESCE(rf.currencyCode, e.commerce.order.currencyCode) AS currency_code,
+      TRIM(e._experience.analytics.customDimensions.eVars.eVar40) AS refund_type_raw,
+      TRIM(e._experience.analytics.customDimensions.eVars.eVar42) AS refund_scope_raw,
+      TRIM(e._experience.analytics.customDimensions.eVars.eVar43) AS refund_tender_raw,
+      LOWER(TRIM(e._experience.analytics.customDimensions.eVars.eVar41)) AS order_type
+    FROM commerce_backoffice_event_dataset e
+    LATERAL VIEW OUTER explode(e.commerce.order.refunds) refund_entries AS rf
+    WHERE e.eventType = 'commerce.backofficeCreditMemoIssued'
+      AND e.timestamp >= date_sub(current_date(), 90)
+      AND e.timestamp < current_date()
+      AND e.commerce.order.purchaseID IS NOT NULL
+  ),
+  record_parsed AS (
+    SELECT
+      refund_date,
+      transaction_id,
+      refund_record_id,
+      refund_value,
+      currency_code,
+      -- Explicit scope (eVar42) first, then the scope prefix of the governed pair (eVar40)
+      CASE
+        WHEN refund_scope_raw IN ('Full Refund', 'Partial Refund') THEN refund_scope_raw
+        WHEN refund_type_raw LIKE 'Full Refund - %' THEN 'Full Refund'
+        WHEN refund_type_raw LIKE 'Partial Refund - %' THEN 'Partial Refund'
+        ELSE NULL
+      END AS refund_scope,
+      -- Explicit tender (eVar43) first, then the tender suffix of any of the six governed Scope - Tender pairs
+      CASE
+        WHEN refund_tender_raw IN ('Original Payment Method', 'Store Credit', 'Gift Card') THEN refund_tender_raw
+        WHEN refund_type_raw LIKE '%- Original Payment Method' THEN 'Original Payment Method'
+        WHEN refund_type_raw LIKE '%- Store Credit' OR refund_type_raw = 'Store Credit' THEN 'Store Credit'
+        WHEN refund_type_raw LIKE '%- Gift Card' OR refund_type_raw = 'Gift Card' THEN 'Gift Card'
+        ELSE '(other)'
+      END AS refund_tender
+    FROM credit_memos
+    WHERE refund_value > 0
+      AND COALESCE(order_type, 'standard') NOT IN ('test', 'staff')
+  ),
+  record_typed AS (
+    SELECT
+      *,
+      -- Governed record value: one of the six Scope - Tender pairs
+      CASE
+        WHEN refund_scope IS NOT NULL AND refund_tender <> '(other)' THEN concat(refund_scope, ' - ', refund_tender)
+        ELSE '(other)'
+      END AS refund_type_governed,
+      -- Reporting rollup: scope kept only for Original Payment Method
+      CASE
+        WHEN refund_tender = 'Original Payment Method' AND refund_scope IS NOT NULL
+          THEN concat(refund_scope, ' - Original Payment Method')
+        WHEN refund_tender IN ('Store Credit', 'Gift Card') THEN refund_tender
+        ELSE '(other)'
+      END AS refund_type_record
+    FROM record_parsed
+  ),
+  purchases AS (
+    SELECT
+      commerce.order.purchaseID AS transaction_id,
+      MAX(commerce.order.priceTotal) AS order_total
+    FROM commerce_event_dataset
+    WHERE eventType = 'commerce.purchases'
+      AND timestamp >= date_sub(current_date(), 455)
+      AND commerce.order.purchaseID IS NOT NULL
+    GROUP BY commerce.order.purchaseID
+  ),
+  order_rollup AS (
+    SELECT
+      r.transaction_id,
+      COUNT(DISTINCT r.refund_tender) AS tender_count,
+      MAX(r.refund_tender) AS single_tender,
+      SUM(r.refund_value) AS cumulative_refund,
+      MAX(p.order_total) AS order_total,
+      MAX(CASE WHEN r.refund_scope = 'Full Refund' THEN 1 ELSE 0 END) AS has_full_record
+    FROM record_typed r
+    LEFT JOIN purchases p
+      ON p.transaction_id = r.transaction_id
+    GROUP BY r.transaction_id
+  ),
+  order_typed AS (
+    SELECT
+      transaction_id,
+      CASE
+        WHEN tender_count > 1 THEN 'Mixed Tender'
+        WHEN single_tender = 'Original Payment Method'
+             AND (has_full_record = 1 OR (order_total > 0 AND cumulative_refund >= order_total - 0.01))
+          THEN 'Full Refund - Original Payment Method'
+        WHEN single_tender = 'Original Payment Method' THEN 'Partial Refund - Original Payment Method'
+        WHEN single_tender IN ('Store Credit', 'Gift Card') THEN single_tender
+        ELSE '(other)'
+      END AS refund_type_order
+    FROM order_rollup
+  ),
+  daily AS (
+    SELECT
+      r.refund_date,
+      r.currency_code,
+      r.refund_type_governed,
+      r.refund_type_record AS refund_type,
+      o.refund_type_order,
+      COUNT(DISTINCT r.refund_record_id) AS refund_records,
+      COUNT(DISTINCT r.transaction_id) AS refunded_orders,
+      ROUND(SUM(r.refund_value), 2) AS refund_value
+    FROM record_typed r
+    JOIN order_typed o
+      ON o.transaction_id = r.transaction_id
+    GROUP BY r.refund_date, r.currency_code, r.refund_type_governed, r.refund_type_record, o.refund_type_order
+  )
+  SELECT
+    refund_date,
+    currency_code,
+    refund_type_governed,
+    refund_type,
+    refund_type_order,
+    refund_records,
+    refunded_orders,
+    refund_value,
+    refund_value / NULLIF(SUM(refund_value) OVER (PARTITION BY refund_date, currency_code), 0) AS share_of_refund_value,
+    refund_records / NULLIF(SUM(refund_records) OVER (PARTITION BY refund_date, currency_code), 0) AS share_of_refund_records
+  FROM daily
+  ORDER BY refund_date, currency_code, refund_value DESC;
+
+Calculation Notes: |
+  1️⃣ Governed value = refund scope + settlement tender, reported as "<Scope> - <Tender>". Scope is Full Refund or Partial Refund. Tender is Original Payment Method, Store Credit or Gift Card. The full governed set is the six Scope - Tender pairs (e.g. Full Refund - Original Payment Method, Partial Refund - Store Credit, Partial Refund - Gift Card), and refund_scope and refund_tender are always captured separately. The reporting rollup keeps scope only for the original payment method: Full Refund - Original Payment Method, Partial Refund - Original Payment Method, Store Credit (both scopes) and Gift Card (both scopes). Unmapped platform values go to "(other)" and are never left null.
+  2️⃣ Scope rule: a refund record is Full Refund only when it alone returns 100% of the captured order total (merchandise + shipping + tax, within a 0.01 currency tolerance). Otherwise it is Partial Refund. A later partial refund that brings the cumulative refunded amount to 100% keeps Partial Refund at record grain, and the order-grain rollup is restated to Full Refund. Restocking-fee or return-shipping deductions (the Adobe Commerce credit memo Adjustment Fee) make a refund Partial by definition.
+  3️⃣ Tender rule: use Original Payment Method when the refund transaction points back to the parent capture (Shopify refund transaction with kind = refund on the original gateway; Adobe Commerce Refund Online / Refund Offline to the order payment). Use Store Credit when value is credited to a customer balance (Shopify store credit; Adobe Commerce Refund to Store Credit). Use Gift Card when a new gift card is issued. Split-tender refunds produce one row per refund transaction. Mixed Tender is an order-level value that SQL derives when one order's refunds use more than one tender; it is never sent in the event payload.
+  4️⃣ Exclusions: authorization voids and cancellations before capture (tracked under Order Cancellation), processor chargebacks and dispute losses, even exchanges with no money movement, zero-value refunds, and test or staff orders. Shopify refunds that only restock inventory and have no transaction are excluded from monetary reporting.
+  5️⃣ Timing: attribute each refund to the refund processed timestamp (Shopify refund processed_at, Adobe Commerce credit memo created_at) in the store reporting timezone, never to the original order date. Refunds are server-confirmed and usually sent through the GA4 Measurement Protocol with no browsing session, so session timeout rules do not apply. Do not use session-scoped joins; join to the purchase on transaction_id.
+  6️⃣ GA4 alignment: the refund event must carry the same transaction_id as the purchase. Under the GA4 spec, an event without an items array is a full refund and one with an items array is a partial refund, so a partial refund sent without items (shipping-only, fee or goodwill refunds) would read as full. Partial refunds must therefore be sent with their items or with an explicit refund_scope, which the SQL uses before the items heuristic. Check this behaviour against refund_type in a daily reconciliation. The commerce platform is the system of record; when the two disagree, the backend value wins and the GA4 row is flagged.
+  7️⃣ Omnichannel: online orders refunded in store or through POS (buy online, return in store) are in scope. Tender comes from the POS refund transaction, and the channel is kept as a separate attribute so refund volume is not double-counted between the web and store ledgers.
+
+Business Use Case: |
+  1️⃣ Finance (Revenue Accounting): at month-end close, the team reconciles the value in Store Credit and Gift Card refunds against the customer-balance liability and breakage accrual. Original Payment Method refunds are posted as direct revenue reversals.
+  2️⃣ Customer Service Operations: in the weekly review, if Partial Refund - Original Payment Method share for a product category exceeds its baseline, the team audits agents' goodwill credits and lowers approval limits for discretionary partial refunds.
+  3️⃣ Merchandising: if Original Payment Method refunds make up a high share of return value in a category, the team tests a store-credit option with bonus value at return initiation to keep that revenue in the business.
+  4️⃣ Finance (Payments): in the monthly processor review, the team matches Original Payment Method refund volume to acquirer refund fees and settlement files by gateway to find unrecovered processing costs and reconciliation breaks.
+
+Dependencies:
+  Events: [purchase, refund-issued]
+  Dimensions: [payment-method]
+
+Source Data: Digital + Commerce Platform (GA4 refund, Shopify Refunds, Adobe Commerce Credit Memos)
+
+Report Attributes: |
+  Refund Type; Payment Method; Order Status; Item Category; Transaction Type; Order Cancellation Reason
+
+Dashboard Usage: [Returns & Refunds Performance, Finance Revenue Reconciliation, Customer Service Appeasement Monitor]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [payment-method, transaction-type, order-status, order-cancellation-reason]
+
+Derived Dimensions: [Refund Scope, Refund Tender, Order Refund Type]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-16T17:46:28.516+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-18T17:44:47.88+00:00
+
