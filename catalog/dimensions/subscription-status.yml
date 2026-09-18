@@ -1,0 +1,501 @@
+# Dimension: Subscription Status
+# Generated: 2026-09-18T01:42:15.087Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Subscription Status
+
+Description: |
+  Subscription Status is the current billing state of a customer's recurring product subscription contract (subscribe-and-save, scheduled replenishment or paid membership), normalised to one governed list (trialing, active, paused, past_due, cancelled, expired) and mapped from Stripe Billing, Shopify Subscription Contracts and Recharge. Finance, Customer Service and lifecycle marketing use it to size the live subscriber base, work payment recovery and pause-to-resume queues, and split churn into voluntary and involuntary, without mixing in plan catalog lifecycle, email or marketing consent, or the broader customer lifecycle held in Customer Status.
+
+Category: Retention
+
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV, subscription, retention, churn]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Subscription Status (one value per subscription contract) from the subscription billing backend.
+  -- Sources: billing.subscriptions (contract header), billing.subscription_status_history (type-2 provider status records
+  -- keyed on the provider event timestamp), billing.subscription_migration_map, billing.subscription_customer_events
+  -- (server-side subscribe / unsubscribe / purchase log) and billing.stores (reporting time zone).
+  DECLARE report_start_date DATE DEFAULT DATE '2026-01-01';
+  DECLARE report_end_date DATE DEFAULT DATE '2026-08-31';
+  
+  -- Step 1: effective-dated canonical status intervals (valid_from <= ts < valid_to).
+  CREATE TEMP TABLE subscription_status_intervals AS
+  WITH migration_target AS (
+    SELECT subscription_id AS target_subscription_id, MIN(original_started_at) AS original_started_at
+    FROM `your-project.billing.subscription_migration_map`
+    GROUP BY subscription_id
+  ),
+  contracts AS (
+    SELECT
+      COALESCE(ml.subscription_id, s.subscription_id) AS subscription_key,
+      s.subscription_id,
+      LOWER(s.provider) AS provider,
+      s.customer_id,
+      s.store_id,
+      s.plan_id,
+      COALESCE(mt.original_started_at, s.started_at) AS subscription_started_at,
+      ml.migrated_at AS legacy_migrated_at
+    FROM `your-project.billing.subscriptions` AS s
+    LEFT JOIN `your-project.billing.subscription_migration_map` AS ml
+      ON ml.legacy_subscription_id = s.subscription_id
+    LEFT JOIN migration_target AS mt
+      ON mt.target_subscription_id = s.subscription_id
+    WHERE NOT COALESCE(s.is_test_mode, FALSE)
+      AND NOT COALESCE(s.is_internal_account, FALSE)
+      AND NOT COALESCE(s.is_gifted_zero_value, FALSE)
+  ),
+  mapped AS (
+    SELECT
+      c.subscription_key,
+      c.subscription_id,
+      c.provider,
+      c.customer_id,
+      c.store_id,
+      c.plan_id,
+      c.subscription_started_at,
+      h.valid_from,
+      LEAST(
+        COALESCE(h.valid_to, TIMESTAMP '9999-12-31 23:59:59+00'),
+        COALESCE(c.legacy_migrated_at, TIMESTAMP '9999-12-31 23:59:59+00')
+      ) AS valid_to,
+      LOWER(h.provider_status) AS provider_status,
+      LOWER(h.previous_provider_status) AS previous_provider_status,
+      LOWER(h.cancellation_reason) AS cancellation_reason,
+      COALESCE(h.retry_limit_reached, FALSE) AS retry_limit_reached,
+      CASE
+        WHEN c.provider = 'stripe' THEN
+          CASE
+            WHEN LOWER(h.provider_status) IN ('incomplete', 'incomplete_expired') THEN NULL
+            WHEN LOWER(h.provider_status) = 'trialing' THEN 'trialing'
+            WHEN LOWER(h.provider_status) = 'active' AND COALESCE(h.pause_collection_set, FALSE) THEN 'paused'
+            WHEN LOWER(h.provider_status) = 'active' THEN 'active'
+            WHEN LOWER(h.provider_status) = 'paused' THEN 'paused'
+            WHEN LOWER(h.provider_status) IN ('past_due', 'unpaid') THEN 'past_due'
+            WHEN LOWER(h.provider_status) = 'canceled'
+              AND (COALESCE(h.ended_on_final_schedule_phase, FALSE) OR COALESCE(h.cancel_at_set_as_contract_term, FALSE)) THEN 'expired'
+            WHEN LOWER(h.provider_status) = 'canceled' THEN 'cancelled'
+            ELSE '(other)'
+          END
+        WHEN c.provider = 'shopify' THEN
+          CASE
+            WHEN LOWER(h.provider_status) = 'active'
+              AND COALESCE(h.first_cycle_zero_priced, FALSE)
+              AND NOT COALESCE(h.has_successful_billing_attempt, FALSE) THEN 'trialing'
+            WHEN LOWER(h.provider_status) = 'active' THEN 'active'
+            WHEN LOWER(h.provider_status) = 'paused' THEN 'paused'
+            WHEN LOWER(h.provider_status) = 'failed' THEN 'past_due'
+            WHEN LOWER(h.provider_status) = 'cancelled' THEN 'cancelled'
+            WHEN LOWER(h.provider_status) = 'expired' THEN 'expired'
+            ELSE '(other)'
+          END
+        WHEN c.provider = 'recharge' THEN
+          CASE
+            WHEN LOWER(h.provider_status) = 'cancelled' THEN 'cancelled'
+            WHEN LOWER(h.provider_status) = 'expired' THEN 'expired'
+            WHEN LOWER(h.provider_status) = 'active'
+              AND COALESCE(h.is_free_trial_product, FALSE)
+              AND NOT COALESCE(h.first_charge_processed, FALSE) THEN 'trialing'
+            WHEN LOWER(h.provider_status) = 'active'
+              AND LOWER(h.latest_charge_status) = 'error'
+              AND (h.latest_charge_retry_date IS NOT NULL OR COALESCE(h.retry_limit_reached, FALSE)) THEN 'past_due'
+            WHEN LOWER(h.provider_status) = 'active'
+              AND (COALESCE(h.charges_skipped_through_next_billing, FALSE) OR COALESCE(h.pause_action_applied, FALSE)) THEN 'paused'
+            WHEN LOWER(h.provider_status) = 'active' THEN 'active'
+            ELSE '(other)'
+          END
+        ELSE '(other)'
+      END AS subscription_status
+    FROM contracts AS c
+    JOIN `your-project.billing.subscription_status_history` AS h
+      ON h.subscription_id = c.subscription_id
+    WHERE c.legacy_migrated_at IS NULL
+       OR h.valid_from < c.legacy_migrated_at
+  )
+  SELECT
+    subscription_key,
+    subscription_id,
+    provider,
+    customer_id,
+    store_id,
+    plan_id,
+    subscription_started_at,
+    valid_from,
+    valid_to,
+    subscription_status,
+    CASE
+      WHEN subscription_status <> 'cancelled' THEN NULL
+      WHEN (provider = 'stripe' AND cancellation_reason IN ('payment_failed', 'payment_disputed'))
+        OR (provider = 'shopify' AND previous_provider_status = 'failed')
+        OR (provider = 'recharge' AND retry_limit_reached) THEN 'involuntary'
+      ELSE 'voluntary'
+    END AS cancellation_type
+  FROM mapped
+  WHERE subscription_status IS NOT NULL
+    AND valid_from < valid_to;
+  
+  -- Step 2: status as of event time (journey analysis on subscribe, unsubscribe, purchase).
+  SELECT
+    e.event_id,
+    e.event_name,
+    e.event_ts,
+    i.subscription_key AS subscription_id,
+    i.customer_id,
+    i.provider AS billing_platform,
+    i.plan_id,
+    i.subscription_status AS subscription_status_at_event,
+    i.cancellation_type
+  FROM `your-project.billing.subscription_customer_events` AS e
+  LEFT JOIN `your-project.billing.subscription_migration_map` AS ml
+    ON ml.legacy_subscription_id = e.subscription_id
+  JOIN subscription_status_intervals AS i
+    ON i.subscription_key = COALESCE(ml.subscription_id, e.subscription_id)
+   AND e.event_ts >= i.valid_from
+   AND e.event_ts < i.valid_to
+  WHERE e.event_name IN ('subscribe', 'unsubscribe', 'purchase')
+    AND DATE(e.event_ts) BETWEEN report_start_date AND report_end_date
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY e.event_id ORDER BY i.valid_from DESC) = 1;
+  
+  -- Step 3: period-end snapshot at 23:59:59 on the last day of each month in the store reporting time zone.
+  CREATE TEMP TABLE subscription_status_month_end AS
+  WITH periods AS (
+    SELECT LAST_DAY(month_start, MONTH) AS period_end_date
+    FROM UNNEST(GENERATE_DATE_ARRAY(DATE_TRUNC(report_start_date, MONTH), DATE_TRUNC(report_end_date, MONTH), INTERVAL 1 MONTH)) AS month_start
+  )
+  SELECT
+    p.period_end_date,
+    i.store_id,
+    i.provider,
+    i.subscription_key,
+    i.customer_id,
+    i.plan_id,
+    i.subscription_status,
+    i.cancellation_type
+  FROM subscription_status_intervals AS i
+  JOIN `your-project.billing.stores` AS st
+    ON st.store_id = i.store_id
+  JOIN periods AS p
+    ON TIMESTAMP(DATETIME(p.period_end_date, TIME '23:59:59'), st.reporting_time_zone) >= i.valid_from
+   AND TIMESTAMP(DATETIME(p.period_end_date, TIME '23:59:59'), st.reporting_time_zone) < i.valid_to
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY p.period_end_date, i.subscription_key ORDER BY i.valid_from DESC) = 1;
+  
+  -- Step 4: month-end distribution; the share denominator is every in-scope contract of the store at the snapshot.
+  SELECT
+    period_end_date,
+    store_id,
+    provider AS billing_platform,
+    subscription_status,
+    cancellation_type,
+    COUNT(DISTINCT subscription_key) AS subscription_contracts,
+    SAFE_DIVIDE(
+      COUNT(DISTINCT subscription_key),
+      SUM(COUNT(DISTINCT subscription_key)) OVER (PARTITION BY period_end_date, store_id)
+    ) AS share_of_store_contracts
+  FROM subscription_status_month_end
+  GROUP BY period_end_date, store_id, provider, subscription_status, cancellation_type
+  ORDER BY period_end_date, store_id, billing_platform, subscription_status;
+  
+  -- Step 5: customer-level rollup at month end (precedence active > past_due > trialing > paused > cancelled > expired).
+  SELECT
+    period_end_date,
+    store_id,
+    customer_id,
+    CASE MIN(CASE subscription_status
+               WHEN 'active' THEN 1 WHEN 'past_due' THEN 2 WHEN 'trialing' THEN 3
+               WHEN 'paused' THEN 4 WHEN 'cancelled' THEN 5 WHEN 'expired' THEN 6 ELSE 7 END)
+      WHEN 1 THEN 'active' WHEN 2 THEN 'past_due' WHEN 3 THEN 'trialing'
+      WHEN 4 THEN 'paused' WHEN 5 THEN 'cancelled' WHEN 6 THEN 'expired' ELSE '(other)'
+    END AS customer_subscription_status,
+    COUNT(DISTINCT subscription_key) AS subscription_contracts
+  FROM subscription_status_month_end
+  GROUP BY period_end_date, store_id, customer_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Subscription Status (one value per subscription contract) from backend datasets ingested from the billing platforms:
+  -- subscription_contracts_dataset, subscription_status_history_dataset (type-2 records keyed on the provider event timestamp),
+  -- subscription_migration_map_dataset, subscription_customer_events_dataset (server-side subscribe / unsubscribe /
+  -- purchase log) and store_settings_dataset (reporting time zone). Reporting window: 2026-01-01 to 2026-08-31.
+  
+  -- Step 1: effective-dated canonical status intervals (valid_from <= ts < valid_to).
+  CREATE TEMP TABLE subscription_status_intervals AS
+  SELECT
+    m.subscription_key,
+    m.subscription_id,
+    m.provider,
+    m.customer_id,
+    m.store_id,
+    m.plan_id,
+    m.subscription_started_at,
+    m.valid_from,
+    m.valid_to,
+    m.subscription_status,
+    CASE
+      WHEN m.subscription_status <> 'cancelled' THEN NULL
+      WHEN (m.provider = 'stripe' AND m.cancellation_reason IN ('payment_failed', 'payment_disputed'))
+        OR (m.provider = 'shopify' AND m.previous_provider_status = 'failed')
+        OR (m.provider = 'recharge' AND m.retry_limit_reached) THEN 'involuntary'
+      ELSE 'voluntary'
+    END AS cancellation_type
+  FROM (
+    SELECT
+      c.subscription_key,
+      c.subscription_id,
+      c.provider,
+      c.customer_id,
+      c.store_id,
+      c.plan_id,
+      c.subscription_started_at,
+      h.valid_from,
+      LEAST(
+        COALESCE(h.valid_to, TIMESTAMP '9999-12-31 23:59:59'),
+        COALESCE(c.legacy_migrated_at, TIMESTAMP '9999-12-31 23:59:59')
+      ) AS valid_to,
+      LOWER(h.previous_provider_status) AS previous_provider_status,
+      LOWER(h.cancellation_reason) AS cancellation_reason,
+      COALESCE(h.retry_limit_reached, false) AS retry_limit_reached,
+      CASE
+        WHEN c.provider = 'stripe' THEN
+          CASE
+            WHEN LOWER(h.provider_status) IN ('incomplete', 'incomplete_expired') THEN NULL
+            WHEN LOWER(h.provider_status) = 'trialing' THEN 'trialing'
+            WHEN LOWER(h.provider_status) = 'active' AND COALESCE(h.pause_collection_set, false) THEN 'paused'
+            WHEN LOWER(h.provider_status) = 'active' THEN 'active'
+            WHEN LOWER(h.provider_status) = 'paused' THEN 'paused'
+            WHEN LOWER(h.provider_status) IN ('past_due', 'unpaid') THEN 'past_due'
+            WHEN LOWER(h.provider_status) = 'canceled'
+              AND (COALESCE(h.ended_on_final_schedule_phase, false) OR COALESCE(h.cancel_at_set_as_contract_term, false)) THEN 'expired'
+            WHEN LOWER(h.provider_status) = 'canceled' THEN 'cancelled'
+            ELSE '(other)'
+          END
+        WHEN c.provider = 'shopify' THEN
+          CASE
+            WHEN LOWER(h.provider_status) = 'active'
+              AND COALESCE(h.first_cycle_zero_priced, false)
+              AND NOT COALESCE(h.has_successful_billing_attempt, false) THEN 'trialing'
+            WHEN LOWER(h.provider_status) = 'active' THEN 'active'
+            WHEN LOWER(h.provider_status) = 'paused' THEN 'paused'
+            WHEN LOWER(h.provider_status) = 'failed' THEN 'past_due'
+            WHEN LOWER(h.provider_status) = 'cancelled' THEN 'cancelled'
+            WHEN LOWER(h.provider_status) = 'expired' THEN 'expired'
+            ELSE '(other)'
+          END
+        WHEN c.provider = 'recharge' THEN
+          CASE
+            WHEN LOWER(h.provider_status) = 'cancelled' THEN 'cancelled'
+            WHEN LOWER(h.provider_status) = 'expired' THEN 'expired'
+            WHEN LOWER(h.provider_status) = 'active'
+              AND COALESCE(h.is_free_trial_product, false)
+              AND NOT COALESCE(h.first_charge_processed, false) THEN 'trialing'
+            WHEN LOWER(h.provider_status) = 'active'
+              AND LOWER(h.latest_charge_status) = 'error'
+              AND (h.latest_charge_retry_date IS NOT NULL OR COALESCE(h.retry_limit_reached, false)) THEN 'past_due'
+            WHEN LOWER(h.provider_status) = 'active'
+              AND (COALESCE(h.charges_skipped_through_next_billing, false) OR COALESCE(h.pause_action_applied, false)) THEN 'paused'
+            WHEN LOWER(h.provider_status) = 'active' THEN 'active'
+            ELSE '(other)'
+          END
+        ELSE '(other)'
+      END AS subscription_status
+    FROM (
+      SELECT
+        COALESCE(ml.subscription_id, s.subscription_id) AS subscription_key,
+        s.subscription_id,
+        LOWER(s.provider) AS provider,
+        s.customer_id,
+        s.store_id,
+        s.plan_id,
+        COALESCE(mt.original_started_at, s.started_at) AS subscription_started_at,
+        ml.migrated_at AS legacy_migrated_at
+      FROM subscription_contracts_dataset AS s
+      LEFT JOIN subscription_migration_map_dataset AS ml
+        ON ml.legacy_subscription_id = s.subscription_id
+      LEFT JOIN (
+        SELECT subscription_id AS target_subscription_id, MIN(original_started_at) AS original_started_at
+        FROM subscription_migration_map_dataset
+        GROUP BY subscription_id
+      ) AS mt
+        ON mt.target_subscription_id = s.subscription_id
+      WHERE NOT COALESCE(s.is_test_mode, false)
+        AND NOT COALESCE(s.is_internal_account, false)
+        AND NOT COALESCE(s.is_gifted_zero_value, false)
+    ) AS c
+    JOIN subscription_status_history_dataset AS h
+      ON h.subscription_id = c.subscription_id
+    WHERE c.legacy_migrated_at IS NULL
+       OR h.valid_from < c.legacy_migrated_at
+  ) AS m
+  WHERE m.subscription_status IS NOT NULL
+    AND m.valid_from < m.valid_to;
+  
+  -- Step 2: status as of event time (journey analysis on subscribe, unsubscribe, purchase).
+  SELECT
+    event_id,
+    event_name,
+    event_ts,
+    subscription_id,
+    customer_id,
+    billing_platform,
+    plan_id,
+    subscription_status_at_event,
+    cancellation_type
+  FROM (
+    SELECT
+      e.event_id,
+      e.event_name,
+      e.event_ts,
+      i.subscription_key AS subscription_id,
+      i.customer_id,
+      i.provider AS billing_platform,
+      i.plan_id,
+      i.subscription_status AS subscription_status_at_event,
+      i.cancellation_type,
+      ROW_NUMBER() OVER (PARTITION BY e.event_id ORDER BY i.valid_from DESC) AS rn
+    FROM subscription_customer_events_dataset AS e
+    LEFT JOIN subscription_migration_map_dataset AS ml
+      ON ml.legacy_subscription_id = e.subscription_id
+    JOIN subscription_status_intervals AS i
+      ON i.subscription_key = COALESCE(ml.subscription_id, e.subscription_id)
+     AND e.event_ts >= i.valid_from
+     AND e.event_ts < i.valid_to
+    WHERE e.event_name IN ('subscribe', 'unsubscribe', 'purchase')
+      AND to_date(e.event_ts) BETWEEN to_date('2026-01-01') AND to_date('2026-08-31')
+  ) AS x
+  WHERE rn = 1;
+  
+  -- Step 3: period-end snapshot at 23:59:59 on the last day of each month in the store reporting time zone.
+  CREATE TEMP TABLE subscription_status_month_end AS
+  SELECT
+    period_end_date,
+    store_id,
+    provider,
+    subscription_key,
+    customer_id,
+    plan_id,
+    subscription_status,
+    cancellation_type
+  FROM (
+    SELECT
+      p.period_end_date,
+      i.store_id,
+      i.provider,
+      i.subscription_key,
+      i.customer_id,
+      i.plan_id,
+      i.subscription_status,
+      i.cancellation_type,
+      ROW_NUMBER() OVER (PARTITION BY p.period_end_date, i.subscription_key ORDER BY i.valid_from DESC) AS rn
+    FROM subscription_status_intervals AS i
+    JOIN store_settings_dataset AS st
+      ON st.store_id = i.store_id
+    JOIN (
+      SELECT last_day(month_start) AS period_end_date
+      FROM (
+        SELECT explode(sequence(to_date('2026-01-01'), to_date('2026-08-01'), interval 1 month)) AS month_start
+      ) AS months
+    ) AS p
+      ON to_utc_timestamp(CAST(concat(CAST(p.period_end_date AS STRING), ' 23:59:59') AS TIMESTAMP), st.reporting_time_zone) >= i.valid_from
+     AND to_utc_timestamp(CAST(concat(CAST(p.period_end_date AS STRING), ' 23:59:59') AS TIMESTAMP), st.reporting_time_zone) < i.valid_to
+  ) AS s
+  WHERE rn = 1;
+  
+  -- Step 4: month-end distribution; the share denominator is every in-scope contract of the store at the snapshot.
+  SELECT
+    period_end_date,
+    store_id,
+    provider AS billing_platform,
+    subscription_status,
+    cancellation_type,
+    COUNT(DISTINCT subscription_key) AS subscription_contracts,
+    COUNT(DISTINCT subscription_key)
+      / NULLIF(SUM(COUNT(DISTINCT subscription_key)) OVER (PARTITION BY period_end_date, store_id), 0) AS share_of_store_contracts
+  FROM subscription_status_month_end
+  GROUP BY period_end_date, store_id, provider, subscription_status, cancellation_type
+  ORDER BY period_end_date, store_id, billing_platform, subscription_status;
+  
+  -- Step 5: customer-level rollup at month end (precedence active > past_due > trialing > paused > cancelled > expired).
+  SELECT
+    period_end_date,
+    store_id,
+    customer_id,
+    CASE MIN(CASE subscription_status
+               WHEN 'active' THEN 1 WHEN 'past_due' THEN 2 WHEN 'trialing' THEN 3
+               WHEN 'paused' THEN 4 WHEN 'cancelled' THEN 5 WHEN 'expired' THEN 6 ELSE 7 END)
+      WHEN 1 THEN 'active' WHEN 2 THEN 'past_due' WHEN 3 THEN 'trialing'
+      WHEN 4 THEN 'paused' WHEN 5 THEN 'cancelled' WHEN 6 THEN 'expired' ELSE '(other)'
+    END AS customer_subscription_status,
+    COUNT(DISTINCT subscription_key) AS subscription_contracts
+  FROM subscription_status_month_end
+  GROUP BY period_end_date, store_id, customer_id;
+
+Calculation Notes: |
+  1️⃣ Grain and value list: one value per subscription contract at any point in time; a customer with several contracts carries one value per contract. trialing = contract started, first paid charge not yet taken (free or zero-priced introductory cycle). active = contract in good standing with the latest scheduled charge collected or not yet due, including contracts flagged to cancel at period end. paused = billing and shipments suspended by customer or merchant action with the contract kept open. past_due = latest scheduled charge failed and the contract is still recoverable (in dunning, or retries exhausted but not yet closed). cancelled = contract ended before its natural end by customer, merchant or failed-payment closure. expired = contract ended at the natural end of a fixed term or prepaid charge count. Contracts that never completed their first payment (Stripe incomplete, incomplete_expired) are not subscriptions and are excluded from distributions and every denominator.
+  2️⃣ Stripe Billing mapping (subscription.status): trialing → trialing; active → active, except pause_collection set → paused (Stripe keeps status active while collection is paused); paused → paused (trial ended with no payment method under trial_settings.end_behavior.missing_payment_method = pause); past_due → past_due; unpaid → past_due, with retries exhausted but invoices still open; canceled → cancelled, or expired when the subscription ended on the final phase of a fixed-term subscription schedule or a cancel_at set at creation as the contract term; incomplete and incomplete_expired → excluded. cancel_at_period_end = true stays active until current_period_end and the value changes only when Stripe emits the canceled status.
+  3️⃣ Shopify Subscription Contract mapping (SubscriptionContract.status): ACTIVE → active, or trialing when the contract's first billing cycle is zero-priced under its selling plan pricing policy and no successful billing attempt exists yet; PAUSED → paused; FAILED → past_due (billing attempts failed and the subscription app's dunning has not closed the contract); CANCELLED → cancelled; EXPIRED → expired. Billing attempt outcomes (SubscriptionBillingAttempt errorCode) are inputs used to confirm past_due and classify involuntary cancellations, never reporting values.
+  4️⃣ Recharge mapping (subscription.status): active → active; cancelled → cancelled; expired → expired (fixed-length or prepaid plans reaching expire_after_specific_number_of_charges). Recharge has no native trialing, paused or past_due value, so they are derived: past_due when an active subscription's most recent charge has status error and a retry_date is scheduled or the retry limit is reached without cancellation; paused when the store's pause flow has skipped every charge through the next scheduled billing date (charge status skipped) or pushed next_charge_scheduled_at out under a pause action; trialing only when the first charge of a free-trial product has not yet processed. A one-off skipped delivery on an otherwise active subscription stays active.
+  5️⃣ Effective dating: every change is stored as a type-2 record (valid_from, valid_to) keyed on the provider's event timestamp (Stripe event.created on customer.subscription.updated/deleted, Shopify subscription_contracts/update updated_at, Recharge subscription webhook updated_at), never webhook receipt time, so out-of-order or replayed webhooks do not reorder states. Status as of event time joins the record whose interval contains the event timestamp and is the only valid basis for journey analysis on subscribe, unsubscribe and purchase events; it is never back-filled with today's value. Status as of snapshot takes the record valid at 23:59:59 on the last day of the period in the store's reporting time zone and is used for subscriber base counts, month-end reconciliation and retention cohorts so closed periods are not restated. Status changes are server-side and never start or extend a web session; the 30-minute inactivity timeout applies only to the customer event carrying the value.
+  6️⃣ Edge cases and exclusions: test-mode, internal staff and zero-value gifted contracts are removed. Cancellation request date and effective end date are held separately; Subscription Cancellations count on the effective end date unless stated otherwise. Reactivation of a cancelled contract on the same contract id is a new active interval, while a new contract id is a new subscription. Contracts migrated between platforms are linked by the migration mapping table and keep their original start date so they are not counted as a cancellation plus a new subscription. Customer-level rollup for multi-contract customers uses precedence active > past_due > trialing > paused > cancelled > expired. Cancellation Type is involuntary when the contract ended through failed-payment closure (Stripe cancellation_details.reason = payment_failed or payment_disputed, Shopify FAILED → CANCELLED transition, Recharge retry limit reached) and voluntary otherwise. Unmapped provider values resolve to '(other)' and are reviewed weekly rather than set to null.
+  7️⃣ Boundaries and value action by industry: plan catalog lifecycle (a plan's availability for sale, held as Subscription Plan Lifecycle Status on subscription-plan) is out of scope, as is which package the customer holds (subscription-plan). Email Subscription Status is marketing consent and is never inferred from this dimension. Customer Status describes the customer relationship as a whole (new, repeat, lapsed) and may consume this value but is not replaced by it. Value action by industry: E-commerce and Retail = recurring replenishment or membership order contract (subscribe, unsubscribe); SaaS = seat or plan contract renewal; Media = paid digital access subscription; the value list and effective-dating rules are unchanged across industries.
+
+Business Use Case: |
+  1️⃣ Customer Service retention lead: each morning, subscriptions that moved to past_due in the prior 24 hours with a card-expired or insufficient-funds decline enter a payment-update outreach queue (email and SMS with a secure card-update link) ahead of the next scheduled retry; any contract still past_due after the final retry is assigned to an agent callback before the platform closes it as an involuntary cancellation.
+  2️⃣ Lifecycle Marketing CRM manager: every week, paused subscriptions with a resume date in the next 7 days receive a resume reminder with a product swap or cadence-change option, and contracts that moved to cancelled with Cancellation Type = voluntary in the last 30 days enter the win-back journey, while involuntary cancellations are suppressed from discount win-back offers and routed to payment recovery instead.
+  3️⃣ Finance (FP&A): at month-end close, take the snapshot distribution by status, reconcile active plus past_due contract counts and recurring order value against the billing platform's subscription report, report churn split into voluntary and involuntary, and exclude contracts past_due for more than 30 days from committed recurring revenue in the forecast.
+  4️⃣ Subscription program Product Manager: when the share of trialing contracts that move to cancelled before the first paid charge exceeds 25% for any plan cohort in two consecutive weeks, review that plan's default delivery cadence and first-charge messaging with Merchandising and measure the change in trial-to-active conversion over the next four cohorts.
+
+Dependencies:
+  Events: [subscription-start, subscription-cancellation, purchase]
+  Dimensions: [subscription-plan]
+
+Source Data: Subscription Billing Backend (Stripe Billing / Shopify Subscription Contracts / Recharge)
+
+Report Attributes: |
+  Subscription Plan; Delivery Cadence; Subscription Start Month; Subscription Tenure (Billing Cycles); Cancellation Type; Payment Method Type; Acquisition Channel; Billing Platform
+
+Dashboard Usage: [Subscriber Base and Churn Overview, Subscription Payment Recovery (Dunning) Monitor, Month-End Recurring Revenue Reconciliation, Subscribe-and-Save Program Performance]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [subscription-plan, customer-status]
+
+Derived Dimensions: [Active Subscriber Flag, Subscription Status Group (live / at-risk / ended), Cancellation Type (voluntary / involuntary)]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-15T13:36:01.474+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-18T01:42:14.84+00:00
+
