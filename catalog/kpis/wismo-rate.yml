@@ -1,7 +1,7 @@
 # KPI: WISMO Rate
-# Generated: 2026-09-18T16:44:23.293Z
+# Generated: 2026-09-18T16:44:36.228Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: WISMO Rate
 Formula: (Distinct shipped orders with ≥ 1 WISMO contact inside the attribution window ÷ Distinct orders with a first shipment in the period) × 100
@@ -11,31 +11,310 @@ Description: |
 
 Category: Experience
 
+Tags: [kpi, E-commerce: Post-Purchase Logistics & Fulfillment, Customer Service, Cost to Serve, Omnichannel]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Generic
 
+Scope: Global
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  submit_form
 
+Adobe Event: |
+  submit_form
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageName": "support:contact",
+          "pageType": "customer_support"
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "submit_form",
+            "eventAction": "form_submit",
+            "type": "form"
+          },
+          "attributes": {
+            "form_id": "contact-support",
+            "form_type": "contact_support",
+            "contact_topic": "order_status",
+            "support_channel": "web_form",
+            "order_id": "ORD-100245"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_id": "contact-support",
+    "form_type": "contact_support",
+    "contact_topic": "order_status",
+    "support_channel": "web_form",
+    "order_id": "ORD-100245"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "submit_form",
+    "eventInfo": {
+      "eventName": "submit_form",
+      "type": "form"
+    },
+    "form": {
+      "id": "contact-support",
+      "type": "contact_support",
+      "topic": "order_status",
+      "channel": "web_form"
+    },
+    "order": {
+      "id": "ORD-100245"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "web": {
+      "webInteraction": {
+        "name": "submit_form",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "contact_support",
+            "eVar41": "order_status",
+            "eVar42": "web_form",
+            "eVar43": "ORD-100245"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- WISMO Rate by ship-date cohort week.
+  -- Denominator: every eligible order whose first carrier shipment falls in the period (OMS).
+  -- Numerator: the subset of those same orders with >= 1 WISMO contact (helpdesk UNION web submit_form)
+  -- between order placement and delivered_at + 7 days (or first shipment + 30 days when undelivered).
+  WITH shipped_orders AS (
+    SELECT
+      s.order_id,
+      MIN(s.shipped_at)            AS first_shipped_at,
+      MAX(s.delivered_at)          AS delivered_at,
+      ANY_VALUE(o.order_created_at) AS order_created_at,
+      ANY_VALUE(s.carrier)         AS carrier
+    FROM `your-project.oms.shipments` AS s
+    JOIN `your-project.oms.orders` AS o
+      ON o.order_id = s.order_id
+    WHERE s.tracking_number IS NOT NULL
+      AND COALESCE(o.is_test, FALSE) = FALSE
+      AND COALESCE(o.is_employee, FALSE) = FALSE
+      AND COALESCE(o.fraud_hold, FALSE) = FALSE
+      AND LOWER(o.fulfillment_method) NOT IN ('bopis', 'curbside', 'digital', 'gift_card')
+      AND LOWER(COALESCE(o.support_owner, 'merchant')) <> 'marketplace_seller'
+    GROUP BY s.order_id
+    HAVING DATE(MIN(s.shipped_at)) BETWEEN DATE '2026-08-01' AND DATE '2026-08-31'
+  ),
+  helpdesk_wismo AS (
+    SELECT
+      t.order_id,
+      t.created_at AS contact_ts
+    FROM `your-project.helpdesk.tickets` AS t
+    WHERE t.order_id IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM UNNEST(t.tags) AS tag
+          WHERE LOWER(tag) IN ('wismo', 'order_status', 'tracking', 'delivery_delay')
+        )
+        OR LOWER(t.contact_reason) IN ('wismo', 'order_status', 'tracking', 'delivery_delay')
+      )
+      AND LOWER(COALESCE(t.final_disposition, 'order_status')) NOT IN ('damaged_item', 'wrong_item', 'return', 'cancellation')
+      AND NOT (LOWER(t.channel) = 'chatbot' AND COALESCE(t.escalated_to_agent, FALSE) = FALSE)
+      AND DATE(t.created_at) BETWEEN DATE '2026-07-01' AND DATE '2026-10-07'
+  ),
+  web_form_events AS (
+    SELECT
+      TIMESTAMP_MICROS(e.event_timestamp) AS contact_ts,
+      (SELECT MAX(IF(ep.key = 'form_type', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS form_type,
+      (SELECT MAX(IF(ep.key = 'contact_topic', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS contact_topic,
+      (SELECT MAX(IF(ep.key = 'order_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL))
+         FROM UNNEST(e.event_params) AS ep) AS order_id
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE e._TABLE_SUFFIX BETWEEN '20260701' AND '20261007'
+      AND e.event_name = 'submit_form'
+  ),
+  web_wismo AS (
+    SELECT order_id, contact_ts
+    FROM web_form_events
+    WHERE form_type = 'contact_support'
+      AND contact_topic = 'order_status'
+      AND order_id IS NOT NULL
+  ),
+  wismo_contacts AS (
+    SELECT order_id, contact_ts FROM helpdesk_wismo
+    UNION ALL
+    SELECT order_id, contact_ts FROM web_wismo
+  ),
+  cohort AS (
+    SELECT
+      so.order_id,
+      DATE_TRUNC(DATE(so.first_shipped_at), WEEK(MONDAY)) AS ship_cohort_week,
+      LOGICAL_OR(wc.order_id IS NOT NULL) AS has_wismo_contact
+    FROM shipped_orders AS so
+    LEFT JOIN wismo_contacts AS wc
+      ON wc.order_id = so.order_id
+     AND wc.contact_ts >= so.order_created_at
+     AND wc.contact_ts < COALESCE(
+           TIMESTAMP_ADD(so.delivered_at, INTERVAL 7 DAY),
+           TIMESTAMP_ADD(so.first_shipped_at, INTERVAL 30 DAY))
+    GROUP BY so.order_id, ship_cohort_week
+  )
+  SELECT
+    ship_cohort_week,
+    COUNT(DISTINCT order_id)                                   AS shipped_orders,
+    COUNT(DISTINCT IF(has_wismo_contact, order_id, NULL))      AS wismo_orders,
+    ROUND(SAFE_DIVIDE(
+      COUNT(DISTINCT IF(has_wismo_contact, order_id, NULL)),
+      COUNT(DISTINCT order_id)) * 100, 2)                      AS wismo_rate_pct
+  FROM cohort
+  GROUP BY ship_cohort_week
+  ORDER BY ship_cohort_week;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- WISMO Rate by ship-date cohort week.
+  -- Denominator: every eligible order whose first carrier shipment falls in the period (OMS dataset).
+  -- Numerator: the subset of those same orders with >= 1 WISMO contact (helpdesk dataset UNION web formFilledOut)
+  -- between order placement and delivered_at + 7 days (or first shipment + 30 days when undelivered).
+  WITH shipped_orders AS (
+    SELECT
+      s.order_id,
+      MIN(s.shipped_at)        AS first_shipped_at,
+      MAX(s.delivered_at)      AS delivered_at,
+      MIN(o.order_created_at)  AS order_created_at
+    FROM oms_shipments_dataset s
+    JOIN oms_orders_dataset o
+      ON o.order_id = s.order_id
+    WHERE s.tracking_number IS NOT NULL
+      AND COALESCE(o.is_test, false) = false
+      AND COALESCE(o.is_employee, false) = false
+      AND COALESCE(o.fraud_hold, false) = false
+      AND LOWER(o.fulfillment_method) NOT IN ('bopis', 'curbside', 'digital', 'gift_card')
+      AND LOWER(COALESCE(o.support_owner, 'merchant')) <> 'marketplace_seller'
+    GROUP BY s.order_id
+    HAVING CAST(MIN(s.shipped_at) AS DATE) BETWEEN DATE '2026-08-01' AND DATE '2026-08-31'
+  ),
+  helpdesk_wismo AS (
+    SELECT
+      t.order_id,
+      t.created_at AS contact_ts
+    FROM helpdesk_tickets_dataset t
+    WHERE t.order_id IS NOT NULL
+      AND (
+        EXISTS(t.tags, tag -> LOWER(tag) IN ('wismo', 'order_status', 'tracking', 'delivery_delay'))
+        OR LOWER(t.contact_reason) IN ('wismo', 'order_status', 'tracking', 'delivery_delay')
+      )
+      AND LOWER(COALESCE(t.final_disposition, 'order_status')) NOT IN ('damaged_item', 'wrong_item', 'return', 'cancellation')
+      AND NOT (LOWER(t.channel) = 'chatbot' AND COALESCE(t.escalated_to_agent, false) = false)
+      AND t.created_at >= TIMESTAMP '2026-07-01 00:00:00'
+      AND t.created_at <  TIMESTAMP '2026-10-08 00:00:00'
+  ),
+  web_wismo AS (
+    SELECT
+      _experience.analytics.customDimensions.eVars.eVar43 AS order_id,
+      timestamp AS contact_ts
+    FROM web_events_dataset
+    WHERE eventType = 'web.formFilledOut'
+      AND web.webInteraction.name = 'submit_form'
+      AND _experience.analytics.customDimensions.eVars.eVar40 = 'contact_support'
+      AND _experience.analytics.customDimensions.eVars.eVar41 = 'order_status'
+      AND _experience.analytics.customDimensions.eVars.eVar43 IS NOT NULL
+      AND timestamp >= TIMESTAMP '2026-07-01 00:00:00'
+      AND timestamp <  TIMESTAMP '2026-10-08 00:00:00'
+  ),
+  wismo_contacts AS (
+    SELECT order_id, contact_ts FROM helpdesk_wismo
+    UNION ALL
+    SELECT order_id, contact_ts FROM web_wismo
+  ),
+  cohort AS (
+    SELECT
+      so.order_id,
+      CAST(DATE_TRUNC('WEEK', so.first_shipped_at) AS DATE) AS ship_cohort_week,
+      MAX(CASE WHEN wc.order_id IS NOT NULL THEN 1 ELSE 0 END) AS has_wismo_contact
+    FROM shipped_orders so
+    LEFT JOIN wismo_contacts wc
+      ON wc.order_id = so.order_id
+     AND wc.contact_ts >= so.order_created_at
+     AND wc.contact_ts < COALESCE(
+           so.delivered_at + INTERVAL 7 DAYS,
+           so.first_shipped_at + INTERVAL 30 DAYS)
+    GROUP BY so.order_id, CAST(DATE_TRUNC('WEEK', so.first_shipped_at) AS DATE)
+  )
+  SELECT
+    ship_cohort_week,
+    COUNT(DISTINCT order_id)                                             AS shipped_orders,
+    COUNT(DISTINCT CASE WHEN has_wismo_contact = 1 THEN order_id END)   AS wismo_orders,
+    ROUND(
+      CAST(COUNT(DISTINCT CASE WHEN has_wismo_contact = 1 THEN order_id END) AS DOUBLE)
+      / NULLIF(COUNT(DISTINCT order_id), 0) * 100, 2)                    AS wismo_rate_pct
+  FROM cohort
+  GROUP BY ship_cohort_week
+  ORDER BY ship_cohort_week;
 
+Calculation Notes: |
+  1️⃣ Cohort anchoring: the denominator is every order whose first shipment confirmation (fulfilment created with a carrier tracking number) falls in the reporting period; the numerator is the subset of those same orders with a qualifying contact between order placement and delivered_at + 7 days (or first shipment + 30 days when no delivery scan exists). Report on the ship-date cohort, never on contact date, and hold the most recent 7 days as provisional until the window closes.,2️⃣ Contact qualification: a contact counts when the helpdesk ticket carries the WISMO intent (tags or contact reasons such as wismo, order_status, tracking, delivery_delay) or when the site fires contact_support / submit_form with topic = order_status. The agent-confirmed disposition overrides the customer-selected topic, so a ticket opened as order_status but closed as damaged_item, wrong_item, return or cancellation is excluded.,3️⃣ Order-level de-duplication: the numerator is COUNT(DISTINCT order_id), so repeat contacts, reopened or merged tickets, channel transfers (chat escalated to phone) and the helpdesk ticket auto-created by a site form submission all collapse to one order. Contact volume per order is tracked as a separate diagnostic, not inside this rate.,4️⃣ Ticket-to-order linkage follows a strict precedence: explicit order_id field on the ticket or form payload, then order number parsed from subject/body, then requester email or user_id matched to that customer's most recent shipped order within 30 days. Unlinked WISMO tickets are excluded from the numerator and reported as an Unlinked WISMO Share data-quality check; above 10% the rate is flagged as understated.,5️⃣ Self-service deflection: tracking-page visits (order_status_check), opens of carrier or shipment notifications and chatbot sessions fully contained by an automated tracking lookup are not contacts. A bot session counts only when it escalates to a human agent or creates a ticket, which keeps the KPI comparable before and after conversational-AI or branded-tracking rollouts.,6️⃣ Exclusions: orders cancelled before shipment, test, employee and fraud-held orders, digital or gift-card-only orders, BOPIS / curbside orders with no carrier leg, and marketplace orders where the third-party seller owns customer support. Split shipments count once in the denominator at the first shipment, and any contact on a child shipment rolls up to the parent order_id.,7️⃣ Promise-state split: stamp every WISMO contact as pre-promise or post-promise by comparing contact timestamp with the delivery promise date shown at checkout. Pre-promise WISMO signals a notification and tracking-visibility gap; post-promise WISMO signals a fulfilment or carrier failure, and the two should be read separately before acting.
 
+Business Use Case: |
+  1️⃣ The Customer Service Operations Manager reviews weekly WISMO Rate by carrier and ship-node every Monday; when a carrier's cohort rate runs 2 percentage points above its trailing 8-week median, they raise the WISMO staffing forecast for the following week and open a carrier escalation with the Logistics team.,2️⃣ The Fulfillment & Logistics Manager watches post-promise WISMO by delivery region daily; a spike in one region triggers proactive shipment-delay notifications to every in-transit order on the affected lanes and a reroute or carrier-mix change for new orders.,3️⃣ The Post-Purchase Product Manager compares pre-promise WISMO between customers who viewed the order-status page and those who did not; when the gap closes, they prioritise branded tracking, push and SMS milestone updates and an order-status link in every transactional email.,4️⃣ The Finance cost-to-serve lead multiplies monthly WISMO contacts by the blended cost per contact in the quarterly cost-to-serve review and uses the result to approve or reject investment in tracking tooling and carrier-performance penalties.
 
+Dependencies:
+  Events: [order-status-check, delivery-confirmation, shipment-delay-notification]
+  Metrics: [shipment-volume]
+  Dimensions: [support-channel, ticket-category, order-status, delivery-promise-date, carrier, shipping-tier]
 
+Source Data: Digital Analytics (GA4 / Adobe web contact form) + Helpdesk/CRM (Zendesk, Gorgias, Salesforce Service Cloud) + OMS shipment records
 
+Report Attributes: |
+  Carrier; Shipping Tier; Fulfillment Method; Delivery Region; Support Channel; Promise State at Contact (Pre-Promise / Post-Promise); Ship-Date Cohort Week; Order Status Page Viewed (Yes / No)
 
+Dashboard Usage: [Post-Purchase Experience Dashboard, Customer Service Operations Dashboard, Carrier Performance Scorecard, Cost-to-Serve Review]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [shipment-on-time-delivery-rate, delivery-accuracy-rate, orders]
 
+Data Sensitivity: Restricted
 
-Contains PII: No
+Contains PII: Yes
 
 Status: draft
 
@@ -43,5 +322,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T16:44:22.3+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T16:44:35.249+00:00
 
