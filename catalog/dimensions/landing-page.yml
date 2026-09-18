@@ -1,7 +1,7 @@
 # Dimension: Landing Page
-# Generated: 2026-09-18T17:12:55.989Z
+# Generated: 2026-09-18T17:13:04.645Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Landing Page
 
@@ -10,31 +10,305 @@ Description: |
 
 Category: Acquisition
 
+Tags: [dimension, E-commerce: Top-of-Funnel & Marketing Acquisition]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Session
 
+Data Type: string
 
+Aggregation Window: Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  page_view
 
+Adobe Event: |
+  Page View
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "/collections/summer-dresses",
+        "pageName": "collections:summer-dresses",
+        "destinationURL": "https://www.example-store.com/collections/summer-dresses?sort=best-selling",
+        "referringURL": "https://www.google.com/",
+        "language": "en-US"
+      },
+      "category": {
+        "primaryCategory": "collections",
+        "pageType": "PLP"
+      },
+      "attributes": {
+        "landingPage": "/collections/summer-dresses",
+        "landingPageQueryString": "/collections/summer-dresses?sort=best-selling",
+        "isEntryPage": true
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_location": "https://www.example-store.com/collections/summer-dresses?sort=best-selling",
+    "page_path": "/collections/summer-dresses",
+    "page_title": "Summer Dresses | Example Store",
+    "page_referrer": "https://www.google.com/",
+    "page_type": "PLP",
+    "landing_page": "/collections/summer-dresses",
+    "landing_page_query_string": "/collections/summer-dresses?sort=best-selling",
+    "is_entry_page": true
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "Page View",
+    "web": {
+      "webPageDetails": {
+        "name": "collections:summer-dresses",
+        "URL": "https://www.example-store.com/collections/summer-dresses?sort=best-selling",
+        "pageType": "PLP",
+        "isHomePage": false
+      },
+      "webReferrer": {
+        "URL": "https://www.google.com/"
+      }
+    },
+    "page": {
+      "landingPage": "/collections/summer-dresses",
+      "landingPageQueryString": "/collections/summer-dresses?sort=best-selling",
+      "isEntryPage": true
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web": {
+      "webPageDetails": {
+        "name": "collections:summer-dresses",
+        "URL": "https://www.example-store.com/collections/summer-dresses?sort=best-selling",
+        "pageViews": {
+          "value": 1
+        }
+      },
+      "webReferrer": {
+        "URL": "https://www.google.com/"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar15": "/collections/summer-dresses",
+            "eVar16": "/collections/summer-dresses?sort=best-selling"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Landing Page (session-scoped): path of the first page_view per session, plus an allow-listed query-string variant.
+  -- Sessions without a page_view stay in the base as '(not set)'. Daily tables only, closed 72h restatement window.
+  WITH events AS (
+    SELECT
+      user_pseudo_id,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      event_name,
+      event_timestamp,
+      batch_ordering_id,
+      batch_event_index,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_location') AS page_location,
+      (SELECT COALESCE(value.string_value, CAST(value.int_value AS STRING)) FROM UNNEST(event_params) WHERE key = 'session_engaged') AS session_engaged,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type,
+      ecommerce.transaction_id AS transaction_id,
+      ecommerce.purchase_revenue AS purchase_revenue
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE REGEXP_CONTAINS(_TABLE_SUFFIX, r'^[0-9]{8}$')
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 31 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
+  ),
+  sessions AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      ARRAY_AGG(IF(event_name = 'page_view', page_location, NULL) IGNORE NULLS
+                ORDER BY event_timestamp, batch_ordering_id, batch_event_index LIMIT 1)[SAFE_OFFSET(0)] AS first_page_location,
+      MAX(IF(session_engaged = '1', 1, 0)) AS is_engaged,
+      MAX(IF(event_name = 'add_to_cart', 1, 0)) AS has_add_to_cart,
+      COUNT(DISTINCT IF(event_name = 'purchase', transaction_id, NULL)) AS orders,
+      SUM(IF(event_name = 'purchase', COALESCE(purchase_revenue, 0), 0)) AS revenue,
+      LOGICAL_OR(COALESCE(traffic_type, '') = 'internal') AS is_internal
+    FROM events
+    WHERE user_pseudo_id IS NOT NULL
+      AND ga_session_id IS NOT NULL
+    GROUP BY user_pseudo_id, ga_session_id
+  ),
+  parsed AS (
+    SELECT
+      *,
+      NULLIF(REGEXP_REPLACE(REGEXP_EXTRACT(first_page_location, r'^https?://[^/]+([^?#]*)'), r'/+$', ''), '') AS raw_path,
+      REGEXP_EXTRACT(first_page_location, r'[?]([^#]*)') AS raw_query
+    FROM sessions
+    WHERE NOT is_internal
+  ),
+  landing AS (
+    SELECT
+      *,
+      CASE WHEN first_page_location IS NULL THEN '(not set)' ELSE COALESCE(raw_path, '/') END AS landing_page,
+      ARRAY_TO_STRING(ARRAY(
+        SELECT p FROM UNNEST(SPLIT(raw_query, '&')) AS p
+        WHERE REGEXP_CONTAINS(LOWER(p), r'^(variant|sort|sort_by|page|filter[.][^=]*)=')
+        ORDER BY p), '&') AS kept_query
+    FROM parsed
+  )
+  SELECT
+    landing_page,
+    CASE WHEN COALESCE(kept_query, '') = '' THEN landing_page
+         ELSE CONCAT(landing_page, '?', kept_query) END AS landing_page_query_string,
+    REGEXP_CONTAINS(LOWER(landing_page), r'(thank[-_]?you|order[-_]confirmation|/orders/|/checkouts?/|3ds|paypal|klarna|shop[-_]?pay)') AS is_defect_entry,
+    COUNT(*) AS sessions,
+    SAFE_DIVIDE(COUNT(*), SUM(COUNT(*)) OVER ()) AS share_of_sessions,
+    SUM(is_engaged) AS engaged_sessions,
+    SAFE_DIVIDE(SUM(is_engaged), COUNT(*)) AS engaged_session_rate,
+    SAFE_DIVIDE(COUNT(*) - SUM(is_engaged), COUNT(*)) AS bounce_rate,
+    SUM(has_add_to_cart) AS add_to_cart_sessions,
+    SAFE_DIVIDE(SUM(has_add_to_cart), COUNT(*)) AS add_to_cart_rate,
+    COUNTIF(orders > 0) AS converting_sessions,
+    SAFE_DIVIDE(COUNTIF(orders > 0), COUNT(*)) AS landing_page_conversion_rate,
+    SUM(orders) AS orders,
+    ROUND(SUM(revenue), 2) AS revenue,
+    ROUND(SAFE_DIVIDE(SUM(revenue), COUNT(*)), 4) AS revenue_per_session
+  FROM landing
+  GROUP BY landing_page, landing_page_query_string, is_defect_entry
+  ORDER BY sessions DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Landing Page (Entry Page): URL path of the first page view in each visit, sessionised on ECID with a 30-minute timeout.
+  -- Visits without a page view stay in the base as '(not set)'.
+  WITH hits AS (
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      timestamp,
+      eventType,
+      web.webPageDetails.URL AS page_url,
+      COALESCE(commerce.productListAdds.value, 0) AS cart_adds,
+      commerce.order.purchaseID AS purchase_id,
+      COALESCE(commerce.order.priceTotal, 0) AS order_revenue,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY identityMap['ECID'][0].id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session
+    FROM your_web_experience_event_dataset
+    WHERE timestamp >= date_sub(current_date(), 31)
+      AND timestamp < date_sub(current_date(), 2)
+      AND identityMap['ECID'][0].id IS NOT NULL
+  ),
+  visits AS (
+    SELECT
+      ecid,
+      session.num AS visit_num,
+      COUNT(*) AS hit_count,
+      MAX(CASE WHEN eventType = 'commerce.productListAdds' OR cart_adds > 0 THEN 1 ELSE 0 END) AS has_add_to_cart,
+      COUNT(DISTINCT CASE WHEN eventType = 'commerce.purchases' THEN purchase_id END) AS orders,
+      SUM(CASE WHEN eventType = 'commerce.purchases' THEN order_revenue ELSE 0 END) AS revenue
+    FROM hits
+    GROUP BY ecid, session.num
+  ),
+  entry_hits AS (
+    SELECT ecid, visit_num, page_url
+    FROM (
+      SELECT
+        ecid,
+        session.num AS visit_num,
+        page_url,
+        ROW_NUMBER() OVER (PARTITION BY ecid, session.num ORDER BY timestamp) AS rn
+      FROM hits
+      WHERE eventType = 'web.webpagedetails.pageViews'
+        AND page_url IS NOT NULL
+    ) ranked
+    WHERE rn = 1
+  ),
+  landing AS (
+    SELECT
+      v.*,
+      CASE WHEN e.page_url IS NULL THEN '(not set)'
+           ELSE COALESCE(NULLIF(regexp_replace(parse_url(e.page_url, 'PATH'), '/+$', ''), ''), '/') END AS landing_page,
+      array_join(array_sort(filter(
+        split(COALESCE(parse_url(e.page_url, 'QUERY'), ''), '&'),
+        p -> lower(p) RLIKE '^(variant|sort|sort_by|page|filter[.][^=]*)=')), '&') AS kept_query
+    FROM visits v
+    LEFT JOIN entry_hits e
+      ON v.ecid = e.ecid AND v.visit_num = e.visit_num
+  )
+  SELECT
+    landing_page,
+    CASE WHEN COALESCE(kept_query, '') = '' THEN landing_page
+         ELSE concat(landing_page, '?', kept_query) END AS landing_page_query_string,
+    lower(landing_page) RLIKE '(thank[-_]?you|order[-_]confirmation|/orders/|/checkouts?/|3ds|paypal|klarna|shop[-_]?pay)' AS is_defect_entry,
+    COUNT(*) AS visits,
+    COUNT(*) / SUM(COUNT(*)) OVER () AS share_of_visits,
+    SUM(CASE WHEN hit_count = 1 THEN 1 ELSE 0 END) AS bounced_visits,
+    SUM(CASE WHEN hit_count = 1 THEN 1 ELSE 0 END) / COUNT(*) AS bounce_rate,
+    SUM(has_add_to_cart) AS add_to_cart_visits,
+    SUM(has_add_to_cart) / COUNT(*) AS add_to_cart_rate,
+    SUM(CASE WHEN orders > 0 THEN 1 ELSE 0 END) AS converting_visits,
+    SUM(CASE WHEN orders > 0 THEN 1 ELSE 0 END) / COUNT(*) AS landing_page_conversion_rate,
+    SUM(orders) AS orders,
+    ROUND(SUM(revenue), 2) AS revenue,
+    ROUND(SUM(revenue) / COUNT(*), 4) AS revenue_per_visit
+  FROM landing
+  GROUP BY 1, 2, 3
+  ORDER BY visits DESC;
 
+Calculation Notes: |
+  1️⃣ Derivation: take page_location from the earliest page_view in the session, ordered by event_timestamp and then batch_ordering_id, keyed on user_pseudo_id + ga_session_id (GA4) or visitor ID + visit number (Adobe, where the Entry Page is the page on the visit's first hit). The value is fixed once assigned and is copied to every hit in the session. It is never re-evaluated mid-session, including when a new campaign arrives, because GA4 does not restart the session in that case.
+  2️⃣ URL normalisation: lowercase the hostname, remove the #fragment and trailing slashes, and collapse locale or currency prefixes only where the storefront renders the same template, so that the path is canonical. Keep two outputs. 'Landing Page' is the path only. 'Landing Page + Query String' keeps only allow-listed merchandising parameters (e.g. variant, sort, filter facets, page). Always strip tracking and click IDs (utm_*, gclid, gbraid, wbraid, fbclid, msclkid, ttclid, _gl) and any cart, session or checkout tokens.
+  3️⃣ Session rules: use a 30-minute inactivity timeout. GA4 does not split sessions at midnight, while Adobe ends a visit after 30 minutes of inactivity or 12 hours of total duration. A tab that sits idle past the timeout and is then reactivated opens a new session. That session's landing page is the page already on screen, not a page reached by navigation, so deep product and cart pages will show inflated entry counts.
+  4️⃣ Missing values: sessions with no page_view get the value '(not set)'. This covers Measurement Protocol or server-side purchases, sessions that contain only user_engagement or scroll events, and consent-denied cookieless pings. Keep these sessions in the full session base for every rate and never drop them from denominators. If more than 2% of sessions are '(not set)', raise it as a tagging defect rather than filtering it out.
+  5️⃣ Exclusions and defect signals: exclude internal IP and staff traffic, known bots and uptime or SEO crawlers, and QA or staging hostnames. Order-confirmation, 3-D Secure, PayPal, Klarna or Shop Pay return URLs should never appear as landing pages. When they do, it means cross-domain linking or referral exclusions are missing. Flag these URLs and do not credit them as real entry points.
+  6️⃣ Single-page storefronts (headless, Hydrogen, PWA): the landing page is the first page_view fired on initial load, before any history-change virtual page_view. Rendered 404 and 'no longer available' product URLs keep their requested path and are grouped with the page-type 'Error' so that broken inbound links are easy to find.
+  7️⃣ Scope and timing: this is a session-scoped dimension. Page URL, Page Name and Previous Page are hit-scoped. Pair Landing Page with session metrics (sessions, engaged sessions, bounce rate, conversions, revenue) and use it as the dimension for Landing Page Conversion Rate. Pairing it with hit-level counts such as page views assigns every hit in the session back to the entry page. The GA4 daily export can restate for up to 72 hours, so final reporting reads events_YYYYMMDD after that window closes and not the intraday tables.
 
+Business Use Case: |
+  1️⃣ Performance Marketing Manager: each Monday, when a paid-search or paid-social landing page's Landing Page Conversion Rate falls more than 20% week over week at a stable session volume, point the affected ad groups' final URLs to the best-converting landing page for the same intent and log the change in the campaign changelog.
+  2️⃣ SEO Lead: in the monthly organic review, rank organic-entry landing pages by sessions and engaged-session rate, then send pages in the top traffic decile with below-median engagement to the content and template backlog for title, above-the-fold and internal-linking fixes.
+  3️⃣ E-commerce Merchandising Manager: two weeks after a campaign PLP or collection page launches as a landing page, compare its revenue per session and add-to-cart rate against the evergreen category page. Retire or rework the variant that underperforms before the next promotional window.
+  4️⃣ Digital Product Owner (Checkout): a daily alert fires when order-confirmation or payment-return URLs exceed 0.5% of landing-page sessions. The owner then opens a P1 ticket to fix cross-domain linking or the payment-provider referral exclusions, because these sessions split orders away from their true acquisition source.
 
+Dependencies:
+  Events: [page-view]
+  Dimensions: [page-url, page-type]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  traffic-source; first-touch-channel-grouping; device-category; page-type; Session Campaign; Session Source / Medium; New vs Returning
 
+Dashboard Usage: [Landing Page Performance, Paid Media Landing Page Scorecard, Organic Search Entry Report, Acquisition Funnel Overview]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [page-url, page-name, previous-page, page-type, traffic-source, first-touch-channel-grouping, device-category]
 
+Derived Dimensions: [landing-page-type]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +316,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T17:12:55.612+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T17:13:04.439+00:00
 
