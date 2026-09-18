@@ -1,5 +1,5 @@
 # KPI: Cart-to-Checkout Rate
-# Generated: 2026-09-17T23:16:03.512Z
+# Generated: 2026-09-18T23:20:46.228Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -207,7 +207,6 @@ GA4 Data Layer: |
     "checkout_step": 1,
     "checkout_type": "guest",
     "express_checkout": false,
-    "device_category": "mobile",
     "page_type": "checkout"
   }
 
@@ -324,6 +323,7 @@ XDM Mapping: |
       "webPageDetails": {
         "name": "Checkout - Shipping",
         "siteSection": "Checkout",
+        "URL": "https://www.example.com/checkout",
         "pageViews": {
           "value": 0
         }
@@ -334,6 +334,17 @@ XDM Mapping: |
     },
     "device": {
       "type": "mobile"
+    },
+    "environment": {
+      "type": "browser",
+      "browserDetails": {
+        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+      }
+    },
+    "consents": {
+      "collect": {
+        "val": "y"
+      }
     },
     "_experience": {
       "analytics": {
@@ -358,6 +369,9 @@ XDM Mapping: |
             },
             "prop2": {
               "value": "cart-holding session"
+            },
+            "prop3": {
+              "value": "external"
             }
           }
         },
@@ -396,8 +410,10 @@ Google Analytics SQL: |
       e.event_timestamp,
       e.user_pseudo_id,
       e.device.category AS device_category,
-      LOWER(COALESCE(e.collected_traffic_source.manual_source, e.traffic_source.source, '(direct)')) AS traffic_source,
-      LOWER(COALESCE(e.collected_traffic_source.manual_medium, e.traffic_source.medium, '(none)')) AS traffic_medium,
+      -- Session-scoped last-click source / medium: the export stamps the same session_traffic_source_last_click value on every event of
+      -- the session, so it is read here rather than event-level collected_traffic_source or first-touch traffic_source.
+      LOWER(COALESCE(NULLIF(e.session_traffic_source_last_click.manual_campaign.source, ''), '(direct)')) AS traffic_source,
+      LOWER(COALESCE(NULLIF(e.session_traffic_source_last_click.manual_campaign.medium, ''), '(none)')) AS traffic_medium,
       e.privacy_info.analytics_storage AS analytics_storage,
       p.ga_session_id,
       p.cart_size,
@@ -430,14 +446,15 @@ Google Analytics SQL: |
       AND COALESCE(e.device.web_info.hostname, '') NOT LIKE '%staging%'
   ),
   clean_events AS (
-    -- Exclusions applied before the ratio: internal / QA / load-test traffic, debug hits and consent-denied measurement.
+    -- Exclusions applied before the ratio (mirrored in the AEP build): internal / QA / load-test / monitoring traffic, debug hits and
+    -- consent-denied measurement. Known bots and crawlers are already filtered out of the GA4 export by the property.
     SELECT
       CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING)) AS session_key,
       *
     FROM base_events
     WHERE ga_session_id IS NOT NULL
       AND COALESCE(debug_mode, 0) = 0
-      AND COALESCE(traffic_type, '') NOT IN ('internal', 'qa', 'load_test', 'monitoring')
+      AND COALESCE(traffic_type, '') NOT IN ('internal', 'qa', 'load_test', 'monitoring', 'debug')
       AND COALESCE(analytics_storage, 'Yes') <> 'No'
   ),
   session_context AS (
@@ -458,7 +475,7 @@ Google Analytics SQL: |
       MIN(event_timestamp) AS first_cart_ts
     FROM clean_events
     WHERE event_name IN ('add_to_cart', 'view_cart')
-      AND (sellable_items > 0 OR COALESCE(cart_value, 0) > 0)
+      AND sellable_items > 0
     GROUP BY session_key
   ),
   checkout_sessions AS (
@@ -487,17 +504,24 @@ Google Analytics SQL: |
           ELSE '10+ items'
         END
       ) AS cart_size_band,
+      -- Default Channel Grouping on the session-scoped last-click source / medium; the AEP build applies the identical rule set and labels
+      -- to the source / medium of each session's entry hit.
       CASE
-        WHEN ctx.session_entry.traffic_medium IN ('cpc', 'ppc', 'paid', 'paidsearch')
-             AND REGEXP_CONTAINS(ctx.session_entry.traffic_source, r'google|bing|yahoo|duckduckgo') THEN 'Paid Search'
-        WHEN ctx.session_entry.traffic_medium IN ('cpc', 'ppc', 'paid', 'display', 'banner') THEN 'Paid Other'
-        WHEN ctx.session_entry.traffic_medium = 'organic' THEN 'Organic Search'
-        WHEN REGEXP_CONTAINS(ctx.session_entry.traffic_medium, r'^(social|social-network|social-media)$') THEN 'Organic Social'
-        WHEN ctx.session_entry.traffic_medium IN ('email', 'e-mail', 'newsletter') THEN 'Email'
+        WHEN ctx.session_entry.traffic_source IN ('(direct)', '') AND ctx.session_entry.traffic_medium IN ('(none)', '(not set)', '') THEN 'Direct'
+        WHEN REGEXP_CONTAINS(ctx.session_entry.traffic_medium, r'^(.*cp.*|ppc|retargeting|paid.*)$')
+             AND REGEXP_CONTAINS(ctx.session_entry.traffic_source, r'google|bing|yahoo|duckduckgo|baidu|yandex|ecosia') THEN 'Paid Search'
+        WHEN REGEXP_CONTAINS(ctx.session_entry.traffic_medium, r'^(.*cp.*|ppc|retargeting|paid.*)$')
+             AND REGEXP_CONTAINS(ctx.session_entry.traffic_source, r'facebook|instagram|tiktok|pinterest|linkedin|twitter|reddit|snapchat') THEN 'Paid Social'
+        WHEN ctx.session_entry.traffic_medium IN ('display', 'banner', 'expandable', 'interstitial', 'cpm') THEN 'Display'
+        WHEN REGEXP_CONTAINS(ctx.session_entry.traffic_medium, r'^(.*cp.*|ppc|retargeting|paid.*)$') THEN 'Paid Other'
+        WHEN ctx.session_entry.traffic_medium IN ('social', 'social-network', 'social-media', 'sm', 'social network', 'social media')
+             OR REGEXP_CONTAINS(ctx.session_entry.traffic_source, r'facebook|instagram|tiktok|pinterest|linkedin|twitter|reddit|snapchat') THEN 'Organic Social'
+        WHEN ctx.session_entry.traffic_medium = 'organic'
+             OR REGEXP_CONTAINS(ctx.session_entry.traffic_source, r'google|bing|yahoo|duckduckgo|baidu|yandex|ecosia') THEN 'Organic Search'
+        WHEN ctx.session_entry.traffic_medium IN ('email', 'e-mail', 'e_mail', 'e mail', 'newsletter') THEN 'Email'
         WHEN ctx.session_entry.traffic_medium = 'affiliate' THEN 'Affiliates'
-        WHEN ctx.session_entry.traffic_medium = 'referral' THEN 'Referral'
-        WHEN ctx.session_entry.traffic_source IN ('(direct)', '') AND ctx.session_entry.traffic_medium IN ('(none)', '') THEN 'Direct'
-        ELSE 'Other'
+        WHEN ctx.session_entry.traffic_medium IN ('referral', 'app', 'link') THEN 'Referral'
+        ELSE 'Unassigned'
       END AS channel_group,
       ctx.express_flag,
       IF(co.session_key IS NULL, 0, 1) AS initiated_checkout
@@ -528,9 +552,14 @@ AEP Query Service SQL: |
   -- Cart-to-Checkout Rate on the web ExperienceEvent dataset, same base population and same session grain as the BigQuery build.
   -- Session key = ECID from identityMap plus a session ordinal rebuilt from _experience.analytics.session.depth, which restarts at every
   -- new visit, with the 30-minute inactivity and midnight rules as the fallback boundary when depth is unavailable.
-  -- Denominator = sessions with a qualified cart hit (commerce.productListAdds, or commerce.productListViews on the cart section).
+  -- Page-view hits (web.webPageDetails.pageViews) are kept alongside the commerce hits so every session includes its entry hit; the
+  -- channel is derived from that entry hit's UTM parameters, or from its referrer only when the referrer is external to the site.
+  -- Denominator = sessions with a qualified cart hit (commerce.productListAdds or commerce.productListViews, the view_cart equivalent).
   -- Numerator  = the subset of those sessions that also carry commerce.checkouts at or after the first cart hit.
   -- Checkout hits with no preceding cart hit in the session (express / wallet entries) fall outside both sides by construction.
+  -- Exclusions mirror the BigQuery build: internal / QA / load-test / monitoring / debug traffic (prop3 traffic type), bots, crawlers and
+  -- load-test agents (user agent) and consent-denied measurement (consents.collect.val = 'n').
+  -- Window = the same 28 complete days as BigQuery: current_date - 31 through current_date - 4, both inclusive.
   WITH base_events AS (
     SELECT
       identityMap['ECID'][0]['id'] AS ecid,
@@ -542,7 +571,23 @@ AEP Query Service SQL: |
       commerce.order.priceTotal AS cart_value,
       device.type AS device_category,
       web.webPageDetails.siteSection AS site_section,
-      web.webReferrer.URL AS referrer_url,
+      COALESCE(web.webPageDetails.pageViews.value, 0) AS page_views,
+      -- Hit-level source / medium, used only from each session's entry hit (see session_context). UTM parameters on the landing URL win;
+      -- otherwise an external referrer (not the site's own domain) is mapped to a channel medium: search engines -> organic,
+      -- social networks -> social, any other external host -> referral. No UTM and no external referrer -> (direct) / (none).
+      lower(COALESCE(
+        NULLIF(parse_url(web.webPageDetails.URL, 'QUERY', 'utm_source'), ''),
+        CASE WHEN COALESCE(parse_url(web.webReferrer.URL, 'HOST'), '') = '' OR lower(parse_url(web.webReferrer.URL, 'HOST')) RLIKE '(^|\\.)example\\.com$' THEN '(direct)'
+             ELSE regexp_replace(lower(parse_url(web.webReferrer.URL, 'HOST')), '^www\\.', '') END
+      )) AS traffic_source,
+      lower(COALESCE(
+        NULLIF(parse_url(web.webPageDetails.URL, 'QUERY', 'utm_medium'), ''),
+        CASE WHEN NULLIF(parse_url(web.webPageDetails.URL, 'QUERY', 'utm_source'), '') IS NOT NULL THEN '(not set)'
+             WHEN COALESCE(parse_url(web.webReferrer.URL, 'HOST'), '') = '' OR lower(parse_url(web.webReferrer.URL, 'HOST')) RLIKE '(^|\\.)example\\.com$' THEN '(none)'
+             WHEN lower(parse_url(web.webReferrer.URL, 'HOST')) RLIKE 'google|bing|yahoo|duckduckgo|baidu|yandex|ecosia' THEN 'organic'
+             WHEN lower(parse_url(web.webReferrer.URL, 'HOST')) RLIKE 'facebook|instagram|tiktok|pinterest|linkedin|twitter|reddit|snapchat' THEN 'social'
+             ELSE 'referral' END
+      )) AS traffic_medium,
       _experience.analytics.session.depth AS session_depth,
       _experience.analytics.customDimensions.eVars.eVar2.value AS cart_size_band,
       _experience.analytics.customDimensions.eVars.eVar3.value AS checkout_type,
@@ -552,8 +597,12 @@ AEP Query Service SQL: |
       AND timestamp < date_sub(current_date(), 3)
       AND identityMap['ECID'][0]['id'] IS NOT NULL
       AND COALESCE(web.webPageDetails.URL, '') NOT LIKE '%staging%'
+      AND lower(COALESCE(_experience.analytics.customDimensions.props.prop3.value, '')) NOT IN ('internal', 'qa', 'load_test', 'monitoring', 'debug')
+      AND NOT (lower(COALESCE(environment.browserDetails.userAgent, '')) RLIKE 'bot|crawler|spider|headless|lighthouse|pingdom|datadog|k6|jmeter|gatling|loadrunner')
+      AND COALESCE(consents.collect.val, 'y') <> 'n'
       AND (
-        eventType IN ('commerce.productListAdds', 'commerce.productListViews', 'commerce.checkouts')
+        eventType IN ('commerce.productListAdds', 'commerce.productListViews', 'commerce.checkouts', 'web.webpagedetails.pageViews')
+        OR COALESCE(web.webPageDetails.pageViews.value, 0) > 0
         OR COALESCE(commerce.productListAdds.value, 0) > 0
         OR COALESCE(commerce.productListViews.value, 0) > 0
         OR COALESCE(commerce.checkouts.value, 0) > 0
@@ -587,10 +636,10 @@ AEP Query Service SQL: |
     WHERE (
         eventType = 'commerce.productListAdds'
         OR COALESCE(product_list_adds, 0) > 0
-        OR ((eventType = 'commerce.productListViews' OR COALESCE(product_list_views, 0) > 0)
-            AND lower(COALESCE(site_section, '')) = 'cart')
+        OR eventType = 'commerce.productListViews'
+        OR COALESCE(product_list_views, 0) > 0
       )
-      AND (sellable_items > 0 OR COALESCE(cart_value, 0) > 0)
+      AND sellable_items > 0
   ),
   cart_sessions AS (
     SELECT session_key, MIN(event_ts) AS first_cart_ts
@@ -610,9 +659,11 @@ AEP Query Service SQL: |
       session_key,
       to_date(MIN(event_ts)) AS session_date,
       COALESCE(MIN_BY(device_category, event_ts), 'unknown') AS device_category,
-      MIN_BY(referrer_url, event_ts) AS entry_referrer,
-      COALESCE(MAX_BY(cart_size_band, event_ts), MAX(cart_size_band), 'Unknown') AS cart_size_band,
-      COALESCE(MAX_BY(checkout_type, event_ts), MAX(checkout_type)) AS checkout_type
+      -- Session-scoped source / medium = the values on the session's entry hit (its first hit, normally the landing page view).
+      MIN_BY(traffic_source, event_ts) AS entry_source,
+      MIN_BY(traffic_medium, event_ts) AS entry_medium,
+      COALESCE(MAX_BY(cart_size_band, CASE WHEN cart_size_band IS NOT NULL THEN event_ts END), 'Unknown') AS cart_size_band,
+      MAX_BY(checkout_type, CASE WHEN checkout_type IS NOT NULL THEN event_ts END) AS checkout_type
     FROM keyed
     GROUP BY session_key
   ),
@@ -623,21 +674,24 @@ AEP Query Service SQL: |
       ctx.device_category,
       ctx.cart_size_band,
       ctx.checkout_type,
+      -- Default Channel Grouping on the entry hit's source / medium: identical rule set and labels to the BigQuery build, which reads the
+      -- session-scoped session_traffic_source_last_click campaign fields.
       CASE
-        WHEN ctx.entry_referrer IS NULL OR ctx.entry_referrer = '' THEN 'Direct'
-        WHEN lower(ctx.entry_referrer) LIKE '%example.com%' THEN 'Internal'
-        WHEN lower(ctx.entry_referrer) LIKE '%google.%'
-          OR lower(ctx.entry_referrer) LIKE '%bing.%'
-          OR lower(ctx.entry_referrer) LIKE '%yahoo.%'
-          OR lower(ctx.entry_referrer) LIKE '%duckduckgo.%' THEN 'Organic Search'
-        WHEN lower(ctx.entry_referrer) LIKE '%facebook.%'
-          OR lower(ctx.entry_referrer) LIKE '%instagram.%'
-          OR lower(ctx.entry_referrer) LIKE '%tiktok.%'
-          OR lower(ctx.entry_referrer) LIKE '%pinterest.%'
-          OR lower(ctx.entry_referrer) LIKE '%linkedin.%' THEN 'Organic Social'
-        WHEN lower(ctx.entry_referrer) LIKE '%mail.%'
-          OR lower(ctx.entry_referrer) LIKE '%outlook.%' THEN 'Email'
-        ELSE 'Referral'
+        WHEN ctx.entry_source IN ('(direct)', '') AND ctx.entry_medium IN ('(none)', '(not set)', '') THEN 'Direct'
+        WHEN ctx.entry_medium RLIKE '^(.*cp.*|ppc|retargeting|paid.*)$'
+             AND ctx.entry_source RLIKE 'google|bing|yahoo|duckduckgo|baidu|yandex|ecosia' THEN 'Paid Search'
+        WHEN ctx.entry_medium RLIKE '^(.*cp.*|ppc|retargeting|paid.*)$'
+             AND ctx.entry_source RLIKE 'facebook|instagram|tiktok|pinterest|linkedin|twitter|reddit|snapchat' THEN 'Paid Social'
+        WHEN ctx.entry_medium IN ('display', 'banner', 'expandable', 'interstitial', 'cpm') THEN 'Display'
+        WHEN ctx.entry_medium RLIKE '^(.*cp.*|ppc|retargeting|paid.*)$' THEN 'Paid Other'
+        WHEN ctx.entry_medium IN ('social', 'social-network', 'social-media', 'sm', 'social network', 'social media')
+             OR ctx.entry_source RLIKE 'facebook|instagram|tiktok|pinterest|linkedin|twitter|reddit|snapchat' THEN 'Organic Social'
+        WHEN ctx.entry_medium = 'organic'
+             OR ctx.entry_source RLIKE 'google|bing|yahoo|duckduckgo|baidu|yandex|ecosia' THEN 'Organic Search'
+        WHEN ctx.entry_medium IN ('email', 'e-mail', 'e_mail', 'e mail', 'newsletter') THEN 'Email'
+        WHEN ctx.entry_medium = 'affiliate' THEN 'Affiliates'
+        WHEN ctx.entry_medium IN ('referral', 'app', 'link') THEN 'Referral'
+        ELSE 'Unassigned'
       END AS channel_group,
       CASE WHEN co.session_key IS NOT NULL THEN 1 ELSE 0 END AS initiated_checkout
     FROM cart_sessions AS cs
@@ -655,20 +709,20 @@ AEP Query Service SQL: |
     ROUND(100.0 * SUM(initiated_checkout) / NULLIF(COUNT(*), 0), 1) AS cart_to_checkout_rate_pct,
     CASE WHEN COUNT(*) >= 200 THEN TRUE ELSE FALSE END AS meets_minimum_base
   FROM session_outcome
-  WHERE session_date <= date_sub(current_date(), 4)
+  WHERE session_date BETWEEN date_sub(current_date(), 31) AND date_sub(current_date(), 4)
   GROUP BY session_date, device_category, channel_group, cart_size_band
   ORDER BY session_date, device_category, channel_group, cart_size_band;
 
 Calculation Notes: |
-  1️⃣ Grain is the session and it never changes: the denominator is the count of distinct sessions containing at least one add_to_cart or view_cart event, and the numerator is the subset of those same sessions containing at least one begin_checkout event. Repeated cart additions or repeated checkout entries inside one session are collapsed to a single session on both sides, so the KPI measures session progression, not event volume.,2️⃣ The denominator is the full cart-holding base population — every session that created or viewed a cart, including sessions that never reach checkout. It is never restricted to begin_checkout sessions, which would force the result toward 100% and destroy the diagnostic value of the step.,3️⃣ Session-timeout rule: sessions close after 30 minutes of inactivity, at midnight in the reporting property's time zone, or on a campaign (source/medium) change. A shopper who builds a cart on Monday and checks out on Wednesday from a persisted cart produces two sessions — the first is a non-converting cart session, the second enters the denominator only if it fires view_cart or add_to_cart, which the cart page normally does. Long-deliberation categories therefore read low on this KPI by design; use the user-grain repeat-visit view for those, not a redefinition of this one.,4️⃣ Exclusions applied before the ratio is computed: internal and QA traffic (office IP / internal-traffic flag), known bots and crawlers, sessions from load-test and monitoring agents, and carts built only from test or zero-price SKUs. Sessions with consent-denied measurement are excluded from both numerator and denominator so the base stays internally consistent rather than mixing modelled and observed counts.,5️⃣ Ordering and timing: begin_checkout must occur at or after the first cart event in the same session, validated on event timestamp rather than hit arrival order, because late-arriving or retried hits can invert sequence. Express paths that jump straight to payment without a cart (buy-now, wallet express buttons) fire begin_checkout with no preceding cart event; those sessions are excluded from both numerator and denominator and reported separately as express checkout so they do not inflate the step.,6️⃣ Navigation back and forth between checkout steps re-fires begin_checkout; those firings are deduplicated to one per session. A remove_from_cart or an emptied cart does not remove a session from the denominator — the cart intent has already been expressed and removing it would hide exactly the abandonment this KPI exists to surface.,7️⃣ Reporting convention: report to one decimal place, compute the numerator and denominator daily and re-sum them when rolling up to week, month or quarter — never average the daily rates. Require at least 500 cart sessions in the window, and at least 200 within any breakdown, before acting on a movement.
+  1️⃣ Grain is the session and it never changes: the denominator is the count of distinct sessions containing at least one add_to_cart or view_cart event, and the numerator is the subset of those same sessions containing at least one begin_checkout event. Repeated cart additions or repeated checkout entries inside one session are collapsed to a single session on both sides, so the KPI measures session progression, not event volume.,2️⃣ The denominator is the full cart-holding base population — every session that created or viewed a cart, including sessions that never reach checkout. It is never restricted to begin_checkout sessions, which would force the result toward 100% and destroy the diagnostic value of the step.,3️⃣ Session-timeout rule: sessions close after 30 minutes of inactivity, at midnight in the reporting property's time zone, or on a campaign (source/medium) change. A shopper who builds a cart on Monday and checks out on Wednesday from a persisted cart produces two sessions — the first is a non-converting cart session, the second enters the denominator only if it fires view_cart or add_to_cart, which the cart page normally does. Long-deliberation categories therefore read low on this KPI by design; use the user-grain repeat-visit view for those, not a redefinition of this one.,4️⃣ Exclusions applied before the ratio is computed: internal and QA traffic (office IP / internal-traffic flag), known bots and crawlers, sessions from load-test and monitoring agents, and carts built only from test or zero-price SKUs. Sessions with consent-denied measurement are excluded from both numerator and denominator so the base stays internally consistent rather than mixing modelled and observed counts.,5️⃣ Ordering and timing: begin_checkout must occur at or after the first cart event in the same session, validated on event timestamp rather than hit arrival order, because late-arriving or retried hits can invert sequence. Express paths that jump straight to payment without a cart (buy-now, wallet express buttons) fire begin_checkout with no preceding cart event; those sessions are excluded from both numerator and denominator and reported separately as express checkout so they do not inflate the step.,6️⃣ Navigation back and forth between checkout steps re-fires begin_checkout; those firings are deduplicated to one per session. A remove_from_cart or an emptied cart does not remove a session from the denominator — the cart intent has already been expressed and removing it would hide exactly the abandonment this KPI exists to surface.,7️⃣ Reporting convention: report to one decimal place, compute the numerator and denominator daily and re-sum them when rolling up to week, month or quarter — never average the daily rates. Each SQL row carries a meets_minimum_base flag that is true when that row holds at least 200 cart sessions; do not act on a movement in any breakdown row where the flag is false, and require the re-summed window total across all rows to reach at least 500 cart sessions before acting on a site-level movement.
 
 Business Use Case: |
   1️⃣ The E-commerce Product Manager reviews the KPI in the weekly funnel readout; when it falls three or more percentage points week over week on a single device category while Add-to-Cart Rate holds, they open a cart-page experiment on delivery-cost disclosure and checkout CTA prominence and brief the checkout squad for the next sprint.,2️⃣ The Merchandising Manager breaks the rate down by item category and cart size band each month and, for categories sitting below the site baseline, moves the free-shipping threshold message and stock-assurance badge onto the cart page for those categories before the next trading cycle.,3️⃣ The Lifecycle Marketing Manager builds the recovery audience directly from the gap — cart sessions that never fired begin_checkout — and triggers the cart-recovery email and paid-social sequence within four hours of session close, suppressing anyone who later initiated checkout on another device.,4️⃣ The Trading Manager monitors the rate hourly through peak trading events; a drop below the trailing 14-day baseline while cart creation is stable is treated as a checkout-entry incident and escalated immediately to the payments and front-end on-call engineers rather than waiting for revenue to confirm the loss.
 
 Dependencies:
-  Events: [add-to-cart, view-cart, begin-checkout]
-  Metrics: [add-to-carts, cart-views, checkouts-initiated, sessions]
-  Dimensions: [checkout-step, device-category, cart-size-band]
+  Events: [add-to-cart, checkout-initiation]
+  Metrics: [add-to-cart, cart-views, begin-checkout]
+  Dimensions: [checkout-type, device-category, cart-size-band]
   KPIs: [add-to-cart-rate]
 
 Source Data: Digital Analytics (GA4)
@@ -695,5 +749,5 @@ Created At: 2026-09-17T23:15:55.05+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-17T23:16:03.182+00:00
+Last Modified At: 2026-09-18T23:20:45.789+00:00
 
