@@ -1,7 +1,7 @@
 # Event: Refund Issued
-# Generated: 2026-09-18T16:52:19.087Z
+# Generated: 2026-09-18T16:52:27.311Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Event Name: Refund Issued
 Event Serialization: always
@@ -11,38 +11,250 @@ Description: |
 
 Category: Monetization
 
+Tags: [event, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Monetization
+
+
+Event Type: standard
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  refund
+
+Adobe Event: |
+  refund
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "account:orders:refund-confirmation",
+        "pageID": "refund-confirmation"
+      },
+      "category": {
+        "primaryCategory": "account",
+        "subCategory1": "orders"
+      }
+    },
+    "transaction": {
+      "transactionID": "ORD-10045872",
+      "total": {
+        "basePrice": 59.98,
+        "currency": "USD",
+        "shipping": 4.99,
+        "taxRate": 0.0825,
+        "transactionTotal": 59.98
+      },
+      "attributes": {
+        "refundID": "re_3PqK8L2eZvKYlo2C1a9",
+        "refundType": "partial",
+        "refundMethod": "original_payment",
+        "returnReason": "wrong_size",
+        "returnMethod": "mail",
+        "refundChannel": "self_service_portal",
+        "originalOrderDate": "2026-09-02",
+        "tax": 4.95
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-88213-BLU-M",
+            "productName": "Organic Cotton Crew Tee"
+          },
+          "category": {
+            "primaryCategory": "Apparel",
+            "subCategory1": "Tops"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 29.99,
+            "currency": "USD"
+          }
+        }
+      ]
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "refund",
+          "eventAction": "refund_issued",
+          "type": "commerce"
+        },
+        "category": {
+          "primaryCategory": "post-purchase"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "refund",
+    "ecommerce": {
+      "transaction_id": "ORD-10045872",
+      "value": 59.98,
+      "currency": "USD",
+      "shipping": 4.99,
+      "tax": 4.95,
+      "refund_id": "re_3PqK8L2eZvKYlo2C1a9",
+      "refund_type": "partial",
+      "refund_method": "original_payment",
+      "return_reason": "wrong_size",
+      "return_method": "mail",
+      "refund_channel": "self_service_portal",
+      "original_order_date": "2026-09-02",
+      "items": [
+        {
+          "item_id": "SKU-88213-BLU-M",
+          "item_name": "Organic Cotton Crew Tee",
+          "item_category": "Apparel",
+          "item_category2": "Tops",
+          "price": 29.99,
+          "quantity": 2
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "refund",
+    "eventInfo": {
+      "eventName": "refund",
+      "linkName": "refund",
+      "linkType": "o"
+    },
+    "transaction": {
+      "transactionID": "ORD-10045872",
+      "refundID": "re_3PqK8L2eZvKYlo2C1a9",
+      "refundAmount": 59.98,
+      "currencyCode": "USD",
+      "shippingRefunded": 4.99,
+      "taxRefunded": 4.95,
+      "refundType": "partial",
+      "refundMethod": "original_payment",
+      "returnReason": "wrong_size",
+      "returnMethod": "mail",
+      "refundChannel": "self_service_portal",
+      "originalOrderDate": "2026-09-02"
+    },
+    "product": [
+      {
+        "productID": "SKU-88213-BLU-M",
+        "productName": "Organic Cotton Crew Tee",
+        "category": "Apparel",
+        "subCategory": "Tops",
+        "price": 29.99,
+        "quantity": 2
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.refund",
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-10045872",
+        "currencyCode": "USD",
+        "refunds": [
+          {
+            "refundTransactionID": "re_3PqK8L2eZvKYlo2C1a9",
+            "refundAmount": 59.98,
+            "refundPaymentType": "original_payment",
+            "currencyCode": "USD"
+          }
+        ],
+        "taxAmount": 4.95
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-88213-BLU-M",
+        "name": "Organic Cotton Crew Tee",
+        "productCategories": [
+          {
+            "categoryName": "Apparel"
+          }
+        ],
+        "quantity": 2,
+        "priceTotal": 59.98,
+        "currencyCode": "USD"
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "partial",
+            "eVar41": "wrong_size",
+            "eVar42": "mail",
+            "eVar43": "original_payment",
+            "eVar44": "self_service_portal",
+            "eVar45": "2026-09-02"
+          }
+        }
+      }
+    }
+  }
+
+Parameters: |
+  {
+    "transaction_id": "string - Order identifier of the original purchase; join key back to the purchase event (required)",
+    "value": "number - Refunded amount in the original transaction currency, excluding refunded tax and shipping (required)",
+    "currency": "string - ISO 4217 code of the original transaction (required when value is set)",
+    "items": "array - Refunded line items with item_id, item_name, item_category, price and refunded quantity; omit for a full-order refund",
+    "refund_id": "string - Payment gateway or OMS refund reference used for deduplication",
+    "refund_type": "string - full, partial, store_credit, exchange_difference or goodwill",
+    "refund_method": "string - original_payment, store_credit, gift_card or bank_transfer",
+    "return_reason": "string - Standardised reason code captured on the return (e.g. wrong_size, damaged, not_as_described, changed_mind)",
+    "return_method": "string - How the goods came back: mail, in_store, courier_pickup or returnless",
+    "shipping": "number - Shipping amount refunded, in the transaction currency",
+    "tax": "number - Tax amount refunded, in the transaction currency",
+    "original_order_date": "string - ISO 8601 date of the original purchase, used for cohort and refund-lag analysis",
+    "refund_channel": "string - Where the refund was initiated: self_service_portal, customer_service, store_pos or marketplace"
+  }
 
 
 
+Dependencies:
+  Events: [purchase]
 
+Source Data: Digital + OMS/Payments (Shopify, Stripe)
 
+    Report Attributes: |
+  transaction_id; refund_type; return_reason; return_method; refund_method; item_id; item_category; currency; original_order_date; session_source_medium; device_category; country
 
+    Dashboard Usage: [Net Revenue & Refund Reconciliation, Returns & Refunds Performance, Product Quality & Return Drivers, Refund-Adjusted Marketing ROAS]
 
+    Segment Eligibility: |
+  true
 
+    Related Dimensions: [refund-type, return-reason, return-method]
 
+    Derived Dimensions: [refund-type, return-reason, return-method]
 
+    Derived Metrics: [refunded-revenue, refund-count, refunded-units, net-revenue]
 
+    Derived KPIs: [refund-rate, return-rate, net-revenue-per-order]
 
+    Data Sensitivity: Internal
 
+    Contains PII: No
 
-
-
-
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
     Status: draft
 
     Contributed By: devyendarm
 
     Created At: 2026-09-18T16:52:18.782+00:00
 
-    
-    
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-18T16:52:27.014+00:00
+
