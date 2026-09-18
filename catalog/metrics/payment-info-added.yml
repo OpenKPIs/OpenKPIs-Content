@@ -1,5 +1,5 @@
 # Metric: Payment Info Added
-# Generated: 2026-09-17T23:01:36.076Z
+# Generated: 2026-09-18T21:21:20.748Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -209,21 +209,20 @@ Adobe Client Data Layer: |
         "stepName": "payment",
         "checkoutType": "guest"
       },
-      "payments": [
-        {
-          "paymentType": "credit_card",
-          "paymentBrand": "visa",
-          "walletProvider": null,
-          "paymentAmount": 184.5,
-          "currencyCode": "USD"
-        }
-      ],
       "order": {
         "currencyCode": "USD",
         "priceTotal": 184.5,
         "discountAmount": 10,
         "shippingTier": "standard",
-        "couponCode": "SPRING10"
+        "payments": [
+          {
+            "paymentType": "credit_card",
+            "paymentBrand": "visa",
+            "walletProvider": null,
+            "paymentAmount": 184.5,
+            "currencyCode": "USD"
+          }
+        ]
       },
       "productListItems": [
         {
@@ -253,6 +252,20 @@ Adobe Client Data Layer: |
         "URL": "https://www.example.com/checkout/payment"
       }
     },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar21": "credit_card",
+            "eVar22": "guest",
+            "eVar23": "payment",
+            "eVar24": "CHK-2026-0917-884213",
+            "eVar25": "standard",
+            "eVar26": "SPRING10"
+          }
+        }
+      }
+    },
     "identityMap": {
       "ECID": [
         {
@@ -273,18 +286,17 @@ XDM Mapping: |
         "value": 1,
         "id": "CHK-2026-0917-884213"
       },
-      "payments": [
-        {
-          "paymentType": "credit_card",
-          "paymentAmount": 184.5,
-          "currencyCode": "USD",
-          "transactionID": "CHK-2026-0917-884213"
-        }
-      ],
       "order": {
         "currencyCode": "USD",
         "priceTotal": 184.5,
-        "discountAmount": 10
+        "discountAmount": 10,
+        "payments": [
+          {
+            "paymentType": "credit_card",
+            "paymentAmount": 184.5,
+            "currencyCode": "USD"
+          }
+        ]
       }
     },
     "productListItems": [
@@ -336,7 +348,8 @@ XDM Mapping: |
             "eVar22": "guest",
             "eVar23": "payment",
             "eVar24": "CHK-2026-0917-884213",
-            "eVar25": "standard"
+            "eVar25": "standard",
+            "eVar26": "SPRING10"
           },
           "props": {
             "prop21": "credit_card",
@@ -365,7 +378,7 @@ Google Analytics SQL: |
   -- Event parameters are pivoted once per event with UNNEST + MAX(IF(key = ...)) so payment_type, value, currency,
   -- coupon and the checkout context can be read side by side.
   -- Exclusions: internal / QA traffic_type, staging-QA-preview-dev hostnames, agent-assisted checkouts keyed by
-  -- Customer Service, and zero-value checkouts settled entirely by gift card or loyalty points.
+  -- Customer Service. Gift card, store credit and loyalty-point tenders are counted like any other payment_type.
   -- value mirrors the cart subtotal at submission and is reported as intent value only, never as recognised revenue;
   -- non-USD checkouts are converted with the finance daily booking rate.
   -- event_date is already in the reporting-property timezone; the trailing 3 days stay provisional (72h late-hit window).
@@ -402,7 +415,9 @@ Google Analytics SQL: |
       LOWER(MAX(IF(ep.key = 'checkout_type', ep.value.string_value, NULL)))                                 AS checkout_type,
       LOWER(MAX(IF(ep.key = 'payment_type', ep.value.string_value, NULL)))                                  AS payment_type,
       LOWER(MAX(IF(ep.key = 'shipping_tier', ep.value.string_value, NULL)))                                 AS shipping_tier,
-      MAX(IF(ep.key = 'cart_size_band', ep.value.string_value, NULL))                                       AS cart_size_band,
+      COALESCE(MAX(IF(ep.key = 'cart_size_band', ep.value.string_value, NULL)),
+               CASE WHEN r.item_units <= 1 THEN '1 item' WHEN r.item_units <= 3 THEN '2-3 items'
+                    WHEN r.item_units <= 6 THEN '4-6 items' ELSE '7+ items' END)                       AS cart_size_band,
       MAX(IF(ep.key = 'coupon', ep.value.string_value, NULL))                                               AS coupon_code,
       UPPER(MAX(IF(ep.key = 'currency', ep.value.string_value, NULL)))                                      AS currency_code,
       MAX(IF(ep.key = 'value', COALESCE(ep.value.double_value, ep.value.float_value, SAFE_CAST(ep.value.int_value AS FLOAT64)), NULL)) AS checkout_value_local,
@@ -428,8 +443,6 @@ Google Analytics SQL: |
       AND NOT REGEXP_CONTAINS(p.hostname, r'^(staging|stage|qa|uat|preview|dev)[.-]|localhost')
       AND COALESCE(p.checkout_type, '') NOT IN ('agent_assisted', 'call_center', 'customer_service')
       AND p.payment_type IS NOT NULL
-      AND NOT (p.payment_type IN ('gift_card', 'loyalty_points', 'store_credit')
-               AND COALESCE(p.checkout_value_local, 0) = 0)
   ),
   serialized AS (
     SELECT
@@ -493,38 +506,39 @@ AEP Query Service SQL: |
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
   -- Payment Info Added: qualifying commerce.checkouts ExperienceEvents that carry the payment step
-  -- (commerce.payments populated or the payment-step success event set), serialized to one occurrence per
-  -- checkout id (eVar24 / commerce.payments.transactionID), falling back to ECID + visit number when the
+  -- (commerce.order.payments populated or the payment-step success event15 set), serialized to one occurrence per
+  -- checkout id (commerce.checkouts.id / eVar24), falling back to ECID + visit number when the
   -- property does not emit a checkout id - those events are flagged as degraded serialization.
-  -- Exclusions: bot and synthetic user agents, staging-QA-preview-dev hosts, agent-assisted checkouts keyed by
-  -- Customer Service, and zero-value checkouts settled entirely by gift card or loyalty points.
-  -- commerce.payments.paymentAmount mirrors the cart subtotal at submission and is intent value only, never
+  -- Exclusions: internal / QA / test traffic (tenant trafficType flag set by the internal-IP processing rule),
+  -- bot and synthetic user agents, staging-QA-preview-dev hosts, and agent-assisted checkouts keyed by Customer Service.
+  -- Gift card, store credit and loyalty-point tenders are counted like any other payment_type.
+  -- commerce.order.payments.paymentAmount mirrors the cart subtotal at submission and is intent value only, never
   -- recognised revenue; non-USD checkouts are converted with the finance daily booking rate.
+  -- Coupon code is read from eVar26; cart size band is derived from productListItems quantities.
   -- Dates use the reporting timezone; the trailing 3 days stay provisional (72h late-hit window).
   WITH base AS (
     SELECT
       to_date(from_utc_timestamp(e.timestamp, 'America/New_York'))                       AS event_date,
       e.timestamp                                                                        AS event_ts,
-      COALESCE(e.endUserIDs._experience.ecid.id, e.identityMap['ECID'][0].id)             AS ecid,
+      COALESCE(e.endUserIDs._experience.mcid.id, e.identityMap['ECID'][0].id)             AS ecid,
       e._experience.analytics.session.num                                                AS visit_num,
       COALESCE(e.device.type, 'unknown')                                                 AS device_type,
       COALESCE(e.marketing.trackingCode, 'direct')                                       AS tracking_code,
-      lower(COALESCE(element_at(e.commerce.payments, 1).paymentType,
+      lower(COALESCE(element_at(e.commerce.order.payments, 1).paymentType,
                      e._experience.analytics.customDimensions.eVars.eVar21))              AS payment_type,
       lower(COALESCE(e._experience.analytics.customDimensions.eVars.eVar22, 'unknown'))   AS checkout_type,
       lower(COALESCE(e._experience.analytics.customDimensions.eVars.eVar23, 'unknown'))   AS checkout_step_name,
       COALESCE(e.commerce.checkouts.id,
-               element_at(e.commerce.payments, 1).transactionID,
                e._experience.analytics.customDimensions.eVars.eVar24)                     AS checkout_id,
       lower(COALESCE(e._experience.analytics.customDimensions.eVars.eVar25, 'unknown'))   AS shipping_tier,
-      COALESCE(e.commerce.order.couponCode, '')                                           AS coupon_code,
-      upper(COALESCE(element_at(e.commerce.payments, 1).currencyCode,
+      COALESCE(e._experience.analytics.customDimensions.eVars.eVar26, '')                 AS coupon_code,
+      upper(COALESCE(element_at(e.commerce.order.payments, 1).currencyCode,
                      e.commerce.order.currencyCode, 'USD'))                               AS currency_code,
-      CAST(COALESCE(element_at(e.commerce.payments, 1).paymentAmount,
+      CAST(COALESCE(element_at(e.commerce.order.payments, 1).paymentAmount,
                     e.commerce.order.priceTotal, 0) AS DOUBLE)                            AS checkout_value_local,
       CASE WHEN e.productListItems IS NULL THEN 0
            ELSE aggregate(e.productListItems, 0, (acc, x) -> acc + COALESCE(CAST(x.quantity AS INT), 0)) END AS item_units,
-      COALESCE(e.commerce.payments IS NOT NULL AND size(e.commerce.payments) > 0, false)  AS has_payment_instrument,
+      COALESCE(e.commerce.order.payments IS NOT NULL AND size(e.commerce.order.payments) > 0, false) AS has_payment_instrument,
       COALESCE(e._experience.analytics.event1to100.event15.value, 0)                      AS payment_step_event
     FROM web_experience_events_dataset AS e
     WHERE e.timestamp >= date_sub(current_date(), 91)
@@ -533,6 +547,8 @@ AEP Query Service SQL: |
       AND COALESCE(e.commerce.checkouts.value, 0) > 0
       AND lower(COALESCE(e.web.webPageDetails.URL, '')) NOT RLIKE '^https?://(staging|stage|qa|uat|preview|dev)[.-]|localhost'
       AND lower(COALESCE(e.environment.browserDetails.userAgent, '')) NOT RLIKE 'bot|spider|crawler|headless|synthetic'
+      -- internal traffic flag: replace _tenant with your tenant namespace (e.g. _acmecorp)
+      AND lower(COALESCE(e._tenant.trafficType, '')) NOT IN ('internal', 'qa', 'test')
   ),
   qualified AS (
     SELECT
@@ -544,13 +560,14 @@ AEP Query Service SQL: |
         WHEN b.payment_type IN ('apple_pay', 'google_pay', 'paypal', 'paypal_express', 'shop_pay', 'amazon_pay', 'link')
           THEN 'express_wallet'
         ELSE 'classic_form'
-      END                                                                                AS payment_channel
+      END                                                                                AS payment_channel,
+      CASE WHEN b.item_units <= 1 THEN '1 item' WHEN b.item_units <= 3 THEN '2-3 items'
+           WHEN b.item_units <= 6 THEN '4-6 items' ELSE '7+ items' END                  AS cart_size_band
     FROM base AS b
     WHERE b.event_date >= date_sub(current_date(), 90)
-      AND (b.has_payment_instrument OR b.payment_step_event > 0 OR b.checkout_step_name = 'payment')
+      AND (b.has_payment_instrument OR b.payment_step_event > 0)
       AND b.payment_type IS NOT NULL
       AND b.checkout_type NOT IN ('agent_assisted', 'call_center', 'customer_service')
-      AND NOT (b.payment_type IN ('gift_card', 'loyalty_points', 'store_credit') AND b.checkout_value_local = 0)
   ),
   serialized AS (
     SELECT
@@ -569,6 +586,7 @@ AEP Query Service SQL: |
       f.payment_type,
       f.payment_channel,
       f.shipping_tier,
+      f.cart_size_band,
       COUNT(*)                                                                      AS payment_info_added,
       COUNT(DISTINCT f.visit_key)                                                   AS visits_with_payment_info,
       COUNT(DISTINCT f.ecid)                                                        AS visitors_with_payment_info,
@@ -584,7 +602,7 @@ AEP Query Service SQL: |
      AND upper(fx.currency_code) = f.currency_code
     GROUP BY
       f.event_date, f.device_type, f.checkout_type,
-      f.payment_type, f.payment_channel, f.shipping_tier
+      f.payment_type, f.payment_channel, f.shipping_tier, f.cart_size_band
   )
   SELECT
     d.event_date,
@@ -593,6 +611,7 @@ AEP Query Service SQL: |
     d.payment_type,
     d.payment_channel,
     d.shipping_tier,
+    d.cart_size_band,
     d.payment_info_added,
     d.visits_with_payment_info,
     d.visitors_with_payment_info,
@@ -608,10 +627,10 @@ AEP Query Service SQL: |
   ORDER BY d.event_date DESC, d.payment_info_added DESC;
 
 Calculation Notes: |
-  1️⃣ Serialization: count one occurrence per checkout_id; card edits, instrument swaps and retries after a validation error collapse into the first qualifying submission so a single struggling shopper cannot inflate the step. Where checkout_id is not emitted, deduplicate on session_id and flag the property as degraded in the funnel report.,2️⃣ Qualification: the event counts only after client-side and gateway tokenization validation pass and the instrument is attached to the order draft. Field focus, partial entry, abandoned CVV entry and declined validation are excluded and belong to checkout_error, not to this metric.,3️⃣ Exclusions: internal and QA traffic (IP and property filters), known bots and synthetic monitors, agent-assisted orders keyed in by Customer Service, and zero-value checkouts settled entirely by gift card or loyalty points — the latter skip the payment instrument step and are reported separately so the funnel denominator stays honest.,4️⃣ Express wallets bypass the classic payment form: Apple Pay, Google Pay, PayPal Express and Shop Pay authorize inside a single sheet. Fire add_payment_info at wallet-sheet authorization with payment_type set to the wallet name; without this, wallet-heavy traffic understates the step and overstates payment-page abandonment.,5️⃣ Session-timeout handling follows the platform default — 30 minutes of inactivity in GA4, the 30-minute visit rule in Adobe. A checkout resumed after timeout opens a new session, so deduplicate on checkout_id first and session_id second to avoid double-counting a single order attempt across two sessions.,6️⃣ Timing: the metric is stamped at event time in the property's reporting timezone and reconciled against the order table on order date. Late and offline-queued hits are accepted for 72 hours, so the trailing three days are provisional and should carry a freshness note on any dashboard used for trading decisions.,7️⃣ Value and currency on the event mirror the cart subtotal at submission and must never be summed into recognised revenue; multi-market reporting converts using the daily booking rate held in the finance rate table.
+  1️⃣ Serialization: count one occurrence per checkout_id; card edits, instrument swaps and retries after a validation error collapse into the first qualifying submission so a single struggling shopper cannot inflate the step. Where checkout_id is not emitted, deduplicate on session_id and flag the property as degraded in the funnel report.,2️⃣ Qualification: the event counts only after client-side and gateway tokenization validation pass and the instrument is attached to the order draft. Field focus, partial entry, abandoned CVV entry and declined validation are excluded; validation failures may be logged for diagnostics through the standard GA4 exception event (Adobe: an error prop), but they never count toward this metric.,3️⃣ Exclusions: internal, QA and test traffic — in GA4 through the traffic_type event parameter set by the property's internal-traffic (IP) rule, in Adobe through the tenant trafficType flag set by the internal-IP processing rule; staging, QA, preview and dev hostnames on both platforms; known bots and synthetic monitors (GA4 known-bot filtering at collection, Adobe user-agent exclusion in the query); and agent-assisted orders keyed in by Customer Service. Gift card, store credit and loyalty-point tenders are legitimate payment-info submissions and are counted, broken out by payment_type.,4️⃣ Express wallets bypass the classic payment form: Apple Pay, Google Pay, PayPal Express and Shop Pay authorize inside a single sheet. Fire add_payment_info at wallet-sheet authorization with payment_type set to the wallet name; without this, wallet-heavy traffic understates the step and overstates payment-page abandonment.,5️⃣ Session-timeout handling follows the platform default — 30 minutes of inactivity in GA4, the 30-minute visit rule in Adobe. A checkout resumed after timeout opens a new session, so deduplicate on checkout_id first and session_id second to avoid double-counting a single order attempt across two sessions.,6️⃣ Timing: the metric is stamped at event time in the property's reporting timezone and reconciled against the order table on order date. Late and offline-queued hits are accepted for 72 hours, so the trailing three days are provisional and should carry a freshness note on any dashboard used for trading decisions.,7️⃣ Value and currency on the event mirror the cart subtotal at submission and must never be summed into recognised revenue; multi-market reporting converts using the daily booking rate held in the finance rate table.
 
 Business Use Case: |
-  1️⃣ The Checkout Product Manager reviews the step funnel each morning; when Payment Info Added falls more than two percentage points below its trailing four-week baseline for a device × payment type cell, they raise a P2 defect with the payments squad and hold the next checkout release until the cell recovers.,2️⃣ The Payments Manager in Finance compares Payment Info Added against completed orders by payment type every week; a widening gap isolated to one acquirer route triggers a rerouting request or a change to the 3-D Secure step-up threshold with that acquirer.,3️⃣ The Lifecycle Marketing Manager builds a recovery audience of sessions with Payment Info Added and no order within 60 minutes and sends them the highest-value abandonment journey, because these shoppers are one interaction from purchase and convert materially better than cart-stage abandoners.,4️⃣ The Conversion Optimization Lead in Merchandising reads payment-page A/B tests on this step before reading revenue, calling winners on step conversion where sample size is reached weeks earlier than on order-level significance.
+  1️⃣ The Checkout Product Manager reviews the step funnel each morning; when the Payment Info Added count for a device × payment type cell falls more than 10% below its trailing four-week same-weekday average, and the derived Begin Checkout → Payment Info Added step rate confirms the drop, they raise a P2 defect with the payments squad and hold the next checkout release until the cell recovers.,2️⃣ The Payments Manager in Finance compares Payment Info Added against completed orders by payment type every week; a widening gap isolated to one acquirer route triggers a rerouting request or a change to the 3-D Secure step-up threshold with that acquirer.,3️⃣ The Lifecycle Marketing Manager builds a recovery audience of sessions with Payment Info Added and no order within 60 minutes and sends them the highest-value abandonment journey, because these shoppers are one interaction from purchase and convert materially better than cart-stage abandoners.,4️⃣ The Conversion Optimization Lead in Merchandising reads payment-page A/B tests on this step before reading revenue, calling winners on step conversion where sample size is reached weeks earlier than on order-level significance.
 
 Dependencies:
   Events: [checkout-initiation, add-to-cart]
@@ -621,7 +640,7 @@ Dependencies:
 Source Data: Digital Analytics (GA4)
 
 Report Attributes: |
-  Payment Method; Checkout Type; Checkout Step; Device category; Traffic Source; Cart Size Band; Coupon Code; Shipping Tier
+  Payment Method; Checkout Type; Checkout Step; Device category; Cart Size Band; Shipping Tier
 
 Dashboard Usage: [Checkout Funnel Performance, Cart & Checkout Abandonment Diagnostics, Payment Method Mix & Authorization Health, Daily Trading Dashboard]
 
@@ -630,7 +649,7 @@ Segment Eligibility: |
 
 Related Metrics: [begin-checkout, add-to-cart, cart-removals, average-order-value]
 
-Derived KPIs: [checkout-completion-rate, checkout-conversion-rate, cart-abandonment-rate, purchase-conversion-rate]
+Derived KPIs: [checkout-completion-rate]
 
 Data Sensitivity: Internal
 
@@ -644,5 +663,5 @@ Created At: 2026-09-17T23:01:21.495+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-17T23:01:35.581+00:00
+Last Modified At: 2026-09-18T21:21:20.326+00:00
 
