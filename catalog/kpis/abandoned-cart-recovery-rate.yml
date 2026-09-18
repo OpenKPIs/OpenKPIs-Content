@@ -1,5 +1,5 @@
 # KPI: Abandoned Cart Recovery Rate
-# Generated: 2026-09-17T23:15:49.090Z
+# Generated: 2026-09-18T23:20:20.090Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -29,7 +29,7 @@ GA4 Event: |
   purchase
 
 Adobe Event: |
-  Recovered Cart Purchase
+  purchase
 
 W3 Data Layer: |
   {
@@ -76,7 +76,9 @@ W3 Data Layer: |
       "checkoutID": "CHK-77120934",
       "price": {
         "basePrice": 142.71,
-        "cartTotal": 148.5,
+        "taxRate": 0.0825,
+        "shipping": 5.99,
+        "cartTotal": 160.47,
         "currency": "USD"
       },
       "attributes": {
@@ -140,7 +142,7 @@ W3 Data Layer: |
         "currency": "USD",
         "taxRate": 0.0825,
         "shipping": 5.99,
-        "transactionTotal": 148.5
+        "transactionTotal": 145.03
       },
       "attributes": {
         "cartID": "CART-8f31c2a4",
@@ -187,7 +189,7 @@ W3 Data Layer: |
       {
         "eventInfo": {
           "eventName": "purchase",
-          "eventAction": "Recovered Cart Purchase",
+          "eventAction": "purchase",
           "type": "conversion",
           "timeStamp": "2026-09-14T09:12:47.000Z",
           "effect": "order placed within the 7-day recovery window"
@@ -256,17 +258,13 @@ GA4 Data Layer: |
     "recovery_window_day": 3,
     "recovered_order": true,
     "attribution_model": "last_non_direct",
-    "recovery_touch": {
-      "event_name": "notification_open",
-      "campaign_id": "KL-AC-2026-Q3",
-      "campaign_name": "Abandoned Cart Recovery Touch 1",
-      "campaign_source": "klaviyo",
-      "campaign_medium": "email",
-      "channel": "email",
-      "message_type": "abandoned_cart",
-      "touch_sequence": 1,
-      "touch_timestamp": "2026-09-11T19:45:02.000Z"
-    },
+    "recovery_touch_event": "notification_open",
+    "recovery_campaign_id": "KL-AC-2026-Q3",
+    "recovery_campaign_name": "Abandoned Cart Recovery Touch 1",
+    "recovery_channel": "email",
+    "recovery_message_type": "abandoned_cart",
+    "recovery_touch_sequence": 1,
+    "recovery_touch_timestamp": "2026-09-11T19:45:02.000Z",
     "customer_type": "returning",
     "customer_segment": "lapsed_high_value",
     "payment_type": "credit_card",
@@ -274,8 +272,8 @@ GA4 Data Layer: |
     "ecommerce": {
       "transaction_id": "ORD-10029384",
       "currency": "USD",
-      "value": 148.5,
-      "tax": 11.03,
+      "value": 145.03,
+      "tax": 10.6,
       "shipping": 5.99,
       "coupon": "COMEBACK10",
       "items": [
@@ -311,7 +309,7 @@ Adobe Client Data Layer: |
     "event": "purchase",
     "eventInfo": {
       "eventName": "purchase",
-      "linkName": "Recovered Cart Purchase",
+      "linkName": "purchase",
       "linkType": "o",
       "path": "commerce.order",
       "timestamp": "2026-09-14T09:12:47.000Z"
@@ -321,14 +319,14 @@ Adobe Client Data Layer: |
         "purchaseID": "ORD-10029384",
         "purchaseOrderNumber": "ORD-10029384",
         "currencyCode": "USD",
-        "priceTotal": 148.5,
-        "taxAmount": 11.03,
+        "priceTotal": 145.03,
+        "taxAmount": 10.6,
         "shippingAmount": 5.99,
         "discountAmount": 14.27,
         "couponCode": "COMEBACK10",
         "payments": [
           {
-            "paymentAmount": 148.5,
+            "paymentAmount": 145.03,
             "paymentType": "credit_card",
             "currencyCode": "USD"
           }
@@ -372,7 +370,7 @@ Adobe Client Data Layer: |
       "abandonedTimestamp": "2026-09-11T18:42:11.000Z",
       "abandonmentBasis": "no_purchase_after_begin_checkout",
       "checkoutStepAtAbandonment": 2,
-      "cartValueAtAbandonment": 162.77,
+      "cartValueAtAbandonment": 160.47,
       "currencyCode": "USD"
     },
     "user": {
@@ -427,15 +425,22 @@ XDM Mapping: |
         }
       ]
     },
+    "consents": {
+      "marketing": {
+        "email": {
+          "val": "y"
+        }
+      }
+    },
     "commerce": {
       "order": {
         "purchaseID": "ORD-10029384",
         "currencyCode": "USD",
-        "priceTotal": 148.5,
+        "priceTotal": 145.03,
         "discountAmount": 14.27,
         "payments": [
           {
-            "paymentAmount": 148.5,
+            "paymentAmount": 145.03,
             "paymentType": "credit_card",
             "currencyCode": "USD"
           }
@@ -467,17 +472,6 @@ XDM Mapping: |
       "mediaType": "email",
       "typeAtSource": "abandoned_cart_recovery"
     },
-    "directMarketing": {
-      "emailDelivered": {
-        "value": 1
-      },
-      "emailOpened": {
-        "value": 1
-      },
-      "emailClicked": {
-        "value": 1
-      }
-    },
     "marketing": {
       "campaignID": "KL-AC-2026-Q3",
       "campaignName": "Abandoned Cart Recovery Touch 1",
@@ -507,8 +501,7 @@ XDM Mapping: |
             "eVar26": "checkout_step_2"
           },
           "props": {
-            "prop21": "recovered_cart_purchase",
-            "prop22": "notification_open"
+            "prop21": "recovered_cart_purchase"
           },
           "lists": {
             "list1": {
@@ -563,11 +556,13 @@ Google Analytics SQL: |
       MAX(IF(key = 'checkout_step_at_abandonment', value.int_value, NULL)) AS checkout_step_at_abandonment,
       MAX(IF(key = 'checkout_step', value.int_value, NULL)) AS checkout_step,
       MAX(IF(key = 'value', value.double_value, NULL)) AS event_value,
-      MAX(IF(key = 'campaign_id', value.string_value, NULL)) AS param_campaign_id,
-      MAX(IF(key = 'campaign_name', value.string_value, NULL)) AS param_campaign_name,
-      LOWER(MAX(IF(key = 'channel', value.string_value, NULL))) AS param_channel,
-      LOWER(MAX(IF(key = 'message_type', value.string_value, NULL))) AS message_type,
-      MAX(IF(key = 'touch_sequence', value.int_value, NULL)) AS touch_sequence,
+      -- Touch events (notification_open) send campaign_id / channel / message_type / touch_sequence; the purchase event sends the
+      -- same context flattened as recovery_campaign_id / recovery_channel / recovery_message_type / recovery_touch_sequence.
+      MAX(IF(key IN ('campaign_id', 'recovery_campaign_id'), value.string_value, NULL)) AS param_campaign_id,
+      MAX(IF(key IN ('campaign_name', 'recovery_campaign_name'), value.string_value, NULL)) AS param_campaign_name,
+      LOWER(MAX(IF(key IN ('channel', 'recovery_channel'), value.string_value, NULL))) AS param_channel,
+      LOWER(MAX(IF(key IN ('message_type', 'recovery_message_type'), value.string_value, NULL))) AS message_type,
+      MAX(IF(key IN ('touch_sequence', 'recovery_touch_sequence'), value.int_value, NULL)) AS touch_sequence,
       MAX(IF(key = 'recovery_window_days', value.int_value, NULL)) AS recovery_window_days,
       LOWER(MAX(IF(key = 'marketing_consent', value.string_value, NULL))) AS marketing_consent,
       MAX(IF(key = 'customer_segment', value.string_value, NULL)) AS customer_segment,
@@ -708,11 +703,11 @@ Google Analytics SQL: |
       COALESCE(param_campaign_name, session_campaign_name, param_campaign_id, session_campaign_id, '(not set)') AS campaign_name,
       touch_sequence
     FROM clean_events
-    WHERE session_medium NOT IN ('', '(none)', 'none', 'direct')
-      AND (
+    WHERE (
         (event_name = 'notification_open' AND COALESCE(message_type, '') = 'abandoned_cart')
         OR (
           event_name = 'session_start'
+          AND session_medium NOT IN ('', '(none)', 'none', 'direct')
           AND COALESCE(session_campaign_id, session_campaign_name) IS NOT NULL
           AND (
             COALESCE(message_type, '') = 'abandoned_cart'
@@ -870,7 +865,9 @@ AEP Query Service SQL: |
   -- ==========================================
   -- Abandoned Cart Recovery Rate = recovered orders credited to a recovery touch / all abandoned carts * 100
   -- Cohort anchor is the ABANDONMENT timestamp (not the order date). Cohort period: 2026-08-01 to 2026-08-31, reporting timezone America/New_York.
-  -- The ExperienceEvent scan runs to 2026-09-08 = cohort end + the fixed 7-day recovery window, so the last cohort day can still see every order it may claim.
+  -- The ExperienceEvent scan runs from 2026-08-01 00:00 to the end of 2026-09-08 in America/New_York (bounds converted to UTC with to_utc_timestamp):
+  -- cohort end + the fixed 7-day recovery window + a one-day buffer, so the last cohort day (2026-08-31) can still see every order it may claim.
+  -- Voids: cancelled orders and FULL refunds only (refunded amount = order priceTotal); partial refunds keep the order.
   -- Abandonment is inferred: commerce.productListAdds / commerce.checkouts with no commerce.purchases for that cart before
   -- GREATEST(last cart activity + 30-minute session inactivity timeout, end of the same calendar day). One record per cart identifier (eVar21).
   -- Purchases inside the window with no recovery touch are ORGANIC RETURNS and are reported on their own line, never folded into the numerator.
@@ -882,6 +879,8 @@ AEP Query Service SQL: |
       identityMap['ECID'][0].id AS ecid,
       commerce.order.purchaseID AS transaction_id,
       commerce.order.priceTotal AS order_value,
+      aggregate(productListItems, CAST(0 AS DOUBLE), (acc, x) -> acc + COALESCE(CAST(x.priceTotal AS DOUBLE), 0)) AS item_price_total,
+      LOWER(COALESCE(consents.marketing.email.val, '')) AS consent_email_val,
       commerce.order.currencyCode AS currency_code,
       commerce.order.payments[0].paymentType AS payment_type,
       commerce.purchases.value AS purchase_flag,
@@ -910,8 +909,8 @@ AEP Query Service SQL: |
       LOWER(COALESCE(environment.browserDetails.userAgent, '')) AS user_agent,
       LOWER(COALESCE(device.type, '')) AS device_category
     FROM aep_web_experience_event_dataset
-    WHERE timestamp >= TIMESTAMP '2026-08-01 00:00:00'
-      AND timestamp < TIMESTAMP '2026-09-08 00:00:00'
+    WHERE timestamp >= to_utc_timestamp(TIMESTAMP '2026-08-01 00:00:00', 'America/New_York')
+      AND timestamp < to_utc_timestamp(TIMESTAMP '2026-09-09 00:00:00', 'America/New_York')
       AND eventType IN (
         'commerce.productListAdds',
         'commerce.checkouts',
@@ -927,6 +926,7 @@ AEP Query Service SQL: |
     SELECT
       b.*,
       COALESCE(b.crm_contact_key, b.ecid) AS identity_key,
+      CASE WHEN b.consent_email_val = 'y' THEN 1 WHEN b.consent_email_val IN ('n', 'dn') THEN 0 ELSE NULL END AS consent_flag,
       split(COALESCE(b.touch_context, ''), '\\|')[0] AS touch_channel_context,
       split(COALESCE(b.touch_context, ''), '\\|')[1] AS touch_message_type,
       split(COALESCE(b.touch_context, ''), '\\|')[2] AS touch_campaign_id,
@@ -944,7 +944,11 @@ AEP Query Service SQL: |
       MIN(event_ts) AS first_cart_activity_ts,
       SUM(CASE WHEN event_type = 'commerce.checkouts' THEN 1 ELSE 0 END) AS checkout_events,
       MAX(COALESCE(checkout_step, CASE WHEN event_type = 'commerce.checkouts' THEN 1 ELSE 0 END)) AS checkout_step_at_abandonment,
-      MAX(COALESCE(order_value, 0)) AS cart_value,
+      COALESCE(
+        MAX(CASE WHEN event_type = 'commerce.checkouts' THEN item_price_total END),
+        SUM(CASE WHEN event_type = 'commerce.productListAdds' THEN COALESCE(item_price_total, 0) ELSE 0 END)
+      ) AS cart_value,
+      MIN(consent_flag) AS consent_flag,
       MAX(identity_key) AS identity_key,
       MAX(crm_contact_key) AS crm_contact_key,
       MAX(ecid) AS ecid,
@@ -974,12 +978,28 @@ AEP Query Service SQL: |
       AND transaction_id <> ''
     GROUP BY transaction_id
   ),
+  order_refunds AS (
+    SELECT
+      transaction_id,
+      SUM(COALESCE(order_value, item_price_total, 0)) AS refunded_amount
+    FROM clean_events
+    WHERE event_type = 'commerce.backofficeOrderItemsRefunded'
+      AND transaction_id IS NOT NULL
+      AND transaction_id <> ''
+    GROUP BY transaction_id
+  ),
   voided_orders AS (
     SELECT DISTINCT transaction_id
     FROM clean_events
-    WHERE event_type IN ('commerce.backofficeOrderCancelled', 'commerce.backofficeOrderItemsRefunded')
+    WHERE event_type = 'commerce.backofficeOrderCancelled'
       AND transaction_id IS NOT NULL
       AND transaction_id <> ''
+    UNION
+    SELECT r.transaction_id
+    FROM order_refunds AS r
+    JOIN purchase_orders AS o
+      ON o.transaction_id = r.transaction_id
+    WHERE r.refunded_amount >= o.purchase_revenue
   ),
   valid_orders AS (
     SELECT o.*
@@ -1023,7 +1043,8 @@ AEP Query Service SQL: |
       c.checkout_step_at_abandonment,
       c.cart_value,
       c.device_category,
-      c.currency_code
+      c.currency_code,
+      CASE WHEN c.consent_flag = 1 THEN 'granted' WHEN c.consent_flag = 0 THEN 'denied' ELSE 'unknown' END AS marketing_consent
     FROM cart_deadlines AS c
     LEFT JOIN cart_first_purchase AS p
       ON p.cart_id = c.cart_id
@@ -1053,7 +1074,8 @@ AEP Query Service SQL: |
       campaign_group,
       tracking_code
     FROM clean_events
-    WHERE COALESCE(campaign_id, touch_campaign_id) IS NOT NULL
+    WHERE event_type <> 'commerce.purchases'
+      AND COALESCE(campaign_id, touch_campaign_id) IS NOT NULL
       AND (
         COALESCE(email_opened, 0) > 0
         OR COALESCE(email_clicked, 0) > 0
@@ -1157,6 +1179,7 @@ AEP Query Service SQL: |
       a.abandonment_date,
       a.cart_id,
       CASE WHEN a.crm_contact_key IS NOT NULL THEN 1 ELSE 0 END AS is_identified,
+      a.marketing_consent,
       a.checkout_step_at_abandonment,
       a.device_category,
       a.cart_value,
@@ -1188,6 +1211,7 @@ AEP Query Service SQL: |
       abandonment_date,
       COUNT(*) AS abandoned_carts,
       SUM(CASE WHEN is_identified = 0 THEN 1 ELSE 0 END) AS anonymous_abandoned_carts,
+      SUM(CASE WHEN marketing_consent <> 'granted' THEN 1 ELSE 0 END) AS consent_suppressed_carts,
       ROUND(SUM(cart_value), 2) AS abandoned_cart_value,
       MIN(cohort_matured) AS cohort_matured
     FROM cart_fact
@@ -1229,6 +1253,8 @@ AEP Query Service SQL: |
     d.abandoned_cart_value,
     d.anonymous_abandoned_carts,
     ROUND(100.0 * d.anonymous_abandoned_carts / NULLIF(d.abandoned_carts, 0), 2) AS unrecoverable_anonymous_share_pct,
+    d.consent_suppressed_carts,
+    ROUND(100.0 * d.consent_suppressed_carts / NULLIF(d.abandoned_carts, 0), 2) AS consent_suppressed_share_pct,
     CASE WHEN d.cohort_matured = 1 THEN 'final' ELSE 'provisional - 7-day recovery window still open, restate daily' END AS cohort_status
   FROM breakdown AS b
   JOIN daily_base AS d
@@ -1242,10 +1268,10 @@ Business Use Case: |
   1️⃣ The CRM & Lifecycle Marketing Manager reviews the matured weekly cohort in the lifecycle dashboard and, when a journey variant's recovery rate falls below the rolling 8-week baseline, rewrites the send cadence (first touch inside 60 minutes, second at 24 hours) and caps discount depth before re-launching the journey.,2️⃣ The Checkout Product Manager segments the denominator by checkout step at abandonment and payment type, and when a step or payment method shows a rising abandoned volume with a flat recovery rate, raises it as a prioritised backlog defect rather than allowing the recovery programme to mask persistent checkout friction.,3️⃣ Finance and Revenue Management combine recovery rate with recovered average order value to size recoverable revenue in the quarterly forecast and to set the incentive budget, withdrawing discount funding from cohorts whose organic-return line shows customers would have converted without an offer.,4️⃣ The Marketing Operations lead monitors the anonymous and consent-suppressed share of the denominator and, when it grows quarter over quarter, commissions progressive identity capture at cart entry so that the addressable ceiling of the recovery programme rises.
 
 Dependencies:
-  Events: [add-to-cart, begin-checkout, purchase, notification-open]
-  Metrics: [carts-created, checkouts-initiated, purchases, email-clicks, revenue]
-  Dimensions: [checkout-step, campaign-name, transaction-id, customer-segment]
-  KPIs: [cart-abandonment-rate, checkout-completion-rate]
+  Events: [add-to-cart, checkout-initiation, purchase]
+  Metrics: [add-to-cart, begin-checkout]
+  Dimensions: [checkout-step, campaign-name, cart-size-band, order-status, rfm-segment]
+  KPIs: [cart-abandonment-rate, checkout-completion-rate, orders, revenue]
 
 Source Data: Digital + CRM (Salesforce)
 
@@ -1271,5 +1297,5 @@ Created At: 2026-09-17T23:15:39.578+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-17T23:15:48.713+00:00
+Last Modified At: 2026-09-18T23:20:19.669+00:00
 
