@@ -1,10 +1,10 @@
 # Metric: Cart Views
-# Generated: 2026-09-17T23:00:52.227Z
+# Generated: 2026-09-18T19:21:18.303Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Metric Name: Cart Views
-Formula: COUNT(events WHERE event_name = 'view_cart' AND cart_item_count > 0)
+Formula: COUNT(view_cart events WHERE cart_item_count > 0 AND analytics consent granted AND traffic_type <> 'internal' AND page URL NOT non-production host), after collapsing hits in the same session with an identical cart_signature (cart_id|cart_item_count|value|cart_surface) less than 1 second apart into one occurrence
 
 Description: |
   The number of times shoppers viewed the cart page or cart drawer with its contents rendered, counted once per qualifying view_cart occurrence. It measures the volume of cart-review moments that precede checkout initiation and anchors the denominator of cart-stage conversion and abandonment reporting.
@@ -116,7 +116,7 @@ W3 Data Layer: |
             "cartLineCount": 2,
             "cartValue": 198,
             "currency": "USD",
-            "cartSignature": "SKU-44821:1|SKU-91237:2|198.00",
+            "cartSignature": "CART-8827341|3|198.00|drawer",
             "userType": "returning"
           }
         }
@@ -301,13 +301,16 @@ XDM Mapping: |
               "value": "cart:view:drawer"
             }
           }
-        },
-        "customData": {
-          "cartItemCount": 3,
-          "cartValue": 198,
-          "currencyCode": "USD"
         }
       }
+    },
+    "_tenant": {
+      "cart": {
+        "cartItemCount": 3,
+        "cartValue": 198,
+        "currencyCode": "USD"
+      },
+      "trafficType": "external"
     }
   }
 
@@ -335,8 +338,9 @@ Google Analytics SQL: |
       e.user_pseudo_id,
       e.device.category                                                                             AS device_category,
       e.geo.country                                                                                 AS country,
-      e.collected_traffic_source.manual_source                                                      AS traffic_source,
-      e.collected_traffic_source.manual_medium                                                      AS traffic_medium,
+      -- session-scoped last-click source / medium: view_cart rarely carries campaign params itself
+      e.session_traffic_source_last_click.manual_campaign.source                                    AS traffic_source,
+      e.session_traffic_source_last_click.manual_campaign.medium                                    AS traffic_medium,
       IFNULL(e.privacy_info.analytics_storage, 'Yes')                                               AS analytics_storage,
       MAX(IF(p.key = 'ga_session_id',   p.value.int_value,    NULL))                                AS ga_session_id,
       MAX(IF(p.key = 'cart_id',         p.value.string_value, NULL))                                AS cart_id,
@@ -382,7 +386,7 @@ Google Analytics SQL: |
   
   deduplicated_views AS (
     -- Re-render suppression: two hits in the same session with an identical cart signature less than
-    -- one second apart (SPA route change, quantity edit, coupon recalculation) are one occurrence.
+    -- one second apart (SPA re-paint or duplicate tag fire) are one occurrence; a changed signature counts again.
     SELECT
       q.*,
       LAG(q.event_timestamp) OVER (
@@ -428,41 +432,62 @@ AEP Query Service SQL: |
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
   -- Metric  : Cart Views (cart-views) | E-commerce > Cart & Checkout Funnel Analytics
-  -- Source  : XDM ExperienceEvent dataset, eventType = 'commerce.productListViews' (cart review surface)
+  -- Source  : XDM ExperienceEvent dataset; all eventTypes are sessionised, then eventType =
+  --           'commerce.productListViews' (cart review surface) is counted
   -- Measure : COUNT of qualifying cart-view occurrences (cart rendered with >= 1 line item)
   -- Grain   : one row per reporting day x device x cart surface x checkout type x cart size band
-  -- Notes   : eVar41 = cart surface, eVar43 = checkout type, eVar44 = cart size band, customData
-  --           carries cartItemCount / cartValue / currencyCode, as mapped on collection.
+  -- Notes   : eVar41 = cart surface, eVar43 = checkout type, eVar44 = cart size band; the tenant
+  --           namespace _tenant (replace with your tenant id, e.g. _acmeretail) carries
+  --           cart.cartItemCount / cart.cartValue / cart.currencyCode and trafficType.
+  -- Window  : T-28 .. T-1 in America/Chicago, matching the BigQuery definition.
   
-  WITH cart_view_events AS (
+  WITH all_events AS (
+    -- Every ExperienceEvent in the window (all eventTypes) so that sessions reflect any activity.
     SELECT
       to_date(from_utc_timestamp(timestamp, 'America/Chicago'))                                     AS report_date,
       timestamp                                                                                     AS event_ts_utc,
+      eventType                                                                                     AS event_type,
       coalesce(identityMap['ECID'][0].id, endUserIDs._experience.mcid.id)                           AS ecid,
       commerce.cart.cartID                                                                          AS cart_id,
       commerce.productListViews.value                                                               AS product_list_views,
       lower(coalesce(_experience.analytics.customDimensions.eVars.eVar41.value, 'unknown'))          AS cart_surface,
       lower(coalesce(_experience.analytics.customDimensions.eVars.eVar43.value, 'unknown'))          AS checkout_type,
       coalesce(_experience.analytics.customDimensions.eVars.eVar44.value, 'unknown')                 AS cart_size_band,
-      cast(_experience.analytics.customData.cartItemCount as integer)                                AS cart_item_count,
-      cast(_experience.analytics.customData.cartValue as decimal(18,2))                              AS cart_value,
-      coalesce(_experience.analytics.customData.currencyCode, 'USD')                                 AS currency,
+      cast(_tenant.cart.cartItemCount as integer)                                                    AS cart_item_count,
+      cast(_tenant.cart.cartValue as decimal(18,2))                                                  AS cart_value,
+      coalesce(_tenant.cart.currencyCode, 'USD')                                                     AS currency,
+      lower(coalesce(_tenant.trafficType, 'external'))                                               AS traffic_type,
       coalesce(device.type, 'unknown')                                                               AS device_type,
       web.webPageDetails.URL                                                                         AS page_url,
       coalesce(consents.collect.val, 'y')                                                            AS consent_collect
     FROM web_commerce_experience_events
-    WHERE timestamp >= from_utc_timestamp(date_trunc('day', current_timestamp - interval '28 days'), 'America/Chicago')
-      AND timestamp <  from_utc_timestamp(date_trunc('day', current_timestamp), 'America/Chicago')
-      AND eventType = 'commerce.productListViews'
+    -- Chicago midnight of T-28 and of today converted to UTC with to_utc_timestamp.
+    WHERE timestamp >= to_utc_timestamp(cast(date_sub(to_date(from_utc_timestamp(current_timestamp, 'America/Chicago')), 28) as timestamp), 'America/Chicago')
+      AND timestamp <  to_utc_timestamp(cast(to_date(from_utc_timestamp(current_timestamp, 'America/Chicago')) as timestamp), 'America/Chicago')
+  ),
+  
+  sessionised_events AS (
+    -- 30-minute inactivity sessionisation per ECID over the full event stream (all eventTypes).
+    SELECT
+      a.*,
+      SESS_TIMEOUT(a.event_ts_utc, 60 * 30) OVER (
+        PARTITION BY a.ecid
+        ORDER BY a.event_ts_utc
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ).num                                                                                         AS session_num
+    FROM all_events AS a
+    WHERE a.ecid IS NOT NULL
   ),
   
   qualified_views AS (
-    -- Qualification and exclusions mirror the BigQuery definition: a rendered cart with at least one
-    -- line item, consent granted, and non-production hostnames removed before counting.
+    -- Cart-view eventType only, then the qualification and exclusions that mirror the BigQuery
+    -- definition: a rendered cart with at least one line item, consent granted, internal traffic
+    -- and non-production hostnames removed before counting.
     SELECT
       report_date,
       event_ts_utc,
       ecid,
+      session_num,
       device_type,
       cart_surface,
       checkout_type,
@@ -472,29 +497,20 @@ AEP Query Service SQL: |
       cart_value,
       concat_ws('|', coalesce(cart_id, 'no-cart-id'), cast(coalesce(cart_item_count, 0) as string),
                 cast(coalesce(cart_value, 0) as string), cart_surface)                              AS cart_signature
-    FROM cart_view_events
-    WHERE coalesce(product_list_views, 1) > 0
+    FROM sessionised_events
+    WHERE event_type = 'commerce.productListViews'
+      AND report_date BETWEEN date_sub(to_date(from_utc_timestamp(current_timestamp, 'America/Chicago')), 28)
+                          AND date_sub(to_date(from_utc_timestamp(current_timestamp, 'America/Chicago')), 1)
+      AND coalesce(product_list_views, 1) > 0
       AND cart_item_count > 0
-      AND ecid IS NOT NULL
       AND consent_collect <> 'n'
+      AND traffic_type <> 'internal'
       AND coalesce(page_url, '') NOT RLIKE '(?i)(staging|preview|uat|qa\.|localhost|127\.0\.0\.1)'
   ),
   
-  sessionised_views AS (
-    -- 30-minute inactivity sessionisation, used only to report per-session reach alongside the counter.
-    SELECT
-      q.*,
-      SESS_TIMEOUT(q.event_ts_utc, 60 * 30) OVER (
-        PARTITION BY q.ecid
-        ORDER BY q.event_ts_utc
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-      ).num                                                                                         AS session_num
-    FROM qualified_views AS q
-  ),
-  
   deduplicated_views AS (
-    -- Re-render suppression: identical cart signature inside the same session less than one second
-    -- apart counts once.
+    -- Re-render suppression: identical cart signature (cart_id|item_count|value|surface) inside the
+    -- same session less than one second apart counts once; a changed signature counts again.
     SELECT
       s.*,
       concat_ws('.', s.ecid, cast(s.session_num as string))                                         AS session_key,
@@ -502,7 +518,7 @@ AEP Query Service SQL: |
         PARTITION BY s.ecid, s.session_num, s.cart_signature
         ORDER BY s.event_ts_utc
       )                                                                                             AS prev_event_ts
-    FROM sessionised_views AS s
+    FROM qualified_views AS s
   )
   
   SELECT
@@ -525,13 +541,12 @@ AEP Query Service SQL: |
   ORDER BY report_date DESC, cart_views DESC;
 
 Calculation Notes: |
-  1️⃣ One view_cart occurrence equals one Cart View: the count is an occurrence counter, not a unique-session or unique-user count. Cart Views is therefore always greater than or equal to the number of sessions that reached the cart, and per-session or per-user cart reach must be derived with COUNT(DISTINCT session_id) rather than by dividing.,2️⃣ The event fires only when the cart surface renders with at least one line item. Empty-cart renders, cart icon hovers, badge count updates and cart-quantity stepper interactions are excluded; the qualifying moment is the cart contents being displayed, whether as a full cart page, a slide-out drawer or a mini-cart panel, distinguished by a cart surface parameter rather than by a separate event name.,3️⃣ Re-render suppression applies: single-page-application route changes, quantity edits, coupon application and promotion recalculation that re-paint the same cart within a 1-second window must not re-fire view_cart. Any two view_cart hits from the same session with an identical cart signature (item set, quantities, cart value) less than 1 second apart are treated as a single occurrence during processing.,4️⃣ A genuine return to the cart within the same session is a new Cart View — shoppers who leave the cart to a product detail page and come back, or who reopen the drawer after adding another item, legitimately generate multiple occurrences. This is the intended behaviour and is why Cart Views is used to measure review intensity, not reach.,5️⃣ Sessionisation follows the standard 30-minute inactivity rule, with an additional session break at midnight in the reporting time zone and on a change of campaign source. A cart reopened after the timeout starts a new session, so a Cart View on a persistent server-side cart can appear in a session that contains no add_to_cart activity; cart-stage funnels must account for this cross-session carry-over.,6️⃣ Excluded from the reported figure: known bot and crawler traffic, internal IP ranges and QA automation, orders placed by customer service through an agent-assisted console, and traffic from users whose consent state withholds analytics storage. Preview, staging and load-test hostnames are filtered at the property level before the metric is published.,7️⃣ Timing and restatement: figures are attributed to the client-side event timestamp adjusted to the reporting time zone, and late-arriving or offline-queued mobile hits can restate the last 72 hours. Trading commentary should be written against T-1 data at the earliest, and any comparison against Adobe Analytics Cart Views must align time zone and the treatment of the drawer surface before variance is investigated.
+  1️⃣ One view_cart occurrence equals one Cart View: the count is an occurrence counter, not a unique-session or unique-user count. Cart Views is therefore always greater than or equal to the number of sessions that reached the cart, and per-session or per-user cart reach must be derived with COUNT(DISTINCT session_id) rather than by dividing.,2️⃣ The event fires only when the cart surface renders with at least one line item. Empty-cart renders, cart icon hovers, badge count updates and cart-quantity stepper interactions are excluded; the qualifying moment is the cart contents being displayed, whether as a full cart page, a slide-out drawer or a mini-cart panel, distinguished by a cart surface parameter rather than by a separate event name.,3️⃣ Re-render suppression uses one rule in both SQL fields: the cart signature is cart_id|cart_item_count|cart value (2 decimals)|cart_surface, and two view_cart hits from the same session with an identical signature less than 1 second apart count as a single occurrence (typically a single-page-application re-paint or duplicate tag fire). A hit whose signature differs, for example after a quantity edit or a coupon changes the item count or cart value, is counted as a separate Cart View.,4️⃣ A genuine return to the cart within the same session is a new Cart View — shoppers who leave the cart to a product detail page and come back, or who reopen the drawer after adding another item, legitimately generate multiple occurrences. This is the intended behaviour and is why Cart Views is used to measure review intensity, not reach.,5️⃣ Sessionisation: in BigQuery the session is user_pseudo_id + ga_session_id as assigned by GA4 (30-minute inactivity timeout by default, with no break at midnight or on a campaign change); in AEP it is SESS_TIMEOUT with a 30-minute inactivity timeout per ECID over all ExperienceEvents, before filtering to cart views. A cart reopened after the timeout starts a new session, so a Cart View on a persistent server-side cart can appear in a session that contains no add_to_cart activity; cart-stage funnels must account for this cross-session carry-over.,6️⃣ Excluded from the reported figure in both SQL fields: hits whose consent state withholds analytics (GA4 analytics_storage = 'No', AEP consents.collect.val = 'n'), internal traffic (traffic_type = 'internal' in GA4, _tenant.trafficType = 'internal' in AEP) and hits on non-production hostnames (staging, preview, uat, qa., localhost, 127.0.0.1) matched on the page URL.,7️⃣ Timing and restatement: figures are attributed to the client-side event timestamp adjusted to the reporting time zone, and late-arriving or offline-queued mobile hits can restate the last 72 hours. Trading commentary should be written against T-1 data at the earliest, and any comparison against Adobe Analytics Cart Views must align time zone and the treatment of the drawer surface before variance is investigated.
 
 Business Use Case: |
   1️⃣ The Merchandising trading manager reviews Cart Views against Add to Carts each morning in the daily trading pack; when Cart Views fall while Add to Carts hold flat, they inspect the cart drawer and cart page for a rendering or pricing-service failure and raise a P2 with the site engineering team before the peak-traffic window.,2️⃣ The Conversion Rate Optimisation lead uses Cart Views as the exposure denominator when sizing cart-page tests (shipping threshold messaging, promotion code placement, cross-sell modules); the metric determines the traffic available per variant and the runtime needed to reach significance, and it gates whether a test is launched at all.,3️⃣ The CRM and Lifecycle marketing manager sizes the abandoned-cart audience by comparing Cart Views with Checkouts Initiated by device and channel; where the gap widens week on week, they increase send frequency for the browse-and-cart abandonment journey and brief the paid media team on remarketing bid adjustments.,4️⃣ The Analytics governance owner in Merchandising validates every release by checking that Cart Views per session stays inside its control band; a step change without a matching Add to Carts movement is treated as a tagging regression on the cart surface and blocks the release sign-off until the data layer is corrected.
 
 Dependencies:
-  Events: [add-to-cart]
   Metrics: [add-to-cart]
   Dimensions: [cart-size-band]
 
@@ -561,5 +576,5 @@ Created At: 2026-09-17T23:00:37.631+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-17T23:00:51.804+00:00
+Last Modified At: 2026-09-18T19:21:17.9+00:00
 
