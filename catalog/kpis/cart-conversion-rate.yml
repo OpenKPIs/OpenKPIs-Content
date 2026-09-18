@@ -1,28 +1,29 @@
 # KPI: cart conversion rate
-# Generated: 2026-08-26T14:03:33.380Z
+# Generated: 2026-09-18T16:56:01.149Z
 # Contributed by: swapnamagantius
 # Last modified by: devyendarm
 
 KPI Name: cart conversion rate
-Formula: (Completed Purchases / Carts Created) × 100
+Formula: (Carts Created that result in a Purchase within 7 days, in any session / Total Carts Created) × 100
 
 Description: |
-  Cart conversion rate measures the percentage of shopping sessions where a cart is created and results in a completed purchase. It helps identify checkout friction and optimize the cart-to-purchase process.
+  Cart conversion rate is the percentage of carts created (a shopper's first add_to_cart of the day) that end in a completed purchase within a 7-day conversion window, including purchases made in a later session or visit. It is the cross-session counterpart of the session-scoped Cart-to-Purchase Rate and shows how much cart intent the store turns into orders, including deferred and returning-visit purchases.
 
 Category: Conversion
 
+Tags: [kpi, E-commerce: Cart & Checkout Funnel Analytics]
 
-Industry: [E-commerce]
+Industry: [["E-commerce"]]
 
 Priority: High
 
 Core Area: Checkout
 
-Scope: Session
+Scope: User
 
-Measure Type: percentage
+Measure Type: Percentage
 
-Aggregation Window: Time based - Daily
+Aggregation Window: Daily, Weekly, Monthly
 
 GA4 Event: |
   purchase
@@ -31,62 +32,283 @@ Adobe Event: |
   purchase
 
 W3 Data Layer: |
-  {"cart":{"items":[{"price":100,"quantity":1,"productID":"abc123","productName":"Product Name"}],"total":100,"cartID":"12345","currency":"USD"},"event":"purchase"}
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "purchase"
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "T-100245",
+      "total": {
+        "basePrice": 118,
+        "transactionTotal": 129.99,
+        "currency": "USD"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-4471",
+            "productName": "Trail Running Shoe"
+          },
+          "category": {
+            "primaryCategory": "Footwear"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 118
+          }
+        }
+      ]
+    },
+    "cart": {
+      "cartID": "C-88213"
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "U-55190"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
 GA4 Data Layer: |
-  {"event":"purchase","ecommerce":{"items":[{"price":100,"item_id":"abc123","quantity":1,"item_name":"Product Name"}],"value":100,"currency":"USD","transaction_id":"12345"}}
+  {
+    "event": "purchase",
+    "user_id": "U-55190",
+    "ecommerce": {
+      "transaction_id": "T-100245",
+      "value": 129.99,
+      "currency": "USD",
+      "tax": 8.99,
+      "shipping": 3,
+      "items": [
+        {
+          "item_id": "SKU-4471",
+          "item_name": "Trail Running Shoe",
+          "item_category": "Footwear",
+          "price": 118,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
 Adobe Client Data Layer: |
-  {"event":"purchase","ecommerce":{"purchase":{"items":[{"price":100,"quantity":1,"productID":"abc123","productName":"Product Name"}],"total":100,"currency":"USD","transactionID":"12345"}}}
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "user": {
+      "profileID": "U-55190"
+    },
+    "cart": {
+      "cartID": "C-88213"
+    },
+    "transaction": {
+      "purchaseID": "T-100245",
+      "total": 129.99,
+      "currency": "USD",
+      "products": [
+        {
+          "productID": "SKU-4471",
+          "productName": "Trail Running Shoe",
+          "category": "Footwear",
+          "quantity": 1,
+          "price": 118
+        }
+      ]
+    }
+  }
 
 XDM Mapping: |
-  {"_experience":{"commerce":{"order":{"products":[{"SKU":"abc123","name":"Product Name","quantity":1,"priceTotal":100}],"priceTotal":100,"purchaseID":"12345","currencyCode":"USD"}}}}
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100245",
+        "priceTotal": 129.99,
+        "currencyCode": "USD"
+      },
+      "cart": {
+        "cartID": "C-88213"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-4471",
+        "name": "Trail Running Shoe",
+        "quantity": 1,
+        "priceTotal": 118
+      }
+    ],
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "U-55190",
+          "primary": false
+        }
+      ]
+    }
+  }
 
 Google Analytics SQL: |
   -- ==========================================
   -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
-  SELECT 
-    COUNTIF(event_name = 'purchase') / COUNTIF(event_name = 'add_to_cart') AS cart_conversion_rate
-  FROM 
-    `your-project.analytics_123456789.events_*`,
-    UNNEST(event_params) AS params
-  WHERE 
-    _TABLE_SUFFIX BETWEEN '20230101' AND '20231231'
-    AND (event_name = 'purchase' OR event_name = 'add_to_cart')
-    AND params.key = 'event_name';
+  -- Cart conversion rate: carts created (user x day, first add_to_cart) that purchase within 7 days, in any session.
+  -- Carts: 2026-01-01..2026-01-31; purchase lookup extended 7 days to 2026-02-07.
+  WITH carts AS (
+    SELECT
+      COALESCE(user_id, user_pseudo_id) AS shopper_id,
+      PARSE_DATE('%Y%m%d', event_date) AS cart_date,
+      MIN(event_timestamp) AS first_cart_ts
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN '20260101' AND '20260131'
+      AND event_name = 'add_to_cart'
+    GROUP BY shopper_id, cart_date
+  ),
+  purchase_events AS (
+    SELECT
+      COALESCE(user_id, user_pseudo_id) AS shopper_id,
+      event_timestamp AS purchase_ts,
+      MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) AS param_transaction_id,
+      ANY_VALUE(ecommerce.transaction_id) AS ecommerce_transaction_id
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN '20260101' AND '20260207'
+      AND event_name = 'purchase'
+    GROUP BY shopper_id, purchase_ts
+  ),
+  purchases AS (
+    -- one row per transaction (deduplicated), earliest occurrence
+    SELECT
+      shopper_id,
+      COALESCE(ecommerce_transaction_id, param_transaction_id) AS transaction_id,
+      MIN(purchase_ts) AS purchase_ts
+    FROM purchase_events
+    WHERE COALESCE(ecommerce_transaction_id, param_transaction_id) IS NOT NULL
+      AND COALESCE(ecommerce_transaction_id, param_transaction_id) NOT IN ('', '(not set)')
+    GROUP BY shopper_id, transaction_id
+  ),
+  cart_outcomes AS (
+    SELECT
+      c.shopper_id,
+      c.cart_date,
+      LOGICAL_OR(
+        p.purchase_ts >= c.first_cart_ts
+        AND p.purchase_ts < c.first_cart_ts + 7 * 24 * 60 * 60 * 1000000
+      ) AS converted
+    FROM carts AS c
+    LEFT JOIN purchases AS p
+      ON p.shopper_id = c.shopper_id
+    GROUP BY c.shopper_id, c.cart_date
+  )
+  SELECT
+    cart_date,
+    COUNT(*) AS carts_created,
+    COUNTIF(IFNULL(converted, FALSE)) AS converted_carts,
+    ROUND(SAFE_DIVIDE(COUNTIF(IFNULL(converted, FALSE)), COUNT(*)) * 100, 2) AS cart_conversion_rate_pct
+  FROM cart_outcomes
+  GROUP BY cart_date
+  ORDER BY cart_date;
 
 AEP Query Service SQL: |
   -- ==========================================
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
-  SELECT 
-    SUM(CASE WHEN event = 'purchase' THEN 1 ELSE 0 END) / SUM(CASE WHEN event = 'add_to_cart' THEN 1 ELSE 0 END) AS cart_conversion_rate
-  FROM 
-    aep_backend_dataset.events
-  WHERE 
-    event IN ('purchase', 'add_to_cart')
-    AND event_timestamp BETWEEN '2023-01-01T00:00:00Z' AND '2023-12-31T23:59:59Z';
+  -- Cart conversion rate: carts created (person x day, first commerce.productListAdds) that purchase within 7 days, in any session.
+  -- Carts: 2026-01-01..2026-01-31; purchase lookup extended 7 days to 2026-02-07.
+  WITH carts AS (
+    SELECT
+      COALESCE(identityMap['CRMID'][0].id, endUserIDs._experience.ecid.id) AS shopper_id,
+      CAST(timestamp AS DATE) AS cart_date,
+      MIN(timestamp) AS first_cart_ts
+    FROM web_experience_events
+    WHERE eventType = 'commerce.productListAdds'
+      AND timestamp >= TIMESTAMP '2026-01-01 00:00:00'
+      AND timestamp <  TIMESTAMP '2026-02-01 00:00:00'
+    GROUP BY 1, 2
+  ),
+  purchases AS (
+    SELECT
+      COALESCE(identityMap['CRMID'][0].id, endUserIDs._experience.ecid.id) AS shopper_id,
+      commerce.order.purchaseID AS purchase_id,
+      MIN(timestamp) AS purchase_ts
+    FROM web_experience_events
+    WHERE eventType = 'commerce.purchases'
+      AND commerce.order.purchaseID IS NOT NULL
+      AND commerce.order.purchaseID <> ''
+      AND timestamp >= TIMESTAMP '2026-01-01 00:00:00'
+      AND timestamp <  TIMESTAMP '2026-02-08 00:00:00'
+    GROUP BY 1, 2
+  ),
+  cart_outcomes AS (
+    SELECT
+      c.shopper_id,
+      c.cart_date,
+      MAX(CASE
+            WHEN p.purchase_ts >= c.first_cart_ts
+             AND p.purchase_ts <  c.first_cart_ts + INTERVAL 7 DAYS
+            THEN 1 ELSE 0
+          END) AS converted
+    FROM carts c
+    LEFT JOIN purchases p
+      ON p.shopper_id = c.shopper_id
+    GROUP BY c.shopper_id, c.cart_date
+  )
+  SELECT
+    cart_date,
+    COUNT(*) AS carts_created,
+    SUM(converted) AS converted_carts,
+    ROUND(100.0 * SUM(converted) / NULLIF(COUNT(*), 0), 2) AS cart_conversion_rate_pct
+  FROM cart_outcomes
+  GROUP BY cart_date
+  ORDER BY cart_date;
 
 Calculation Notes: |
-  Exclude sessions where carts are abandoned due to technical errors. Consider session timeout rules for accurate measurement.
+  1️⃣ Denominator is every cart created in the reporting period: one cart per user (stitched user_id where available, otherwise the device/ECID identifier) per calendar day, anchored on that day's first add_to_cart; no carts are excluded for later abandonment.
+  2️⃣ A cart counts as converted when the same user fires a purchase with a non-empty transaction_id at or after the cart's first add_to_cart and within 7 days (168 hours); the session boundary does not matter, which separates this KPI from the session-scoped cart-to-purchase-rate.
+  3️⃣ Extend the purchase lookup 7 days past the end of the reporting period, and treat the most recent 7 days as provisional until their window closes.
+  4️⃣ Deduplicate purchases on transaction_id and exclude test orders, internal traffic and fully refunded or cancelled orders flagged within the window.
+  5️⃣ One purchase can convert several carts from the same user inside the window (for example, carts built on Monday and Wednesday and bought on Thursday); report the rate on carts, not on orders.
+  6️⃣ Without cross-device identity stitching, carts built on one device and bought on another count as unconverted, so the rate is a lower bound; state the identity basis on the dashboard.
 
 Business Use Case: |
-  Executives use this KPI to identify and address barriers in the checkout process, aiming to increase sales by reducing cart abandonment.
+  1️⃣ The E-commerce Manager reviews the weekly rate against the session-scoped Cart-to-Purchase Rate; when the gap widens, the team treats it as deferred buying and sizes save-for-later, persistent-cart and cross-device login features.
+  2️⃣ The CRM & Lifecycle Marketing team uses the share of carts converting in days 2–7 to set the timing and cadence of abandoned-cart email and push sequences, and runs holdout tests on the incremental lift.
+  3️⃣ The Merchandising team compares the rate by product category and price band; categories with low cart conversion get price-match messaging, shipping-threshold offers or stock-availability fixes.
+  4️⃣ The Head of Digital Commerce reports the monthly rate by device and traffic source in the trading review and opens a checkout friction investigation when it falls more than 2 points below the trailing 13-week average.
 
+Dependencies:
+  Events: [add-to-cart, purchase]
+  Metrics: [add-to-cart]
+  KPIs: [cart-to-purchase-rate]
 
-Source Data: Digital Analytics
+Source Data: Digital Analytics (GA4)
 
 Report Attributes: |
-  ["device type","geography","traffic source"]
+  device category; traffic source / medium; product category; new vs returning customer; country; days from cart to purchase
 
-Dashboard Usage: [E-commerce Performance Dashboard]
+Dashboard Usage: [E-commerce Performance Dashboard, Cart & Checkout Funnel Dashboard, Abandoned Cart Recovery Dashboard]
 
 Segment Eligibility: |
   true
 
+Related KPIs: [cart-to-purchase-rate, cart-abandonment-rate, add-to-cart-rate, checkout-completion-rate, purchase-conversion-rate]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -98,4 +320,5 @@ Created At: 2026-06-17T00:47:23.566+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T16:55:58.152+00:00
 
