@@ -1,0 +1,443 @@
+# KPI: Search-to-Purchase Conversion Rate
+# Generated: 2026-09-18T03:41:41.540Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Search-to-Purchase Conversion Rate
+Formula: (Sessions with ≥1 view_search_results followed later in the same session by ≥1 purchase / Sessions with ≥1 view_search_results) × 100
+
+Description: |
+  E-commerce specialisation of Search Conversion Rate (the Travel variant is Search-to-Booking Conversion Rate): the percentage of sessions with at least one site search that go on to complete a purchase later in the same session. It shows how well on-site search relevance, result ranking and merchandising rules turn stated shopping intent into orders, and is read against overall session conversion to size the commercial value of search.
+
+Category: Conversion
+
+Tags: [kpi, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Session
+
+Measure Type: Percentage
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "view_search_results",
+            "eventAction": "search",
+            "onsiteSearchTerm": "running shoes",
+            "onsiteSearchResults": 42
+          },
+          "category": {
+            "primaryCategory": "search"
+          }
+        },
+        {
+          "eventInfo": {
+            "eventName": "purchase",
+            "eventAction": "purchase"
+          },
+          "category": {
+            "primaryCategory": "checkout"
+          }
+        }
+      ],
+      "page": {
+        "pageInfo": {
+          "pageID": "order-confirmation",
+          "pageName": "checkout:order confirmation"
+        },
+        "category": {
+          "primaryCategory": "checkout",
+          "pageType": "order_confirmation"
+        }
+      },
+      "transaction": {
+        "transactionID": "T-100245",
+        "total": {
+          "basePrice": 129.98,
+          "currency": "USD",
+          "taxRate": 0.08,
+          "shipping": 5.99,
+          "transactionTotal": 146.37
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU-48213",
+              "productName": "Trail Running Shoe"
+            },
+            "category": {
+              "primaryCategory": "Footwear",
+              "subCategory1": "Running"
+            },
+            "attributes": {
+              "itemListID": "search_results",
+              "itemListName": "Search Results"
+            },
+            "quantity": 2,
+            "price": {
+              "basePrice": 64.99,
+              "currency": "USD"
+            }
+          }
+        ]
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "view_search_results": {
+      "event": "view_search_results",
+      "search_term": "running shoes"
+    },
+    "purchase": {
+      "event": "purchase",
+      "ecommerce": {
+        "transaction_id": "T-100245",
+        "value": 146.37,
+        "currency": "USD",
+        "tax": 10.4,
+        "shipping": 5.99,
+        "items": [
+          {
+            "item_id": "SKU-48213",
+            "item_name": "Trail Running Shoe",
+            "item_brand": "Acme",
+            "item_category": "Footwear",
+            "item_category2": "Running",
+            "item_list_id": "search_results",
+            "item_list_name": "Search Results",
+            "index": 3,
+            "price": 64.99,
+            "quantity": 2
+          }
+        ]
+      }
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "view_search_results": {
+      "event": "view_search_results",
+      "eventInfo": {
+        "eventName": "view_search_results"
+      },
+      "search": {
+        "searchTerm": "running shoes",
+        "searchResultsCount": 42
+      }
+    },
+    "purchase": {
+      "event": "purchase",
+      "eventInfo": {
+        "eventName": "purchase"
+      },
+      "transaction": {
+        "purchaseID": "T-100245",
+        "total": 146.37,
+        "currency": "USD",
+        "tax": 10.4,
+        "shipping": 5.99,
+        "items": [
+          {
+            "sku": "SKU-48213",
+            "name": "Trail Running Shoe",
+            "category": "Footwear/Running",
+            "listName": "Search Results",
+            "quantity": 2,
+            "price": 64.99
+          }
+        ]
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "view_search_results": {
+      "eventType": "web.webpagedetails.pageViews",
+      "web": {
+        "webPageDetails": {
+          "name": "search:results",
+          "pageViews": {
+            "value": 1
+          }
+        }
+      },
+      "_experience": {
+        "analytics": {
+          "event1to100": {
+            "event5": {
+              "value": 1
+            }
+          },
+          "customDimensions": {
+            "eVars": {
+              "eVar5": "running shoes"
+            }
+          }
+        }
+      }
+    },
+    "purchase": {
+      "eventType": "commerce.purchases",
+      "commerce": {
+        "purchases": {
+          "value": 1
+        },
+        "order": {
+          "purchaseID": "T-100245",
+          "priceTotal": 146.37,
+          "currencyCode": "USD",
+          "taxAmount": 10.4
+        },
+        "shipping": {
+          "shippingAmount": 5.99
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-48213",
+          "name": "Trail Running Shoe",
+          "productCategories": [
+            {
+              "categoryID": "footwear-running"
+            }
+          ],
+          "quantity": 2,
+          "priceTotal": 129.98,
+          "currencyCode": "USD"
+        }
+      ],
+      "_experience": {
+        "analytics": {
+          "customDimensions": {
+            "eVars": {
+              "eVar6": "Search Results"
+            }
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Search-to-Purchase Conversion Rate by session start date.
+  -- Session key = user_pseudo_id + ga_session_id; numerator = search sessions with a qualified purchase after the first search.
+  -- Window: last 28 complete days, excluding the trailing 3 days still receiving late hits.
+  WITH base_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      e.user_pseudo_id,
+      e.event_name,
+      e.event_timestamp,
+      p.ga_session_id,
+      TRIM(p.search_term) AS search_term,
+      p.debug_mode,
+      p.traffic_type,
+      e.ecommerce.transaction_id AS transaction_id,
+      e.ecommerce.purchase_revenue AS purchase_revenue
+    FROM `your-project.analytics_123456789.events_*` AS e,
+    UNNEST([(
+      SELECT AS STRUCT
+        MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+        MAX(IF(ep.key = 'search_term', ep.value.string_value, NULL)) AS search_term,
+        MAX(IF(ep.key = 'debug_mode', COALESCE(ep.value.int_value, SAFE_CAST(ep.value.string_value AS INT64)), NULL)) AS debug_mode,
+        MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type
+      FROM UNNEST(e.event_params) AS ep
+    )]) AS p
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 31 DAY))
+                              AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
+      AND e.event_name IN ('session_start', 'view_search_results', 'purchase')
+      AND COALESCE(e.device.web_info.hostname, '') NOT LIKE '%staging%'
+  ),
+  clean_events AS (
+    SELECT
+      *,
+      CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING)) AS session_key
+    FROM base_events
+    WHERE ga_session_id IS NOT NULL
+      AND COALESCE(debug_mode, 0) = 0
+      AND COALESCE(traffic_type, '') <> 'internal'
+  ),
+  session_dates AS (
+    SELECT session_key, MIN(event_date) AS session_date
+    FROM clean_events
+    GROUP BY session_key
+  ),
+  search_sessions AS (
+    SELECT session_key, MIN(event_timestamp) AS first_search_ts
+    FROM clean_events
+    WHERE event_name = 'view_search_results'
+      AND search_term IS NOT NULL
+      AND search_term <> ''
+    GROUP BY session_key
+  ),
+  qualified_purchases AS (
+    SELECT session_key, event_timestamp
+    FROM clean_events
+    WHERE event_name = 'purchase'
+      AND transaction_id IS NOT NULL
+      AND transaction_id NOT IN ('', '(not set)')
+      AND NOT STARTS_WITH(UPPER(transaction_id), 'TEST')
+      AND purchase_revenue > 0
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1
+  ),
+  session_outcome AS (
+    SELECT
+      s.session_key,
+      d.session_date,
+      LOGICAL_OR(q.event_timestamp > s.first_search_ts) AS purchased_after_search
+    FROM search_sessions AS s
+    JOIN session_dates AS d USING (session_key)
+    LEFT JOIN qualified_purchases AS q USING (session_key)
+    GROUP BY s.session_key, d.session_date
+  )
+  SELECT
+    session_date,
+    COUNT(*) AS search_sessions,
+    COUNTIF(COALESCE(purchased_after_search, FALSE)) AS search_sessions_with_purchase,
+    ROUND(100 * SAFE_DIVIDE(COUNTIF(COALESCE(purchased_after_search, FALSE)), COUNT(*)), 2) AS search_to_purchase_conversion_rate_pct
+  FROM session_outcome
+  WHERE session_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 31 DAY)
+    AND session_date <= DATE_SUB(CURRENT_DATE(), INTERVAL 4 DAY)
+  GROUP BY session_date
+  ORDER BY session_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Search-to-Purchase Conversion Rate by visit start date on the web ExperienceEvent dataset.
+  -- Session key = ECID + visit number; numerator = search visits with a qualified purchase after the first search.
+  WITH clean_events AS (
+    SELECT
+      CONCAT(endUserIDs._experience.ecid.id, '.', CAST(_experience.analytics.session.num AS STRING)) AS session_key,
+      timestamp AS event_ts,
+      eventType,
+      _experience.analytics.event1to100.event5.value AS search_event_value,
+      TRIM(_experience.analytics.customDimensions.eVars.eVar5) AS search_term,
+      commerce.order.purchaseID AS purchase_id,
+      commerce.order.priceTotal AS order_total,
+      commerce.purchases.value AS purchases_value
+    FROM aep_web_experience_events
+    WHERE timestamp >= date_sub(current_date(), 31)
+      AND timestamp < date_sub(current_date(), 3)
+      AND endUserIDs._experience.ecid.id IS NOT NULL
+      AND _experience.analytics.session.num IS NOT NULL
+      AND COALESCE(web.webPageDetails.URL, '') NOT LIKE '%staging%'
+  ),
+  session_dates AS (
+    SELECT session_key, to_date(MIN(event_ts)) AS session_date
+    FROM clean_events
+    GROUP BY session_key
+  ),
+  search_sessions AS (
+    SELECT session_key, MIN(event_ts) AS first_search_ts
+    FROM clean_events
+    WHERE search_event_value > 0
+      AND search_term IS NOT NULL
+      AND search_term <> ''
+      AND COALESCE(eventType, '') <> 'commerce.purchases'
+      AND COALESCE(purchases_value, 0) = 0
+    GROUP BY session_key
+  ),
+  ranked_purchases AS (
+    SELECT
+      session_key,
+      event_ts,
+      ROW_NUMBER() OVER (PARTITION BY purchase_id ORDER BY event_ts) AS rn
+    FROM clean_events
+    WHERE (eventType = 'commerce.purchases' OR purchases_value > 0)
+      AND purchase_id IS NOT NULL
+      AND purchase_id <> ''
+      AND UPPER(purchase_id) NOT LIKE 'TEST%'
+      AND order_total > 0
+  ),
+  session_outcome AS (
+    SELECT
+      s.session_key,
+      d.session_date,
+      MAX(CASE WHEN p.event_ts > s.first_search_ts THEN 1 ELSE 0 END) AS purchased_after_search
+    FROM search_sessions s
+    JOIN session_dates d ON d.session_key = s.session_key
+    LEFT JOIN ranked_purchases p ON p.session_key = s.session_key AND p.rn = 1
+    GROUP BY s.session_key, d.session_date
+  )
+  SELECT
+    session_date,
+    COUNT(*) AS search_sessions,
+    SUM(purchased_after_search) AS search_sessions_with_purchase,
+    ROUND(100.0 * SUM(purchased_after_search) / NULLIF(COUNT(*), 0), 2) AS search_to_purchase_conversion_rate_pct
+  FROM session_outcome
+  WHERE session_date <= date_sub(current_date(), 4)
+  GROUP BY session_date
+  ORDER BY session_date;
+
+Calculation Notes: |
+  1️⃣ Sequencing: the session key is user_pseudo_id + ga_session_id (Adobe: visitor ID + visit number). A session enters the numerator only when at least one purchase event_timestamp is strictly later than the session's first view_search_results event_timestamp; sessions whose only purchase precedes the first search (e.g. order placed, then a search for accessories) count in the denominator only.
+  2️⃣ Session boundary: 30-minute inactivity timeout (GA4 default; align the Adobe visit timeout to the same value). GA4 does not split sessions at midnight, so sessions crossing a date partition are attributed to the session start date. Search in one session followed by a purchase in a later session is out of scope here and belongs to a user-scope or lookback-window attribution view.
+  3️⃣ Search definition: count view_search_results (GA4 enhanced measurement, or the search event where the implementation fires it on result render) with a non-empty, trimmed search_term. Zero-result searches stay in the denominator because they are part of search performance. Exclude type-ahead suggestion impressions, facet or filter changes without a new query, and sort or pagination re-fires; the denominator is distinct sessions, so repeat searches never inflate it.
+  4️⃣ Purchase qualification: deduplicate on transaction_id so confirmation-page reloads do not create extra conversions, and drop purchases with a null transaction_id, test orders or value ≤ 0. Multiple orders in one session still count that session once. Later refunds and cancellations do not reverse the numerator; net outcomes are covered by the revenue and return KPIs.
+  5️⃣ Traffic hygiene: exclude known bots and spiders, internal and agency IP ranges, staff accounts, staging hostnames and events flagged debug_mode. Consent Mode modelled conversions are not present in the BigQuery export, so compare UI and warehouse figures only on observed data.
+  6️⃣ Search-influenced, not search-attributed: the purchased items do not have to come from the search results page. For item-level credit, use items where item_list_name / item_list_id identifies search results (Adobe: merchandising eVar with product syntax binding) and report that separately as search-attributed revenue.
+  7️⃣ Timing and thresholds: GA4 daily export tables can still receive late hits for up to 72 hours, so report only complete days and restate the trailing three days. Suppress term-level or segment-level rates when the denominator is under 100 search sessions, and trend on weekly grain to smooth weekday mix.
+
+Business Use Case: |
+  1️⃣ The Site Search Merchandising Manager reviews the weekly search-term breakdown and, for high-volume terms converting below the site-search average or returning zero results, adds synonyms, redirects and boost/bury rules in the search platform, then checks the rate for those terms the following week.
+  2️⃣ The Product team running a search relevance or vendor A/B test (e.g. Algolia, Bloomreach, Constructor) uses this KPI as the primary success metric and rolls out the challenger ranking only if the rate improves significantly without lowering average order value.
+  3️⃣ The E-commerce Director sees in the monthly trading review that the mobile rate is well below desktop and prioritises mobile search UX fixes (autocomplete, filter access, result imagery) in the next sprint plan.
+  4️⃣ The Marketing team takes internal search terms with a high search-to-purchase rate and low category coverage, and turns them into dedicated landing pages, paid search keywords and CRM campaign themes.
+
+Dependencies:
+  Events: [purchase]
+  Metrics: [site-searches]
+  Dimensions: [internal-search-term, device-category, traffic-source]
+  KPIs: [session]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Internal Search Term; Device Category; Traffic Source / Medium; New vs Returning Customer; Landing Page; Country; Item Category
+
+Dashboard Usage: [Site Search Performance, Merchandising Weekly Trading Review, E-commerce Conversion Funnel Overview]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [search-to-booking-conversion-rate, order-conversion-rate-visit, add-to-cart-rate, purchase-conversion-rate, conversion-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-16T17:36:45.914+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-18T03:41:41.238+00:00
+
