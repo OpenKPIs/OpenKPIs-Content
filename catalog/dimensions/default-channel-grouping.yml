@@ -1,7 +1,7 @@
 # Dimension: Default Channel Grouping
-# Generated: 2026-09-18T17:12:22.834Z
+# Generated: 2026-09-18T17:12:32.155Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Default Channel Grouping
 
@@ -10,31 +10,403 @@ Description: |
 
 Category: Acquisition
 
+Tags: [dimension, E-commerce: Top-of-Funnel & Marketing Acquisition]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Session
 
+Data Type: string
 
+Aggregation Window: Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  page_view
 
+Adobe Event: |
+  pageView
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "home",
+        "pageName": "home",
+        "destinationURL": "https://www.example.com/?utm_source=google&utm_medium=cpc&utm_campaign=spring_sale&gclid=Cj0KCQ",
+        "referringURL": "https://www.google.com/",
+        "sysEnv": "desktop"
+      },
+      "attributes": {
+        "sessionStart": true,
+        "trafficSource": {
+          "source": "google",
+          "medium": "cpc",
+          "campaign": "spring_sale",
+          "term": "running shoes",
+          "content": "text_ad_1",
+          "clickId": "gclid",
+          "channelGroup": "Paid Search"
+        }
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_location": "https://www.example.com/?utm_source=google&utm_medium=cpc&utm_campaign=spring_sale&gclid=Cj0KCQ",
+    "page_referrer": "https://www.google.com/",
+    "page_title": "Home",
+    "traffic_source": {
+      "source": "google",
+      "medium": "cpc",
+      "campaign": "spring_sale",
+      "term": "running shoes",
+      "content": "text_ad_1",
+      "click_id_type": "gclid"
+    },
+    "session_channel_group": "Paid Search"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "eventInfo": {
+      "path": "page.page-1"
+    },
+    "page": {
+      "page-1": {
+        "dc:title": "Home",
+        "xdm:URL": "https://www.example.com/?utm_source=google&utm_medium=cpc&utm_campaign=spring_sale&gclid=Cj0KCQ",
+        "xdm:referrer": "https://www.google.com/"
+      }
+    },
+    "marketing": {
+      "trackingCode": "google|cpc|spring_sale",
+      "source": "google",
+      "medium": "cpc",
+      "campaign": "spring_sale",
+      "channelGroup": "Paid Search"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web": {
+      "webPageDetails": {
+        "URL": "https://www.example.com/?utm_source=google&utm_medium=cpc&utm_campaign=spring_sale&gclid=Cj0KCQ",
+        "name": "home",
+        "pageViews": {
+          "value": 1
+        }
+      },
+      "webReferrer": {
+        "URL": "https://www.google.com/",
+        "type": "search_engine"
+      }
+    },
+    "marketing": {
+      "trackingCode": "google|cpc|spring_sale",
+      "campaignName": "spring_sale"
+    },
+    "channel": {
+      "_id": "https://ns.adobe.com/xdm/channels/paid-search",
+      "_type": "https://ns.adobe.com/xdm/channel-types/search",
+      "mediaType": "paid",
+      "mediaAction": "clicks"
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "Paid Search"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Default Channel Grouping (session scope): first event carrying traffic-source data wins,
+  -- falling back to the landing referrer, then (direct)/(none). Ordered first-match rule set.
+  WITH events AS (
+    SELECT
+      user_pseudo_id,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      PARSE_DATE('%Y%m%d', event_date) AS event_dt,
+      event_timestamp,
+      event_name,
+      ecommerce.purchase_revenue AS purchase_revenue,
+      LOWER(TRIM(collected_traffic_source.manual_source)) AS utm_source,
+      LOWER(TRIM(collected_traffic_source.manual_medium)) AS utm_medium,
+      LOWER(TRIM(collected_traffic_source.manual_campaign_name)) AS utm_campaign,
+      collected_traffic_source.gclid AS gclid,
+      collected_traffic_source.dclid AS dclid,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_referrer') AS page_referrer
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+  ),
+  sessions AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      MIN(event_dt) AS session_date,
+      ARRAY_AGG(
+        IF(utm_source IS NOT NULL OR utm_medium IS NOT NULL OR gclid IS NOT NULL OR dclid IS NOT NULL,
+           STRUCT(utm_source, utm_medium, utm_campaign, gclid, dclid), NULL)
+        IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS ts,
+      ARRAY_AGG(page_referrer IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS landing_referrer,
+      MAX(IF(event_name = 'purchase', 1, 0)) AS has_purchase,
+      SUM(IF(event_name = 'purchase', COALESCE(purchase_revenue, 0), 0)) AS session_revenue
+    FROM events
+    WHERE ga_session_id IS NOT NULL
+    GROUP BY user_pseudo_id, ga_session_id
+  ),
+  referrers AS (
+    SELECT
+      s.*,
+      IF(REGEXP_CONTAINS(LOWER(NET.HOST(landing_referrer)),
+           r'(^|[.])(example[.]com|paypal[.]com|klarna[.]com|afterpay[.]com|shop[.]app|adyen[.]com|stripe[.]com|accounts[.]google[.]com)$'),
+         NULL, LOWER(NET.HOST(landing_referrer))) AS ref_host
+    FROM sessions AS s
+  ),
+  source_medium AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      session_date,
+      has_purchase,
+      session_revenue,
+      COALESCE(ts.utm_source,
+               IF(ts.gclid IS NOT NULL, 'google', NULL),
+               IF(ts.dclid IS NOT NULL, 'dbm', NULL),
+               ref_host,
+               '(direct)') AS src,
+      COALESCE(ts.utm_medium,
+               IF(ts.gclid IS NOT NULL, 'cpc', NULL),
+               IF(ts.dclid IS NOT NULL, 'cpm', NULL),
+               IF(REGEXP_CONTAINS(ref_host, r'(^|[.])(google|bing|yahoo|baidu|duckduckgo|yandex|ecosia|naver|ask|aol|startpage|qwant|seznam)[.]'), 'organic', NULL),
+               IF(ref_host IS NOT NULL, 'referral', NULL),
+               '(none)') AS med,
+      COALESCE(ts.utm_campaign, '(not set)') AS cmp
+    FROM referrers
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN src = '(direct)' AND med IN ('(none)', '(not set)') THEN 'Direct'
+        WHEN REGEXP_CONTAINS(cmp, r'cross-network') THEN 'Cross-network'
+        WHEN (REGEXP_CONTAINS(src, r'(^|[^a-z])(shopping|amazon|ebay|etsy|walmart|target|igshopping)([^a-z]|$)')
+              OR REGEXP_CONTAINS(cmp, r'^(.*(([^a-df-z]|^)shop|shopping).*)$'))
+             AND REGEXP_CONTAINS(med, r'^(.*cp.*|ppc|retargeting|paid.*)$') THEN 'Paid Shopping'
+        WHEN REGEXP_CONTAINS(src, r'(^|[.])(google|bing|yahoo|baidu|duckduckgo|yandex|ecosia|naver|ask|aol|startpage|qwant|seznam)([.]|$)')
+             AND REGEXP_CONTAINS(med, r'^(.*cp.*|ppc|retargeting|paid.*)$') THEN 'Paid Search'
+        WHEN REGEXP_CONTAINS(src, r'(^|[.])(facebook|fb|instagram|ig|meta|linkedin|lnkd|twitter|t[.]co|x|pinterest|reddit|snapchat|tiktok|threads)([.]|$)')
+             AND REGEXP_CONTAINS(med, r'^(.*cp.*|ppc|retargeting|paid.*)$') THEN 'Paid Social'
+        WHEN REGEXP_CONTAINS(src, r'(^|[.])(youtube|youtu[.]be|vimeo|twitch|dailymotion)([.]|$)')
+             AND REGEXP_CONTAINS(med, r'^(.*cp.*|ppc|retargeting|paid.*)$') THEN 'Paid Video'
+        WHEN med IN ('display', 'banner', 'expandable', 'interstitial', 'cpm') THEN 'Display'
+        WHEN REGEXP_CONTAINS(med, r'^(.*cp.*|ppc|retargeting|paid.*)$') THEN 'Paid Other'
+        WHEN REGEXP_CONTAINS(src, r'(^|[^a-z])(shopping|amazon|ebay|etsy|walmart|target|igshopping)([^a-z]|$)')
+             OR REGEXP_CONTAINS(cmp, r'^(.*(([^a-df-z]|^)shop|shopping).*)$') THEN 'Organic Shopping'
+        WHEN REGEXP_CONTAINS(src, r'(^|[.])(facebook|fb|instagram|ig|meta|linkedin|lnkd|twitter|t[.]co|x|pinterest|reddit|snapchat|tiktok|threads)([.]|$)')
+             OR med IN ('social', 'social-network', 'social-media', 'sm', 'social network', 'social media') THEN 'Organic Social'
+        WHEN REGEXP_CONTAINS(src, r'(^|[.])(youtube|youtu[.]be|vimeo|twitch|dailymotion)([.]|$)')
+             OR REGEXP_CONTAINS(med, r'video') THEN 'Organic Video'
+        WHEN REGEXP_CONTAINS(src, r'(^|[.])(google|bing|yahoo|baidu|duckduckgo|yandex|ecosia|naver|ask|aol|startpage|qwant|seznam)([.]|$)')
+             OR med = 'organic' THEN 'Organic Search'
+        WHEN med IN ('referral', 'app', 'link') THEN 'Referral'
+        WHEN REGEXP_CONTAINS(src, r'email|e-mail|e_mail|e mail') OR REGEXP_CONTAINS(med, r'email|e-mail|e_mail|e mail') THEN 'Email'
+        WHEN med = 'affiliate' THEN 'Affiliates'
+        WHEN med = 'audio' THEN 'Audio'
+        WHEN src = 'sms' OR med = 'sms' THEN 'SMS'
+        WHEN REGEXP_CONTAINS(med, r'(mobile|notification)$') OR src = 'firebase' THEN 'Mobile Push Notifications'
+        ELSE 'Unassigned'
+      END AS default_channel_group
+    FROM source_medium
+  )
+  SELECT
+    session_date,
+    default_channel_group,
+    COUNT(*) AS sessions,
+    COUNT(DISTINCT user_pseudo_id) AS users,
+    SUM(has_purchase) AS purchasing_sessions,
+    SAFE_DIVIDE(SUM(has_purchase), COUNT(*)) AS session_conversion_rate,
+    SUM(session_revenue) AS purchase_revenue,
+    SAFE_DIVIDE(COUNT(*), SUM(COUNT(*)) OVER (PARTITION BY session_date)) AS share_of_sessions
+  FROM classified
+  GROUP BY session_date, default_channel_group
+  ORDER BY session_date, sessions DESC
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Default Channel Grouping (session scope): visits built with a 30-minute inactivity timeout;
+  -- channel resolved from the landing hit URL parameters and referrer with the same ordered rule set.
+  WITH hits AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS visitor_id,
+      timestamp,
+      eventType,
+      LOWER(TRIM(web.webPageDetails.URL)) AS page_url,
+      LOWER(TRIM(web.webReferrer.URL)) AS referrer_url,
+      COALESCE(commerce.purchases.value, 0) AS purchase_count,
+      COALESCE(commerce.order.priceTotal, 0) AS order_total,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY endUserIDs._experience.ecid.id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 28)
+      AND timestamp < current_date()
+      AND endUserIDs._experience.ecid.id IS NOT NULL
+  ),
+  landing AS (
+    SELECT
+      visitor_id,
+      session.num AS session_num,
+      to_date(timestamp) AS session_date,
+      page_url,
+      referrer_url,
+      ROW_NUMBER() OVER (PARTITION BY visitor_id, session.num ORDER BY timestamp) AS hit_rank
+    FROM hits
+  ),
+  session_outcomes AS (
+    SELECT
+      visitor_id,
+      session.num AS session_num,
+      MAX(CASE WHEN purchase_count > 0 THEN 1 ELSE 0 END) AS has_purchase,
+      SUM(CASE WHEN purchase_count > 0 THEN order_total ELSE 0 END) AS session_revenue
+    FROM hits
+    GROUP BY visitor_id, session.num
+  ),
+  parsed AS (
+    SELECT
+      l.visitor_id,
+      l.session_num,
+      l.session_date,
+      NULLIF(regexp_extract(l.page_url, '[?&]utm_source=([^&#]*)', 1), '') AS utm_source,
+      NULLIF(regexp_extract(l.page_url, '[?&]utm_medium=([^&#]*)', 1), '') AS utm_medium,
+      NULLIF(regexp_extract(l.page_url, '[?&]utm_campaign=([^&#]*)', 1), '') AS utm_campaign,
+      CASE WHEN l.page_url RLIKE '[?&](gclid|wbraid|gbraid)=' THEN 1 ELSE 0 END AS has_gclid,
+      CASE WHEN l.page_url RLIKE '[?&]dclid=' THEN 1 ELSE 0 END AS has_dclid,
+      CASE
+        WHEN l.referrer_url RLIKE '^https?://([^/:?#]+[.])?(example[.]com|paypal[.]com|klarna[.]com|afterpay[.]com|shop[.]app|adyen[.]com|stripe[.]com|accounts[.]google[.]com)([/:?#]|$)' THEN NULL
+        ELSE NULLIF(regexp_extract(l.referrer_url, '^https?://([^/:?#]+)', 1), '')
+      END AS ref_host
+    FROM landing AS l
+    WHERE l.hit_rank = 1
+  ),
+  source_medium AS (
+    SELECT
+      p.visitor_id,
+      p.session_num,
+      p.session_date,
+      o.has_purchase,
+      o.session_revenue,
+      COALESCE(p.utm_source,
+               CASE WHEN p.has_gclid = 1 THEN 'google' END,
+               CASE WHEN p.has_dclid = 1 THEN 'dbm' END,
+               p.ref_host,
+               '(direct)') AS src,
+      COALESCE(p.utm_medium,
+               CASE WHEN p.has_gclid = 1 THEN 'cpc' END,
+               CASE WHEN p.has_dclid = 1 THEN 'cpm' END,
+               CASE WHEN p.ref_host RLIKE '(^|[.])(google|bing|yahoo|baidu|duckduckgo|yandex|ecosia|naver|ask|aol|startpage|qwant|seznam)[.]' THEN 'organic' END,
+               CASE WHEN p.ref_host IS NOT NULL THEN 'referral' END,
+               '(none)') AS med,
+      COALESCE(p.utm_campaign, '(not set)') AS cmp
+    FROM parsed AS p
+    JOIN session_outcomes AS o
+      ON o.visitor_id = p.visitor_id
+     AND o.session_num = p.session_num
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN src = '(direct)' AND med IN ('(none)', '(not set)') THEN 'Direct'
+        WHEN cmp RLIKE 'cross-network' THEN 'Cross-network'
+        WHEN (src RLIKE '(^|[^a-z])(shopping|amazon|ebay|etsy|walmart|target|igshopping)([^a-z]|$)'
+              OR cmp RLIKE '^(.*(([^a-df-z]|^)shop|shopping).*)$')
+             AND med RLIKE '^(.*cp.*|ppc|retargeting|paid.*)$' THEN 'Paid Shopping'
+        WHEN src RLIKE '(^|[.])(google|bing|yahoo|baidu|duckduckgo|yandex|ecosia|naver|ask|aol|startpage|qwant|seznam)([.]|$)'
+             AND med RLIKE '^(.*cp.*|ppc|retargeting|paid.*)$' THEN 'Paid Search'
+        WHEN src RLIKE '(^|[.])(facebook|fb|instagram|ig|meta|linkedin|lnkd|twitter|t[.]co|x|pinterest|reddit|snapchat|tiktok|threads)([.]|$)'
+             AND med RLIKE '^(.*cp.*|ppc|retargeting|paid.*)$' THEN 'Paid Social'
+        WHEN src RLIKE '(^|[.])(youtube|youtu[.]be|vimeo|twitch|dailymotion)([.]|$)'
+             AND med RLIKE '^(.*cp.*|ppc|retargeting|paid.*)$' THEN 'Paid Video'
+        WHEN med IN ('display', 'banner', 'expandable', 'interstitial', 'cpm') THEN 'Display'
+        WHEN med RLIKE '^(.*cp.*|ppc|retargeting|paid.*)$' THEN 'Paid Other'
+        WHEN src RLIKE '(^|[^a-z])(shopping|amazon|ebay|etsy|walmart|target|igshopping)([^a-z]|$)'
+             OR cmp RLIKE '^(.*(([^a-df-z]|^)shop|shopping).*)$' THEN 'Organic Shopping'
+        WHEN src RLIKE '(^|[.])(facebook|fb|instagram|ig|meta|linkedin|lnkd|twitter|t[.]co|x|pinterest|reddit|snapchat|tiktok|threads)([.]|$)'
+             OR med IN ('social', 'social-network', 'social-media', 'sm', 'social network', 'social media') THEN 'Organic Social'
+        WHEN src RLIKE '(^|[.])(youtube|youtu[.]be|vimeo|twitch|dailymotion)([.]|$)'
+             OR med RLIKE 'video' THEN 'Organic Video'
+        WHEN src RLIKE '(^|[.])(google|bing|yahoo|baidu|duckduckgo|yandex|ecosia|naver|ask|aol|startpage|qwant|seznam)([.]|$)'
+             OR med = 'organic' THEN 'Organic Search'
+        WHEN med IN ('referral', 'app', 'link') THEN 'Referral'
+        WHEN src RLIKE 'email|e-mail|e_mail|e mail' OR med RLIKE 'email|e-mail|e_mail|e mail' THEN 'Email'
+        WHEN med = 'affiliate' THEN 'Affiliates'
+        WHEN med = 'audio' THEN 'Audio'
+        WHEN src = 'sms' OR med = 'sms' THEN 'SMS'
+        WHEN med RLIKE '(mobile|notification)$' OR src = 'firebase' THEN 'Mobile Push Notifications'
+        ELSE 'Unassigned'
+      END AS default_channel_group
+    FROM source_medium
+  )
+  SELECT
+    session_date,
+    default_channel_group,
+    COUNT(*) AS sessions,
+    COUNT(DISTINCT visitor_id) AS users,
+    SUM(has_purchase) AS purchasing_sessions,
+    CAST(SUM(has_purchase) AS DOUBLE) / NULLIF(COUNT(*), 0) AS session_conversion_rate,
+    SUM(session_revenue) AS purchase_revenue,
+    CAST(COUNT(*) AS DOUBLE) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY session_date), 0) AS share_of_sessions
+  FROM classified
+  GROUP BY session_date, default_channel_group
+  ORDER BY session_date, sessions DESC
 
+Calculation Notes: |
+  1️⃣ Rule precedence: rules are evaluated top-down and the first match wins, mirroring the GA4 order (Direct → Cross-network → Paid Shopping → Paid Search → Paid Social → Paid Video → Display → Paid Other → Organic Shopping → Organic Social → Organic Video → Organic Search → Referral → Email → Affiliates → Audio → SMS → Mobile Push Notifications → Unassigned); source, medium and campaign are lower-cased and trimmed before matching, and any change to rule order or the search/social/shopping/video source lists is versioned and never applied retroactively without a documented backfill.,2️⃣ Direct is assigned only when source = '(direct)' and medium IN ('(none)','(not set)'); sessions with populated parameters that match no rule land in Unassigned, never in Direct, and Unassigned share above 2–3% of sessions is treated as a UTM governance defect to be fixed at the campaign-tagging layer.,3️⃣ Auto-tagging precedence: a gclid, dclid, wbraid or gbraid on the landing URL overrides manual utm_* values and resolves to Paid Search, Paid Shopping or Cross-network (Performance Max campaigns whose name contains 'cross-network'); Paid Shopping requires a paid medium (regex ^(.*cp.*|ppc|retargeting|paid.*)$) combined with a shopping source or a campaign name matching the shopping pattern.,4️⃣ Session boundaries: 30-minute inactivity timeout with no midnight reset; unlike Universal Analytics, a GA4 session does NOT restart when a new campaign arrives mid-visit, so the channel is taken from the first event carrying traffic-source data, while Adobe Marketing Channel follows its own visit definition and the report-suite channel expiration (30 days by default), so cross-tool reconciliation is performed at session level, never on attributed conversions.,5️⃣ Reporting-grade attribution: GA4 UI reporting of Session default channel group applies last non-direct click with a 90-day lookback, so a returning (direct) session inherits the prior non-direct channel; the raw BigQuery export (collected_traffic_source) does not, and warehouse builds must use session_traffic_source_last_click or replicate the lookback explicitly, stating which convention a report uses.,6️⃣ Referral hygiene: payment and authentication hops (PayPal, Klarna, Afterpay, Shop Pay, Adyen/Stripe 3-D Secure, SSO providers) and the brand's own domains are excluded as unwanted referrals; otherwise returning checkout traffic opens a new Referral session and steals conversion credit from the originating paid or email channel.,7️⃣ Exclusions and edge cases: internal/employee IP ranges, QA environments and known bots are filtered before classification; marketplace and affiliate-network redirects (Awin, Impact, CJ) must carry medium = 'affiliate' to avoid being classed as Referral, and email clicks from app-based clients without UTMs fall to Direct and are recovered only through mandatory utm_medium = 'email' tagging on every send.
 
+Business Use Case: |
+  1️⃣ The Performance Marketing team reviews channel-level sessions, conversion rate and revenue every Monday; when a paid channel's (Paid Search, Paid Shopping, Paid Social) session conversion rate drops more than 15% week over week, they reallocate budget between Google Ads and Meta campaigns and pause the underperforming ad sets.,2️⃣ The Marketing Operations lead monitors the Unassigned and Direct shares daily; when Unassigned exceeds 3% of sessions or Direct jumps after a campaign launch, they audit the UTM taxonomy of the release, correct the tagging template and re-issue the affected links.,3️⃣ The CRM and Lifecycle team compares Email and SMS session revenue against send volume after every major campaign drop and suppresses segments whose click-to-session revenue falls below the program threshold for the next send.,4️⃣ The Affiliate Program Manager reconciles Affiliates-channel orders against the network's commission report at month end; when the network claims orders the site attributes to Paid Search or Direct, they dispute the overlapping commissions before payout.
 
+Dependencies:
+  Events: [session_start, page_view]
+  Dimensions: [traffic-source]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Session Source / Medium; Session Campaign; Landing Page; Device Category; Country; New vs Returning User
 
+Dashboard Usage: [Marketing Acquisition Performance, Channel ROAS & Budget Allocation, E-commerce Conversion Funnel by Channel, UTM Governance & Unassigned Traffic Monitor]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [first-touch-channel-grouping, traffic-source, landing-page, device-category]
 
+Derived Dimensions: [channel-media-type]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +414,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T17:12:22.404+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T17:12:31.741+00:00
 
