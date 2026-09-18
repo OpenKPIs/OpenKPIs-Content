@@ -1,7 +1,7 @@
 # Metric: Late Deliveries
-# Generated: 2026-09-18T17:21:43.349Z
+# Generated: 2026-09-18T17:21:52.397Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Late Deliveries
 Formula: COUNT(DISTINCT order_id) WHERE order_delivered_date_local > promised_delivery_date, where order_delivered_date_local = DATE(MAX(shipment.delivered_at) AT TIME ZONE ship_to_timezone) across all shipments of the order and promised_delivery_date is the Delivery Promise Date committed at order confirmation
@@ -11,6 +11,19 @@ Description: |
 
 Category: Operations
 
+Tags: [metric, Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
 
 
 
@@ -18,23 +31,167 @@ Category: Operations
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Source: backend OMS + carrier tracking tables (offline, no events_* export)
+  WITH delivered_scans AS (
+    SELECT
+      tracking_number,
+      status_code,
+      event_timestamp
+    FROM `your-project.carrier.tracking_events`
+    WHERE status_code IN ('DELIVERED', 'PROOF_OF_DELIVERY')
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY tracking_number, status_code, event_timestamp
+      ORDER BY ingested_at
+    ) = 1
+  ),
+  shipment_delivery AS (
+    SELECT
+      s.order_id,
+      s.shipment_id,
+      MIN(d.event_timestamp) AS delivered_at
+    FROM `your-project.oms.shipments` AS s
+    LEFT JOIN delivered_scans AS d
+      ON d.tracking_number = s.tracking_number
+    WHERE COALESCE(s.is_separately_promised_line, FALSE) = FALSE
+    GROUP BY s.order_id, s.shipment_id
+  ),
+  order_delivery AS (
+    SELECT
+      order_id,
+      COUNT(shipment_id) AS shipment_count,
+      COUNT(delivered_at) AS delivered_shipment_count,
+      MAX(delivered_at) AS last_delivered_at
+    FROM shipment_delivery
+    GROUP BY order_id
+  ),
+  eligible_orders AS (
+    SELECT
+      o.order_id,
+      o.shipping_tier,
+      DATE(od.last_delivered_at, o.ship_to_timezone) AS order_delivered_date_local,
+      COALESCE(o.customer_rescheduled_delivery_date, o.promised_delivery_date_max) AS promised_delivery_date
+    FROM `your-project.oms.orders` AS o
+    JOIN order_delivery AS od
+      ON od.order_id = o.order_id
+    WHERE od.shipment_count > 0
+      AND od.delivered_shipment_count = od.shipment_count
+      AND o.order_status NOT IN ('cancelled', 'refunded_before_shipment')
+      AND o.fulfillment_method NOT IN ('bopis', 'curbside', 'digital')
+      AND COALESCE(o.is_gift_card_only, FALSE) = FALSE
+      AND COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_employee_order, FALSE) = FALSE
+      AND COALESCE(o.is_marketplace_3p_fulfilled, FALSE) = FALSE
+  )
+  SELECT
+    order_delivered_date_local AS delivery_date,
+    shipping_tier,
+    COUNT(DISTINCT IF(order_delivered_date_local > promised_delivery_date, order_id, NULL)) AS late_deliveries,
+    COUNT(DISTINCT order_id) AS delivered_orders_with_promise
+  FROM eligible_orders
+  WHERE promised_delivery_date IS NOT NULL
+    AND order_delivered_date_local >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+  GROUP BY delivery_date, shipping_tier
+  ORDER BY delivery_date, shipping_tier
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Source: backend OMS + carrier tracking datasets ingested into AEP (aep_backend_dataset)
+  WITH delivered_scans AS (
+    SELECT tracking_number, status_code, event_timestamp
+    FROM (
+      SELECT
+        tracking_number,
+        status_code,
+        event_timestamp,
+        ROW_NUMBER() OVER (
+          PARTITION BY tracking_number, status_code, event_timestamp
+          ORDER BY ingested_at
+        ) AS rn
+      FROM aep_backend_dataset_carrier_tracking_events
+      WHERE status_code IN ('DELIVERED', 'PROOF_OF_DELIVERY')
+    ) dedup
+    WHERE rn = 1
+  ),
+  shipment_delivery AS (
+    SELECT
+      s.order_id,
+      s.shipment_id,
+      MIN(d.event_timestamp) AS delivered_at
+    FROM aep_backend_dataset_oms_shipments s
+    LEFT JOIN delivered_scans d
+      ON d.tracking_number = s.tracking_number
+    WHERE COALESCE(s.is_separately_promised_line, FALSE) = FALSE
+    GROUP BY s.order_id, s.shipment_id
+  ),
+  order_delivery AS (
+    SELECT
+      order_id,
+      COUNT(shipment_id) AS shipment_count,
+      COUNT(delivered_at) AS delivered_shipment_count,
+      MAX(delivered_at) AS last_delivered_at
+    FROM shipment_delivery
+    GROUP BY order_id
+  ),
+  eligible_orders AS (
+    SELECT
+      o.order_id,
+      o.shipping_tier,
+      TO_DATE(FROM_UTC_TIMESTAMP(od.last_delivered_at, o.ship_to_timezone)) AS order_delivered_date_local,
+      COALESCE(o.customer_rescheduled_delivery_date, o.promised_delivery_date_max) AS promised_delivery_date
+    FROM aep_backend_dataset_oms_orders o
+    JOIN order_delivery od
+      ON od.order_id = o.order_id
+    WHERE od.shipment_count > 0
+      AND od.delivered_shipment_count = od.shipment_count
+      AND o.order_status NOT IN ('cancelled', 'refunded_before_shipment')
+      AND o.fulfillment_method NOT IN ('bopis', 'curbside', 'digital')
+      AND COALESCE(o.is_gift_card_only, FALSE) = FALSE
+      AND COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_employee_order, FALSE) = FALSE
+      AND COALESCE(o.is_marketplace_3p_fulfilled, FALSE) = FALSE
+  )
+  SELECT
+    order_delivered_date_local AS delivery_date,
+    shipping_tier,
+    COUNT(DISTINCT CASE WHEN order_delivered_date_local > promised_delivery_date THEN order_id END) AS late_deliveries,
+    COUNT(DISTINCT order_id) AS delivered_orders_with_promise
+  FROM eligible_orders
+  WHERE promised_delivery_date IS NOT NULL
+    AND order_delivered_date_local >= DATE_SUB(CURRENT_DATE, 90)
+  GROUP BY order_delivered_date_local, shipping_tier
+  ORDER BY delivery_date, shipping_tier
 
+Calculation Notes: |
+  1️⃣ Promise baseline: the comparison uses the Delivery Promise Date (delivery-promise-date) snapshotted at order confirmation, taking the upper bound when the promise was displayed as a range (e.g. 'Arrives Jun 12-14' compares against Jun 14). Carrier- or merchant-initiated re-promises never overwrite the baseline; only a customer-initiated delivery reschedule replaces it, because the customer agreed to the new date.,2️⃣ Date-grain comparison in destination local time: delivered_at from the carrier DELIVERED scan is converted to the ship-to address time zone and truncated to a date before comparison, so a parcel scanned at 23:40 local time on the promise date is on time even if the UTC timestamp falls on the next day. Delivery-window or time-slot promises (e.g. 'by 9 PM') are out of scope for this date-level metric.,3️⃣ Split shipments: an order is late when its last shipment is delivered after the promise date (order is complete only when every item arrives); each order counts at most once regardless of how many packages were late. Where a line-level promise exists for backordered or pre-order items explicitly promised separately at checkout, those lines are evaluated against their own promise and excluded from the parent order's evaluation.,4️⃣ Delivered orders only: the metric counts an order only once a successful DELIVERED (or proof-of-delivery) status exists; failed attempts, 'available for pickup at carrier point' scans, returns-to-sender and lost parcels are not deliveries. Orders already past their promise date but still in transit are tracked as an open 'past due, undelivered' backlog and enter this count only on the day they are delivered.,5️⃣ Exclusions: cancelled and fully refunded-before-shipment orders, buy-online-pick-up-in-store and curbside orders (measured by Pickup Completion Rate), digital and gift-card-only orders, test and internal employee orders, and marketplace third-party-fulfilled orders when the merchant does not own the promise. Orders with a NULL promise date are excluded and reported separately as a data-quality exception rather than silently treated as on time.,6️⃣ Period attribution and restatement: the order is attributed to the reporting period of its delivery date, not the order date, so it reconciles with the numerator/denominator of Shipment On-Time Delivery Rate (Late Deliveries = delivered orders with a valid promise - on-time deliveries). Carrier scan files can arrive up to 72 hours late, so daily figures are restated on a rolling 7-day window and a month is locked 14 days after month end.,7️⃣ No session logic applies: this is a backend, order-grain measure sourced from the OMS order header and carrier tracking events, so web session timeouts, consent state and client-side sampling have no effect on the count; de-duplicate carrier webhook retries on (tracking_number, status_code, event_timestamp) before evaluation.
 
+Business Use Case: |
+  1️⃣ The Fulfillment & Carrier Operations manager reviews Late Deliveries by carrier, service level and origin distribution center in the weekly carrier scorecard; when a carrier-lane combination exceeds its contracted late volume for two consecutive weeks, the manager files guaranteed-service refund claims and shifts allocation to the alternate carrier in the rate-shopping rules.,2️⃣ The Customer Service team lead receives the daily list of orders that crossed the promise date overnight and triggers proactive delay emails plus shipping-fee credits for Express and Next-Day tiers before the customer contacts support, reducing WISMO contacts and chargebacks.,3️⃣ The E-commerce Product owner responsible for the delivery-date promise engine compares Late Deliveries by destination region and shipping tier against the promise shown at checkout; when late volume concentrates in specific ZIP-code zones, the owner adds transit-day padding for those zones in the next release rather than widening promises site-wide.,4️⃣ Finance uses the monthly locked Late Deliveries count on guaranteed shipping tiers to accrue expected shipping-fee refunds and to reconcile carrier money-back-guarantee credits received against the invoices audited for that month.
 
+Dependencies:
+  Events: [delivery-confirmation]
+  Dimensions: [delivery-promise-date]
 
+Source Data: Backend: Order Management (OMS) + Carrier Tracking Events
 
+Report Attributes: |
+  Carrier; Shipping Tier; Delivery Region; Fulfillment Method; Distribution Center; Delivery Promise Date; Order Status
 
+Dashboard Usage: [Carrier Performance Scorecard, Post-Purchase Delivery Experience, Daily Fulfillment Operations Review, Customer Service Proactive Outreach Queue]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [average-delivery-time, damaged-shipment-count, shipment-volume]
 
+Derived KPIs: [shipment-on-time-delivery-rate]
 
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +201,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T17:21:42.798+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T17:21:51.855+00:00
 
