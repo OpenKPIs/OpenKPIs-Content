@@ -1,10 +1,10 @@
 # Metric: Shipping Info Added
-# Generated: 2026-09-17T23:01:52.465Z
+# Generated: 2026-09-18T21:21:36.745Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Metric Name: Shipping Info Added
-Formula: COUNT(add_shipping_info events WHERE shipping_tier IS NOT NULL)
+Formula: COUNT(add_shipping_info events WHERE shipping_tier IS NOT NULL AND address validation not failed AND fulfillment_type NOT IN (digital, none) AND NOT excluded traffic/checkout types AND analytics consent granted)
 
 Description: |
   Counts the checkout interactions in which a shopper submitted a shipping address or selected a delivery option, incrementing once for every qualifying add_shipping_info occurrence. It isolates the fulfillment-selection step of the checkout funnel and supplies the step-level volume used to measure drop-off between checkout start and payment entry.
@@ -179,6 +179,7 @@ GA4 Data Layer: |
     "address_source": "manual_entry",
     "is_resubmission": false,
     "cart_id": "CART-9F3B27C4",
+    "checkout_id": "CHK-2026-0917-88214",
     "cart_size_band": "150-249",
     "ecommerce": {
       "currency": "USD",
@@ -238,7 +239,9 @@ Adobe Client Data Layer: |
       "order": {
         "currencyCode": "USD",
         "priceTotal": 187.2,
-        "discountAmount": 20.8,
+        "discountAmount": 20.8
+      },
+      "shipping": {
         "shippingMethod": "Ground"
       }
     },
@@ -316,7 +319,9 @@ XDM Mapping: |
       "order": {
         "currencyCode": "USD",
         "priceTotal": 187.2,
-        "discountAmount": 20.8,
+        "discountAmount": 20.8
+      },
+      "shipping": {
         "shippingMethod": "Ground"
       }
     },
@@ -379,7 +384,8 @@ XDM Mapping: |
         "addressValidationStatus": "verified",
         "isResubmission": false,
         "cartSizeBand": "150-249"
-      }
+      },
+      "trafficType": "external"
     }
   }
 
@@ -396,8 +402,8 @@ Google Analytics SQL: |
   -- address_validation_status, is_resubmission and cart_size_band can be read side by side.
   -- Qualification: a submitted shipping destination or a selected delivery option carrying a non-null
   -- shipping_tier. Field focus, autocomplete suggestions and client-side validation failures never qualify.
-  -- Exclusions: carts that legitimately bypass the shipping step (digital goods, gift cards, pure pickup / BOPIS),
-  -- internal and QA traffic_type, staging-QA-preview-dev hostnames, declared bots, agent-keyed checkouts and
+  -- Exclusions: carts that bypass the shipping step (fulfillment_type 'digital' or 'none'; pickup / BOPIS / curbside /
+  -- locker selections carrying a shipping_tier stay in and are split by fulfillment_type), internal and QA traffic_type, staging-QA-preview-dev hostnames, declared bots, agent-keyed checkouts and
   -- sessions without analytics consent under consent mode.
   -- value and currency are contextual qualifiers only - this is a funnel-behaviour count, never shipping revenue
   -- or any carrier cost figure.
@@ -474,10 +480,8 @@ Google Analytics SQL: |
       END                                                                                   AS delivery_speed_band
     FROM pivoted AS p
     WHERE p.shipping_tier IS NOT NULL
-      AND (p.delivery_option IS NOT NULL OR p.address_validation_status IS NOT NULL)
       AND COALESCE(p.address_validation_status, 'verified') NOT IN ('failed', 'invalid', 'rejected')
-      AND COALESCE(p.fulfillment_type, 'ship_to_address')
-            NOT IN ('pickup_in_store', 'bopis', 'curbside', 'locker_pickup', 'digital', 'none')
+      AND COALESCE(p.fulfillment_type, 'ship_to_address') NOT IN ('digital', 'none')
       AND COALESCE(p.checkout_type, '') NOT IN ('agent_assisted', 'call_center', 'customer_service')
       AND COALESCE(p.traffic_type, '') NOT IN ('internal', 'qa', 'test', 'bot')
       AND NOT REGEXP_CONTAINS(p.hostname, r'^(staging|stage|qa|uat|preview|dev)[.-]|localhost')
@@ -565,8 +569,11 @@ AEP Query Service SQL: |
   -- step context (eVar45 / prop41) and addressValidationStatus (prop43).
   -- Qualification: a submitted shipping destination or a selected delivery option carrying a non-null
   -- shipping tier. Field focus, autocomplete suggestions and client-side validation failures never qualify.
-  -- Exclusions: carts that legitimately bypass the shipping step (digital goods, gift cards, pure pickup / BOPIS),
-  -- staging-QA-preview-dev hosts, bot and synthetic user agents, agent-keyed checkouts and unconsented hits.
+  -- Exclusions: carts that bypass the shipping step (fulfillmentType 'digital' or 'none'; pickup / BOPIS / curbside /
+  -- locker selections carrying a shipping tier stay in and are split by fulfillment_type),
+  -- internal and QA traffic (_openkpis.trafficType), staging-QA-preview-dev hosts, bot and synthetic user agents,
+  -- agent-keyed checkouts and unconsented hits (consents.collect.val <> 'y').
+  -- Only the shipping step of commerce.checkouts qualifies (_openkpis.checkout.stepName = 'shipping' or step = 3).
   -- commerce.order.priceTotal is a contextual qualifier only - this is a funnel-behaviour count, never shipping
   -- revenue or any carrier cost figure. Non-USD carts are converted with the finance daily booking rate.
   -- Dates use the reporting timezone; the trailing 3 days stay provisional (72h late-hit window).
@@ -582,7 +589,7 @@ AEP Query Service SQL: |
       COALESCE(e.commerce.checkouts.id,
                e._openkpis.checkout.cartId)                                                 AS checkout_instance_id,
       COALESCE(e._openkpis.checkout.shippingTier,
-               e.commerce.order.shippingMethod,
+               e.commerce.shipping.shippingMethod,
                e._experience.analytics.customDimensions.eVars.eVar41)                        AS shipping_tier,
       lower(COALESCE(e._openkpis.checkout.deliveryOption,
                e._experience.analytics.customDimensions.eVars.eVar43))                       AS delivery_option,
@@ -607,6 +614,10 @@ AEP Query Service SQL: |
       AND e.timestamp <  current_date()
       AND e.eventType = 'commerce.checkouts'
       AND COALESCE(e.commerce.checkouts.value, 0) > 0
+      AND (lower(COALESCE(e._openkpis.checkout.stepName, '')) = 'shipping'
+           OR CAST(e._openkpis.checkout.step AS INT) = 3)
+      AND lower(COALESCE(e.consents.collect.val, 'y')) = 'y'
+      AND lower(COALESCE(e._openkpis.trafficType, 'external')) NOT IN ('internal', 'qa', 'test', 'bot')
       AND lower(COALESCE(e.web.webPageDetails.URL, '')) NOT RLIKE '^https?://(staging|stage|qa|uat|preview|dev)[.-]|localhost'
       AND lower(COALESCE(e.environment.browserDetails.userAgent, '')) NOT RLIKE 'bot|spider|crawler|headless|synthetic'
   ),
@@ -627,7 +638,7 @@ AEP Query Service SQL: |
       AND b.shipping_tier IS NOT NULL
       AND (b.delivery_option IS NOT NULL OR b.address_validation_status IS NOT NULL OR b.checkout_step_name RLIKE 'shipping')
       AND COALESCE(b.address_validation_status, 'verified') NOT IN ('failed', 'invalid', 'rejected')
-      AND b.fulfillment_type NOT IN ('pickup_in_store', 'bopis', 'curbside', 'locker_pickup', 'digital', 'none')
+      AND b.fulfillment_type NOT IN ('digital', 'none')
       AND b.checkout_type NOT IN ('agent_assisted', 'call_center', 'customer_service')
   ),
   serialized AS (
@@ -701,14 +712,14 @@ AEP Query Service SQL: |
   ORDER BY d.event_date DESC, d.shipping_info_added DESC;
 
 Calculation Notes: |
-  1️⃣ Counted from the unified add_shipping_info event; every qualifying occurrence increments the metric, so a shopper who edits the address or switches delivery option and resubmits generates additional counts. Publish the session-deduplicated variant (one per session × checkout instance) next to the raw count whenever the number is used to size funnel drop-off.,2️⃣ Qualification requires a submitted shipping destination or a selected delivery option carrying a non-null shipping_tier. Field focus, keystroke-level interaction, address autocomplete suggestions and client-side validation failures do not qualify and must not fire the event.,3️⃣ Exclusions: carts that legitimately bypass the shipping step (digital goods, gift cards, pure in-store pickup / BOPIS), internal and QA test traffic, declared bot traffic, and sessions without analytics consent under consent mode. Orders keyed by service agents on behalf of a customer are out of scope for the digital count.,4️⃣ Session-timeout rule: the standard 30-minute inactivity window closes the session, so a shopper who abandons and returns later to resubmit delivery details is counted again in a new session. Session-scoped funnel rates must therefore be built on sessions containing the event, never on raw event counts.,5️⃣ Timing: the count is credited to the date and session of event_timestamp, not to the order date. Step-to-step conversion is always evaluated against begin_checkout occurrences inside the same session so that cross-session returns do not inflate the ratio.,6️⃣ Multi-shipment and split-destination carts emit one event per submitted destination in most platform implementations; confirm the commerce platform's behaviour before treating the metric as a count of checkout instances, and pivot shipping_tier from the event-parameter array with MAX(IF()) when flattening.,7️⃣ The value and currency parameters are contextual qualifiers only. This is a shopper-behaviour funnel measure and must never be reported as shipping revenue, carrier cost or any logistics performance figure.
+  1️⃣ Counted from the unified add_shipping_info event; every qualifying occurrence increments the metric, so a shopper who edits the address or switches delivery option and resubmits generates additional counts. Publish the session-deduplicated variant (one per session × checkout instance) next to the raw count whenever the number is used to size funnel drop-off.,2️⃣ Qualification requires a submitted shipping destination or a selected delivery option carrying a non-null shipping_tier. Field focus, keystroke-level interaction, address autocomplete suggestions and client-side validation failures do not qualify and must not fire the event.,3️⃣ Exclusions: carts that legitimately bypass the shipping step (fulfillment_type 'digital' or 'none', e.g. digital goods and e-gift cards), internal and QA test traffic, declared bot traffic, and sessions without analytics consent under consent mode. Orders keyed by service agents on behalf of a customer are out of scope for the digital count. Pickup, BOPIS, curbside and locker selections that fire the event with a shipping_tier are counted and split by fulfillment_type, keeping the numerator on the same base as all begin_checkout occurrences.,4️⃣ Session-timeout rule: the standard 30-minute inactivity window closes the session, so a shopper who abandons and returns later to resubmit delivery details is counted again in a new session. Session-scoped funnel rates must therefore be built on sessions containing the event, never on raw event counts.,5️⃣ Timing: the count is credited to the date and session of event_timestamp, not to the order date. Step-to-step conversion is always evaluated against begin_checkout occurrences inside the same session so that cross-session returns do not inflate the ratio.,6️⃣ Multi-shipment and split-destination carts emit one event per submitted destination in most platform implementations; confirm the commerce platform's behaviour before treating the metric as a count of checkout instances, and pivot shipping_tier from the event-parameter array with MAX(IF()) when flattening.,7️⃣ The value and currency parameters are contextual qualifiers only. This is a shopper-behaviour funnel measure and must never be reported as shipping revenue, carrier cost or any logistics performance figure.
 
 Business Use Case: |
   1️⃣ The Checkout Product Manager reviews the begin_checkout → add_shipping_info → add_payment_info ladder every week; when the shipping step's step-through rate drops more than three points below the trailing eight-week median on mobile, they raise a defect ticket against address validation and queue a redesign test on the delivery form.,2️⃣ Merchandising calibrates the free-shipping threshold by splitting this count by shipping_tier and cart-value band: a high volume of expedited selections that never reach payment entry triggers a revised threshold and shipping-promotion plan ahead of the next trading period.,3️⃣ Lifecycle Marketing builds the "shipping info added, no purchase" audience from sessions carrying the event with no purchase within 24 hours and launches the abandoned-checkout journey with the shopper's selected delivery option pre-filled in the reminder.,4️⃣ The Customer Service operations lead watches day-over-day declines in this count against carrier and address-validation incident logs, and briefs agents plus pre-loads macros before contact volume builds in the queue.
 
 Dependencies:
-  Events: [add-shipping-info, begin-checkout]
-  Metrics: [checkouts-initiated]
+  Events: [checkout-initiation]
+  Metrics: [begin-checkout]
   Dimensions: [shipping-tier, checkout-step]
 
 Source Data: Digital Analytics (GA4)
@@ -721,9 +732,9 @@ Dashboard Usage: [Checkout Funnel Performance, Cart & Checkout Abandonment Analy
 Segment Eligibility: |
   true
 
-Related Metrics: [checkouts-initiated, payment-info-added, add-to-cart, purchases]
+Related Metrics: [begin-checkout, payment-info-added, add-to-cart]
 
-Derived KPIs: [checkout-completion-rate, checkout-abandonment-rate, checkout-conversion-rate]
+Derived KPIs: [checkout-conversion-rate]
 
 Data Sensitivity: Internal
 
@@ -737,5 +748,5 @@ Created At: 2026-09-17T23:01:42.281+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-17T23:01:52.099+00:00
+Last Modified At: 2026-09-18T21:21:35.911+00:00
 
