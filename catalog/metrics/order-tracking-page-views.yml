@@ -1,7 +1,7 @@
 # Metric: Order Tracking Page Views
-# Generated: 2026-09-18T17:21:59.488Z
+# Generated: 2026-09-18T17:22:07.963Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Order Tracking Page Views
 Formula: COUNT(page_view) WHERE page_type IN ('order_status', 'order_tracking') AND traffic_type <> 'internal'
@@ -11,30 +11,221 @@ Description: |
 
 Category: Experience
 
+Tags: [metric, Post-Purchase Logistics & Fulfillment]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Engagement
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  page_view
 
+Adobe Event: |
+  pageView
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "account:orders:order-detail",
+        "pageName": "account:orders:order-status",
+        "destinationURL": "https://www.example.com/account/orders/detail",
+        "sysEnv": "desktop",
+        "language": "en-US"
+      },
+      "category": {
+        "primaryCategory": "post-purchase",
+        "subCategory1": "order-tracking",
+        "pageType": "order_status"
+      },
+      "attributes": {
+        "orderStatus": "shipped",
+        "carrier": "UPS",
+        "shippingTier": "standard",
+        "fulfillmentMethod": "ship_to_home",
+        "trafficType": "external"
+      }
+    },
+    "transaction": {
+      "transactionID": "T-100482731"
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "hashed_customer_id_7f3a9c"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_type": "order_status",
+    "page_location": "https://www.example.com/account/orders/detail",
+    "page_title": "Order Status",
+    "transaction_id": "T-100482731",
+    "order_status": "shipped",
+    "shipping_carrier": "UPS",
+    "shipping_tier": "standard",
+    "fulfillment_method": "ship_to_home",
+    "traffic_type": "external"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "page": {
+      "pageName": "account:orders:order-status",
+      "pageType": "order_status",
+      "siteSection": "post-purchase",
+      "url": "https://www.example.com/account/orders/detail"
+    },
+    "order": {
+      "purchaseID": "T-100482731",
+      "orderStatus": "shipped",
+      "carrier": "UPS",
+      "shippingTier": "standard",
+      "fulfillmentMethod": "ship_to_home"
+    },
+    "user": {
+      "trafficType": "external"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web": {
+      "webPageDetails": {
+        "name": "account:orders:order-status",
+        "URL": "https://www.example.com/account/orders/detail",
+        "siteSection": "post-purchase",
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "T-100482731"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar20": "order_status",
+            "eVar21": "shipped",
+            "eVar22": "UPS"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Order Tracking Page Views: daily count of page_view hits on the order_status / order_tracking templates, internal traffic excluded.
+  WITH page_views AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      user_pseudo_id,
+      device.category AS device_category,
+      (SELECT MAX(IF(key = 'ga_session_id', value.int_value, NULL)) FROM UNNEST(event_params)) AS ga_session_id,
+      (SELECT MAX(IF(key = 'page_type', value.string_value, NULL)) FROM UNNEST(event_params)) AS page_type,
+      (SELECT MAX(IF(key = 'traffic_type', value.string_value, NULL)) FROM UNNEST(event_params)) AS traffic_type,
+      (SELECT MAX(IF(key = 'order_status', value.string_value, NULL)) FROM UNNEST(event_params)) AS order_status,
+      (SELECT MAX(IF(key = 'shipping_carrier', value.string_value, NULL)) FROM UNNEST(event_params)) AS shipping_carrier,
+      (SELECT MAX(IF(key = 'fulfillment_method', value.string_value, NULL)) FROM UNNEST(event_params)) AS fulfillment_method
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name = 'page_view'
+  )
+  SELECT
+    event_date,
+    page_type,
+    order_status,
+    shipping_carrier,
+    fulfillment_method,
+    device_category,
+    COUNT(*) AS order_tracking_page_views,
+    COUNT(DISTINCT CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING))) AS sessions_with_tracking_view,
+    COUNT(DISTINCT user_pseudo_id) AS users_with_tracking_view
+  FROM page_views
+  WHERE page_type IN ('order_status', 'order_tracking')
+    AND COALESCE(traffic_type, 'external') <> 'internal'
+  GROUP BY event_date, page_type, order_status, shipping_carrier, fulfillment_method, device_category
+  ORDER BY event_date, order_tracking_page_views DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Order Tracking Page Views: daily sum of web.webPageDetails.pageViews on the order_status / order_tracking templates (page type in eVar20); internal traffic removed upstream by the report suite / datastream IP exclusion rules.
+  SELECT
+    DATE(timestamp) AS event_date,
+    _experience.analytics.customDimensions.eVars.eVar20 AS page_type,
+    _experience.analytics.customDimensions.eVars.eVar21 AS order_status,
+    _experience.analytics.customDimensions.eVars.eVar22 AS shipping_carrier,
+    device.type AS device_type,
+    SUM(COALESCE(web.webPageDetails.pageViews.value, 0)) AS order_tracking_page_views,
+    COUNT(DISTINCT CONCAT(identityMap['ECID'][0].id, '.', CAST(_experience.analytics.session.num AS STRING))) AS visits_with_tracking_view,
+    COUNT(DISTINCT identityMap['ECID'][0].id) AS visitors_with_tracking_view
+  FROM aep_web_events_dataset
+  WHERE timestamp >= DATE_SUB(CURRENT_DATE(), 28)
+    AND timestamp < CURRENT_DATE()
+    AND eventType = 'web.webpagedetails.pageViews'
+    AND web.webPageDetails.pageViews.value = 1
+    AND _experience.analytics.customDimensions.eVars.eVar20 IN ('order_status', 'order_tracking')
+  GROUP BY
+    DATE(timestamp),
+    _experience.analytics.customDimensions.eVars.eVar20,
+    _experience.analytics.customDimensions.eVars.eVar21,
+    _experience.analytics.customDimensions.eVars.eVar22,
+    device.type
+  ORDER BY event_date, order_tracking_page_views DESC;
 
+Calculation Notes: |
+  1️⃣ Template filter: count only page_view hits whose page-type value maps to the governed order_status or order_tracking templates (guest order lookup page, My Account > Order Detail, and branded tracking pages on a first-party subdomain such as track.brand.com). The order confirmation / thank-you page is excluded because it is the purchase page, as are shipping-policy and help-centre articles about delivery times, which belong to Help Article View.,2️⃣ Difference from the linked events: Order Status Check fires once when a customer submits an order number + email/postcode or requests an order detail, and only counts successful lookups; Shipment Tracking View fires when the carrier checkpoint timeline actually renders for a tracking number. This metric counts the page load itself, so it is always ≥ successful Order Status Checks on the same template, and the gap between the two is the failed-lookup and bounce volume on the tracking page.,3️⃣ Internal and agent traffic: exclude hits flagged traffic_type = internal (office IP ranges, VPN egress, contact-centre desktops) because service agents routinely open the customer-facing order status page while handling calls and chats; leaving them in double-counts WISMO demand that is already captured as a contact. Known bots and uptime monitors are removed by the platform bot filter before counting.,4️⃣ Single-page applications and polling: on SPA or headless storefronts a virtual page_view must fire on the route change to the tracking view, not on each client-side refresh of carrier status. Tracking widgets that poll the carrier or tracking provider must not re-fire page_view; user-initiated reloads are counted because repeated reloads are a genuine anxiety signal.,5️⃣ Off-domain carrier pages: clicks out to carrier-hosted tracking (UPS, FedEx, DHL, USPS) are not page views on the owned property and are excluded; they are measured as outbound clicks. Branded tracking provided by a third party (Narvar, AfterShip, parcelLab, Route) is included only when it is hosted on a first-party subdomain with the same measurement ID or report suite and cross-domain linking enabled.,6️⃣ Sessions and timing: hits are dated on the event timestamp in the property's reporting time zone; standard 30-minute inactivity session timeout applies (GA4 session / Adobe visit). Shipment and delivery emails that deep-link to the tracking page start a new session attributed to the email channel; keep the UTM parameters so traffic-source splits separate proactive notification clicks from organic lookups.,7️⃣ PII and consent: strip order numbers, email addresses and postcodes from page_location and page_title before collection (redact query parameters such as ?order= and ?email=), so the metric carries no personal data. Counts are observed hits only; under GA4 Consent Mode or Adobe opt-in, declined-consent traffic is not included and the absolute volume is understated in consent-heavy markets.
 
+Business Use Case: |
+  1️⃣ Customer Service Workforce Management: when daily Order Tracking Page Views per shipped order rise above the trailing 28-day baseline for a carrier or delivery region, the WFM lead adds chat and phone capacity for the next 48 hours and asks the CRM team to trigger a proactive delay notification to the affected orders.,2️⃣ Customer Service Operations: the Head of Customer Service tracks the ratio of Order Tracking Page Views to WISMO contacts each week; when contacts grow faster than tracking page views, the team audits the tracking page for failed lookups and missing carrier data and prioritises fixes with the Product team to restore self-service deflection.,3️⃣ Fulfillment & Logistics: when views concentrate in the window between order placement and the first carrier scan, the Fulfillment Manager reviews pick-pack-ship cycle times at the originating distribution center and, with the Product team, adds an expected ship date and pre-transit status message to the order status page and confirmation email.,4️⃣ E-commerce Merchandising: because the tracking page is among the highest-intent repeat visits after purchase, the Merchandising team uses weekly page view volume to size recommendation and replenishment modules placed on the branded tracking page and measures the downstream revenue they drive.
 
+Dependencies:
+  Events: [page-view, order-status-check, shipment-tracking-view]
+  Dimensions: [page-type]
 
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
 
+Report Attributes: |
+  page-type; order-status; device-category; traffic-source; fulfillment-method; shipping-tier; carrier; delivery-region; notification-channel
 
+Dashboard Usage: [Post-Purchase Experience & WISMO Deflection, Customer Service Contact Demand Forecast, Carrier & Delivery Performance Scorecard]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [unique-visitors, average-delivery-time]
 
+Derived KPIs: [wismo-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +235,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T17:21:59.154+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T17:22:07.669+00:00
 
