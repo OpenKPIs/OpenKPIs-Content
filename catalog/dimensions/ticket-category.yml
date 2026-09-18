@@ -1,12 +1,12 @@
 # Dimension: Ticket Category
-# Generated: 2026-09-16T17:47:55.148Z
+# Generated: 2026-09-18T19:22:29.752Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Ticket Category
 
 Description: |
-  The main reason a customer contacted support by ticket, chat, call or email, taken from a fixed list: order_status, shipping_delay, returns_refunds, payment_issue, product_question, account_access and other. Inquiry Type records what a prospect wants before a sale in Real Estate property inquiries; Ticket Category records why a customer contacted support after buying in e-commerce, and it is not the same as the Zendesk Ticket Type field (question, incident, problem, task).
+  The main reason a customer contacted support by ticket, chat, call or email, taken from a fixed list: order_status, shipping_delay, returns_refunds, payment_issue, product_question, account_access and other. It records why the customer contacted support, which is different from Return Reason (why an item was sent back) and Order Cancellation Reason (why an order was cancelled): a returns_refunds ticket may or may not lead to a return. It is also not the same as the Zendesk Ticket Type field (question, incident, problem, task).
 
 Category: Experience
 
@@ -89,10 +89,7 @@ XDM Mapping: |
     "web": {
       "webInteraction": {
         "name": "submit_form",
-        "type": "other",
-        "linkClicks": {
-          "value": 1
-        }
+        "type": "other"
       }
     },
     "_experience": {
@@ -107,6 +104,7 @@ XDM Mapping: |
     },
     "_tenant": {
       "support": {
+        "form_submitted": 1,
         "form_name": "support_contact",
         "contact_reason": "shipping_delay",
         "ticket_id": "ZD-1048213",
@@ -153,12 +151,14 @@ Google Analytics SQL: |
   -- Denominator for contacts per 100 orders: every order placed on the day, not only orders that generated a ticket.
   web_orders AS (
     SELECT
-      PARSE_DATE('%Y%m%d', event_date) AS order_date,
-      COUNT(DISTINCT ecommerce.transaction_id) AS orders_placed
-    FROM `your-project.analytics_123456789.events_*`
-    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 98 DAY)) AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
-      AND event_name = 'purchase'
-      AND ecommerce.transaction_id IS NOT NULL
+      DATE(TIMESTAMP_MICROS(e.event_timestamp), 'America/New_York') AS order_date,
+      COUNT(DISTINCT e.ecommerce.transaction_id) AS orders_placed
+    FROM `your-project.analytics_123456789.events_*` AS e
+    CROSS JOIN params AS p
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 98 DAY)) AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND e.event_name = 'purchase'
+      AND e.ecommerce.transaction_id IS NOT NULL
+      AND DATE(TIMESTAMP_MICROS(e.event_timestamp), 'America/New_York') BETWEEN p.start_date AND p.end_date
     GROUP BY order_date
   ),
   base_tickets AS (
@@ -300,6 +300,7 @@ AEP Query Service SQL: |
     WHERE eventType = 'purchase'
       AND commerce.order.purchaseID IS NOT NULL
       AND timestamp >= current_date() - INTERVAL 98 DAYS
+      AND to_date(from_utc_timestamp(timestamp, 'America/New_York')) >= date_sub(current_date(), 90)
     GROUP BY to_date(from_utc_timestamp(timestamp, 'America/New_York'))
   ),
   base_tickets AS (
@@ -418,9 +419,9 @@ Calculation Notes: |
   2️⃣ Keep this field separate from the Zendesk Ticket Type field (question / incident / problem / task), priority, status and group. Never derive a category from any of those fields. Salesforce Service Cloud Case.Reason and the Gorgias contact reason map directly to this dimension.
   3️⃣ Normalise values to lowercase snake_case through a governed mapping table that translates each help-desk's picklist values and macro tags to the standard list. Any value that is unmapped, null or retired goes to other. When other exceeds 10% of solved tickets in a month, Customer Service reviews the list; values are never added on the fly.
   4️⃣ Exclusions: spam, auto-replies and out-of-office bounces, tickets closed by merge (the surviving ticket keeps its category), internal and test tickets, agent-created outbound or proactive tickets, and social-media mentions that never became a ticket.
-  5️⃣ Timing: attribute each ticket to its created_at date in the store's reporting timezone. A reopened ticket keeps its original date and category. A new contact from the same requester about the same order within 7 days counts as a repeat contact on the first ticket, not as a new contact driver. Category edits made more than 72 hours after solve are audited and excluded from restated history.
+  5️⃣ Timing: attribute each ticket to its created_at date, and each order to its purchase timestamp date, in the store's reporting timezone (America/New_York in the SQL). A reopened ticket keeps its original date and category. A new contact from the same requester about the same order within 7 days counts as a repeat contact on the first ticket, not as a new contact driver. Category edits made more than 72 hours after solve are audited and excluded from restated history.
   6️⃣ Digital capture: the help-centre contact form sends the unified submit_form event with form_name = support_contact and a contact_reason parameter holding the same controlled value. The event is joined to the help-desk ticket on ticket_id; submissions without a ticket_id are not joined. Chat, phone and email tickets come only from the help desk, so the help desk is the source of truth when the two values differ.
-  7️⃣ Order-linked categories (order_status, shipping_delay, returns_refunds, payment_issue) must carry order_id where the customer supplied one. Contacts-per-order ratios by category use all orders placed in the period as the denominator, not only orders that generated a ticket.
+  7️⃣ Order-linked categories (order_status, shipping_delay, returns_refunds, payment_issue) must carry order_id where the customer supplied one. Contacts-per-order ratios by category use all orders placed in the same dates and the same 90-day window as the tickets as the denominator, not only orders that generated a ticket.
 
 Business Use Case: |
   1️⃣ The Head of Customer Service reviews the weekly contact-driver report. When shipping_delay or order_status tickets rise more than 20% week over week, they move agent capacity to those queues, publish proactive delay macros and escalate the affected carrier lanes to Fulfilment.
@@ -429,7 +430,7 @@ Business Use Case: |
   4️⃣ The Payments lead in Finance watches payment_issue tickets daily. When volume spikes after a checkout release or a payment-provider change, they open an incident with the payment service provider and pause the release until declines and double-charge reports return to baseline.
 
 Dependencies:
-  Events: [submit-form, purchase]
+  Events: [contact-form-submission, purchase]
 
 Source Data: Web + Help Desk (Zendesk / Salesforce Service Cloud / Gorgias)
 
@@ -443,7 +444,7 @@ Segment Eligibility: |
 
 Related Dimensions: [inquiry-type, order-status, order-cancellation-reason, delivery-exception-type, payment-method]
 
-Derived Dimensions: [order-linked-contact-flag]
+Derived Dimensions: [return-reason]
 
 Data Sensitivity: Internal
 
@@ -457,5 +458,5 @@ Created At: 2026-09-16T17:47:44.775+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-16T17:47:54.819+00:00
+Last Modified At: 2026-09-18T19:22:29.292+00:00
 
