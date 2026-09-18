@@ -1,7 +1,7 @@
 # Dimension: Store Inventory Status
-# Generated: 2026-09-18T16:35:38.912Z
+# Generated: 2026-09-18T16:35:50.377Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Store Inventory Status
 
@@ -10,31 +10,556 @@ Description: |
 
 Category: Conversion
 
+Tags: [dimension, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
 
+Industry: Retail
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Session, Daily, Weekly
 
+GA4 Event: |
+  view_item
 
+Adobe Event: |
+  Product View: Store Availability Check
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "pageInstanceID": "prod-web-pdp",
+      "page": {
+        "pageInfo": {
+          "pageID": "pdp-sku-48219",
+          "pageName": "PDP: 20V Cordless Drill Kit",
+          "destinationURL": "https://www.example-retail.com/tools/20v-cordless-drill-kit",
+          "language": "en-US",
+          "issueDate": "2026-09-17T14:32:05.000Z"
+        },
+        "category": {
+          "primaryCategory": "Tools",
+          "subCategory1": "Power Tools",
+          "pageType": "product detail"
+        }
+      },
+      "product": [
+        {
+          "productInfo": {
+            "productID": "SKU-48219",
+            "productName": "20V Cordless Drill Kit",
+            "manufacturer": "ToolCraft",
+            "sku": "SKU-48219"
+          },
+          "category": {
+            "primaryCategory": "Tools",
+            "subCategory1": "Power Tools"
+          },
+          "attributes": {
+            "price": 129.99,
+            "currency": "USD",
+            "fulfillmentMethod": "bopis",
+            "storeID": "STR-0412",
+            "storeName": "Chicago River North",
+            "storeInventoryStatus": "Low Stock",
+            "storeInventoryStatusCheckedAt": "2026-09-17T14:32:05.000Z",
+            "storeSelectionMethod": "saved_store"
+          }
+        }
+      ],
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "view_item",
+            "eventAction": "Store Availability Check",
+            "timeStamp": "2026-09-17T14:32:05.000Z"
+          },
+          "attributes": {
+            "storeID": "STR-0412",
+            "storeInventoryStatus": "Low Stock",
+            "fulfillmentMethod": "bopis"
+          }
+        }
+      ],
+      "version": "1.0"
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "view_item",
+    "store_id": "STR-0412",
+    "store_name": "Chicago River North",
+    "store_selection_method": "saved_store",
+    "store_inventory_status": "Low Stock",
+    "store_inventory_status_checked_at": "2026-09-17T14:32:05.000Z",
+    "fulfillment_method": "bopis",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 129.99,
+      "items": [
+        {
+          "item_id": "SKU-48219",
+          "item_name": "20V Cordless Drill Kit",
+          "item_brand": "ToolCraft",
+          "item_category": "Tools",
+          "item_category2": "Power Tools",
+          "price": 129.99,
+          "quantity": 1,
+          "item_store_id": "STR-0412",
+          "item_store_inventory_status": "Low Stock",
+          "item_store_inventory_status_checked_at": "2026-09-17T14:32:05.000Z",
+          "item_fulfillment_method": "bopis"
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "view_item",
+    "eventInfo": {
+      "path": "component.productDetail.storeAvailability",
+      "eventAction": "Store Availability Check",
+      "eventTimestamp": "2026-09-17T14:32:05.000Z"
+    },
+    "productContext": {
+      "productID": "SKU-48219",
+      "productName": "20V Cordless Drill Kit",
+      "productBrand": "ToolCraft",
+      "productCategory": "Tools",
+      "productSubCategory": "Power Tools",
+      "price": 129.99,
+      "currency": "USD",
+      "quantity": 1,
+      "storeID": "STR-0412",
+      "storeInventoryStatus": "Low Stock",
+      "storeInventoryStatusCheckedAt": "2026-09-17T14:32:05.000Z"
+    },
+    "storeContext": {
+      "storeID": "STR-0412",
+      "storeName": "Chicago River North",
+      "storeFormat": "full-line",
+      "storeSelectionMethod": "saved_store",
+      "fulfillmentMethod": "bopis"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.productViews",
+    "timestamp": "2026-09-17T14:32:05.000Z",
+    "commerce": {
+      "productViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-48219",
+        "name": "20V Cordless Drill Kit",
+        "quantity": 1,
+        "priceTotal": 129.99,
+        "currencyCode": "USD",
+        "productAvailability": "Low Stock",
+        "availabilityCheckedAt": "2026-09-17T14:32:05.000Z",
+        "fulfillmentMethod": "bopis",
+        "storeID": "STR-0412"
+      }
+    ],
+    "placeContext": {
+      "POIinteraction": {
+        "POIDetail": {
+          "poiID": "STR-0412",
+          "name": "Chicago River North",
+          "category": "retail store"
+        }
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar41": "Low Stock",
+            "eVar42": "STR-0412"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Dimension: Store Inventory Status (string, Event scope)
+  -- Source: GA4 export, unified events view_item / select_item / add_to_cart.
+  -- Point-in-time rule: the availability label is read exactly as it was stamped on the
+  -- event payload at the moment the store inventory check resolved. No join to a live or
+  -- current inventory position is performed anywhere below, so replenishment after the fact
+  -- can never restate an Out of Stock experience.
+  -- Reference tables (store master, product catalog) are used for LABELS ONLY.
+  
+  DECLARE start_date STRING DEFAULT FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 27 DAY));
+  DECLARE end_date   STRING DEFAULT FORMAT_DATE('%Y%m%d', CURRENT_DATE());
+  
+  WITH
+  -- 1) Base population: every candidate event, with event-scoped parameters pivoted.
+  --    Every parameter is pivoted with UNNEST + MAX(IF(...)); no fan-out joins on event_params.
+  base_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date)                                      AS event_day,
+      event_name                                                            AS unified_event_name,
+      user_pseudo_id,
+      TIMESTAMP_MICROS(event_timestamp)                                     AS event_ts,
+      CONCAT(
+        user_pseudo_id, '.',
+        CAST((SELECT MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL))
+              FROM UNNEST(event_params) ep) AS STRING)
+      )                                                                     AS session_key,
+      (SELECT MAX(IF(ep.key = 'store_id', ep.value.string_value, NULL))
+         FROM UNNEST(event_params) ep)                                      AS store_id,
+      (SELECT MAX(IF(ep.key = 'store_name', ep.value.string_value, NULL))
+         FROM UNNEST(event_params) ep)                                      AS store_name_evt,
+      (SELECT MAX(IF(ep.key = 'store_selection_method', ep.value.string_value, NULL))
+         FROM UNNEST(event_params) ep)                                      AS store_selection_method,
+      (SELECT MAX(IF(ep.key = 'store_inventory_status', ep.value.string_value, NULL))
+         FROM UNNEST(event_params) ep)                                      AS store_inventory_status_evt,
+      (SELECT MAX(IF(ep.key = 'store_inventory_status_checked_at', ep.value.string_value, NULL))
+         FROM UNNEST(event_params) ep)                                      AS status_checked_at_evt,
+      (SELECT MAX(IF(ep.key = 'fulfillment_method', ep.value.string_value, NULL))
+         FROM UNNEST(event_params) ep)                                      AS fulfillment_method_evt,
+      device.category                                                       AS device_category,
+      IFNULL(geo.region, '(not set)')                                       AS region,
+      IFNULL(traffic_source.medium, '(not set)')                            AS traffic_source_medium,
+      items
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN start_date AND end_date
+      AND event_name IN ('view_item', 'select_item', 'add_to_cart')
+  ),
+  
+  -- 2) Item grain: the status is resolved per item and per store, so it is read from the
+  --    item-scoped parameters first and falls back to the event-scoped stamp.
+  item_grain AS (
+    SELECT
+      b.event_day,
+      b.unified_event_name,
+      b.user_pseudo_id,
+      b.session_key,
+      b.event_ts,
+      b.device_category,
+      b.region,
+      b.traffic_source_medium,
+      b.store_selection_method,
+      it.item_id,
+      it.item_name,
+      IFNULL(it.item_category, '(not set)')                                 AS item_category,
+      COALESCE(
+        (SELECT MAX(IF(ip.key = 'item_store_id', ip.value.string_value, NULL))
+           FROM UNNEST(it.item_params) ip),
+        b.store_id
+      )                                                                     AS store_id,
+      b.store_name_evt,
+      COALESCE(
+        (SELECT MAX(IF(ip.key = 'item_store_inventory_status', ip.value.string_value, NULL))
+           FROM UNNEST(it.item_params) ip),
+        b.store_inventory_status_evt
+      )                                                                     AS store_inventory_status_raw,
+      COALESCE(
+        (SELECT MAX(IF(ip.key = 'item_store_inventory_status_checked_at', ip.value.string_value, NULL))
+           FROM UNNEST(it.item_params) ip),
+        b.status_checked_at_evt
+      )                                                                     AS status_checked_at_raw,
+      COALESCE(
+        (SELECT MAX(IF(ip.key = 'item_fulfillment_method', ip.value.string_value, NULL))
+           FROM UNNEST(it.item_params) ip),
+        b.fulfillment_method_evt
+      )                                                                     AS fulfillment_method
+    FROM base_events b
+    LEFT JOIN UNNEST(b.items) AS it
+  ),
+  
+  -- 3) Normalise to the three shopper-visible values. Events that carry store context but no
+  --    status keep the '(not set)' label and stay in the population, so every share below is
+  --    measured against the full base of store-context events.
+  typed AS (
+    SELECT
+      g.*,
+      CASE LOWER(TRIM(g.store_inventory_status_raw))
+        WHEN 'in stock'     THEN 'In Stock'
+        WHEN 'low stock'    THEN 'Low Stock'
+        WHEN 'out of stock' THEN 'Out of Stock'
+        WHEN ''             THEN '(not set)'
+        ELSE IFNULL(g.store_inventory_status_raw, '(not set)')
+      END                                                                   AS store_inventory_status,
+      SAFE_CAST(g.status_checked_at_raw AS TIMESTAMP)                       AS status_checked_at,
+      (g.store_id IS NOT NULL AND g.store_id <> '')                         AS has_store_context
+    FROM item_grain g
+  )
+  
+  -- ============================================================
+  -- A. Value distribution: the dimension value, the events it rides on, and volume by value.
+  --    Denominator = every store-context event occurrence in the window, including the
+  --    occurrences where the status was absent. Nothing is silently dropped.
+  -- ============================================================
+  SELECT
+    t.store_inventory_status,
+    t.unified_event_name,
+    COUNT(*)                                                                AS event_occurrences,
+    COUNT(DISTINCT t.session_key)                                           AS sessions,
+    COUNT(DISTINCT t.user_pseudo_id)                                        AS users,
+    COUNT(DISTINCT t.item_id)                                               AS distinct_items,
+    COUNT(DISTINCT t.store_id)                                              AS distinct_stores,
+    ROUND(100 * COUNT(*) / SUM(COUNT(*)) OVER (), 2)                        AS pct_of_all_store_context_events,
+    ROUND(100 * COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY t.unified_event_name), 2)
+                                                                            AS pct_of_event_population,
+    MIN(t.status_checked_at)                                                AS first_status_checked_at,
+    MAX(t.status_checked_at)                                                AS last_status_checked_at
+  FROM typed t
+  WHERE t.has_store_context
+  GROUP BY t.store_inventory_status, t.unified_event_name
+  ORDER BY event_occurrences DESC;
+  
+  -- ============================================================
+  -- B. Item x store exposure: which item-store pairs shoppers are most often shown as
+  --    unavailable. Labels come from reference tables; the status itself is never re-derived.
+  -- ============================================================
+  SELECT
+    t.store_id,
+    COALESCE(s.store_name, MAX(t.store_name_evt))                           AS store_name,
+    s.store_format,
+    s.region                                                                AS store_region,
+    t.item_id,
+    COALESCE(p.item_display_name, ANY_VALUE(t.item_name))                   AS item_name,
+    ANY_VALUE(t.item_category)                                              AS item_category,
+    COUNT(*)                                                                AS store_context_events,
+    COUNTIF(t.store_inventory_status = 'In Stock')                          AS in_stock_events,
+    COUNTIF(t.store_inventory_status = 'Low Stock')                         AS low_stock_events,
+    COUNTIF(t.store_inventory_status = 'Out of Stock')                      AS out_of_stock_events,
+    COUNTIF(t.store_inventory_status = '(not set)')                         AS status_not_set_events,
+    ROUND(100 * COUNTIF(t.store_inventory_status = 'Out of Stock') / COUNT(*), 2)
+                                                                            AS pct_out_of_stock_exposure,
+    ROUND(100 * COUNTIF(t.store_inventory_status IN ('Low Stock', 'Out of Stock')) / COUNT(*), 2)
+                                                                            AS pct_constrained_exposure,
+    ROUND(100 * COUNTIF(t.unified_event_name = 'add_to_cart') / COUNT(*), 2)
+                                                                            AS pct_events_reaching_add_to_cart
+  FROM typed t
+  LEFT JOIN `your-project.reference.store_master` s   -- labels only (name, format, region)
+    ON s.store_id = t.store_id
+  LEFT JOIN `your-project.reference.product_catalog` p -- labels only (display name)
+    ON p.item_id = t.item_id
+  WHERE t.has_store_context
+  GROUP BY t.store_id, s.store_name, s.store_format, s.region, t.item_id, p.item_display_name
+  HAVING store_context_events >= 50
+  ORDER BY out_of_stock_events DESC, store_context_events DESC
+  LIMIT 500;
+  
+  -- ============================================================
+  -- C. Daily trend and collection coverage. The denominator is every candidate event in the
+  --    window, store context present or not, so gaps in the tagging stay visible.
+  -- ============================================================
+  SELECT
+    t.event_day,
+    t.store_selection_method,
+    t.fulfillment_method,
+    t.device_category,
+    COUNT(*)                                                                AS candidate_events,
+    COUNTIF(t.has_store_context)                                            AS store_context_events,
+    COUNTIF(t.has_store_context AND t.store_inventory_status <> '(not set)') AS events_with_status,
+    ROUND(100 * COUNTIF(t.has_store_context AND t.store_inventory_status <> '(not set)') / COUNT(*), 2)
+                                                                            AS pct_status_coverage_of_all_events,
+    ROUND(100 * COUNTIF(t.store_inventory_status = 'In Stock')     / COUNT(*), 2) AS pct_in_stock_of_all_events,
+    ROUND(100 * COUNTIF(t.store_inventory_status = 'Low Stock')    / COUNT(*), 2) AS pct_low_stock_of_all_events,
+    ROUND(100 * COUNTIF(t.store_inventory_status = 'Out of Stock') / COUNT(*), 2) AS pct_out_of_stock_of_all_events
+  FROM typed t
+  GROUP BY t.event_day, t.store_selection_method, t.fulfillment_method, t.device_category
+  ORDER BY t.event_day DESC, candidate_events DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Dimension: Store Inventory Status (string, Event scope)
+  -- Source: ExperienceEvent dataset, XDM paths declared in the mapping:
+  --   productListItems[].productAvailability      -> the stamped availability label
+  --   productListItems[].availabilityCheckedAt    -> when the store check resolved
+  --   productListItems[].storeID / fulfillmentMethod
+  --   placeContext.POIinteraction.POIDetail.poiID / name
+  --   _experience.analytics.customDimensions.eVars.eVar41 / eVar42 (event-scoped fallback)
+  -- Point-in-time rule: the label is read as captured on the event. No join to a current
+  -- inventory dataset is made, so a later replenishment cannot restate past exposure.
+  -- Reference datasets are used for LABELS ONLY, never to re-derive the status.
+  
+  WITH base_events AS (
+    SELECT
+      to_date(timestamp)                                                    AS event_day,
+      timestamp                                                             AS event_ts,
+      CASE eventType
+        WHEN 'commerce.productViews'     THEN 'view_item'
+        WHEN 'commerce.productListOpens' THEN 'select_item'
+        WHEN 'commerce.productListAdds'  THEN 'add_to_cart'
+      END                                                                   AS unified_event_name,
+      _id                                                                   AS event_id,
+      enduserids._experience.mcid.id                                        AS visitor_id,
+      concat(enduserids._experience.mcid.id, '-',
+             cast(_experience.analytics.session.num AS string))             AS session_key,
+      placeContext.POIinteraction.POIDetail.poiID                           AS poi_store_id,
+      placeContext.POIinteraction.POIDetail.name                            AS poi_store_name,
+      _experience.analytics.customDimensions.eVars.eVar41                   AS status_evar,
+      _experience.analytics.customDimensions.eVars.eVar42                   AS store_evar,
+      device.type                                                           AS device_category,
+      placeContext.geo.stateProvince                                        AS region,
+      productListItems
+    FROM experience_events
+    WHERE timestamp >= current_date - interval '28' day
+      AND timestamp <  current_date
+      AND eventType IN ('commerce.productViews', 'commerce.productListOpens', 'commerce.productListAdds')
+  ),
+  
+  -- Item grain: availability is resolved per item and per store.
+  item_grain AS (
+    SELECT
+      b.event_day,
+      b.event_ts,
+      b.unified_event_name,
+      b.event_id,
+      b.visitor_id,
+      b.session_key,
+      b.device_category,
+      b.region,
+      pli.SKU                                                               AS item_id,
+      pli.name                                                              AS item_name,
+      coalesce(pli.storeID, b.poi_store_id, b.store_evar)                   AS store_id,
+      b.poi_store_name                                                      AS store_name_evt,
+      coalesce(pli.productAvailability, b.status_evar)                      AS store_inventory_status_raw,
+      pli.availabilityCheckedAt                                             AS status_checked_at_raw,
+      pli.fulfillmentMethod                                                 AS fulfillment_method
+    FROM base_events b
+    LATERAL VIEW OUTER explode(b.productListItems) exploded AS pli
+  ),
+  
+  -- Normalise to the three shopper-visible values; occurrences with store context but no
+  -- status stay in the population as '(not set)'.
+  typed AS (
+    SELECT
+      g.*,
+      CASE lower(trim(g.store_inventory_status_raw))
+        WHEN 'in stock'     THEN 'In Stock'
+        WHEN 'low stock'    THEN 'Low Stock'
+        WHEN 'out of stock' THEN 'Out of Stock'
+        WHEN ''             THEN '(not set)'
+        ELSE coalesce(g.store_inventory_status_raw, '(not set)')
+      END                                                                   AS store_inventory_status,
+      cast(g.status_checked_at_raw AS timestamp)                            AS status_checked_at,
+      (g.store_id IS NOT NULL AND g.store_id <> '')                         AS has_store_context
+    FROM item_grain g
+  )
+  
+  -- ============================================================
+  -- A. Value distribution by carrier event. Denominator = all store-context occurrences,
+  --    including the ones where the status was absent.
+  -- ============================================================
+  SELECT
+    t.store_inventory_status,
+    t.unified_event_name,
+    count(*)                                                                AS event_occurrences,
+    count(DISTINCT t.session_key)                                           AS sessions,
+    count(DISTINCT t.visitor_id)                                            AS visitors,
+    count(DISTINCT t.item_id)                                               AS distinct_items,
+    count(DISTINCT t.store_id)                                              AS distinct_stores,
+    round(100.0 * count(*) / sum(count(*)) OVER (), 2)                      AS pct_of_all_store_context_events,
+    round(100.0 * count(*) / sum(count(*)) OVER (PARTITION BY t.unified_event_name), 2)
+                                                                            AS pct_of_event_population,
+    min(t.status_checked_at)                                                AS first_status_checked_at,
+    max(t.status_checked_at)                                                AS last_status_checked_at
+  FROM typed t
+  WHERE t.has_store_context
+  GROUP BY t.store_inventory_status, t.unified_event_name
+  ORDER BY event_occurrences DESC;
+  
+  -- ============================================================
+  -- B. Item x store exposure. Store and product datasets supply labels only.
+  -- ============================================================
+  SELECT
+    t.store_id,
+    coalesce(max(s.store_name), max(t.store_name_evt))                      AS store_name,
+    max(s.store_format)                                                     AS store_format,
+    max(s.region)                                                           AS store_region,
+    t.item_id,
+    coalesce(max(p.item_display_name), max(t.item_name))                    AS item_name,
+    count(*)                                                                AS store_context_events,
+    count(CASE WHEN t.store_inventory_status = 'In Stock'     THEN 1 END)   AS in_stock_events,
+    count(CASE WHEN t.store_inventory_status = 'Low Stock'    THEN 1 END)   AS low_stock_events,
+    count(CASE WHEN t.store_inventory_status = 'Out of Stock' THEN 1 END)   AS out_of_stock_events,
+    count(CASE WHEN t.store_inventory_status = '(not set)'    THEN 1 END)   AS status_not_set_events,
+    round(100.0 * count(CASE WHEN t.store_inventory_status = 'Out of Stock' THEN 1 END) / count(*), 2)
+                                                                            AS pct_out_of_stock_exposure,
+    round(100.0 * count(CASE WHEN t.store_inventory_status IN ('Low Stock', 'Out of Stock') THEN 1 END) / count(*), 2)
+                                                                            AS pct_constrained_exposure,
+    round(100.0 * count(CASE WHEN t.unified_event_name = 'add_to_cart' THEN 1 END) / count(*), 2)
+                                                                            AS pct_events_reaching_add_to_cart
+  FROM typed t
+  LEFT JOIN store_master s    ON s.store_id = t.store_id
+  LEFT JOIN product_catalog p ON p.item_id = t.item_id
+  WHERE t.has_store_context
+  GROUP BY t.store_id, t.item_id
+  HAVING count(*) >= 50
+  ORDER BY out_of_stock_events DESC, store_context_events DESC
+  LIMIT 500;
+  
+  -- ============================================================
+  -- C. Daily trend and collection coverage against every candidate occurrence.
+  -- ============================================================
+  SELECT
+    t.event_day,
+    t.unified_event_name,
+    t.fulfillment_method,
+    t.device_category,
+    count(*)                                                                AS candidate_events,
+    count(CASE WHEN t.has_store_context THEN 1 END)                         AS store_context_events,
+    count(CASE WHEN t.has_store_context AND t.store_inventory_status <> '(not set)' THEN 1 END)
+                                                                            AS events_with_status,
+    round(100.0 * count(CASE WHEN t.has_store_context AND t.store_inventory_status <> '(not set)' THEN 1 END) / count(*), 2)
+                                                                            AS pct_status_coverage_of_all_events,
+    round(100.0 * count(CASE WHEN t.store_inventory_status = 'In Stock'     THEN 1 END) / count(*), 2) AS pct_in_stock_of_all_events,
+    round(100.0 * count(CASE WHEN t.store_inventory_status = 'Low Stock'    THEN 1 END) / count(*), 2) AS pct_low_stock_of_all_events,
+    round(100.0 * count(CASE WHEN t.store_inventory_status = 'Out of Stock' THEN 1 END) / count(*), 2) AS pct_out_of_stock_of_all_events
+  FROM typed t
+  GROUP BY t.event_day, t.unified_event_name, t.fulfillment_method, t.device_category
+  ORDER BY t.event_day DESC, candidate_events DESC;
 
+Calculation Notes: |
+  1️⃣ Point-in-time semantics: the value is the availability label as shown to the shopper when the store inventory check resolved, stamped onto the event payload. Reporting must read the stamped value and never re-derive or restate it from current inventory position, otherwise a store that has since been replenished will retrospectively erase the out-of-stock experiences that suppressed demand.,2️⃣ Allowed values are restricted to the shopper-visible set — In Stock, Low Stock, Out of Stock — matching the availability attribute published to local inventory listings. Any store or locale rendering a different label (for example Limited Availability) maps to the nearest of the three before the event is dispatched; free-text passthrough is rejected at collection.,3️⃣ Exclusion: on-hand unit counts, reserved and safety-stock quantities, incoming replenishment dates and store transfer positions are backend values and are explicitly out of scope. Only the displayed availability state is carried, so the dimension can never be used to reconstruct stock depth.,4️⃣ Carried on the unified standard events view_item, select_item and add_to_cart, and only when a store has actually been selected or defaulted from the shopper's saved or geolocated store. Events with no store context are not assigned a value and must be filtered out of availability reporting rather than bucketed as Out of Stock.,5️⃣ Low Stock is a threshold state defined by the merchandising availability rules, not a distinct physical condition; because thresholds differ by category and store format, trend comparisons that treat Low Stock as a single homogeneous band must be qualified by category and store format.,6️⃣ Multi-line and multi-store journeys resolve per item and per store, so a single session can legitimately contain several different values. Session-level rollups take the status of the last check per item-store pair within the 30-minute GA4 session window, and cross-session analysis must not carry the value forward — availability is re-checked on every new session.,7️⃣ Not related to the published logistics dimension Inventory Class, which classifies items by ABC value contribution for stocking policy. The two are never interchangeable and must not be joined as synonyms in reporting.
 
+Business Use Case: |
+  1️⃣ The Merchandising team reviews the weekly availability mix by store and category; when Out of Stock exposure on a top-selling item exceeds its threshold at a cluster of stores, they reallocate assortment depth and raise the store replenishment minimum for that item so BOPIS demand stops being turned away at the product page.,2️⃣ The Store Operations team monitors the gap between displayed availability and picked orders; when a store shows In Stock but its BOPIS pick failure rate rises, they trigger a cycle count and a shelf audit at that location to correct the position feeding the storefront.,3️⃣ The Marketing team suppresses paid local inventory listings and store-targeted campaigns for item-store pairs that have been shown as Out of Stock over a sustained period, redirecting budget to stores with confirmed availability and cutting spend on clicks that cannot convert to a pickup order.,4️⃣ The Product team quantifies lost conversion by comparing add-to-cart and BOPIS order rates across the three availability states; when Low Stock underperforms In Stock beyond the expected margin, they test alternative messaging and nearby-store substitution on the product page.
 
+Dependencies:
+  Events: [view-item, select-item, add-to-cart]
+  Dimensions: [store-id, fulfillment-method]
 
+Source Data: Digital Analytics (GA4) + Store Inventory Availability Feed (Adobe Commerce MSI), stitched to Commerce Order Management (Salesforce Commerce Cloud)
 
+Report Attributes: |
+  store-id; fulfillment-method; item-category; device-category; region; traffic-source
 
+Dashboard Usage: [BOPIS Availability & Fulfillment Dashboard, Store Inventory Exposure Monitor, Omnichannel Conversion Funnel, Merchandising Assortment Review]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [store-id, fulfillment-method]
 
+Derived Dimensions: [bopis-eligibility]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +567,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T16:35:37.41+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T16:35:48.198+00:00
 
