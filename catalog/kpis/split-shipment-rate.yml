@@ -1,7 +1,7 @@
 # KPI: Split Shipment Rate
-# Generated: 2026-09-18T16:44:04.254Z
+# Generated: 2026-09-18T16:44:15.357Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Split Shipment Rate
 Formula: (Orders with COUNT(DISTINCT shipment_id) >= 2 / Orders with COUNT(DISTINCT shipment_id) >= 1, where the order's first ship-confirm date falls in the period) × 100
@@ -11,29 +11,450 @@ Description: |
 
 Category: Operations
 
+Tags: [kpi, E-commerce: Post-Purchase Logistics & Fulfillment]
 
+Industry: [["E-commerce"]]
 
+Priority: Medium
 
+Core Area: Generic
 
+Scope: Event
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "purchase",
+          "eventAction": "order_confirmation"
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "ORD-100245871",
+      "total": {
+        "basePrice": 184.97,
+        "currency": "USD",
+        "shipping": 0,
+        "priceWithTax": 199.77
+      },
+      "attributes": {
+        "plannedShipmentCount": 2,
+        "splitShipmentPlanned": true,
+        "splitReason": "inventory_node",
+        "fulfillmentMethod": "ship_to_home",
+        "shippingTier": "standard",
+        "deliveryRegion": "US-TX"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-44821",
+            "productName": "Trail Running Shoe"
+          },
+          "category": {
+            "primaryCategory": "Footwear"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 129.99
+          },
+          "attributes": {
+            "fulfillmentMethod": "ship_to_home",
+            "fulfillmentSource": "owned_dc",
+            "fulfillmentNode": "DC-DAL-01",
+            "shipmentGroup": "1"
+          }
+        },
+        {
+          "productInfo": {
+            "productID": "SKU-90317",
+            "productName": "Hydration Vest"
+          },
+          "category": {
+            "primaryCategory": "Accessories"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 54.98
+          },
+          "attributes": {
+            "fulfillmentMethod": "ship_to_home",
+            "fulfillmentSource": "drop_ship",
+            "fulfillmentNode": "VENDOR-2231",
+            "shipmentGroup": "2"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "ORD-100245871",
+      "value": 184.97,
+      "tax": 14.8,
+      "shipping": 0,
+      "currency": "USD",
+      "shipping_tier": "standard",
+      "items": [
+        {
+          "item_id": "SKU-44821",
+          "item_name": "Trail Running Shoe",
+          "item_category": "Footwear",
+          "price": 129.99,
+          "quantity": 1,
+          "fulfillment_method": "ship_to_home",
+          "fulfillment_source": "owned_dc",
+          "fulfillment_node": "DC-DAL-01",
+          "shipment_group": "1"
+        },
+        {
+          "item_id": "SKU-90317",
+          "item_name": "Hydration Vest",
+          "item_category": "Accessories",
+          "price": 54.98,
+          "quantity": 1,
+          "fulfillment_method": "ship_to_home",
+          "fulfillment_source": "drop_ship",
+          "fulfillment_node": "VENDOR-2231",
+          "shipment_group": "2"
+        }
+      ]
+    },
+    "planned_shipment_count": 2,
+    "split_shipment_planned": "true",
+    "split_reason": "inventory_node",
+    "fulfillment_method": "ship_to_home",
+    "delivery_region": "US-TX"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "transaction": {
+      "purchaseID": "ORD-100245871",
+      "revenue": 184.97,
+      "currency": "USD",
+      "shippingTier": "standard",
+      "plannedShipmentCount": 2,
+      "splitShipmentPlanned": true,
+      "splitReason": "inventory_node",
+      "fulfillmentMethod": "ship_to_home",
+      "deliveryRegion": "US-TX"
+    },
+    "product": [
+      {
+        "productID": "SKU-44821",
+        "name": "Trail Running Shoe",
+        "category": "Footwear",
+        "quantity": 1,
+        "price": 129.99,
+        "fulfillmentMethod": "ship_to_home",
+        "fulfillmentSource": "owned_dc",
+        "fulfillmentNode": "DC-DAL-01",
+        "shipmentGroup": "1"
+      },
+      {
+        "productID": "SKU-90317",
+        "name": "Hydration Vest",
+        "category": "Accessories",
+        "quantity": 1,
+        "price": 54.98,
+        "fulfillmentMethod": "ship_to_home",
+        "fulfillmentSource": "drop_ship",
+        "fulfillmentNode": "VENDOR-2231",
+        "shipmentGroup": "2"
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD-100245871",
+        "priceTotal": 184.97,
+        "currencyCode": "USD"
+      },
+      "shipping": {
+        "shippingMethod": "standard"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-44821",
+        "name": "Trail Running Shoe",
+        "productCategories": [
+          {
+            "categoryName": "Footwear"
+          }
+        ],
+        "quantity": 1,
+        "priceTotal": 129.99,
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "eVar41": "owned_dc",
+                "eVar42": "DC-DAL-01",
+                "eVar43": "1"
+              }
+            }
+          }
+        }
+      },
+      {
+        "SKU": "SKU-90317",
+        "name": "Hydration Vest",
+        "productCategories": [
+          {
+            "categoryName": "Accessories"
+          }
+        ],
+        "quantity": 1,
+        "priceTotal": 54.98,
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "eVar41": "drop_ship",
+                "eVar42": "VENDOR-2231",
+                "eVar43": "2"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar38": "ship_to_home",
+            "eVar39": "2",
+            "eVar40": "inventory_node",
+            "eVar44": "US-TX"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Split Shipment Rate = orders with >= 2 distinct original-fulfillment shipments / all orders with >= 1 carrier shipment
+  -- Base and numerator come from the OMS shipment table; GA4 purchase is joined on transaction_id for attribution only.
+  WITH eligible_orders AS (
+    SELECT o.order_id
+    FROM `your-project.oms.orders` AS o
+    WHERE o.is_test_order = FALSE
+      AND o.is_employee_order = FALSE
+      AND o.order_status NOT IN ('fraud_cancelled', 'cancelled_before_ship')
+  ),
+  original_shipments AS (
+    SELECT
+      s.order_id,
+      COALESCE(s.shipment_id, s.tracking_number) AS shipment_key,
+      s.ship_confirm_ts,
+      s.split_reason,
+      s.distribution_center
+    FROM `your-project.oms.shipments` AS s
+    JOIN eligible_orders AS e
+      ON e.order_id = s.order_id
+    WHERE s.shipment_status = 'ship_confirmed'
+      AND s.delivery_mode = 'carrier'
+      AND s.shipment_reason_code = 'original_fulfillment'
+  ),
+  order_shipments AS (
+    SELECT
+      order_id,
+      COUNT(DISTINCT shipment_key) AS shipment_count,
+      MIN(ship_confirm_ts) AS first_ship_confirm_ts,
+      LOGICAL_OR(split_reason = 'customer_requested') AS is_customer_requested_split
+    FROM original_shipments
+    GROUP BY order_id
+  ),
+  shipped_order_cohort AS (
+    SELECT
+      order_id,
+      shipment_count,
+      is_customer_requested_split,
+      DATE(first_ship_confirm_ts, 'America/New_York') AS first_ship_date
+    FROM order_shipments
+    WHERE DATE(first_ship_confirm_ts, 'America/New_York') BETWEEN DATE '2026-08-01' AND DATE '2026-08-31'
+  ),
+  ga4_purchases AS (
+    SELECT
+      transaction_id,
+      device_category,
+      traffic_source,
+      planned_split_reason
+    FROM (
+      SELECT
+        ecommerce.transaction_id AS transaction_id,
+        device.category AS device_category,
+        CONCAT(IFNULL(traffic_source.source, '(direct)'), ' / ', IFNULL(traffic_source.medium, '(none)')) AS traffic_source,
+        (SELECT MAX(IF(ep.key = 'split_reason', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS planned_split_reason,
+        ROW_NUMBER() OVER (PARTITION BY ecommerce.transaction_id ORDER BY event_timestamp) AS purchase_rank
+      FROM `your-project.analytics_123456789.events_*`
+      WHERE _TABLE_SUFFIX BETWEEN '20260601' AND '20260831'
+        AND event_name = 'purchase'
+        AND ecommerce.transaction_id IS NOT NULL
+        AND ecommerce.transaction_id NOT IN ('', '(not set)')
+    )
+    WHERE purchase_rank = 1
+  )
+  SELECT
+    c.first_ship_date,
+    COALESCE(g.device_category, '(no digital match)') AS device_category,
+    COALESCE(g.traffic_source, '(no digital match)') AS traffic_source,
+    COUNT(*) AS shipped_orders,
+    COUNTIF(c.shipment_count >= 2) AS split_orders,
+    COUNTIF(c.shipment_count >= 2 AND NOT c.is_customer_requested_split) AS controllable_split_orders,
+    SUM(c.shipment_count) AS original_shipments,
+    ROUND(SAFE_DIVIDE(COUNTIF(c.shipment_count >= 2), COUNT(*)) * 100, 2) AS split_shipment_rate_pct,
+    ROUND(SAFE_DIVIDE(COUNTIF(c.shipment_count >= 2 AND NOT c.is_customer_requested_split), COUNT(*)) * 100, 2) AS controllable_split_rate_pct,
+    ROUND(SAFE_DIVIDE(COUNTIF(g.planned_split_reason IS NOT NULL AND c.shipment_count >= 2), COUNTIF(c.shipment_count >= 2)) * 100, 2) AS split_disclosed_at_checkout_pct,
+    ROUND(SAFE_DIVIDE(COUNTIF(g.transaction_id IS NOT NULL), COUNT(*)) * 100, 2) AS ga4_match_rate_pct
+  FROM shipped_order_cohort AS c
+  LEFT JOIN ga4_purchases AS g
+    ON g.transaction_id = c.order_id
+  GROUP BY 1, 2, 3
+  ORDER BY first_ship_date, shipped_orders DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Split Shipment Rate = orders with >= 2 distinct original-fulfillment shipments / all orders with >= 1 carrier shipment
+  -- OMS order and shipment records are ingested as backend datasets; the web purchase (XDM commerce.purchases) is joined on purchaseID for attribution only.
+  WITH eligible_orders AS (
+    SELECT o.order_id
+    FROM oms_orders_backend_dataset AS o
+    WHERE o.is_test_order = false
+      AND o.is_employee_order = false
+      AND o.order_status NOT IN ('fraud_cancelled', 'cancelled_before_ship')
+  ),
+  original_shipments AS (
+    SELECT
+      s.order_id,
+      COALESCE(s.shipment_id, s.tracking_number) AS shipment_key,
+      s.ship_confirm_ts,
+      s.split_reason
+    FROM oms_shipments_backend_dataset AS s
+    JOIN eligible_orders AS e
+      ON e.order_id = s.order_id
+    WHERE s.shipment_status = 'ship_confirmed'
+      AND s.delivery_mode = 'carrier'
+      AND s.shipment_reason_code = 'original_fulfillment'
+  ),
+  order_shipments AS (
+    SELECT
+      order_id,
+      COUNT(DISTINCT shipment_key) AS shipment_count,
+      MIN(ship_confirm_ts) AS first_ship_confirm_ts,
+      MAX(CASE WHEN split_reason = 'customer_requested' THEN 1 ELSE 0 END) AS is_customer_requested_split
+    FROM original_shipments
+    GROUP BY order_id
+  ),
+  shipped_order_cohort AS (
+    SELECT
+      order_id,
+      shipment_count,
+      is_customer_requested_split,
+      to_date(from_utc_timestamp(first_ship_confirm_ts, 'America/New_York')) AS first_ship_date
+    FROM order_shipments
+    WHERE to_date(from_utc_timestamp(first_ship_confirm_ts, 'America/New_York')) BETWEEN DATE '2026-08-01' AND DATE '2026-08-31'
+  ),
+  web_purchases AS (
+    SELECT
+      purchase_id,
+      device_type,
+      tracking_code,
+      planned_split_reason
+    FROM (
+      SELECT
+        commerce.order.purchaseID AS purchase_id,
+        device.type AS device_type,
+        COALESCE(marketing.trackingCode, '(direct)') AS tracking_code,
+        _experience.analytics.customDimensions.eVars.eVar40 AS planned_split_reason,
+        ROW_NUMBER() OVER (PARTITION BY commerce.order.purchaseID ORDER BY timestamp) AS purchase_rank
+      FROM web_events_dataset
+      WHERE timestamp >= TIMESTAMP '2026-06-01 00:00:00'
+        AND timestamp < TIMESTAMP '2026-09-01 00:00:00'
+        AND eventType = 'commerce.purchases'
+        AND commerce.purchases.value = 1
+        AND commerce.order.purchaseID IS NOT NULL
+        AND commerce.order.purchaseID <> ''
+    ) AS ranked
+    WHERE purchase_rank = 1
+  )
+  SELECT
+    c.first_ship_date,
+    COALESCE(w.device_type, '(no digital match)') AS device_type,
+    COALESCE(w.tracking_code, '(no digital match)') AS tracking_code,
+    COUNT(*) AS shipped_orders,
+    SUM(CASE WHEN c.shipment_count >= 2 THEN 1 ELSE 0 END) AS split_orders,
+    SUM(CASE WHEN c.shipment_count >= 2 AND c.is_customer_requested_split = 0 THEN 1 ELSE 0 END) AS controllable_split_orders,
+    SUM(c.shipment_count) AS original_shipments,
+    ROUND(100.0 * SUM(CASE WHEN c.shipment_count >= 2 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS split_shipment_rate_pct,
+    ROUND(100.0 * SUM(CASE WHEN c.shipment_count >= 2 AND c.is_customer_requested_split = 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS controllable_split_rate_pct,
+    ROUND(100.0 * SUM(CASE WHEN c.shipment_count >= 2 AND w.planned_split_reason IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN c.shipment_count >= 2 THEN 1 ELSE 0 END), 0), 2) AS split_disclosed_at_checkout_pct,
+    ROUND(100.0 * SUM(CASE WHEN w.purchase_id IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS digital_match_rate_pct
+  FROM shipped_order_cohort AS c
+  LEFT JOIN web_purchases AS w
+    ON w.purchase_id = c.order_id
+  GROUP BY c.first_ship_date, COALESCE(w.device_type, '(no digital match)'), COALESCE(w.tracking_code, '(no digital match)')
+  ORDER BY c.first_ship_date, shipped_orders DESC;
 
+Calculation Notes: |
+  1️⃣ Unit of analysis is the order (OMS order_id = GA4 purchase transaction_id). The denominator is every order with at least one ship-confirmed carrier shipment whose first ship-confirm timestamp falls in the reporting period; the numerator is the subset with two or more distinct shipment_ids (tracking numbers or OMS fulfillment IDs, deduplicated so a relabelled parcel is not counted twice).,2️⃣ Maturity window: an order is assigned to the period of its first shipment but can only be finalised once all lines are shipped, cancelled or closed. Publish daily and weekly values as provisional and restate them for 14 days (or until every line in the cohort is closed, whichever comes first); monthly values are locked after that window.,3️⃣ Exclude shipments that are not part of original fulfillment: replacement and reshipments for lost or damaged parcels, exchange outbound shipments, return labels and warranty sends. Identify them by the OMS shipment reason code, not by timing, otherwise a reshipment inflates the split count.,4️⃣ Exclude orders with no carrier shipment: buy-online-pick-up-in-store, curbside, ship-to-store handed over at the counter, digital goods, e-gift cards and cancelled-before-ship orders. Orders that mix a pickup line with a shipped line stay in scope and are evaluated on their shipped lines only.,5️⃣ Customer-driven splits (ship-to-multiple-addresses, customer-selected 'ship items as they become available', pre-order lines with a later release date) stay in the KPI but must carry a split_reason of customer_requested so operations can report the controllable rate (network, inventory and drop-ship splits) separately from the headline rate.,6️⃣ Stitching: the GA4 purchase is used only for attribution and device breakdowns. Deduplicate purchases on transaction_id (keep the first event), and keep OMS orders with no GA4 match (call-centre, marketplace, consent-denied traffic) in the base; report the GA4 match rate next to the KPI so digital cuts are read against their coverage. GA4 session timeout (30 minutes) has no effect on the base.,7️⃣ Timestamps come from the OMS ship-confirm event converted to the store's reporting time zone; a zero-order day returns NULL rather than 0%, and test, fraud-cancelled and internal employee orders are filtered by the OMS order-type flag before counting.
 
+Business Use Case: |
+  1️⃣ The fulfillment network planning team reviews split rate by distribution-center and item-category each week; when a node's controllable split rate rises more than 2 points above its 8-week baseline, they rebalance safety stock of the most frequently co-purchased SKUs into that node so baskets can ship complete.,2️⃣ Finance multiplies the monthly count of split orders by the incremental parcel cost per extra shipment; when that cost moves the fulfillment cost per order above plan, they propose a revised free-shipping threshold or a consolidation hold window to the pricing committee.,3️⃣ Merchandising checks split rate by fulfillment source; when drop-ship or backordered lines account for most splits in a category, they add a 'ships separately' message on the product page and cart, or move high-attach SKUs to owned inventory at the next buy.,4️⃣ Customer Service leadership compares 'where is my order' contact rate for split versus single-shipment orders; when split orders generate materially more contacts, they request a proactive multi-shipment notification in the order confirmation and shipping emails.
 
+Dependencies:
+  Events: [purchase, delivery-confirmation]
+  Metrics: [shipment-volume]
+  Dimensions: [number-of-shipments, fulfillment-method, order-status]
+  KPIs: [orders]
 
+Source Data: Digital + OMS (Order Management) shipment records
 
+Report Attributes: |
+  distribution-center; fulfillment-method; carrier; shipping-tier; item-category; delivery-region; device-category; traffic-source
 
+Dashboard Usage: [Fulfillment & Delivery Performance, Post-Purchase Experience Scorecard, Cost-to-Serve by Order, Weekly Operations Review]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [shipment-on-time-delivery-rate, delivery-accuracy-rate, average-order-value, orders]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +464,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T16:44:03.323+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T16:44:14.018+00:00
 
