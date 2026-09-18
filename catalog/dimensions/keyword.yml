@@ -1,7 +1,7 @@
 # Dimension: Keyword
-# Generated: 2026-09-18T17:12:39.681Z
+# Generated: 2026-09-18T17:12:49.349Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Keyword
 
@@ -10,31 +10,369 @@ Description: |
 
 Category: Acquisition
 
+Tags: [dimension, E-commerce: Top-of-Funnel & Marketing Acquisition]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Session
 
+Data Type: string
 
+Aggregation Window: Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  page_view
 
+Adobe Event: |
+  pageView
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageID": "/collections/running-shoes",
+          "pageName": "collections:running-shoes",
+          "destinationURL": "https://www.example.com/collections/running-shoes?utm_source=google&utm_medium=cpc&utm_campaign=spring_sale&utm_term=running+shoes",
+          "referringURL": "https://www.google.com/"
+        },
+        "attributes": {
+          "campaign": {
+            "source": "google",
+            "medium": "cpc",
+            "campaignName": "spring_sale",
+            "adGroup": "running_shoes_generic",
+            "keyword": "running shoes",
+            "keywordMatchType": "phrase",
+            "gclid": "Cj0KCQjw_example"
+          }
+        }
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_location": "https://www.example.com/collections/running-shoes?utm_source=google&utm_medium=cpc&utm_campaign=spring_sale&utm_term=running+shoes",
+    "page_referrer": "https://www.google.com/",
+    "page_title": "Running Shoes",
+    "campaign_source": "google",
+    "campaign_medium": "cpc",
+    "campaign_name": "spring_sale",
+    "campaign_term": "running shoes",
+    "campaign_content": "running_shoes_generic"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "web": {
+      "webPageDetails": {
+        "name": "collections:running-shoes",
+        "URL": "https://www.example.com/collections/running-shoes?utm_source=google&utm_medium=cpc&utm_campaign=spring_sale&utm_term=running+shoes"
+      },
+      "webReferrer": {
+        "URL": "https://www.google.com/"
+      }
+    },
+    "marketing": {
+      "trackingCode": "google:cpc:spring_sale",
+      "campaignName": "spring_sale",
+      "adGroup": "running_shoes_generic",
+      "keyword": "running shoes",
+      "keywordMatchType": "phrase"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web": {
+      "webPageDetails": {
+        "name": "collections:running-shoes",
+        "URL": "https://www.example.com/collections/running-shoes?utm_source=google&utm_medium=cpc&utm_campaign=spring_sale&utm_term=running+shoes",
+        "pageViews": {
+          "value": 1
+        }
+      },
+      "webReferrer": {
+        "URL": "https://www.google.com/"
+      }
+    },
+    "marketing": {
+      "trackingCode": "google:cpc:spring_sale"
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar5": "running shoes",
+            "eVar6": "phrase"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Keyword (session scope): Google Ads keyword via gclid, else utm_term; explicit '(not provided)' / '(not set)' buckets
+  WITH events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      user_pseudo_id,
+      event_timestamp,
+      event_name,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      NULLIF(TRIM(COALESCE(
+        collected_traffic_source.manual_term,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'term'),
+        REGEXP_EXTRACT((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_location'), r'[?&]utm_term=([^&#]*)')
+      )), '') AS raw_term,
+      NULLIF(LOWER(collected_traffic_source.manual_medium), '') AS manual_medium,
+      NULLIF(collected_traffic_source.gclid, '') AS gclid,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_referrer') AS page_referrer,
+      (SELECT COALESCE(value.string_value, CAST(value.int_value AS STRING)) FROM UNNEST(event_params) WHERE key = 'session_engaged') AS session_engaged,
+      ecommerce.transaction_id,
+      ecommerce.purchase_revenue
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND COALESCE(device.web_info.hostname, '') NOT LIKE '%staging%'
+      AND NOT EXISTS (
+        SELECT 1 FROM UNNEST(event_params)
+        WHERE key = 'traffic_type' AND value.string_value = 'internal'
+      )
+  ),
+  sessions AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      MIN(event_date) AS session_date,
+      ARRAY_AGG(raw_term IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS session_term,
+      ARRAY_AGG(manual_medium IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS session_medium,
+      ARRAY_AGG(gclid IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS session_gclid,
+      ARRAY_AGG(page_referrer IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS landing_referrer,
+      MAX(IF(session_engaged = '1', 1, 0)) AS is_engaged,
+      COUNT(DISTINCT IF(event_name = 'purchase', transaction_id, NULL)) AS orders,
+      SUM(IF(event_name = 'purchase', COALESCE(purchase_revenue, 0), 0)) AS revenue
+    FROM events
+    WHERE ga_session_id IS NOT NULL
+    GROUP BY user_pseudo_id, ga_session_id
+  ),
+  ads_clicks AS (
+    SELECT
+      click_view_gclid AS gclid,
+      ANY_VALUE(click_view_keyword_info_text) AS ads_keyword,
+      ANY_VALUE(click_view_keyword_info_match_type) AS ads_match_type
+    FROM `your-project.google_ads.ads_ClickStats_1234567890`
+    WHERE segments_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 33 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+    GROUP BY click_view_gclid
+  ),
+  normalised AS (
+    SELECT
+      s.*,
+      COALESCE(a.ads_match_type, '(not set)') AS keyword_match_type,
+      SUBSTR(LOWER(TRIM(REGEXP_REPLACE(
+        TRANSLATE(REPLACE(REPLACE(COALESCE(NULLIF(TRIM(a.ads_keyword), ''), s.session_term), '%20', ' '), '+', ' '), '[]"', ''),
+        r' +', ' '
+      ))), 1, 100) AS term_clean
+    FROM sessions AS s
+    LEFT JOIN ads_clicks AS a
+      ON a.gclid = s.session_gclid
+  ),
+  classified AS (
+    SELECT
+      session_date,
+      is_engaged,
+      orders,
+      revenue,
+      keyword_match_type,
+      COALESCE(session_medium, IF(session_gclid IS NOT NULL, 'cpc', NULL), '(none)') AS session_medium,
+      CASE
+        WHEN term_clean = '(not provided)' THEN '(not provided)'
+        WHEN term_clean IS NULL OR term_clean IN ('', '(not set)') THEN
+          CASE
+            WHEN session_gclid IS NULL
+             AND (session_medium = 'organic'
+                  OR (session_medium IS NULL
+                      AND REGEXP_CONTAINS(LOWER(COALESCE(landing_referrer, '')), r'(google|bing|yahoo|duckduckgo|baidu|yandex|ecosia)[.]')))
+              THEN '(not provided)'
+            ELSE '(not set)'
+          END
+        WHEN REGEXP_CONTAINS(term_clean, r'@|[0-9]{7,}') THEN '(redacted)'
+        ELSE term_clean
+      END AS keyword
+    FROM normalised
+  )
+  SELECT
+    session_date,
+    keyword,
+    keyword_match_type,
+    session_medium,
+    COUNT(*) AS sessions,
+    SUM(is_engaged) AS engaged_sessions,
+    COUNTIF(orders > 0) AS converting_sessions,
+    SUM(orders) AS orders,
+    ROUND(SUM(revenue), 2) AS revenue,
+    SAFE_DIVIDE(COUNT(*), SUM(COUNT(*)) OVER (PARTITION BY session_date)) AS share_of_sessions,
+    SAFE_DIVIDE(COUNTIF(orders > 0), COUNT(*)) AS session_conversion_rate,
+    session_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY) AS is_provisional
+  FROM classified
+  GROUP BY session_date, keyword, keyword_match_type, session_medium
+  ORDER BY session_date DESC, sessions DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Keyword (visit scope): eVar5 search keyword, else utm_term; explicit '(not provided)' / '(not set)' buckets
+  WITH hits AS (
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      timestamp,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY identityMap['ECID'][0].id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session,
+      NULLIF(TRIM(COALESCE(
+        _experience.analytics.customDimensions.eVars.eVar5,
+        regexp_extract(web.webPageDetails.URL, '[?&]utm_term=([^&#]*)', 1)
+      )), '') AS raw_term,
+      NULLIF(TRIM(_experience.analytics.customDimensions.eVars.eVar6), '') AS raw_match_type,
+      NULLIF(LOWER(marketing.trackingCode), '') AS tracking_code,
+      NULLIF(LOWER(COALESCE(
+        NULLIF(regexp_extract(web.webPageDetails.URL, '[?&]utm_medium=([^&#]*)', 1), ''),
+        split(marketing.trackingCode, ':')[1]
+      )), '') AS medium,
+      web.webReferrer.URL AS referrer_url,
+      commerce.purchases.value AS purchase_flag,
+      commerce.order.purchaseID AS purchase_id,
+      commerce.order.priceTotal AS order_total
+    FROM adobe_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 30)
+      AND timestamp < current_date()
+      AND identityMap['ECID'][0].id IS NOT NULL
+      AND COALESCE(web.webPageDetails.URL, '') NOT LIKE '%staging%'
+  ),
+  session_hits AS (
+    SELECT
+      ecid,
+      session.num AS session_num,
+      timestamp,
+      purchase_flag,
+      purchase_id,
+      order_total,
+      FIRST_VALUE(raw_term, true) OVER w AS session_term,
+      FIRST_VALUE(raw_match_type, true) OVER w AS session_match_type,
+      FIRST_VALUE(tracking_code, true) OVER w AS session_tracking_code,
+      FIRST_VALUE(medium, true) OVER w AS session_medium,
+      FIRST_VALUE(referrer_url, true) OVER w AS landing_referrer
+    FROM hits
+    WINDOW w AS (
+      PARTITION BY ecid, session.num
+      ORDER BY timestamp
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    )
+  ),
+  sessions AS (
+    SELECT
+      ecid,
+      session_num,
+      CAST(MIN(timestamp) AS DATE) AS session_date,
+      MAX(session_term) AS session_term,
+      MAX(session_match_type) AS session_match_type,
+      MAX(session_tracking_code) AS session_tracking_code,
+      MAX(session_medium) AS session_medium,
+      MAX(landing_referrer) AS landing_referrer,
+      COUNT(DISTINCT CASE WHEN purchase_flag > 0 THEN purchase_id END) AS orders,
+      SUM(CASE WHEN purchase_flag > 0 THEN COALESCE(order_total, 0) ELSE 0 END) AS revenue
+    FROM session_hits
+    GROUP BY ecid, session_num
+  ),
+  normalised AS (
+    SELECT
+      *,
+      substr(lower(trim(regexp_replace(
+        translate(replace(replace(session_term, '%20', ' '), '+', ' '), '[]"', ''),
+        ' +', ' '
+      ))), 1, 100) AS term_clean
+    FROM sessions
+  ),
+  classified AS (
+    SELECT
+      session_date,
+      orders,
+      revenue,
+      COALESCE(lower(session_match_type), '(not set)') AS keyword_match_type,
+      COALESCE(session_medium, '(none)') AS session_medium,
+      CASE
+        WHEN term_clean = '(not provided)' THEN '(not provided)'
+        WHEN term_clean IS NULL OR term_clean IN ('', '(not set)') THEN
+          CASE
+            WHEN session_tracking_code IS NULL
+             AND (session_medium = 'organic'
+                  OR (session_medium IS NULL
+                      AND lower(COALESCE(landing_referrer, '')) RLIKE '(google|bing|yahoo|duckduckgo|baidu|yandex|ecosia)[.]'))
+              THEN '(not provided)'
+            ELSE '(not set)'
+          END
+        WHEN term_clean RLIKE '@|[0-9]{7,}' THEN '(redacted)'
+        ELSE term_clean
+      END AS keyword
+    FROM normalised
+  )
+  SELECT
+    session_date,
+    keyword,
+    keyword_match_type,
+    session_medium,
+    COUNT(*) AS sessions,
+    SUM(CASE WHEN orders > 0 THEN 1 ELSE 0 END) AS converting_sessions,
+    SUM(orders) AS orders,
+    ROUND(SUM(revenue), 2) AS revenue,
+    COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY session_date) AS share_of_sessions,
+    SUM(CASE WHEN orders > 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) AS session_conversion_rate,
+    session_date >= date_sub(current_date(), 3) AS is_provisional
+  FROM classified
+  GROUP BY session_date, keyword, keyword_match_type, session_medium
+  ORDER BY session_date DESC, sessions DESC;
 
+Calculation Notes: |
+  1️⃣ Resolution precedence per session: (a) Google Ads keyword text joined from the gclid via the Google Ads link (GA4 "Google Ads keyword text"), (b) utm_term from the landing URL (GA4 "Session manual term", BigQuery collected_traffic_source.manual_term), (c) Adobe "Search Keyword" from the referrer or tracking-code classification; the first non-null value wins and no downstream hit may overwrite it within the session.,2️⃣ Session scope follows the platform's attribution rules: GA4 carries the last non-direct click forward across a 30-minute inactivity timeout (sessions do not break at midnight and a new campaign parameter does not split the session in GA4), while Adobe starts a new visit after 30 minutes of inactivity and binds the keyword through the eVar/marketing-channel expiration configured for the report suite; state which rule a report uses before comparing platforms.,3️⃣ Reserved-value handling: "(not provided)" (organic search with an encrypted referrer) and "(not set)" (no keyword on a tagged or auto-tagged click, Performance Max, Shopping and Dynamic Search Ads traffic) are retained as explicit buckets and never nulled, backfilled from Search Console or redistributed pro rata; they typically represent the majority of organic and Shopping sessions.,4️⃣ Normalisation before aggregation: lowercase, trim, URL-decode ('+' and %20 to a space), collapse repeated whitespace, and strip match-type syntax ("[ ]" exact, quotation marks for phrase, legacy "+" broad-match modifier) into the separate keyword match type attribute so that the same keyword under different match types is not reported as distinct rows.,5️⃣ Keyword is the bidded criterion, not the user's query: the Google Ads search term (search query report) and on-site search terms from the view_search_results event are different dimensions and must not be merged into this field; a single keyword can map to hundreds of search terms under broad match.,6️⃣ Exclusions: internal traffic (IP / internal_traffic filter), known bots and spiders, QA and staging hostnames, and sessions whose utm_term contains an email address, phone number or order ID are excluded or hashed at ingestion; values over 100 characters are truncated consistently with the GA4 parameter limit.,7️⃣ Timing and freshness: the gclid-to-keyword join depends on the Google Ads link and backfills for up to 72 hours, and cost data from the Google Ads Data Transfer lands on a T+1 schedule, so keyword-level ROAS and conversion rate for the most recent three days are provisional and must be flagged as such in daily reporting.
 
+Business Use Case: |
+  1️⃣ Paid Search Manager reviews the weekly keyword report and, when a keyword spends above target with a Paid Search Conversion Rate below the ad-group median over 14 days and at least 200 clicks, lowers its bid, tightens its match type or adds it as a negative to the ad group.,2️⃣ Performance Marketing lead compares brand and non-brand keywords each month and, when brand keywords account for a rising share of attributed revenue, shifts incremental budget to non-brand keywords and runs a geo holdout on brand terms to measure true incrementality.,3️⃣ Merchandising team receives the top converting keywords by product category and, when a high-intent keyword lands on a generic category page, commissions a dedicated landing page or collection filter and re-points the ad group's final URL to it.,4️⃣ Marketing Analytics lead monitors the share of paid search sessions resolving to "(not set)" and, when it exceeds 5% outside Performance Max and Shopping, raises a ticket with the Paid Media team to repair auto-tagging, the Google Ads link or utm_term templates in the tracking template.
 
+Dependencies:
+  Events: [page-view]
+  Dimensions: [campaign-name, ad-group]
 
+Source Data: Digital Analytics (GA4) + Google Ads
 
+Report Attributes: |
+  Session Source / Medium; Campaign Name; Ad Group; Keyword Match Type; Landing Page; Device Category; Country
 
+Dashboard Usage: [Paid Search Performance, Marketing Acquisition Overview, Brand vs Non-Brand Search, Organic Search Performance]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [campaign-name, ad-group, first-touch-channel-grouping]
 
+Derived Dimensions: [keyword-match-type, brand-vs-non-brand-keyword]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +380,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T17:12:39.341+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T17:12:48.966+00:00
 
