@@ -1,0 +1,441 @@
+# KPI: Promotion Click-Through Rate
+# Generated: 2026-09-18T03:41:23.470Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Promotion Click-Through Rate
+Formula: (Deduplicated select_promotion paired to a viewable impression in the same session / Deduplicated viewable view_promotion) × 100, capped at 100%, where each event is deduplicated to one per session × promotion_id × creative_slot × location_id
+
+Description: |
+  Internal promotion click-through rate is the share of viewable on-site internal promotion impressions (hero banners, carousels, category tiles, PDP and cart cross-sell slots) that a shopper clicks, measured as select_promotion over view_promotion for each promotion_id, creative_slot and location_id. It covers only promotions the retailer serves on its own storefront, not paid-media, email, affiliate or marketplace ad CTR, so Merchandising can judge which placements and creatives earn attention before downstream conversion is considered.
+
+Category: Engagement
+
+Tags: [kpi, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Event
+
+Measure Type: Percentage
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  select_promotion
+
+Adobe Event: |
+  promotionClick
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "home",
+        "pageName": "home",
+        "destinationURL": "https://www.example.com/"
+      },
+      "category": {
+        "primaryCategory": "home",
+        "pageType": "home"
+      },
+      "attributes": {
+        "trafficType": "external"
+      }
+    },
+    "promotion": [
+      {
+        "promotionInfo": {
+          "promotionID": "PROMO_SUMMER_2026_HERO",
+          "promotionName": "Summer Sale 2026",
+          "creativeName": "summer_sale_hero_v2",
+          "creativeSlot": "hero_banner_1",
+          "locationID": "homepage_top",
+          "promotionType": "internal"
+        },
+        "attributes": {
+          "viewable": true,
+          "impressionTimestamp": "2026-09-16T14:05:11Z",
+          "clicked": true,
+          "clickTimestamp": "2026-09-16T14:05:19Z"
+        }
+      }
+    ],
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "select_promotion",
+          "eventAction": "promotionClick",
+          "type": "internal_promotion",
+          "timeStamp": "2026-09-16T14:05:19Z"
+        },
+        "category": {
+          "primaryCategory": "merchandising"
+        },
+        "attributes": {
+          "promotionID": "PROMO_SUMMER_2026_HERO",
+          "creativeSlot": "hero_banner_1",
+          "locationID": "homepage_top"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "select_promotion",
+    "page_type": "home",
+    "promotion_type": "internal",
+    "viewable": true,
+    "ecommerce": {
+      "promotion_id": "PROMO_SUMMER_2026_HERO",
+      "promotion_name": "Summer Sale 2026",
+      "creative_name": "summer_sale_hero_v2",
+      "creative_slot": "hero_banner_1",
+      "location_id": "homepage_top",
+      "items": [
+        {
+          "item_id": "SKU_10452",
+          "item_name": "Linen Short-Sleeve Shirt",
+          "item_brand": "Coastline",
+          "item_category": "Apparel",
+          "item_category2": "Men",
+          "item_list_id": "homepage_hero",
+          "item_list_name": "Homepage Hero",
+          "promotion_id": "PROMO_SUMMER_2026_HERO",
+          "promotion_name": "Summer Sale 2026",
+          "creative_name": "summer_sale_hero_v2",
+          "creative_slot": "hero_banner_1",
+          "location_id": "homepage_top",
+          "index": 0,
+          "price": 39.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "promotionClick",
+    "eventInfo": {
+      "path": "promotion.PROMO_SUMMER_2026_HERO",
+      "ga4EventEquivalent": "select_promotion",
+      "impressionEvent": "promotionView"
+    },
+    "page": {
+      "pageType": "home",
+      "pageName": "home",
+      "trafficType": "external"
+    },
+    "promotion": {
+      "PROMO_SUMMER_2026_HERO": {
+        "promotionID": "PROMO_SUMMER_2026_HERO",
+        "promotionName": "Summer Sale 2026",
+        "creativeName": "summer_sale_hero_v2",
+        "creativeSlot": "hero_banner_1",
+        "locationID": "homepage_top",
+        "promotionType": "internal",
+        "viewable": true,
+        "linkedProductSKUs": [
+          "SKU_10452"
+        ]
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "timestamp": "2026-09-16T14:05:19Z",
+    "web": {
+      "webPageDetails": {
+        "name": "home"
+      },
+      "webInteraction": {
+        "name": "promotionClick",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU_10452",
+        "name": "Linen Short-Sleeve Shirt",
+        "priceTotal": 39.99,
+        "quantity": 1
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar30": "PROMO_SUMMER_2026_HERO",
+            "eVar31": "Summer Sale 2026",
+            "eVar32": "summer_sale_hero_v2",
+            "eVar33": "hero_banner_1",
+            "eVar34": "homepage_top",
+            "eVar35": "internal",
+            "eVar36": "true",
+            "eVar37": "home",
+            "eVar38": "external"
+          }
+        },
+        "event1to100": {
+          "event30": {
+            "value": 0
+          },
+          "event31": {
+            "value": 1
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Promotion Click-Through Rate: deduplicated select_promotion / deduplicated viewable view_promotion,
+  -- one per session x promotion_id x creative_slot x location_id; clicks count only when paired with an impression in the same session.
+  -- Promotion fields live in items[] in the GA4 export; location_id falls back to the event-level parameter.
+  WITH base AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      event_name,
+      user_pseudo_id,
+      device.category AS device_category,
+      items,
+      (SELECT MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) FROM UNNEST(event_params) AS ep) AS ga_session_id,
+      (SELECT MAX(IF(ep.key = 'page_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS page_type,
+      (SELECT MAX(IF(ep.key = 'location_id', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS location_id_param,
+      (SELECT MAX(IF(ep.key = 'promotion_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS promotion_type,
+      (SELECT MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS traffic_type,
+      (SELECT MAX(IF(ep.key = 'viewable', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) FROM UNNEST(event_params) AS ep) AS viewable
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name IN ('view_promotion', 'select_promotion')
+  ),
+  promo_events AS (
+    SELECT
+      b.event_date,
+      b.event_name,
+      CONCAT(b.user_pseudo_id, '.', CAST(b.ga_session_id AS STRING)) AS session_key,
+      b.device_category,
+      COALESCE(b.page_type, '(not set)') AS page_type,
+      it.promotion_id,
+      it.promotion_name,
+      it.creative_name,
+      COALESCE(NULLIF(it.creative_slot, ''), '(not set)') AS creative_slot,
+      COALESCE(NULLIF(it.location_id, ''), NULLIF(b.location_id_param, ''), '(not set)') AS location_id,
+      b.viewable
+    FROM base AS b, UNNEST(b.items) AS it
+    WHERE it.promotion_id IS NOT NULL
+      AND it.promotion_id != ''
+      AND b.ga_session_id IS NOT NULL
+      AND LOWER(COALESCE(b.promotion_type, 'internal')) = 'internal'
+      AND LOWER(COALESCE(b.traffic_type, '')) NOT IN ('internal', 'agency', 'developer')
+      AND NOT REGEXP_CONTAINS(LOWER(it.promotion_id), r'^(stg|staging|preview)[_-]')
+  ),
+  impressions AS (
+    SELECT
+      session_key,
+      promotion_id,
+      creative_slot,
+      location_id,
+      MIN(event_date) AS event_date,
+      ANY_VALUE(promotion_name) AS promotion_name,
+      ANY_VALUE(creative_name) AS creative_name,
+      ANY_VALUE(device_category) AS device_category,
+      ANY_VALUE(page_type) AS page_type
+    FROM promo_events
+    WHERE event_name = 'view_promotion'
+      AND LOWER(viewable) IN ('true', '1')
+    GROUP BY session_key, promotion_id, creative_slot, location_id
+  ),
+  clicks AS (
+    SELECT DISTINCT session_key, promotion_id, creative_slot, location_id
+    FROM promo_events
+    WHERE event_name = 'select_promotion'
+  ),
+  paired AS (
+    SELECT
+      i.*,
+      IF(c.session_key IS NOT NULL, 1, 0) AS clicked
+    FROM impressions AS i
+    LEFT JOIN clicks AS c
+      USING (session_key, promotion_id, creative_slot, location_id)
+  )
+  SELECT
+    event_date,
+    promotion_id,
+    ANY_VALUE(promotion_name) AS promotion_name,
+    ANY_VALUE(creative_name) AS creative_name,
+    creative_slot,
+    location_id,
+    page_type,
+    device_category,
+    COUNT(*) AS promotion_impressions,
+    SUM(clicked) AS promotion_clicks,
+    ROUND(LEAST(SAFE_DIVIDE(SUM(clicked), COUNT(*)), 1) * 100, 2) AS promotion_ctr_pct,
+    COUNT(*) >= 1000 AS meets_min_volume
+  FROM paired
+  GROUP BY event_date, promotion_id, creative_slot, location_id, page_type, device_category
+  ORDER BY event_date DESC, promotion_impressions DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Promotion Click-Through Rate: promotionClick (event31) / viewable promotionView (event30),
+  -- deduplicated per session x promotion ID (eVar30) x creative slot (eVar33) x location ID (eVar34);
+  -- only viewable (eVar36) internal promotions (eVar35) from non-internal/agency traffic (eVar38, sourced from data layer page.trafficType), broken down by page type (eVar37);
+  -- sessions use a 30-minute inactivity timeout and clicks count only when paired with an impression in the same session.
+  WITH sessionized AS (
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      timestamp,
+      device.type AS device_category,
+      _experience.analytics.customDimensions.eVars.eVar37 AS page_type,
+      _experience.analytics.customDimensions.eVars.eVar35 AS promotion_type,
+      _experience.analytics.customDimensions.eVars.eVar36 AS viewable,
+      _experience.analytics.customDimensions.eVars.eVar38 AS traffic_type,
+      _experience.analytics.customDimensions.eVars.eVar30 AS promotion_id,
+      _experience.analytics.customDimensions.eVars.eVar31 AS promotion_name,
+      _experience.analytics.customDimensions.eVars.eVar32 AS creative_name,
+      COALESCE(NULLIF(_experience.analytics.customDimensions.eVars.eVar33, ''), '(not set)') AS creative_slot,
+      COALESCE(NULLIF(_experience.analytics.customDimensions.eVars.eVar34, ''), '(not set)') AS location_id,
+      COALESCE(_experience.analytics.event1to100.event30.value, 0) AS promo_view,
+      COALESCE(_experience.analytics.event1to100.event31.value, 0) AS promo_click,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY identityMap['ECID'][0].id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 30)
+      AND timestamp < current_date()
+      AND identityMap['ECID'][0].id IS NOT NULL
+  ),
+  promo_hits AS (
+    SELECT
+      CONCAT(ecid, '-', CAST(session.num AS STRING)) AS session_key,
+      to_date(timestamp) AS event_date,
+      COALESCE(device_category, '(not set)') AS device_category,
+      COALESCE(NULLIF(page_type, ''), '(not set)') AS page_type,
+      viewable,
+      promotion_id,
+      promotion_name,
+      creative_name,
+      creative_slot,
+      location_id,
+      promo_view,
+      promo_click
+    FROM sessionized
+    WHERE promotion_id IS NOT NULL
+      AND promotion_id != ''
+      AND (promo_view > 0 OR promo_click > 0)
+      AND LOWER(COALESCE(promotion_type, 'internal')) = 'internal'
+      AND LOWER(COALESCE(traffic_type, '')) NOT IN ('internal', 'agency', 'developer')
+      AND NOT (LOWER(promotion_id) RLIKE '^(stg|staging|preview)[_-]')
+  ),
+  impressions AS (
+    SELECT
+      session_key,
+      promotion_id,
+      creative_slot,
+      location_id,
+      MIN(event_date) AS event_date,
+      MAX(promotion_name) AS promotion_name,
+      MAX(creative_name) AS creative_name,
+      MAX(device_category) AS device_category,
+      MIN(page_type) AS page_type
+    FROM promo_hits
+    WHERE promo_view > 0
+      AND LOWER(viewable) IN ('true', '1')
+    GROUP BY session_key, promotion_id, creative_slot, location_id
+  ),
+  clicks AS (
+    SELECT DISTINCT session_key, promotion_id, creative_slot, location_id
+    FROM promo_hits
+    WHERE promo_click > 0
+  ),
+  paired AS (
+    SELECT
+      i.event_date,
+      i.promotion_id,
+      i.promotion_name,
+      i.creative_name,
+      i.creative_slot,
+      i.location_id,
+      i.page_type,
+      i.device_category,
+      CASE WHEN c.session_key IS NOT NULL THEN 1 ELSE 0 END AS clicked
+    FROM impressions AS i
+    LEFT JOIN clicks AS c
+      ON  i.session_key = c.session_key
+      AND i.promotion_id = c.promotion_id
+      AND i.creative_slot = c.creative_slot
+      AND i.location_id = c.location_id
+  )
+  SELECT
+    event_date,
+    promotion_id,
+    MAX(promotion_name) AS promotion_name,
+    MAX(creative_name) AS creative_name,
+    creative_slot,
+    location_id,
+    page_type,
+    device_category,
+    COUNT(*) AS promotion_impressions,
+    SUM(clicked) AS promotion_clicks,
+    ROUND(LEAST(SUM(clicked) / NULLIF(COUNT(*), 0), 1.0) * 100, 2) AS promotion_ctr_pct,
+    COUNT(*) >= 1000 AS meets_min_volume
+  FROM paired
+  GROUP BY event_date, promotion_id, creative_slot, location_id, page_type, device_category
+  ORDER BY event_date DESC, promotion_impressions DESC;
+
+Calculation Notes: |
+  1️⃣ Denominator counts view_promotion only when the creative is viewable (at least 50% of its pixels in the viewport for at least 1 continuous second, per the IAB/MRC display standard). Slides in a carousel that never render, lazy-loaded slots below the fold that are never scrolled to, and page-load pushes fired before render are excluded, because they inflate impressions and understate CTR.,2️⃣ Both events are deduplicated to one per session × promotion_id × creative_slot × location_id. Carousel auto-rotation, back-button restores and SPA re-renders therefore do not create extra impressions, and double-taps or repeat clicks on the same tile count as a single selection.,3️⃣ A select_promotion with no matching viewable view_promotion in the same session (for example from cached pages, deep links that replay the click, or consent granted after the impression) is excluded from the numerator. The slot-level ratio is capped at 100%, and any slot above 100% before capping is sent to the tagging owner as an instrumentation defect.,4️⃣ Scope is on-site internal promotions only. Paid search, paid social, display, email, SMS, affiliate and retail-media sponsored-product placements are excluded, even when they carry a promotion_id. Known bots, internal and agency IP ranges, and promotions whose promotion_id uses the staging or preview prefix are also filtered out. In GA4 the traffic_type parameter comes from the property's internal-traffic rules. In Adobe the site sets page.trafficType (external, internal, agency or developer) in the data layer, and it is mapped to eVar38; internal, agency and developer traffic is dropped.,5️⃣ Sessions end after 30 minutes of inactivity. An impression and a click must fall in the same session to pair, and the day boundary is the property reporting time zone. GA4 BigQuery daily tables settle within 72 hours, so the prior three days are restated on each load and a period is frozen after that.,6️⃣ Clicks earned in the hero slot are not comparable with clicks from a footer tile. Rank creatives only within the same creative_slot and location_id, and only when the cell has at least 1,000 deduplicated impressions. For A/B decisions, test the difference in proportions at 95% confidence, not by eyeballing rank.,7️⃣ The GA4 standard report metric 'Item promotion click-through rate' is item-scoped (items clicked in promotion / items viewed in promotion) and will differ from this event-scoped definition when promotions carry several items[]. Name the variant explicitly in any dashboard, and use the item-scoped figure only for product-level promotion analysis.
+
+Business Use Case: |
+  1️⃣ Site Merchandising: at the Monday trading review, any homepage or category creative_slot whose CTR has been more than 20% below its trailing 8-week slot median for 7 consecutive days goes back to the content team for a creative swap or reprioritisation in the promotion calendar.,2️⃣ Conversion Rate Optimisation (Product): when testing hero-banner layouts or tile copy, the team ships the variant with the higher CTR at 95% confidence only if Merchandising Conversion Rate for the same slot does not decline, so clickbait creatives that attract clicks without sales are rejected.,3️⃣ Trade Marketing: for vendor-funded or co-op placements, the team includes slot-level impressions, clicks and CTR in the end-of-flight brand-partner recap and uses the benchmark against the slot median to price placement renewals.,4️⃣ Digital Product (UX): when mobile CTR for a location_id is less than 60% of desktop CTR for the same promotion over a full week, the UX team audits tap-target size, carousel swipe behaviour and above-the-fold placement on mobile templates.
+
+Dependencies:
+  Events: [view-promotion, select-promotion]
+  Dimensions: [promotion-type, page-type, device-category]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  promotion_id; promotion_name; creative_name; creative_slot; location_id; page_type; device_category
+
+Dashboard Usage: [Onsite Merchandising Performance, Homepage & Category Landing Optimisation, Promotion Calendar & Placement Review, Vendor-Funded Placement Recap]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [merchandising-conversion-rate, search-result-click-through-rate, item-view-to-cart-rate, add-to-cart-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-16T17:36:30.344+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-18T03:41:22.995+00:00
+
