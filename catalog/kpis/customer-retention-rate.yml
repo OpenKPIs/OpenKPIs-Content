@@ -1,5 +1,5 @@
 # KPI: Customer Retention Rate
-# Generated: 2026-09-18T16:58:38.378Z
+# Generated: 2026-09-18T17:28:28.109Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -23,7 +23,7 @@ Scope: User
 
 Measure Type: Percentage
 
-Aggregation Window: Time based - Monthly, Monthly, Quarterly, Yearly
+Aggregation Window: Monthly, Quarterly, Yearly
 
 GA4 Event: |
   purchase
@@ -157,7 +157,8 @@ Google Analytics SQL: |
       e.user_id,
       PARSE_DATE('%Y%m%d', e.event_date) AS purchase_date,
       MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) AS transaction_id,
-      MAX(IF(ep.key = 'value', COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64)), NULL)) AS order_value
+      MAX(IF(ep.key = 'value', COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64)), NULL)) AS order_value,
+      MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type
     FROM `your-project.analytics_123456789.events_*` AS e,
       UNNEST(e.event_params) AS ep
     WHERE e.event_name = 'purchase'
@@ -166,13 +167,39 @@ Google Analytics SQL: |
                             AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
     GROUP BY e.user_id, e.event_date, e.event_timestamp, e.user_pseudo_id
   ),
+  refunds AS (
+    -- transactions fully refunded or cancelled up to the end of the current period
+    -- (GA4 full refund = refund event sent without an items array)
+    SELECT DISTINCT COALESCE(r.transaction_id, r.ecommerce_transaction_id) AS transaction_id
+    FROM (
+      SELECT
+        e.event_timestamp,
+        e.user_pseudo_id,
+        ANY_VALUE(e.ecommerce.transaction_id) AS ecommerce_transaction_id,
+        MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) AS transaction_id
+      FROM `your-project.analytics_123456789.events_*` AS e,
+        UNNEST(e.event_params) AS ep
+      WHERE e.event_name = 'refund'
+        AND ARRAY_LENGTH(e.items) = 0
+        AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 26 MONTH))
+                              AND FORMAT_DATE('%Y%m%d', LAST_DAY(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH), MONTH))
+      GROUP BY e.event_timestamp, e.user_pseudo_id
+    ) AS r
+    WHERE COALESCE(r.transaction_id, r.ecommerce_transaction_id) IS NOT NULL
+  ),
   orders AS (
-    -- one row per transaction; drop test and zero-value orders
-    SELECT user_id, MIN(purchase_date) AS purchase_date, transaction_id
-    FROM purchase_events
-    WHERE transaction_id IS NOT NULL
-      AND order_value > 0
-    GROUP BY user_id, transaction_id
+    -- one row per transaction; drop zero-value orders, test orders (transaction_id prefixed 'test'
+    -- or internal traffic) and orders fully refunded or cancelled by the end of the period
+    SELECT pe.user_id, MIN(pe.purchase_date) AS purchase_date, pe.transaction_id
+    FROM purchase_events AS pe
+    LEFT JOIN refunds AS rf
+      ON rf.transaction_id = pe.transaction_id
+    WHERE pe.transaction_id IS NOT NULL
+      AND pe.order_value > 0
+      AND NOT STARTS_WITH(LOWER(pe.transaction_id), 'test')
+      AND COALESCE(pe.traffic_type, '') != 'internal'
+      AND rf.transaction_id IS NULL
+    GROUP BY pe.user_id, pe.transaction_id
   ),
   first_purchase AS (
     SELECT user_id, MIN(purchase_date) AS first_purchase_date
@@ -223,20 +250,64 @@ AEP Query Service SQL: |
       add_months(trunc(current_date(), 'MM'), -2) AS prev_start,
       date_sub(add_months(trunc(current_date(), 'MM'), -1), 1) AS prev_end
   ),
-  orders AS (
-    -- one row per purchase ID; drop test and zero-value orders
-    SELECT
-      identityMap['CRMID'][0].id AS customer_id,
-      commerce.order.purchaseID AS purchase_id,
-      MIN(CAST(timestamp AS DATE)) AS purchase_date
+  order_totals AS (
+    -- original order value per purchase ID
+    SELECT commerce.order.purchaseID AS purchase_id, MAX(commerce.order.priceTotal) AS order_total
     FROM commerce_experience_event_dataset
     WHERE eventType = 'commerce.purchases'
-      AND commerce.purchases.value > 0
-      AND commerce.order.priceTotal > 0
       AND commerce.order.purchaseID IS NOT NULL
-      AND identityMap['CRMID'][0].id IS NOT NULL
       AND timestamp >= add_months(trunc(current_date(), 'MM'), -26)
-    GROUP BY identityMap['CRMID'][0].id, commerce.order.purchaseID
+    GROUP BY commerce.order.purchaseID
+  ),
+  credit_memos AS (
+    -- Adobe Commerce credit memos (refunds) issued up to the end of the current period, summed per order
+    SELECT commerce.order.purchaseID AS purchase_id, SUM(commerce.order.priceTotal) AS refunded_total
+    FROM commerce_experience_event_dataset
+    WHERE eventType = 'commerce.backofficeCreditMemoIssued'
+      AND commerce.order.purchaseID IS NOT NULL
+      AND timestamp >= add_months(trunc(current_date(), 'MM'), -26)
+      AND timestamp < trunc(current_date(), 'MM')
+    GROUP BY commerce.order.purchaseID
+  ),
+  cancellations AS (
+    -- Adobe Commerce order cancellations up to the end of the current period (any cancellation counts as full)
+    SELECT DISTINCT commerce.order.purchaseID AS purchase_id
+    FROM commerce_experience_event_dataset
+    WHERE eventType = 'commerce.backofficeOrderCancelled'
+      AND commerce.order.purchaseID IS NOT NULL
+      AND timestamp >= add_months(trunc(current_date(), 'MM'), -26)
+      AND timestamp < trunc(current_date(), 'MM')
+  ),
+  refunds AS (
+    -- purchase IDs fully refunded (summed credit memos >= original order total) or cancelled;
+    -- partially refunded orders are kept, matching the GA4 full-refund rule
+    SELECT cm.purchase_id
+    FROM credit_memos cm
+    JOIN order_totals ot ON ot.purchase_id = cm.purchase_id
+    WHERE cm.refunded_total >= ot.order_total
+    UNION
+    SELECT ca.purchase_id
+    FROM cancellations ca
+  ),
+  orders AS (
+    -- one row per purchase ID; drop zero-value orders, test orders (purchaseID prefixed 'test')
+    -- and orders fully refunded or cancelled by the end of the period
+    SELECT
+      ev.identityMap['CRMID'][0].id AS customer_id,
+      ev.commerce.order.purchaseID AS purchase_id,
+      MIN(CAST(ev.timestamp AS DATE)) AS purchase_date
+    FROM commerce_experience_event_dataset ev
+    LEFT JOIN refunds rf
+      ON rf.purchase_id = ev.commerce.order.purchaseID
+    WHERE ev.eventType = 'commerce.purchases'
+      AND ev.commerce.purchases.value > 0
+      AND ev.commerce.order.priceTotal > 0
+      AND ev.commerce.order.purchaseID IS NOT NULL
+      AND lower(ev.commerce.order.purchaseID) NOT LIKE 'test%'
+      AND ev.identityMap['CRMID'][0].id IS NOT NULL
+      AND ev.timestamp >= add_months(trunc(current_date(), 'MM'), -26)
+      AND rf.purchase_id IS NULL
+    GROUP BY ev.identityMap['CRMID'][0].id, ev.commerce.order.purchaseID
   ),
   first_purchase AS (
     SELECT customer_id, MIN(purchase_date) AS first_purchase_date
@@ -282,7 +353,7 @@ Calculation Notes: |
   1️⃣ A customer is an identified buyer (logged-in user_id / CRM ID) with at least one completed purchase in the period; anonymous or guest orders that cannot be tied to a customer ID are excluded from all three counts, so report the share of identified revenue alongside the rate.
   2️⃣ Customers at start of period (the denominator) is the full base of customers who purchased in the prior period of equal length, not only those who were exposed to a retention campaign or visited the site.
   3️⃣ New customers are those whose first-ever completed purchase falls inside the current period; use a lookback of at least 24 months of order history so returning customers are not misclassified as new.
-  4️⃣ Count purchases once per transaction_id: deduplicate repeated purchase hits, and exclude test orders, zero-value orders and orders fully cancelled or refunded within the period.
+  4️⃣ Count purchases once per transaction_id: deduplicate repeated purchase hits, and exclude zero-value orders, test orders (transaction IDs prefixed 'test' and GA4 hits with traffic_type = 'internal') and orders fully cancelled or refunded by the end of the period (GA4 refund event without items; AEP commerce.backofficeOrderCancelled, or commerce.backofficeCreditMemoIssued events whose summed refund amount reaches the original order total, on the same commerce.order.purchaseID); partially refunded orders are kept.
   5️⃣ Choose the period to match the category's natural purchase cycle (monthly for grocery and consumables, quarterly or yearly for apparel, electronics and home) and never compare rates across different period lengths.
   6️⃣ Customers at end minus new customers can include lapsed customers who reactivated; report reactivated customers separately and use the cohort-intersection value (start-base customers who purchased again) when a strict cohort view capped at 100% is needed.
   7️⃣ Value action by industry: E-commerce and Retail use a repeat purchase; subscription businesses use an active paid subscription at period end (see Subscriber Retention Rate).
@@ -322,5 +393,5 @@ Created At: 2026-09-11T21:30:33.374508+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-18T16:58:38.082+00:00
+Last Modified At: 2026-09-18T17:28:27.529+00:00
 
