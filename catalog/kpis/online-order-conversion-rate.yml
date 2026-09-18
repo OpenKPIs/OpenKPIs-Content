@@ -1,28 +1,29 @@
 # KPI: Online Order Conversion Rate
-# Generated: 2026-08-26T14:03:32.380Z
+# Generated: 2026-09-18T00:10:36.546Z
 # Contributed by: dev-user
 # Last modified by: devyendarm
 
 KPI Name: Online Order Conversion Rate
-Formula: (Completed Orders / Total Sessions) × 100
+Formula: (Sessions with at least one Completed Order / Total Sessions) × 100
 
 Description: |
-  The Online Order Conversion Rate measures the percentage of online sessions that result in a completed order on the website.
+  Online Order Conversion Rate is the percentage of all website or app sessions that include at least one completed order (a purchase event with a unique transaction ID). It is the standard session-based e-commerce conversion rate used in GA4, Adobe Analytics and Shopify reporting to judge how effectively traffic turns into orders.
 
 Category: Conversion
 
+Tags: [kpi, E-commerce: Cart & Checkout Funnel Analytics, conversion rate, sessions]
 
-Industry: [Retail]
+Industry: [["Retail"]]
 
 Priority: High
 
-Core Area: Generic
+Core Area: Checkout
 
 Scope: Session
 
-Measure Type: rate
+Measure Type: Percentage
 
-Aggregation Window: Time based - Daily
+Aggregation Window: Daily, Weekly, Monthly
 
 GA4 Event: |
   purchase
@@ -31,70 +32,220 @@ Adobe Event: |
   purchase
 
 W3 Data Layer: |
-  {"page":{"type":"checkout","category":"conversion"},"event":{"name":"purchase","action":"completed"}}
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "order confirmation",
+        "pageType": "checkout-confirmation"
+      }
+    },
+    "transaction": {
+      "transactionID": "T-100245",
+      "total": {
+        "basePrice": 90,
+        "currency": "USD",
+        "shipping": 5,
+        "taxRate": 0.0556,
+        "priceWithTax": 100
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-123",
+            "productName": "Running Shoe"
+          },
+          "price": {
+            "basePrice": 45
+          },
+          "quantity": 2
+        }
+      ]
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "purchase",
+          "eventAction": "order-completed"
+        }
+      }
+    ]
+  }
 
 GA4 Data Layer: |
-  {"event":"purchase","ecommerce":{"purchase":{"products":[{"id":"PROD123","name":"Product Name","price":"25.00","quantity":2}],"actionField":{"id":"12345","tax":"5.00","coupon":"SUMMER10","revenue":"50.00","shipping":"5.00"}}}}
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T-100245",
+      "value": 100,
+      "tax": 5,
+      "shipping": 5,
+      "currency": "USD",
+      "coupon": "SUMMER10",
+      "items": [
+        {
+          "item_id": "SKU-123",
+          "item_name": "Running Shoe",
+          "item_category": "Footwear",
+          "price": 45,
+          "quantity": 2
+        }
+      ]
+    }
+  }
 
 Adobe Client Data Layer: |
-  {"events":[{"products":[{"productID":"PROD123","productName":"Product Name","productPrice":"25.00","productQuantity":2}],"purchaseID":"12345","purchaseTax":"5.00","purchaseTotal":"50.00","purchaseCoupon":"SUMMER10","purchaseShipping":"5.00"}]}
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "transaction": {
+      "purchaseID": "T-100245",
+      "total": 100,
+      "tax": 5,
+      "shipping": 5,
+      "currency": "USD",
+      "coupon": "SUMMER10"
+    },
+    "products": [
+      {
+        "productID": "SKU-123",
+        "productName": "Running Shoe",
+        "price": 45,
+        "quantity": 2
+      }
+    ]
+  }
 
 XDM Mapping: |
-  {"_experience":{"analytics":{"custom1":"purchase","custom2":"completed"}}}
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100245",
+        "priceTotal": 100,
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-123",
+        "name": "Running Shoe",
+        "quantity": 2,
+        "priceTotal": 90
+      }
+    ]
+  }
 
 Google Analytics SQL: |
   -- ==========================================
   -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
-  WITH total_orders AS (
-    SELECT COUNT(DISTINCT event_id) AS total_orders
+  -- Online Order Conversion Rate = sessions with >= 1 purchase / all sessions x 100
+  WITH events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      user_pseudo_id,
+      event_name,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      ecommerce.transaction_id AS transaction_id
     FROM `your-project.analytics_123456789.events_*`
-    WHERE event_name = 'purchase'
-  ), total_visits AS (
-    SELECT COUNT(DISTINCT event_id) AS total_visits
-    FROM `your-project.analytics_123456789.events_*`
-    WHERE event_name = 'page_view'
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+  ),
+  sessions AS (
+    SELECT
+      MIN(event_date) AS session_date,
+      user_pseudo_id,
+      ga_session_id,
+      MAX(IF(event_name = 'purchase' AND transaction_id IS NOT NULL AND transaction_id != '(not set)', 1, 0)) AS has_order
+    FROM events
+    WHERE ga_session_id IS NOT NULL
+    GROUP BY user_pseudo_id, ga_session_id
   )
-  
   SELECT
-    (total_orders.total_orders / total_visits.total_visits) * 100 AS online_order_conversion_rate
-  FROM total_orders, total_visits;
+    session_date,
+    COUNT(*) AS total_sessions,
+    SUM(has_order) AS converting_sessions,
+    ROUND(SAFE_DIVIDE(SUM(has_order), COUNT(*)) * 100, 2) AS online_order_conversion_rate_pct
+  FROM sessions
+  GROUP BY session_date
+  ORDER BY session_date;
 
 AEP Query Service SQL: |
   -- ==========================================
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
-  WITH total_orders AS (
-    SELECT COUNT(DISTINCT purchaseID) AS total_orders
-    FROM aep_backend_dataset.purchase_events
-  ), total_visits AS (
-    SELECT COUNT(DISTINCT visitID) AS total_visits
-    FROM aep_backend_dataset.visit_events
+  -- Online Order Conversion Rate = sessions with >= 1 purchase / all sessions x 100 (30-minute session timeout)
+  WITH sessionized AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS ecid,
+      timestamp,
+      eventType,
+      commerce.order.purchaseID AS purchase_id,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY endUserIDs._experience.ecid.id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM web_experience_events
+    WHERE timestamp >= DATE_SUB(CURRENT_DATE, 30)
+      AND timestamp < CURRENT_DATE
+  ),
+  sessions AS (
+    SELECT
+      ecid,
+      session.num AS session_num,
+      CAST(MIN(timestamp) AS DATE) AS session_date,
+      MAX(CASE WHEN eventType = 'commerce.purchases' AND purchase_id IS NOT NULL THEN 1 ELSE 0 END) AS has_order
+    FROM sessionized
+    GROUP BY ecid, session.num
   )
-  
   SELECT
-    (total_orders.total_orders / total_visits.total_visits) * 100 AS online_order_conversion_rate
-  FROM total_orders, total_visits;
+    session_date,
+    COUNT(*) AS total_sessions,
+    SUM(has_order) AS converting_sessions,
+    ROUND(SUM(has_order) * 100.0 / NULLIF(COUNT(*), 0), 2) AS online_order_conversion_rate_pct
+  FROM sessions
+  GROUP BY session_date
+  ORDER BY session_date;
 
 Calculation Notes: |
-  Exclude sessions with no interaction or incomplete order data.
+  1️⃣ Denominator is the full base population: every session in the period (distinct user_pseudo_id + ga_session_id), not only sessions that viewed a product or reached checkout.
+  2️⃣ Numerator counts sessions containing at least one purchase event with a non-null transaction_id; a session with several orders counts once, so the rate can never exceed 100%.
+  3️⃣ Deduplicate purchases by transaction_id so page reloads of the order confirmation page do not inflate conversions.
+  4️⃣ Sessions end after 30 minutes of inactivity (GA4 default); in AEP the same 30-minute timeout is applied with SESS_TIMEOUT.
+  5️⃣ Exclude internal, test and known bot traffic, and exclude fully refunded or cancelled test orders flagged in the order payload.
+  6️⃣ Offline, phone and in-store orders are out of scope; blend them only in a separate omnichannel conversion view.
+  7️⃣ Report the rate alongside session volume, because small daily session counts make the percentage volatile.
 
 Business Use Case: |
-  By monitoring the Online Order Conversion Rate, the marketing team can optimize website design and checkout process to increase sales conversion.
+  1️⃣ The E-commerce Manager reviews the rate weekly and, when it falls more than 10% below the trailing 4-week average, opens a funnel review of cart and checkout steps to find the drop-off.
+  2️⃣ The Marketing team compares the rate by traffic source and campaign each month and shifts budget away from channels whose sessions convert well below the site average.
+  3️⃣ The Product team uses the rate by device type as the primary success metric for checkout and mobile UX A/B tests, rolling out variants only when the lift is statistically significant.
+  4️⃣ Merchandising checks the rate during promotions and sale events and adjusts landing pages or offers when promotional traffic fails to convert.
 
+Dependencies:
+  Events: [purchase, session_start]
+  Metrics: [sessions, transactions]
+  Dimensions: [transaction-id, session-id]
 
-Source Data: Digital Analytics
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
 
 Report Attributes: |
-  ["Traffic Source","Device Type","Geographic Location"]
+  Traffic Source / Medium; Campaign; Device Category; Country; Landing Page; New vs Returning User
 
-Dashboard Usage: [E-commerce Performance Dashboard, Conversion Rate Optimization Dashboard]
+Dashboard Usage: [E-commerce Performance Dashboard, Conversion Rate Optimization Dashboard, Marketing Channel Performance Dashboard]
 
 Segment Eligibility: |
   true
 
+Related KPIs: [checkout-conversion-rate, cart-conversion-rate, add-to-cart-rate, cart-abandonment-rate, average-order-value]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -106,4 +257,5 @@ Created At: 2026-05-28T15:25:10.733899+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T00:10:36.178+00:00
 
