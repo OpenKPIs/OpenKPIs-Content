@@ -1,0 +1,394 @@
+# KPI: Pickup Completion Rate
+# Generated: 2026-09-18T16:43:55.210Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Pickup Completion Rate
+Formula: (Pickup Orders Collected within Hold Window / Pickup Orders Placed in Period) × 100, where both counts are distinct pickup fulfillment groups (order_id + store_id) from the same placement-date cohort
+
+Description: |
+  Share of buy-online-pickup-in-store (BOPIS) and curbside orders placed in a period that the customer actually collects within the store's hold window, stitched from the online purchase (fulfillment method = pickup) to the store handoff record on the order ID. It is the primary health signal of the click-and-collect promise: every point below target is booked revenue turning into auto-cancellations, refunds and stranded store inventory, and the gap decomposes cleanly into customer no-shows versus retailer-side pick failures.
+
+Category: Operations
+
+Tags: [kpi, E-commerce: Post-Purchase Logistics & Fulfillment, BOPIS, Curbside Pickup, Digital + Offline]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Measure Type: Percentage
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "ORD-10458821",
+      "total": {
+        "basePrice": 142.5,
+        "currency": "USD",
+        "shipping": 0,
+        "taxRate": 0.0825,
+        "priceWithTax": 154.26
+      },
+      "attributes": {
+        "fulfillmentMethod": "pickup_in_store",
+        "storeID": "STR-0412",
+        "pickupWindow": "same_day_2h",
+        "holdPeriodDays": 7
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-778120",
+            "productName": "Cordless Drill Kit 20V"
+          },
+          "category": {
+            "primaryCategory": "Tools"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 142.5,
+            "currency": "USD"
+          },
+          "attributes": {
+            "fulfillmentMethod": "pickup_in_store",
+            "storeID": "STR-0412"
+          }
+        }
+      ]
+    },
+    "page": {
+      "pageInfo": {
+        "pageName": "checkout:order-confirmation",
+        "pageID": "order-confirmation"
+      },
+      "category": {
+        "primaryCategory": "checkout"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "ORD-10458821",
+      "value": 142.5,
+      "tax": 11.76,
+      "shipping": 0,
+      "currency": "USD",
+      "fulfillment_method": "pickup_in_store",
+      "store_id": "STR-0412",
+      "pickup_window": "same_day_2h",
+      "hold_period_days": 7,
+      "items": [
+        {
+          "item_id": "SKU-778120",
+          "item_name": "Cordless Drill Kit 20V",
+          "item_category": "Tools",
+          "price": 142.5,
+          "quantity": 1,
+          "location_id": "STR-0412"
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "transaction": {
+      "purchaseID": "ORD-10458821",
+      "revenue": 142.5,
+      "currency": "USD",
+      "fulfillmentMethod": "pickup_in_store",
+      "storeID": "STR-0412",
+      "pickupWindow": "same_day_2h",
+      "holdPeriodDays": 7
+    },
+    "product": [
+      {
+        "productID": "SKU-778120",
+        "productName": "Cordless Drill Kit 20V",
+        "category": "Tools",
+        "quantity": 1,
+        "price": 142.5,
+        "fulfillmentMethod": "pickup_in_store"
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD-10458821",
+        "priceTotal": 142.5,
+        "currencyCode": "USD"
+      },
+      "shipping": {
+        "shippingMethod": "pickup_in_store"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-778120",
+        "name": "Cordless Drill Kit 20V",
+        "quantity": 1,
+        "priceTotal": 142.5
+      }
+    ],
+    "placeContext": {
+      "POIinteraction": {
+        "POIDetail": {
+          "POIID": "STR-0412"
+        }
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar30": "pickup_in_store",
+            "eVar31": "STR-0412",
+            "eVar32": "same_day_2h"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Pickup Completion Rate: pickup orders collected within the hold window / all pickup orders placed (same placement-date cohort)
+  -- Denominator: GA4 purchase events with fulfillment_method in pickup; numerator: OMS/POS pickup handoff records, joined on transaction_id
+  WITH purchases AS (
+    SELECT
+      ecommerce.transaction_id AS transaction_id,
+      TIMESTAMP_MICROS(event_timestamp) AS placed_ts,
+      MAX(IF(ep.key = 'fulfillment_method', ep.value.string_value, NULL)) AS fulfillment_method,
+      MAX(IF(ep.key = 'store_id', ep.value.string_value, NULL)) AS store_id,
+      MAX(IF(ep.key = 'hold_period_days', COALESCE(ep.value.int_value, SAFE_CAST(ep.value.string_value AS INT64)), NULL)) AS hold_period_days_param
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY))
+                            AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+      AND ecommerce.transaction_id NOT IN ('', '(not set)')
+    GROUP BY transaction_id, placed_ts, event_timestamp, user_pseudo_id
+  ),
+  pickup_orders AS (
+    -- full base: one row per distinct pickup order, deduplicated across repeated purchase hits
+    SELECT
+      transaction_id,
+      MIN(placed_ts) AS placed_ts,
+      ANY_VALUE(fulfillment_method) AS fulfillment_method,
+      ANY_VALUE(store_id) AS store_id,
+      MAX(hold_period_days_param) AS hold_period_days_param
+    FROM purchases
+    WHERE fulfillment_method IN ('pickup_in_store', 'curbside', 'locker')
+    GROUP BY transaction_id
+  ),
+  excluded_orders AS (
+    SELECT DISTINCT transaction_id
+    FROM `your-project.oms.orders`
+    WHERE is_test_order = TRUE
+       OR is_employee_order = TRUE
+       OR fraud_voided_before_release = TRUE
+  ),
+  store_config AS (
+    SELECT store_id, time_zone, hold_period_days
+    FROM `your-project.oms.store_pickup_config`
+  ),
+  collections AS (
+    SELECT
+      transaction_id,
+      MIN(ready_for_pickup_ts) AS ready_for_pickup_ts,
+      MAX(collected_ts) AS collected_ts,
+      LOGICAL_AND(pickup_status = 'collected') AS all_groups_collected
+    FROM `your-project.oms.order_pickups`
+    GROUP BY transaction_id
+  ),
+  cohort AS (
+    SELECT
+      o.transaction_id,
+      o.store_id,
+      o.fulfillment_method,
+      DATE(o.placed_ts, COALESCE(s.time_zone, 'UTC')) AS placement_date,
+      COALESCE(s.hold_period_days, o.hold_period_days_param, 7) AS hold_days,
+      CURRENT_DATE(COALESCE(s.time_zone, 'UTC')) AS store_today,
+      CASE
+        WHEN c.all_groups_collected
+         AND c.collected_ts IS NOT NULL
+         AND c.collected_ts <= TIMESTAMP_ADD(COALESCE(c.ready_for_pickup_ts, o.placed_ts),
+                                             INTERVAL COALESCE(s.hold_period_days, o.hold_period_days_param, 7) DAY)
+        THEN 1 ELSE 0
+      END AS is_collected
+    FROM pickup_orders AS o
+    LEFT JOIN collections AS c
+      ON c.transaction_id = o.transaction_id
+    LEFT JOIN store_config AS s
+      ON s.store_id = o.store_id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM excluded_orders AS x WHERE x.transaction_id = o.transaction_id
+    )
+  )
+  SELECT
+    placement_date,
+    store_id,
+    fulfillment_method,
+    COUNT(DISTINCT transaction_id) AS pickup_orders_placed,
+    COUNT(DISTINCT IF(is_collected = 1, transaction_id, NULL)) AS pickup_orders_collected,
+    ROUND(SAFE_DIVIDE(COUNT(DISTINCT IF(is_collected = 1, transaction_id, NULL)),
+                      COUNT(DISTINCT transaction_id)) * 100, 2) AS pickup_completion_rate_pct,
+    -- cohort locks once hold period plus a 1-day late-scan buffer has elapsed
+    LOGICAL_OR(DATE_ADD(placement_date, INTERVAL hold_days + 1 DAY) > store_today) AS is_provisional
+  FROM cohort
+  GROUP BY placement_date, store_id, fulfillment_method
+  ORDER BY placement_date DESC, store_id, fulfillment_method;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Pickup Completion Rate: pickup orders collected within the hold window / all pickup orders placed (same placement-date cohort)
+  -- Denominator: XDM commerce.purchases with a pickup shipping method; numerator: OMS/POS pickup handoff dataset, joined on purchaseID
+  WITH purchases AS (
+    SELECT
+      commerce.order.purchaseID AS transaction_id,
+      timestamp AS placed_ts,
+      LOWER(commerce.shipping.shippingMethod) AS fulfillment_method,
+      placeContext.POIinteraction.POIDetail.POIID AS store_id
+    FROM aep_web_events_dataset
+    WHERE eventType = 'commerce.purchases'
+      AND timestamp >= date_sub(current_date(), 90)
+      AND commerce.order.purchaseID IS NOT NULL
+      AND commerce.order.purchaseID <> ''
+  ),
+  pickup_orders AS (
+    -- full base: one row per distinct pickup order, deduplicated across repeated purchase hits
+    SELECT
+      transaction_id,
+      MIN(placed_ts) AS placed_ts,
+      FIRST(fulfillment_method, TRUE) AS fulfillment_method,
+      FIRST(store_id, TRUE) AS store_id
+    FROM purchases
+    WHERE fulfillment_method IN ('pickup_in_store', 'curbside', 'locker')
+    GROUP BY transaction_id
+  ),
+  excluded_orders AS (
+    SELECT DISTINCT transaction_id
+    FROM aep_oms_orders_dataset
+    WHERE is_test_order = TRUE
+       OR is_employee_order = TRUE
+       OR fraud_voided_before_release = TRUE
+  ),
+  store_config AS (
+    SELECT store_id, time_zone, hold_period_days
+    FROM aep_store_pickup_config_dataset
+  ),
+  collections AS (
+    SELECT
+      transaction_id,
+      MIN(ready_for_pickup_ts) AS ready_for_pickup_ts,
+      MAX(collected_ts) AS collected_ts,
+      MIN(CASE WHEN pickup_status = 'collected' THEN 1 ELSE 0 END) AS all_groups_collected
+    FROM aep_oms_order_pickups_dataset
+    GROUP BY transaction_id
+  ),
+  cohort AS (
+    SELECT
+      o.transaction_id,
+      o.store_id,
+      o.fulfillment_method,
+      to_date(from_utc_timestamp(o.placed_ts, COALESCE(s.time_zone, 'UTC'))) AS placement_date,
+      COALESCE(s.hold_period_days, 7) AS hold_days,
+      to_date(from_utc_timestamp(current_timestamp(), COALESCE(s.time_zone, 'UTC'))) AS store_today,
+      CASE
+        WHEN c.all_groups_collected = 1
+         AND c.collected_ts IS NOT NULL
+         AND unix_timestamp(c.collected_ts)
+             <= unix_timestamp(COALESCE(c.ready_for_pickup_ts, o.placed_ts)) + COALESCE(s.hold_period_days, 7) * 86400
+        THEN 1 ELSE 0
+      END AS is_collected
+    FROM pickup_orders AS o
+    LEFT JOIN collections AS c
+      ON c.transaction_id = o.transaction_id
+    LEFT JOIN store_config AS s
+      ON s.store_id = o.store_id
+    LEFT ANTI JOIN excluded_orders AS x
+      ON x.transaction_id = o.transaction_id
+  )
+  SELECT
+    placement_date,
+    store_id,
+    fulfillment_method,
+    COUNT(DISTINCT transaction_id) AS pickup_orders_placed,
+    COUNT(DISTINCT CASE WHEN is_collected = 1 THEN transaction_id END) AS pickup_orders_collected,
+    ROUND(COUNT(DISTINCT CASE WHEN is_collected = 1 THEN transaction_id END) * 100.0
+          / NULLIF(COUNT(DISTINCT transaction_id), 0), 2) AS pickup_completion_rate_pct,
+    -- cohort locks once hold period plus a 1-day late-scan buffer has elapsed
+    MAX(CASE WHEN date_add(placement_date, hold_days + 1) > store_today THEN 1 ELSE 0 END) = 1 AS is_provisional
+  FROM cohort
+  GROUP BY placement_date, store_id, fulfillment_method
+  ORDER BY placement_date DESC, store_id, fulfillment_method;
+
+Calculation Notes: |
+  1️⃣ Cohort logic: the denominator is every distinct pickup fulfillment group (order_id + store_id) whose purchase carries fulfillment_method IN ('pickup_in_store','curbside','locker') and whose placement timestamp falls in the reporting period; the numerator is the subset of those same groups with an order_pickup record in status 'collected'. Never add pickups of orders placed in an earlier period to the current numerator, otherwise the rate can exceed 100% and drifts with order volume.,2️⃣ Hold window and maturation: a group counts as collected only if the handoff timestamp falls within the store's configured hold period measured from the ready_for_pickup notification (commonly 5 to 7 calendar days; use the per-store value from the pickup-window configuration, not a global constant). Cohorts younger than the hold period are provisional and must be flagged or suppressed; the figure locks once hold expiry plus a 24-hour late-scan buffer has passed.,3️⃣ Full-base denominator: retailer-side failures (pick shortage, item not found, damaged at pick, store closure) remain in the denominator as non-completions and are tagged via order-cancellation-reason, so the shortfall splits into customer no-shows and operational failures. Remove only test orders, internal and employee orders, and orders voided by fraud review before release to the store.,4️⃣ Fulfillment-method changes: if the customer converts the order to ship-to-home or changes the pickup store before ready_for_pickup, the original group leaves the denominator and the new store's group (if any) enters it; any conversion initiated by the retailer after ready_for_pickup counts as a non-completion of the original group.,5️⃣ Partial collection and split carts: in mixed carts only the pickup fulfillment groups enter the calculation, ship-to-home lines are ignored. A group is complete only when every pickup-eligible line is handed over; partial handoffs count as not complete at order level and are tracked separately as a line-level unit collection rate.,6️⃣ Identity and join rules: stitch the digital purchase to the store record on transaction_id / order number, never on client_id, user_id or loyalty ID, because collection by an authorised alternate pickup person is still a completion. Orders placed through app, web, call centre or in-store endless-aisle all qualify when they are recorded in the order management platform; digital-only counts are used for channel and device attribution, not as the denominator.,7️⃣ Timing and timezone: attribute placement and collection to the store's local calendar date, not UTC or the analytics property timezone. The handoff timestamp comes from the associate scan, curbside arrival-and-handoff confirmation or locker door-open event; a post-collection return or refund does not reverse the completion, it belongs to return-rate reporting.
+
+Business Use Case: |
+  1️⃣ Store Operations district managers review the weekly store-level cut; any store that stays under 92% for two consecutive weeks triggers a hold-shelf and ready-notification audit, with the operational-failure share (pick shortages, item not found) routed to the store manager and the no-show share routed to CRM.,2️⃣ The CRM and Lifecycle Marketing team uses the no-show component to tune reminder cadence: when collection within 48 hours of ready_for_pickup falls below the trailing four-week baseline, they A/B test an additional SMS or push reminder at 24 and 72 hours and scale the variant that lifts completion without increasing opt-outs.,3️⃣ Merchandising and Inventory Planning cross the rate with category and store-inventory-status; categories with high uncollected volume (e.g. large items, promotional doorbusters) get a shorter hold period or a deposit requirement, releasing stranded units back to sellable stock sooner.,4️⃣ Finance forecasts pickup revenue leakage by applying the matured cohort rate to open pickup orders at month end, accruing expected auto-cancellation refunds and card-authorisation reversals against booked online revenue.
+
+Dependencies:
+  Events: [purchase, order-pickup, order-cancellation]
+  Dimensions: [fulfillment-method, pickup-window, store-id, order-status, order-cancellation-reason]
+  KPIs: [orders]
+
+Source Data: Web + App Digital Analytics (GA4) + Order Management (Salesforce Order Management / store pickup records)
+
+Report Attributes: |
+  fulfillment-method; store-id; pickup-window; store-distance-band; store-inventory-status; order-cancellation-reason; notification-channel; item-category; device-category; traffic-source
+
+Dashboard Usage: [BOPIS & Curbside Operations Scorecard, Omnichannel Fulfillment Performance, Store Operations Weekly Review, Post-Purchase Experience Overview]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [shipment-on-time-delivery-rate, delivery-accuracy-rate, orders]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-18T16:43:45.846+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-18T16:43:54.883+00:00
+
