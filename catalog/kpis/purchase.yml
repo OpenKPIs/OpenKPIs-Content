@@ -1,0 +1,248 @@
+# KPI: Purchase
+# Generated: 2026-09-18T23:19:17.763Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Purchase
+Formula: COUNT(DISTINCT transaction_id) WHERE event_name = 'purchase' AND transaction_id IS NOT NULL AND is_test_order != true AND traffic_type != 'internal' AND hostname NOT LIKE staging/stage/qa/test/dev/localhost, dated by MIN(event_date) per transaction_id (first placement date) in the reporting timezone
+
+Description: |
+  Purchase is the count of unique, successfully placed orders (distinct transaction IDs) across web and app in the reporting period, net of test, internal and duplicate transactions. It is the primary sales-volume outcome of the storefront and the numerator for order conversion rate, average order value and revenue-per-visit analysis.
+
+Category: Conversion
+
+Tags: [kpi, Digital only, E-commerce: Cart & Checkout Funnel Analytics, purchase, orders, transactions]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Time based - Hourly/Daily/Monthly/Yearly, Hourly, Weekly, Quarterly, Daily, Monthly, Yearly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "purchase"
+          }
+        }
+      ],
+      "transaction": {
+        "transactionID": "T12345",
+        "total": {
+          "basePrice": 99.99,
+          "currency": "USD"
+        }
+      },
+      "page": {
+        "pageInfo": {
+          "hostname": "www.example.com"
+        }
+      },
+      "is_test_order": false,
+      "traffic_type": "external"
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "is_test_order": false,
+    "traffic_type": "external",
+    "ecommerce": {
+      "transaction_id": "T12345",
+      "currency": "USD",
+      "value": 99.99,
+      "items": [
+        {
+          "item_id": "SKU_123",
+          "item_name": "Example Product",
+          "price": 99.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "commerce.purchase",
+    "commerce": {
+      "order": {
+        "purchaseID": "T12345",
+        "priceTotal": 99.99,
+        "currencyCode": "USD"
+      }
+    },
+    "is_test_order": false,
+    "traffic_type": "external"
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce.purchases.value": 1,
+    "commerce.order.purchaseID": "commerce.order.purchaseID",
+    "commerce.order.priceTotal": "commerce.order.priceTotal",
+    "commerce.order.currencyCode": "commerce.order.currencyCode",
+    "_yourtenant.is_test_order": "is_test_order",
+    "_yourtenant.traffic_type": "traffic_type"
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Purchase: distinct placed orders per day (property reporting timezone via event_date).
+  -- Reporting window: last 30 complete days; a 3-day lookback collapses late repeat hits onto the first placement date.
+  -- Gross at placement: refunds and cancellations are not subtracted.
+  -- reporting_tz must equal the GA4 property reporting timezone (and the AEP reporting_tz) so day boundaries match.
+  DECLARE reporting_tz STRING DEFAULT 'America/New_York';
+  
+  WITH purchase_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_dt,
+      event_timestamp,
+      COALESCE(
+        NULLIF(NULLIF(ecommerce.transaction_id, ''), '(not set)'),
+        MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL))
+      ) AS transaction_id,
+      MAX(IF(ep.key = 'is_test_order', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS is_test_order,
+      MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type,
+      device.web_info.hostname AS hostname
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(reporting_tz), INTERVAL 33 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(reporting_tz), INTERVAL 1 DAY))
+      AND event_name = 'purchase'
+    GROUP BY event_date, event_timestamp, user_pseudo_id, ecommerce.transaction_id, device.web_info.hostname
+  ),
+  valid_orders AS (
+    SELECT transaction_id, event_dt, event_timestamp
+    FROM purchase_events
+    WHERE transaction_id IS NOT NULL
+      AND TRIM(transaction_id) != ''
+      AND LOWER(COALESCE(is_test_order, 'false')) NOT IN ('true', '1')
+      AND COALESCE(traffic_type, '') != 'internal'
+      AND NOT REGEXP_CONTAINS(LOWER(COALESCE(hostname, '')), r'(^|\.)(staging|stage|qa|test|dev)\.|localhost')
+  ),
+  first_placement AS (
+    SELECT transaction_id, MIN(event_dt) AS order_date
+    FROM valid_orders
+    GROUP BY transaction_id
+  )
+  SELECT
+    order_date,
+    COUNT(DISTINCT transaction_id) AS purchases
+  FROM first_placement
+  WHERE order_date BETWEEN DATE_SUB(CURRENT_DATE(reporting_tz), INTERVAL 30 DAY)
+                       AND DATE_SUB(CURRENT_DATE(reporting_tz), INTERVAL 1 DAY)
+  GROUP BY order_date
+  ORDER BY order_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Purchase: distinct placed orders per day in the property reporting timezone.
+  -- Reporting window: last 30 complete days; a 3-day lookback collapses late repeat hits onto the first placement date.
+  -- Gross at placement: refunds and cancellations are not subtracted.
+  -- reporting_tz must equal the ga4_sql reporting_tz (property reporting timezone) so day boundaries match.
+  WITH params AS (
+    SELECT 'America/New_York' AS reporting_tz
+  ),
+  purchase_events AS (
+    SELECT
+      to_date(from_utc_timestamp(timestamp, p.reporting_tz)) AS event_dt,
+      NULLIF(TRIM(commerce.order.purchaseID), '') AS transaction_id,
+      LOWER(CAST(_yourtenant.is_test_order AS STRING)) AS is_test_order,
+      _yourtenant.traffic_type AS traffic_type,
+      LOWER(parse_url(web.webPageDetails.URL, 'HOST')) AS hostname
+    FROM aep_web_events_dataset
+    CROSS JOIN params p
+    WHERE eventType = 'commerce.purchases'
+      AND commerce.purchases.value > 0
+      AND timestamp >= to_utc_timestamp(date_sub(to_date(from_utc_timestamp(current_timestamp(), p.reporting_tz)), 33), p.reporting_tz)
+      AND timestamp <  to_utc_timestamp(to_date(from_utc_timestamp(current_timestamp(), p.reporting_tz)), p.reporting_tz)
+  ),
+  valid_orders AS (
+    SELECT transaction_id, event_dt
+    FROM purchase_events
+    WHERE transaction_id IS NOT NULL
+      AND COALESCE(is_test_order, 'false') NOT IN ('true', '1')
+      AND COALESCE(traffic_type, '') != 'internal'
+      AND NOT (COALESCE(hostname, '') RLIKE '(^|\\.)(staging|stage|qa|test|dev)\\.|localhost')
+  ),
+  first_placement AS (
+    SELECT transaction_id, MIN(event_dt) AS order_date
+    FROM valid_orders
+    GROUP BY transaction_id
+  )
+  SELECT
+    order_date,
+    COUNT(DISTINCT transaction_id) AS purchases
+  FROM first_placement
+  CROSS JOIN params p
+  WHERE order_date BETWEEN date_sub(to_date(from_utc_timestamp(current_timestamp(), p.reporting_tz)), 30)
+                       AND date_sub(to_date(from_utc_timestamp(current_timestamp(), p.reporting_tz)), 1)
+  GROUP BY order_date
+  ORDER BY order_date;
+
+Calculation Notes: |
+  1️⃣ Count DISTINCT transaction_id, not purchase events: confirmation-page reloads, back-button re-renders and app/web double firing produce repeat hits with the same ID and must collapse to one order, including when the repeat lands in a later session or on a later date.
+  2️⃣ Purchase events with a null or empty transaction_id are excluded from the KPI and tracked separately as a tagging-quality metric; they are never imputed as orders.
+  3️⃣ Exclude test orders (test payment instruments, QA/staging hostnames, is_test flags), internal-traffic and employee orders, and bot-filtered sessions before counting.
+  4️⃣ The KPI is gross at time of order placement: later cancellations, returns and refunds do not decrement it; net order views are derived by joining the refund event or order-status feed on transaction_id.
+  5️⃣ One transaction_id equals one purchase regardless of split shipments, multi-seller baskets or partial payment captures; orders pending authorisation (e.g. BNPL, bank transfer) count on placement and are reversed only in the net view if the payment fails.
+  6️⃣ Attribute the order to the event timestamp in the reporting timezone of the property (not fulfilment or capture date); session-level breakdowns follow each platform's session rules: a session or visit ends after 30 minutes of inactivity (configurable in GA4; Adobe visits also close after 12 hours or 2,500 hits) and is not split at midnight, so a session spanning midnight is reported on its start date while the order is dated by its own event timestamp; hourly and daily cuts are final only after the platform's processing lag (up to 72 hours for GA4 daily export).
+  7️⃣ Reconcile daily against the commerce platform order ledger; a client-side shortfall of more than 5% (typical causes: consent declines, ad blockers, off-site payment redirects that never return to the confirmation page) triggers a tagging review or a move to server-side purchase collection.
+
+Business Use Case: |
+  1️⃣ The E-commerce Trading team watches hourly purchases against the same weekday baseline during promotions and sitewide sales; when orders fall more than 20% below forecast for two consecutive hours, they escalate a checkout or payment incident to Engineering and pause paid media pushing traffic to affected flows.
+  2️⃣ Merchandising reviews weekly purchases by category, device and country after each assortment or pricing change and reallocates homepage and landing-page placements toward the segments where order volume grew.
+  3️⃣ Performance Marketing compares purchases by channel and campaign against spend in the weekly budget review and shifts budget away from campaigns whose cost per purchase exceeds the agreed target.
+  4️⃣ Finance reconciles monthly analytics purchases to the order ledger before the close and signs off the digital sales-volume figures used in board reporting only when the variance is within the 5% tolerance.
+
+Dependencies:
+  Events: [purchase]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics web & app purchase events) reconciled to the commerce platform order ledger (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
+
+Report Attributes: |
+  Date; Hour; Channel Grouping; Campaign; Device Category; Platform (Web / App); Country; New vs Returning Customer; Payment Method; Item Category
+
+Dashboard Usage: [Executive KPI Dashboard, E-commerce Performance, Checkout Funnel Performance, Marketing Channel Performance, Promotion Monitoring]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [revenue, average-order-value, order-conversion-rate-visit, checkout-completion-rate, orders]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-05-30T04:02:50.343713+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-18T23:19:17.439+00:00
+
