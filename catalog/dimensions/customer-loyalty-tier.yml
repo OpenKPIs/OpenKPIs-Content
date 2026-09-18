@@ -1,0 +1,385 @@
+# Dimension: Customer Loyalty Tier
+# Generated: 2026-09-18T17:29:36.099Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Customer Loyalty Tier
+
+Description: |
+  Classifies each identified customer into the loyalty program tier (for example Bronze, Silver, Gold, Platinum) that the program had formally assigned at the moment an event occurred, keeping Not Enrolled and Unknown as separate values. It is the canonical loyalty tier dimension for comparing conversion, order value, purchase frequency, revenue share and retention across tiers; Traveler Loyalty Tier specialises the same concept for travel elite-status programs.
+
+Category: Retention
+
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV, Retail]
+
+Industry: Travel & Hospitality, E-commerce
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: Event, Session, User, Daily
+
+GA4 Event: |
+  login
+
+Adobe Event: |
+  login
+
+W3 Data Layer: |
+  {
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "CUST-000123"
+            },
+            "attributes": {
+              "loyaltyTier": "gold",
+              "loyaltyProgramStatus": "active"
+            }
+          }
+        ]
+      }
+    ],
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "login",
+          "eventAction": "login"
+        },
+        "attributes": {
+          "method": "email"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "login",
+    "method": "email",
+    "user_id": "CUST-000123",
+    "customer_loyalty_tier": "gold",
+    "user_properties": {
+      "customer_loyalty_tier": "gold"
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "login",
+    "eventInfo": {
+      "method": "email"
+    },
+    "user": {
+      "profileID": "CUST-000123",
+      "loyalty": {
+        "tier": "gold",
+        "programStatus": "active"
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "userAccount.login",
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar20": "gold"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Customer Loyalty Tier: tier effective at event time per user, with daily users, sessions, purchasers and revenue by tier.
+  -- Authoritative source: effective-dated tier history from the loyalty platform; the tier captured on the event / user property is a fallback only.
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH ga4_events AS (
+    SELECT
+      FARM_FINGERPRINT(CONCAT(e.user_pseudo_id, '|', CAST(e.event_timestamp AS STRING), '|', e.event_name, '|', CAST(IFNULL(e.event_bundle_sequence_id, 0) AS STRING))) AS event_key,
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      TIMESTAMP_MICROS(e.event_timestamp) AS event_ts,
+      e.event_name,
+      e.user_pseudo_id,
+      NULLIF(e.user_id, '') AS customer_id,
+      (SELECT MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS ga_session_id,
+      (SELECT MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS traffic_type,
+      COALESCE(
+        (SELECT MAX(IF(ep.key = 'customer_loyalty_tier', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep),
+        (SELECT MAX(IF(up.key = 'customer_loyalty_tier', up.value.string_value, NULL)) FROM UNNEST(e.user_properties) AS up)
+      ) AS captured_tier,
+      e.ecommerce.transaction_id,
+      e.ecommerce.purchase_revenue
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+  ),
+  ga4_events_filled AS (
+    -- Fill pre-login events with the member id seen elsewhere in the same session so they count under that member's tier, not UNKNOWN.
+    SELECT
+      ev.* EXCEPT (customer_id),
+      IF(ev.ga_session_id IS NULL, ev.customer_id, MAX(ev.customer_id) OVER (PARTITION BY ev.user_pseudo_id, ev.ga_session_id)) AS customer_id
+    FROM ga4_events AS ev
+  ),
+  tier_crosswalk AS (
+    -- Approved mapping of program-specific tier names to standard codes and rank (e.g. 'VIB' -> SILVER, rank 2).
+    SELECT UPPER(TRIM(source_tier_name)) AS source_tier_name, tier_code, tier_rank
+    FROM `your-project.loyalty.tier_crosswalk`
+  ),
+  tier_history AS (
+    -- One row per formally assigned tier interval; overlapping intervals resolved to the latest source update.
+    SELECT
+      customer_id,
+      UPPER(TRIM(tier_name)) AS source_tier_name,
+      effective_start_ts,
+      COALESCE(effective_end_ts, TIMESTAMP '9999-12-31 00:00:00+00') AS effective_end_ts,
+      source_updated_at
+    FROM `your-project.loyalty.member_tier_history`
+    WHERE NULLIF(TRIM(tier_name), '') IS NOT NULL
+  ),
+  excluded_customers AS (
+    SELECT customer_id
+    FROM `your-project.crm.customers`
+    WHERE is_employee OR is_test_account OR is_deleted
+  ),
+  attributed AS (
+    SELECT
+      ev.*,
+      h.source_tier_name AS history_tier,
+      ROW_NUMBER() OVER (PARTITION BY ev.event_key ORDER BY h.source_updated_at DESC) AS interval_rank
+    FROM ga4_events_filled AS ev
+    LEFT JOIN tier_history AS h
+      ON h.customer_id = ev.customer_id
+     AND ev.event_ts >= h.effective_start_ts
+     AND ev.event_ts < h.effective_end_ts
+    LEFT JOIN excluded_customers AS x
+      ON x.customer_id = ev.customer_id
+    WHERE x.customer_id IS NULL
+      AND ev.traffic_type IS DISTINCT FROM 'internal'
+  ),
+  classified AS (
+    SELECT
+      a.*,
+      CASE
+        WHEN a.history_tier IS NOT NULL THEN COALESCE(cw_h.tier_code, 'UNMAPPED')
+        WHEN a.captured_tier IS NOT NULL THEN COALESCE(cw_c.tier_code, 'UNMAPPED')
+        WHEN a.customer_id IS NOT NULL THEN 'NOT_ENROLLED'
+        ELSE 'UNKNOWN'
+      END AS customer_loyalty_tier,
+      CASE
+        WHEN a.history_tier IS NOT NULL THEN IFNULL(cw_h.tier_rank, -2)
+        WHEN a.captured_tier IS NOT NULL THEN IFNULL(cw_c.tier_rank, -2)
+        WHEN a.customer_id IS NOT NULL THEN 0
+        ELSE -1
+      END AS loyalty_tier_rank,
+      CASE
+        WHEN a.history_tier IS NOT NULL THEN 'EFFECTIVE_DATED'
+        WHEN a.captured_tier IS NOT NULL THEN 'EVENT_CAPTURED'
+        ELSE 'NONE'
+      END AS attribution_method
+    FROM attributed AS a
+    LEFT JOIN tier_crosswalk AS cw_h ON cw_h.source_tier_name = a.history_tier
+    LEFT JOIN tier_crosswalk AS cw_c ON cw_c.source_tier_name = UPPER(TRIM(a.captured_tier))
+    WHERE a.interval_rank = 1
+  )
+  SELECT
+    event_date,
+    customer_loyalty_tier,
+    loyalty_tier_rank,
+    COUNT(DISTINCT user_pseudo_id) AS users,
+    COUNT(DISTINCT CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING))) AS sessions,
+    COUNT(DISTINCT IF(event_name = 'purchase', transaction_id, NULL)) AS orders,
+    COUNT(DISTINCT IF(event_name = 'purchase', user_pseudo_id, NULL)) AS purchasers,
+    ROUND(SUM(IF(event_name = 'purchase', IFNULL(purchase_revenue, 0), 0)), 2) AS purchase_revenue,
+    -- Denominator is every user observed in the tier that day, not only purchasers or logged-in users.
+    SAFE_DIVIDE(COUNT(DISTINCT IF(event_name = 'purchase', user_pseudo_id, NULL)), COUNT(DISTINCT user_pseudo_id)) AS user_purchase_rate,
+    SAFE_DIVIDE(COUNTIF(attribution_method = 'EVENT_CAPTURED'), COUNT(*)) AS event_captured_share
+  FROM classified
+  GROUP BY event_date, customer_loyalty_tier, loyalty_tier_rank
+  ORDER BY event_date, loyalty_tier_rank DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Customer Loyalty Tier: tier effective at event time per person, with daily people, sessions, purchasers and revenue by tier.
+  -- Authoritative source: effective-dated tier history dataset; the tier captured in eVar20 on the ExperienceEvent is a fallback only.
+  WITH aep_events AS (
+    SELECT
+      _id AS event_key,
+      CAST(timestamp AS DATE) AS event_date,
+      timestamp AS event_ts,
+      eventType AS event_type,
+      identityMap['ECID'][0].id AS ecid,
+      identityMap['CRMID'][0].id AS customer_id,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY identityMap['ECID'][0].id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session,
+      -- Replace _tenant with your tenant namespace; trafficType = 'internal' marks internal traffic.
+      _tenant.trafficType AS traffic_type,
+      NULLIF(TRIM(_experience.analytics.customDimensions.eVars.eVar20), '') AS captured_tier,
+      commerce.order.purchaseID AS order_id,
+      commerce.order.priceTotal AS order_revenue
+    FROM your_web_experience_event_dataset
+    WHERE timestamp >= DATE_SUB(CURRENT_DATE, 30)
+      AND timestamp < CURRENT_DATE
+      AND identityMap['ECID'][0].id IS NOT NULL
+  ),
+  aep_events_filled AS (
+    -- Fill pre-login events with the CRMID seen elsewhere in the same ECID session so they count under that member's tier, not UNKNOWN.
+    SELECT
+      ev.event_key,
+      ev.event_date,
+      ev.event_ts,
+      ev.event_type,
+      ev.ecid,
+      MAX(ev.customer_id) OVER (PARTITION BY ev.ecid, ev.session.num) AS customer_id,
+      ev.session,
+      ev.traffic_type,
+      ev.captured_tier,
+      ev.order_id,
+      ev.order_revenue
+    FROM aep_events AS ev
+  ),
+  tier_crosswalk AS (
+    SELECT UPPER(TRIM(source_tier_name)) AS source_tier_name, tier_code, tier_rank
+    FROM your_loyalty_tier_crosswalk_dataset
+  ),
+  tier_history AS (
+    SELECT
+      customer_id,
+      UPPER(TRIM(tier_name)) AS source_tier_name,
+      effective_start_ts,
+      COALESCE(effective_end_ts, TIMESTAMP '9999-12-31 00:00:00') AS effective_end_ts,
+      source_updated_at
+    FROM your_loyalty_tier_history_dataset
+    WHERE tier_name IS NOT NULL
+      AND TRIM(tier_name) <> ''
+  ),
+  excluded_customers AS (
+    SELECT customer_id
+    FROM your_crm_customer_profile_dataset
+    WHERE is_employee = TRUE OR is_test_account = TRUE OR is_deleted = TRUE
+  ),
+  attributed AS (
+    SELECT
+      ev.*,
+      h.source_tier_name AS history_tier,
+      ROW_NUMBER() OVER (PARTITION BY ev.event_key ORDER BY h.source_updated_at DESC) AS interval_rank
+    FROM aep_events_filled AS ev
+    LEFT JOIN tier_history AS h
+      ON h.customer_id = ev.customer_id
+     AND ev.event_ts >= h.effective_start_ts
+     AND ev.event_ts < h.effective_end_ts
+    LEFT JOIN excluded_customers AS x
+      ON x.customer_id = ev.customer_id
+    WHERE x.customer_id IS NULL
+      AND COALESCE(ev.traffic_type, '') <> 'internal'
+  ),
+  classified AS (
+    SELECT
+      a.event_date,
+      a.ecid,
+      a.session.num AS session_num,
+      a.event_type,
+      a.order_id,
+      a.order_revenue,
+      CASE
+        WHEN a.history_tier IS NOT NULL THEN COALESCE(cw_h.tier_code, 'UNMAPPED')
+        WHEN a.captured_tier IS NOT NULL THEN COALESCE(cw_c.tier_code, 'UNMAPPED')
+        WHEN a.customer_id IS NOT NULL THEN 'NOT_ENROLLED'
+        ELSE 'UNKNOWN'
+      END AS customer_loyalty_tier,
+      CASE
+        WHEN a.history_tier IS NOT NULL THEN COALESCE(cw_h.tier_rank, -2)
+        WHEN a.captured_tier IS NOT NULL THEN COALESCE(cw_c.tier_rank, -2)
+        WHEN a.customer_id IS NOT NULL THEN 0
+        ELSE -1
+      END AS loyalty_tier_rank,
+      CASE
+        WHEN a.history_tier IS NOT NULL THEN 'EFFECTIVE_DATED'
+        WHEN a.captured_tier IS NOT NULL THEN 'EVENT_CAPTURED'
+        ELSE 'NONE'
+      END AS attribution_method
+    FROM attributed AS a
+    LEFT JOIN tier_crosswalk AS cw_h ON cw_h.source_tier_name = a.history_tier
+    LEFT JOIN tier_crosswalk AS cw_c ON cw_c.source_tier_name = UPPER(TRIM(a.captured_tier))
+    WHERE a.interval_rank = 1
+  )
+  SELECT
+    event_date,
+    customer_loyalty_tier,
+    loyalty_tier_rank,
+    COUNT(DISTINCT ecid) AS users,
+    COUNT(DISTINCT CONCAT(ecid, '.', CAST(session_num AS STRING))) AS sessions,
+    COUNT(DISTINCT CASE WHEN event_type = 'commerce.purchases' THEN order_id END) AS orders,
+    COUNT(DISTINCT CASE WHEN event_type = 'commerce.purchases' THEN ecid END) AS purchasers,
+    ROUND(SUM(CASE WHEN event_type = 'commerce.purchases' THEN COALESCE(order_revenue, 0) ELSE 0 END), 2) AS purchase_revenue,
+    -- Denominator is every person observed in the tier that day, not only purchasers or logged-in users.
+    COUNT(DISTINCT CASE WHEN event_type = 'commerce.purchases' THEN ecid END) * 1.0 / NULLIF(COUNT(DISTINCT ecid), 0) AS user_purchase_rate,
+    SUM(CASE WHEN attribution_method = 'EVENT_CAPTURED' THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(*), 0) AS event_captured_share
+  FROM classified
+  GROUP BY event_date, customer_loyalty_tier, loyalty_tier_rank
+  ORDER BY event_date, loyalty_tier_rank DESC;
+
+Calculation Notes: |
+  1️⃣ Attribute the tier that was effective when the event happened: effective_start_ts <= event_ts < effective_end_ts (UTC) from the loyalty platform tier history; the tier captured on the event or user property is a fallback only and is labelled EVENT_CAPTURED.  
+  2️⃣ Never backfill the current tier onto historical events (look-ahead bias); snapshot reports use the tier in force at the end of the snapshot date.  
+  3️⃣ Keep NOT_ENROLLED (signed-in customer without an active membership) separate from UNKNOWN (anonymous or unresolved identity); map program-specific tier names to standard codes through the approved crosswalk and report unmatched names as UNMAPPED. Events from a signed-in member's session, including those before login, count under that member's tier.  
+  4️⃣ Use only the tier formally assigned by the program; never infer a higher tier from points balance, spend, order count or engagement, even when the customer is close to a threshold.  
+  5️⃣ When tier records overlap, keep the record with the latest source update timestamp and quarantine the conflict for data-quality review.  
+  6️⃣ Exclude employee, test, deleted-account profiles and internal traffic from standard reporting; rate denominators are every user observed in the tier for the period, not only signed-in or purchasing users.  
+  7️⃣ A customer whose tier changes within a day counts once in each tier held that day; deduplicate on the user for multi-day totals instead of summing daily user counts.
+
+Business Use Case: |
+  1️⃣ The CRM & Loyalty Marketing manager reviews purchase frequency by tier each month; when Silver members fall below the prior-quarter rate, the team launches a "points to next tier" email journey and measures lift against a holdout group.  
+  2️⃣ The E-commerce Merchandising team compares conversion rate and average order value by tier before a product launch and grants Gold and Platinum members early access when those tiers convert above the site average.  
+  3️⃣ The Loyalty Program owner and Finance review revenue share and benefit cost by tier each quarter and recalibrate tier qualification thresholds when a tier grows without a matching increase in revenue per member.
+
+Dependencies:
+  Events: [customer-login, purchase, loyalty-program-enrollment]
+
+Source Data: Digital Analytics (GA4) + Loyalty Platform (CRM)
+
+Report Attributes: |
+  Event Date; Device Category; Traffic Source; Customer Status; Acquisition Cohort; Purchase Count Band; Product Category; Country
+
+Dashboard Usage: [Loyalty Program Performance, Customer Retention & LTV, Conversion Funnel by Loyalty Tier, Revenue by Loyalty Tier, Loyalty Data Quality & Reconciliation]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [traveler-loyalty-tier, rfm-segment, purchase-count-band, last-purchase-recency-band, acquisition-cohort, customer-status]
+
+Derived Dimensions: [Loyalty Tier Rank, Loyalty Tier Group, Loyalty Tier Change Direction]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T23:30:33.781888+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-18T17:29:35.116+00:00
+
