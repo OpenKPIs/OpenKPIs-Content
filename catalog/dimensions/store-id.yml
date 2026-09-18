@@ -1,7 +1,7 @@
 # Dimension: Store ID
-# Generated: 2026-09-18T16:35:22.499Z
+# Generated: 2026-09-18T16:35:30.993Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Store ID
 
@@ -10,31 +10,474 @@ Description: |
 
 Category: Operations
 
+Tags: [dimension, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
 
+Industry: Retail
 
+Priority: High
 
+Core Area: Checkout
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Session, Daily, Monthly
 
+GA4 Event: |
+  select_item
 
+Adobe Event: |
+  Store Selection
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "pageInstanceID": "retail-web-prod",
+      "page": {
+        "pageInfo": {
+          "pageID": "store-selector",
+          "pageName": "Store Selector",
+          "destinationURL": "https://www.example.com/checkout/store-selector"
+        },
+        "category": {
+          "primaryCategory": "Checkout",
+          "subCategory1": "Store Selection"
+        }
+      },
+      "product": [
+        {
+          "productInfo": {
+            "productID": "SKU-88231",
+            "productName": "Cordless Drill 18V",
+            "sku": "SKU-88231"
+          },
+          "category": {
+            "primaryCategory": "Tools"
+          },
+          "attributes": {
+            "storeId": "00427",
+            "fulfillmentMethod": "bopis",
+            "storeInventoryStatus": "in_stock"
+          }
+        }
+      ],
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "select_item",
+            "eventAction": "Store Selection",
+            "type": "interaction",
+            "timeStamp": "2026-09-17T14:22:08Z"
+          },
+          "attributes": {
+            "storeId": "00427",
+            "fulfillmentMethod": "bopis",
+            "selectionContext": "store_selector"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "select_item",
+    "store_id": "00427",
+    "fulfillment_method": "bopis",
+    "store_inventory_status": "in_stock",
+    "ecommerce": {
+      "item_list_id": "store_selector",
+      "item_list_name": "Store Selector",
+      "items": [
+        {
+          "item_id": "SKU-88231",
+          "item_name": "Cordless Drill 18V",
+          "item_category": "Tools",
+          "item_list_id": "store_selector",
+          "item_list_name": "Store Selector",
+          "affiliation": "00427",
+          "price": 129,
+          "quantity": 1,
+          "index": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "select_item",
+    "eventInfo": {
+      "eventName": "Store Selection",
+      "triggeredBy": "store-selector-modal"
+    },
+    "page": {
+      "pageInfo": {
+        "pageName": "Store Selector",
+        "siteSection": "Checkout"
+      }
+    },
+    "commerce": {
+      "fulfillment": {
+        "method": "bopis",
+        "storeId": "00427",
+        "storeInventoryStatus": "in_stock"
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-88231",
+          "name": "Cordless Drill 18V",
+          "category": "Tools",
+          "quantity": 1,
+          "priceTotal": 129,
+          "storeId": "00427"
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.productViews",
+    "web": {
+      "webInteraction": {
+        "name": "Store Selection",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "commerce": {
+      "productViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-88231",
+        "name": "Cordless Drill 18V",
+        "quantity": 1,
+        "priceTotal": 129
+      }
+    ],
+    "placeContext": {
+      "POIinteraction": {
+        "POIDetail": {
+          "poiID": "00427",
+          "category": "retail_store"
+        }
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar27": "00427"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Store ID: distribution and usage of the fulfilling-store key across its carrier events
+  -- (select_item = store selection, view_item = store inventory check, add_shipping_info, purchase).
+  -- event_params are pivoted once per event with UNNEST + MAX(IF(...)) at the event grain.
+  -- The value is the store key only: never split, parsed or concatenated. Store name, banner and
+  -- district are resolved by joining the effective-dated store master reference on that key.
+  
+  -- Query A: store-level distribution, volume and share of the full carrier-event population
+  WITH store_carrier_events AS (
+    SELECT
+      e.user_pseudo_id,
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      e.event_timestamp,
+      e.event_name,
+      MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+      -- trimmed, upper-cased, leading zeros preserved; no numeric cast
+      NULLIF(UPPER(TRIM(MAX(IF(ep.key = 'store_id', ep.value.string_value, NULL)))), '') AS store_id,
+      LOWER(MAX(IF(ep.key = 'fulfillment_method', ep.value.string_value, NULL))) AS fulfillment_method,
+      LOWER(MAX(IF(ep.key = 'store_inventory_status', ep.value.string_value, NULL))) AS store_inventory_status,
+      COALESCE(
+        NULLIF(MAX(e.ecommerce.transaction_id), '(not set)'),
+        MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL))
+      ) AS transaction_id,
+      MAX(e.ecommerce.purchase_revenue) AS purchase_revenue
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name IN ('select_item', 'view_item', 'add_shipping_info', 'purchase')
+    GROUP BY e.user_pseudo_id, e.event_date, e.event_timestamp, e.event_name, e.event_bundle_sequence_id
+  ),
+  sessionized AS (
+    SELECT
+      s.*,
+      CONCAT(s.user_pseudo_id, '.', CAST(s.ga_session_id AS STRING)) AS session_key
+    FROM store_carrier_events AS s
+  ),
+  -- Full base population: every carrier event in the window, including ship-to-home and
+  -- digital-only events that legitimately carry no store key. Every share divides by this base.
+  population AS (
+    SELECT
+      COUNT(*) AS carrier_events,
+      COUNT(DISTINCT session_key) AS sessions,
+      COUNT(DISTINCT IF(event_name = 'purchase', transaction_id, NULL)) AS orders,
+      SUM(IF(event_name = 'purchase', purchase_revenue, 0)) AS purchase_revenue
+    FROM sessionized
+  ),
+  by_store AS (
+    SELECT
+      store_id AS store_key,
+      COUNT(*) AS carrier_events,
+      COUNTIF(event_name = 'select_item') AS store_selections,
+      COUNTIF(event_name = 'view_item') AS store_inventory_checks,
+      COUNTIF(event_name = 'add_shipping_info') AS checkout_shipping_events,
+      COUNTIF(event_name = 'purchase') AS purchase_events,
+      COUNT(DISTINCT session_key) AS sessions,
+      COUNT(DISTINCT user_pseudo_id) AS users,
+      COUNT(DISTINCT IF(event_name = 'purchase', transaction_id, NULL)) AS orders,
+      COUNT(DISTINCT IF(event_name = 'purchase'
+                        AND fulfillment_method IN ('bopis', 'curbside', 'ship_to_store'),
+                        transaction_id, NULL)) AS store_fulfilled_orders,
+      ROUND(SUM(IF(event_name = 'purchase', purchase_revenue, 0)), 2) AS purchase_revenue,
+      COUNTIF(event_name = 'view_item' AND store_inventory_status = 'in_stock') AS in_stock_inventory_checks,
+      MIN(event_date) AS first_seen_date,
+      MAX(event_date) AS last_seen_date
+    FROM sessionized
+    WHERE store_id IS NOT NULL
+    GROUP BY store_key
+  )
+  SELECT
+    b.store_key,
+    -- descriptive attributes come from the master reference join, never from the key itself
+    m.store_name,
+    m.banner,
+    m.district,
+    m.store_format,
+    b.carrier_events,
+    b.store_selections,
+    b.store_inventory_checks,
+    b.checkout_shipping_events,
+    b.purchase_events,
+    b.sessions,
+    b.users,
+    b.orders,
+    b.store_fulfilled_orders,
+    b.purchase_revenue,
+    b.in_stock_inventory_checks,
+    b.first_seen_date,
+    b.last_seen_date,
+    ROUND(SAFE_DIVIDE(b.carrier_events, p.carrier_events) * 100, 2) AS pct_of_all_carrier_events,
+    ROUND(SAFE_DIVIDE(b.sessions, p.sessions) * 100, 2) AS pct_of_all_sessions,
+    ROUND(SAFE_DIVIDE(b.orders, p.orders) * 100, 2) AS pct_of_all_orders,
+    ROUND(SAFE_DIVIDE(b.purchase_revenue, p.purchase_revenue) * 100, 2) AS pct_of_all_revenue,
+    ROUND(SAFE_DIVIDE(b.in_stock_inventory_checks, b.store_inventory_checks) * 100, 2) AS in_stock_check_rate_pct
+  FROM by_store AS b
+  CROSS JOIN population AS p
+  LEFT JOIN `your-project.retail_reference.store_master` AS m
+    ON m.store_key = b.store_key
+   AND b.last_seen_date BETWEEN m.effective_from AND COALESCE(m.effective_to, DATE '9999-12-31')
+  ORDER BY b.carrier_events DESC;
+  
+  -- Query B: dimension health - how much of the FULL carrier-event population carries the key
+  WITH carrier_events AS (
+    SELECT
+      e.event_name,
+      NULLIF(UPPER(TRIM(MAX(IF(ep.key = 'store_id', ep.value.string_value, NULL)))), '') AS store_id,
+      LOWER(MAX(IF(ep.key = 'fulfillment_method', ep.value.string_value, NULL))) AS fulfillment_method
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name IN ('select_item', 'view_item', 'add_shipping_info', 'purchase')
+    GROUP BY e.user_pseudo_id, e.event_date, e.event_timestamp, e.event_name, e.event_bundle_sequence_id
+  )
+  SELECT
+    event_name,
+    COUNT(*) AS events,                                        -- full base population for this event
+    COUNTIF(store_id IS NOT NULL) AS events_with_store_key,
+    ROUND(SAFE_DIVIDE(COUNTIF(store_id IS NOT NULL), COUNT(*)) * 100, 2) AS store_key_coverage_pct,
+    COUNT(DISTINCT store_id) AS distinct_store_keys,
+    -- compound values such as store+banner or store+region are a collection defect, not a value
+    COUNTIF(store_id IS NOT NULL AND NOT REGEXP_CONTAINS(store_id, r'^[A-Z0-9]+$')) AS non_conforming_keys,
+    COUNTIF(store_id IN ('0', 'NA', 'N/A', 'NONE', 'NULL', 'ONLINE')) AS filler_token_values,
+    COUNTIF(store_id IS NULL AND fulfillment_method IN ('bopis', 'curbside', 'ship_to_store')) AS store_fulfilment_missing_key
+  FROM carrier_events
+  GROUP BY event_name
+  ORDER BY events DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Store ID from the XDM ExperienceEvent dataset: placeContext.POIinteraction.POIDetail.poiID,
+  -- with _experience.analytics.customDimensions.eVars.eVar27 as the Analytics fallback.
+  -- Carrier events: commerce.productViews (store selection via web.webInteraction.name and store
+  -- inventory check), commerce.checkouts (shipping step) and commerce.purchases.
+  -- The value is the store key only: never split, parsed or concatenated. Store name, banner and
+  -- district are resolved by joining the effective-dated store master lookup on that key.
+  
+  -- Query A: store-level distribution, volume and share of the full carrier-event population
+  WITH carrier_events AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS ecid,
+      timestamp AS event_ts,
+      eventType AS event_type,
+      web.webInteraction.name AS interaction_name,
+      NULLIF(UPPER(TRIM(COALESCE(
+        placeContext.POIinteraction.POIDetail.poiID,
+        _experience.analytics.customDimensions.eVars.eVar27
+      ))), '') AS store_key,
+      placeContext.POIinteraction.POIDetail.category AS poi_category,
+      commerce.order.purchaseID AS purchase_id,
+      commerce.order.priceTotal AS order_total,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY endUserIDs._experience.ecid.id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 30)
+      AND timestamp < current_date()
+      AND eventType IN ('commerce.productViews', 'commerce.checkouts', 'commerce.purchases')
+      AND endUserIDs._experience.ecid.id IS NOT NULL
+  ),
+  labelled AS (
+    SELECT
+      ecid,
+      event_ts,
+      store_key,
+      poi_category,
+      purchase_id,
+      order_total,
+      CONCAT(ecid, '.', CAST(session.num AS STRING)) AS session_key,
+      CASE
+        WHEN event_type = 'commerce.productViews' AND interaction_name = 'Store Selection' THEN 'store_selection'
+        WHEN event_type = 'commerce.productViews' THEN 'store_inventory_check'
+        WHEN event_type = 'commerce.checkouts' THEN 'checkout_shipping'
+        WHEN event_type = 'commerce.purchases' THEN 'purchase'
+      END AS carrier_event
+    FROM carrier_events
+  ),
+  -- Full base population: every carrier event in the window, including ship-to-home and
+  -- digital-only events that legitimately carry no store key. Every share divides by this base.
+  population AS (
+    SELECT
+      COUNT(*) AS carrier_events,
+      COUNT(DISTINCT session_key) AS sessions,
+      COUNT(DISTINCT CASE WHEN carrier_event = 'purchase' THEN purchase_id END) AS orders,
+      SUM(CASE WHEN carrier_event = 'purchase' THEN order_total ELSE 0 END) AS order_revenue
+    FROM labelled
+  ),
+  by_store AS (
+    SELECT
+      store_key,
+      COUNT(*) AS carrier_events,
+      SUM(CASE WHEN carrier_event = 'store_selection' THEN 1 ELSE 0 END) AS store_selections,
+      SUM(CASE WHEN carrier_event = 'store_inventory_check' THEN 1 ELSE 0 END) AS store_inventory_checks,
+      SUM(CASE WHEN carrier_event = 'checkout_shipping' THEN 1 ELSE 0 END) AS checkout_shipping_events,
+      SUM(CASE WHEN carrier_event = 'purchase' THEN 1 ELSE 0 END) AS purchase_events,
+      COUNT(DISTINCT session_key) AS sessions,
+      COUNT(DISTINCT ecid) AS visitors,
+      COUNT(DISTINCT CASE WHEN carrier_event = 'purchase' THEN purchase_id END) AS orders,
+      ROUND(SUM(CASE WHEN carrier_event = 'purchase' THEN order_total ELSE 0 END), 2) AS order_revenue,
+      MIN(to_date(event_ts)) AS first_seen_date,
+      MAX(to_date(event_ts)) AS last_seen_date
+    FROM labelled
+    WHERE store_key IS NOT NULL
+    GROUP BY store_key
+  )
+  SELECT
+    b.store_key,
+    -- descriptive attributes come from the master lookup join, never from the key itself
+    m.store_name,
+    m.banner,
+    m.district,
+    m.store_format,
+    b.carrier_events,
+    b.store_selections,
+    b.store_inventory_checks,
+    b.checkout_shipping_events,
+    b.purchase_events,
+    b.sessions,
+    b.visitors,
+    b.orders,
+    b.order_revenue,
+    b.first_seen_date,
+    b.last_seen_date,
+    ROUND(CAST(b.carrier_events AS DOUBLE) / NULLIF(p.carrier_events, 0) * 100, 2) AS pct_of_all_carrier_events,
+    ROUND(CAST(b.sessions AS DOUBLE) / NULLIF(p.sessions, 0) * 100, 2) AS pct_of_all_sessions,
+    ROUND(CAST(b.orders AS DOUBLE) / NULLIF(p.orders, 0) * 100, 2) AS pct_of_all_orders,
+    ROUND(b.order_revenue / NULLIF(p.order_revenue, 0) * 100, 2) AS pct_of_all_revenue
+  FROM by_store b
+  CROSS JOIN population p
+  LEFT JOIN store_master_lookup_dataset m
+    ON m.store_key = b.store_key
+   AND b.last_seen_date >= m.effective_from
+   AND b.last_seen_date <= COALESCE(m.effective_to, date '9999-12-31')
+  ORDER BY b.carrier_events DESC;
+  
+  -- Query B: dimension health - how much of the FULL carrier-event population carries the key
+  WITH carrier_events AS (
+    SELECT
+      eventType AS event_type,
+      web.webInteraction.name AS interaction_name,
+      NULLIF(UPPER(TRIM(COALESCE(
+        placeContext.POIinteraction.POIDetail.poiID,
+        _experience.analytics.customDimensions.eVars.eVar27
+      ))), '') AS store_key
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 30)
+      AND timestamp < current_date()
+      AND eventType IN ('commerce.productViews', 'commerce.checkouts', 'commerce.purchases')
+  )
+  SELECT
+    event_type,
+    COUNT(*) AS events,                                        -- full base population for this event type
+    SUM(CASE WHEN store_key IS NOT NULL THEN 1 ELSE 0 END) AS events_with_store_key,
+    ROUND(CAST(SUM(CASE WHEN store_key IS NOT NULL THEN 1 ELSE 0 END) AS DOUBLE)
+          / NULLIF(COUNT(*), 0) * 100, 2) AS store_key_coverage_pct,
+    COUNT(DISTINCT store_key) AS distinct_store_keys,
+    -- compound values such as store+banner or store+region are a collection defect, not a value
+    SUM(CASE WHEN store_key IS NOT NULL AND store_key NOT RLIKE '^[A-Z0-9]+$' THEN 1 ELSE 0 END) AS non_conforming_keys,
+    SUM(CASE WHEN store_key IN ('0', 'NA', 'N/A', 'NONE', 'NULL', 'ONLINE') THEN 1 ELSE 0 END) AS filler_token_values
+  FROM carrier_events
+  GROUP BY event_type
+  ORDER BY events DESC;
 
+Calculation Notes: |
+  1️⃣ Populated the moment a shopper commits to a location — store selection on select_item, store inventory check on view_item — then persisted forward onto add_shipping_info and purchase so the order inherits the store that will actually fulfil it. Event-grain reporting keeps every value observed; order-grain reporting uses the value present on the purchase event only.,2️⃣ The value carries the store key and nothing else. Concatenated fragments such as store+region, store+banner, store+district or store+channel are prohibited; banner, region, district, format and store name are joined from the store master file, never encoded into the identifier.,3️⃣ Multi-store sessions are expected in comparison shopping: a shopper may check inventory at three locations before choosing one. Store-level funnel metrics count each distinct Store ID once per session for inventory-check and store-view measures, while conversion and revenue attach solely to the store on the purchase event to prevent double counting.,4️⃣ Closed, relocated and rebannered stores retain their original identifier permanently — keys are never recycled and never backfilled to the successor location. Reporting resolves store attributes against the store master as of the event date (slowly changing dimension, effective-dated), so historical periods continue to roll up under the banner and district in force at the time.,5️⃣ Ship-to-home and digital-only orders have no fulfilling store and must be recorded as null rather than a filler token such as 0, 'NA' or 'ONLINE'. These rows are excluded from store-level denominators; ship-to-store orders are in scope and carry the destination store, distinguished from pickup by Fulfillment Method.,6️⃣ Stored as a trimmed, upper-cased string with leading zeros preserved (e.g. '00427'). Numeric casting, locale formatting and store-name substitution are prohibited, as they silently collide distinct locations and break the join to the store master.,7️⃣ Store changes made during checkout overwrite the session value under the standard 30-minute inactivity window; if the shopper returns after timeout, the new session starts empty and re-collects on the next store selection. Post-order amendments — pickup transferred to another location or converted to ship-to-home — are reconciled on the T+1 order refresh, so same-day store reporting is provisional.
 
+Business Use Case: |
+  1️⃣ The Omnichannel Merchandising manager ranks stores by BOPIS Order Share and Pickup Completion Rate every Monday, and for any location falling two consecutive weeks below the chain median reallocates pickup-heavy SKUs and raises the local safety stock on the store's top ten online-demand items.,2️⃣ The Store Operations lead monitors elapsed time from order to pickup by Store ID; when a store breaches the two-hour ready-for-pickup promise on more than 5% of orders in a day, they trigger a staffing review and temporarily suspend that store from the 'ready in 2 hours' badge on the site.,3️⃣ The Marketing team activates local campaigns on the Store ID of the shopper's most recently selected location, targeting customers who checked store inventory but did not purchase with a pickup-offer message scoped to that store's in-stock assortment.,4️⃣ The Finance analyst allocates online-originated revenue to the fulfilling store's P&L using the Store ID on the purchase event, resolving the credit disputes between digital and store channels that arise at quarter close and feeding store-level omnichannel contribution reporting.
 
+Dependencies:
+  Events: [select-item, view-item, add-shipping-info, purchase]
+  Dimensions: [fulfillment-method]
 
+Source Data: Digital Analytics (GA4) + Commerce Order Data (Salesforce Commerce Cloud) + Store Master File (POS)
 
+Report Attributes: |
+  Fulfillment Method; Store ZIP Code / Local Market; Pickup Window; Store Inventory Status; Device Category; Item Category; Order Status
 
+Dashboard Usage: [BOPIS & Curbside Performance Dashboard, Store-Level Omnichannel Scorecard, Online-to-Store Journey Report, Fulfillment Method Mix Dashboard]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [store-zip-code-local-market, fulfillment-method]
 
+Derived Dimensions: [store-name, store-distance-band, store-inventory-status]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +485,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T16:35:22.078+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T16:35:30.675+00:00
 
