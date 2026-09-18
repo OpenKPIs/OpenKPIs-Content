@@ -1,0 +1,576 @@
+# Dimension: RFM Segment
+# Generated: 2026-09-18T01:42:03.465Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: RFM Segment
+
+Description: |
+  RFM Segment is the named behavioral segment a customer holds on the scoring snapshot date, built from Recency, Frequency and Monetary scores of 1–5 assigned by customer-count quintile across every customer with at least one qualifying order in the trailing scoring window, with the R×F score combination mapped to a governed segment list whose documented default is the 11-segment map from Champions to Lost. Lifecycle marketing, retention and finance teams use it to target, suppress and prioritise customer groups and to track migration between segments from one refresh to the next, and it is distinct from Customer Status (relationship or lifecycle state), Customer Loyalty Tier (a tier earned under a loyalty program) and Customer Segmentation by Risk Profile (financial or credit risk).
+
+Category: Retention
+
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV, retention, segmentation, ltv]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- RFM Segment: one row per in-scope customer per snapshot date, built from backend commerce orders and the CRM customer master (no web events).
+  -- R = days since last qualifying order (reversed so most recent = 5), F = distinct qualifying orders, M = net merchandise revenue; all in the trailing scoring window.
+  WITH params AS (
+    SELECT
+      DATE '2026-09-13' AS snapshot_start_date,  -- first snapshot date (end of day, reporting time zone)
+      DATE '2026-09-13' AS snapshot_end_date,    -- last snapshot date; weekly refresh steps in between
+      24 AS window_months,                       -- governed alternative for high-frequency categories: 12
+      'America/New_York' AS reporting_tz,
+      'USD' AS reporting_currency,
+      'rfm-11-default-v1' AS map_version
+  ),
+  snapshots AS (
+    SELECT
+      snapshot_date,
+      p.window_months,
+      p.reporting_tz,
+      p.reporting_currency,
+      p.map_version,
+      DATE_SUB(snapshot_date, INTERVAL p.window_months MONTH) AS window_start_exclusive
+    FROM params AS p,
+      UNNEST(GENERATE_DATE_ARRAY(p.snapshot_start_date, p.snapshot_end_date, INTERVAL 7 DAY)) AS snapshot_date
+  ),
+  crm_customers AS (
+    SELECT
+      CAST(c.customer_id AS STRING) AS crm_customer_id,
+      CAST(c.commerce_customer_id AS STRING) AS commerce_customer_id,
+      TO_HEX(SHA256(LOWER(TRIM(c.email)))) AS email_hash,
+      CAST(c.merged_into_customer_id AS STRING) AS merged_into_customer_id,
+      c.merged_at,
+      c.created_at,
+      LOWER(c.account_type) AS account_type
+    FROM `your-project.crm.customers` AS c
+  ),
+  -- Merged records roll up to the surviving customer from the merge date onward
+  crm_resolved AS (
+    SELECT
+      s.snapshot_date,
+      c.crm_customer_id,
+      c.commerce_customer_id,
+      c.email_hash,
+      c.created_at,
+      c.account_type,
+      IF(c.merged_into_customer_id IS NOT NULL AND DATE(c.merged_at, s.reporting_tz) <= s.snapshot_date,
+         c.merged_into_customer_id, c.crm_customer_id) AS customer_key
+    FROM crm_customers AS c
+    CROSS JOIN snapshots AS s
+    WHERE DATE(c.created_at, s.reporting_tz) <= s.snapshot_date
+  ),
+  commerce_id_match AS (
+    SELECT snapshot_date, commerce_customer_id, customer_key
+    FROM crm_resolved
+    WHERE commerce_customer_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY snapshot_date, commerce_customer_id ORDER BY created_at, crm_customer_id) = 1
+  ),
+  email_match AS (
+    SELECT snapshot_date, email_hash, customer_key
+    FROM crm_resolved
+    WHERE email_hash IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY snapshot_date, email_hash ORDER BY created_at, crm_customer_id) = 1
+  ),
+  -- Employee, internal, reseller, B2B and wholesale accounts are removed before ranking
+  excluded_keys AS (
+    SELECT snapshot_date, customer_key
+    FROM crm_resolved
+    GROUP BY snapshot_date, customer_key
+    HAVING LOGICAL_OR(account_type IN ('employee', 'internal', 'reseller', 'b2b', 'wholesale'))
+  ),
+  refunds_to_date AS (
+    SELECT
+      s.snapshot_date,
+      CAST(r.order_id AS STRING) AS order_id,
+      SUM(r.refund_merchandise_amount) AS refunded_merchandise_amount
+    FROM `your-project.commerce.order_refunds` AS r
+    CROSS JOIN snapshots AS s
+    WHERE DATE(r.refunded_at, s.reporting_tz) <= s.snapshot_date
+    GROUP BY s.snapshot_date, CAST(r.order_id AS STRING)
+  ),
+  orders_to_date AS (
+    SELECT
+      s.snapshot_date,
+      s.window_start_exclusive,
+      s.reporting_currency,
+      CAST(o.order_id AS STRING) AS order_id,
+      CAST(o.customer_id AS STRING) AS commerce_customer_id,
+      TO_HEX(SHA256(LOWER(TRIM(o.customer_email)))) AS email_hash,
+      DATE(o.order_placed_at, s.reporting_tz) AS order_date,
+      o.currency_code,
+      -- merchandise only: excludes tax, shipping and gift card purchases
+      COALESCE(o.merchandise_subtotal_amount, 0)
+        - COALESCE(o.order_discount_amount, 0)
+        - COALESCE(o.gift_card_sales_amount, 0) AS merchandise_after_discount
+    FROM `your-project.commerce.orders` AS o
+    CROSS JOIN snapshots AS s
+    WHERE DATE(o.order_placed_at, s.reporting_tz) <= s.snapshot_date
+      AND LOWER(o.order_status) NOT IN ('cancelled', 'canceled', 'voided', 'draft')
+      AND COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_staff_order, FALSE) = FALSE
+      AND LOWER(COALESCE(o.order_type, 'standard')) NOT IN ('free_sample', 'test', 'draft')
+      AND NOT (COALESCE(o.is_marketplace_order, FALSE) AND o.customer_id IS NULL)
+  ),
+  -- Qualifying order: net merchandise value above zero after refunds posted by the snapshot date
+  -- (removes fully refunded and zero-value replacement orders; partial refunds keep the order and reduce M)
+  qualifying_orders AS (
+    SELECT
+      o.snapshot_date,
+      o.window_start_exclusive,
+      o.order_id,
+      o.order_date,
+      COALESCE(cm.customer_key, em.customer_key, o.commerce_customer_id, CONCAT('guest:', o.email_hash)) AS customer_key,
+      (o.merchandise_after_discount - COALESCE(rf.refunded_merchandise_amount, 0))
+        * IF(o.currency_code = o.reporting_currency, 1, fx.rate) AS net_revenue_reporting
+    FROM orders_to_date AS o
+    LEFT JOIN refunds_to_date AS rf
+      ON rf.snapshot_date = o.snapshot_date AND rf.order_id = o.order_id
+    LEFT JOIN commerce_id_match AS cm
+      ON cm.snapshot_date = o.snapshot_date AND cm.commerce_customer_id = o.commerce_customer_id
+    LEFT JOIN email_match AS em
+      ON em.snapshot_date = o.snapshot_date AND em.email_hash = o.email_hash AND o.commerce_customer_id IS NULL
+    LEFT JOIN `your-project.finance.fx_daily_rates` AS fx
+      ON fx.rate_date = o.order_date AND fx.from_currency = o.currency_code AND fx.to_currency = o.reporting_currency
+    WHERE o.merchandise_after_discount - COALESCE(rf.refunded_merchandise_amount, 0) > 0
+      AND (o.commerce_customer_id IS NOT NULL OR o.email_hash IS NOT NULL)
+  ),
+  -- Base population: every in-scope customer with at least one qualifying order up to the snapshot date
+  customer_measures AS (
+    SELECT
+      q.snapshot_date,
+      q.customer_key,
+      DATE_DIFF(q.snapshot_date, MAX(q.order_date), DAY) AS recency_days,
+      COUNT(DISTINCT IF(q.order_date > q.window_start_exclusive, q.order_id, NULL)) AS frequency_orders,
+      ROUND(SUM(IF(q.order_date > q.window_start_exclusive, q.net_revenue_reporting, 0)), 2) AS monetary_net_revenue
+    FROM qualifying_orders AS q
+    LEFT JOIN excluded_keys AS x
+      ON x.snapshot_date = q.snapshot_date AND x.customer_key = q.customer_key
+    WHERE x.customer_key IS NULL
+    GROUP BY q.snapshot_date, q.customer_key
+  ),
+  -- Customer-count quintiles over the scoring base only (at least one qualifying order in the window)
+  quintile_tiles AS (
+    SELECT
+      m.*,
+      NTILE(5) OVER (PARTITION BY m.snapshot_date ORDER BY m.recency_days DESC, m.customer_key) AS r_tile,
+      NTILE(5) OVER (PARTITION BY m.snapshot_date ORDER BY m.frequency_orders ASC, m.customer_key) AS f_tile,
+      NTILE(5) OVER (PARTITION BY m.snapshot_date ORDER BY m.monetary_net_revenue ASC, m.customer_key) AS m_tile
+    FROM customer_measures AS m
+    WHERE m.frequency_orders > 0
+  ),
+  -- Tied values share one score: the quintile of the first customer in the tie
+  tie_adjusted AS (
+    SELECT
+      t.*,
+      MIN(t.r_tile) OVER (PARTITION BY t.snapshot_date, t.recency_days) AS r_quintile,
+      MIN(t.f_tile) OVER (PARTITION BY t.snapshot_date, t.frequency_orders) AS f_quintile,
+      MIN(t.m_tile) OVER (PARTITION BY t.snapshot_date, t.monetary_net_revenue) AS m_quintile
+    FROM quintile_tiles AS t
+  ),
+  -- F scores 1 to 3 collapsed into one value when no customer holds F quintile 2 or 3
+  f_method AS (
+    SELECT snapshot_date, COUNTIF(f_quintile IN (2, 3)) = 0 AS use_fixed_f_cutoffs
+    FROM tie_adjusted
+    GROUP BY snapshot_date
+  ),
+  scores AS (
+    SELECT
+      t.snapshot_date,
+      t.customer_key,
+      t.r_quintile AS r_score,
+      IF(fm.use_fixed_f_cutoffs,
+         CASE
+           WHEN t.frequency_orders >= 6 THEN 5
+           WHEN t.frequency_orders >= 4 THEN 4
+           WHEN t.frequency_orders = 3 THEN 3
+           WHEN t.frequency_orders = 2 THEN 2
+           ELSE 1
+         END,
+         t.f_quintile) AS f_score,
+      t.m_quintile AS m_score,
+      t.monetary_net_revenue,
+      IF(fm.use_fixed_f_cutoffs, 'fixed_cutoffs_1|2|3|4-5|6+', 'quintile') AS f_score_method
+    FROM tie_adjusted AS t
+    JOIN f_method AS fm
+      ON fm.snapshot_date = t.snapshot_date
+  ),
+  -- Default 11-segment R x F map (all 25 cells); M is used only for ranking inside a segment
+  segmented AS (
+    SELECT
+      sc.*,
+      CASE
+        WHEN sc.r_score = 5 AND sc.f_score IN (4, 5) THEN 'Champions'
+        WHEN sc.r_score IN (3, 4) AND sc.f_score IN (4, 5) THEN 'Loyal Customers'
+        WHEN sc.r_score IN (4, 5) AND sc.f_score IN (2, 3) THEN 'Potential Loyalists'
+        WHEN sc.r_score = 5 AND sc.f_score = 1 THEN 'New Customers'
+        WHEN sc.r_score = 4 AND sc.f_score = 1 THEN 'Promising'
+        WHEN sc.r_score = 3 AND sc.f_score = 3 THEN 'Need Attention'
+        WHEN sc.r_score = 3 AND sc.f_score IN (1, 2) THEN 'About to Sleep'
+        WHEN sc.r_score IN (1, 2) AND sc.f_score IN (3, 4) THEN 'At Risk'
+        WHEN sc.r_score IN (1, 2) AND sc.f_score = 5 THEN 'Cannot Lose Them'
+        WHEN sc.r_score = 2 AND sc.f_score IN (1, 2) THEN 'Hibernating'
+        WHEN sc.r_score = 1 AND sc.f_score IN (1, 2) THEN 'Lost'
+      END AS rfm_segment
+    FROM scores AS sc
+  ),
+  ranked AS (
+    SELECT
+      sg.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY sg.snapshot_date, sg.rfm_segment
+        ORDER BY sg.m_score DESC, sg.monetary_net_revenue DESC, sg.customer_key
+      ) AS monetary_rank_in_segment
+    FROM segmented AS sg
+  )
+  SELECT
+    m.snapshot_date,
+    m.customer_key,
+    COALESCE(rk.rfm_segment, '(not scored)') AS rfm_segment,
+    rk.r_score,
+    rk.f_score,
+    rk.m_score,
+    rk.monetary_rank_in_segment,
+    rk.f_score_method,
+    m.recency_days,
+    m.frequency_orders,
+    m.monetary_net_revenue,
+    s.window_months AS scoring_window_months,
+    DATE_ADD(s.window_start_exclusive, INTERVAL 1 DAY) AS scoring_window_start_date,
+    s.map_version
+  FROM customer_measures AS m
+  JOIN snapshots AS s
+    ON s.snapshot_date = m.snapshot_date
+  LEFT JOIN ranked AS rk
+    ON rk.snapshot_date = m.snapshot_date AND rk.customer_key = m.customer_key
+  ORDER BY m.snapshot_date, COALESCE(rk.rfm_segment, '(not scored)'), rk.monetary_rank_in_segment, m.customer_key;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- RFM Segment: one row per in-scope customer per snapshot date, built from backend commerce order and CRM customer profile datasets (no web events).
+  -- R = days since last qualifying order (reversed so most recent = 5), F = distinct qualifying orders, M = net merchandise revenue; all in the trailing scoring window.
+  WITH params AS (
+    SELECT
+      to_date('2026-09-13') AS snapshot_start_date,  -- first snapshot date (end of day, reporting time zone)
+      to_date('2026-09-13') AS snapshot_end_date,    -- last snapshot date; weekly refresh steps in between
+      24 AS window_months,                           -- governed alternative for high-frequency categories: 12
+      'America/New_York' AS reporting_tz,
+      'USD' AS reporting_currency,
+      'rfm-11-default-v1' AS map_version
+  ),
+  snapshot_calendar AS (
+    SELECT explode(sequence(snapshot_start_date, snapshot_end_date, INTERVAL 7 DAYS)) AS snapshot_date
+    FROM params
+  ),
+  snapshots AS (
+    SELECT
+      c.snapshot_date,
+      p.window_months,
+      p.reporting_tz,
+      p.reporting_currency,
+      p.map_version,
+      add_months(c.snapshot_date, -p.window_months) AS window_start_exclusive
+    FROM snapshot_calendar AS c
+    CROSS JOIN params AS p
+  ),
+  crm_customers AS (
+    SELECT
+      CAST(c.customer_id AS STRING) AS crm_customer_id,
+      CAST(c.commerce_customer_id AS STRING) AS commerce_customer_id,
+      sha2(lower(trim(c.email)), 256) AS email_hash,
+      CAST(c.merged_into_customer_id AS STRING) AS merged_into_customer_id,
+      c.merged_at,
+      c.created_at,
+      lower(c.account_type) AS account_type
+    FROM crm_customer_profile_dataset AS c
+  ),
+  -- Merged records roll up to the surviving customer from the merge date onward
+  crm_resolved AS (
+    SELECT
+      s.snapshot_date,
+      c.crm_customer_id,
+      c.commerce_customer_id,
+      c.email_hash,
+      c.created_at,
+      c.account_type,
+      CASE
+        WHEN c.merged_into_customer_id IS NOT NULL
+         AND to_date(from_utc_timestamp(c.merged_at, s.reporting_tz)) <= s.snapshot_date
+        THEN c.merged_into_customer_id
+        ELSE c.crm_customer_id
+      END AS customer_key
+    FROM crm_customers AS c
+    CROSS JOIN snapshots AS s
+    WHERE to_date(from_utc_timestamp(c.created_at, s.reporting_tz)) <= s.snapshot_date
+  ),
+  commerce_id_match AS (
+    SELECT snapshot_date, commerce_customer_id, customer_key
+    FROM (
+      SELECT
+        r.snapshot_date,
+        r.commerce_customer_id,
+        r.customer_key,
+        ROW_NUMBER() OVER (PARTITION BY r.snapshot_date, r.commerce_customer_id ORDER BY r.created_at, r.crm_customer_id) AS rn
+      FROM crm_resolved AS r
+      WHERE r.commerce_customer_id IS NOT NULL
+    ) AS x
+    WHERE rn = 1
+  ),
+  email_match AS (
+    SELECT snapshot_date, email_hash, customer_key
+    FROM (
+      SELECT
+        r.snapshot_date,
+        r.email_hash,
+        r.customer_key,
+        ROW_NUMBER() OVER (PARTITION BY r.snapshot_date, r.email_hash ORDER BY r.created_at, r.crm_customer_id) AS rn
+      FROM crm_resolved AS r
+      WHERE r.email_hash IS NOT NULL
+    ) AS x
+    WHERE rn = 1
+  ),
+  -- Employee, internal, reseller, B2B and wholesale accounts are removed before ranking
+  excluded_keys AS (
+    SELECT snapshot_date, customer_key
+    FROM crm_resolved
+    GROUP BY snapshot_date, customer_key
+    HAVING MAX(CASE WHEN account_type IN ('employee', 'internal', 'reseller', 'b2b', 'wholesale') THEN 1 ELSE 0 END) = 1
+  ),
+  refunds_to_date AS (
+    SELECT
+      s.snapshot_date,
+      CAST(r.order_id AS STRING) AS order_id,
+      SUM(r.refund_merchandise_amount) AS refunded_merchandise_amount
+    FROM commerce_order_refunds_dataset AS r
+    CROSS JOIN snapshots AS s
+    WHERE to_date(from_utc_timestamp(r.refunded_at, s.reporting_tz)) <= s.snapshot_date
+    GROUP BY s.snapshot_date, CAST(r.order_id AS STRING)
+  ),
+  orders_to_date AS (
+    SELECT
+      s.snapshot_date,
+      s.window_start_exclusive,
+      s.reporting_currency,
+      CAST(o.order_id AS STRING) AS order_id,
+      CAST(o.customer_id AS STRING) AS commerce_customer_id,
+      sha2(lower(trim(o.customer_email)), 256) AS email_hash,
+      to_date(from_utc_timestamp(o.order_placed_at, s.reporting_tz)) AS order_date,
+      o.currency_code,
+      -- merchandise only: excludes tax, shipping and gift card purchases
+      COALESCE(o.merchandise_subtotal_amount, 0)
+        - COALESCE(o.order_discount_amount, 0)
+        - COALESCE(o.gift_card_sales_amount, 0) AS merchandise_after_discount
+    FROM commerce_orders_dataset AS o
+    CROSS JOIN snapshots AS s
+    WHERE to_date(from_utc_timestamp(o.order_placed_at, s.reporting_tz)) <= s.snapshot_date
+      AND lower(o.order_status) NOT IN ('cancelled', 'canceled', 'voided', 'draft')
+      AND COALESCE(o.is_test_order, false) = false
+      AND COALESCE(o.is_staff_order, false) = false
+      AND lower(COALESCE(o.order_type, 'standard')) NOT IN ('free_sample', 'test', 'draft')
+      AND NOT (COALESCE(o.is_marketplace_order, false) AND o.customer_id IS NULL)
+  ),
+  -- Qualifying order: net merchandise value above zero after refunds posted by the snapshot date
+  -- (removes fully refunded and zero-value replacement orders; partial refunds keep the order and reduce M)
+  qualifying_orders AS (
+    SELECT
+      o.snapshot_date,
+      o.window_start_exclusive,
+      o.order_id,
+      o.order_date,
+      COALESCE(cm.customer_key, em.customer_key, o.commerce_customer_id, concat('guest:', o.email_hash)) AS customer_key,
+      (o.merchandise_after_discount - COALESCE(rf.refunded_merchandise_amount, 0))
+        * CASE WHEN o.currency_code = o.reporting_currency THEN 1 ELSE fx.rate END AS net_revenue_reporting
+    FROM orders_to_date AS o
+    LEFT JOIN refunds_to_date AS rf
+      ON rf.snapshot_date = o.snapshot_date AND rf.order_id = o.order_id
+    LEFT JOIN commerce_id_match AS cm
+      ON cm.snapshot_date = o.snapshot_date AND cm.commerce_customer_id = o.commerce_customer_id
+    LEFT JOIN email_match AS em
+      ON em.snapshot_date = o.snapshot_date AND em.email_hash = o.email_hash AND o.commerce_customer_id IS NULL
+    LEFT JOIN fx_daily_rates_dataset AS fx
+      ON fx.rate_date = o.order_date AND fx.from_currency = o.currency_code AND fx.to_currency = o.reporting_currency
+    WHERE o.merchandise_after_discount - COALESCE(rf.refunded_merchandise_amount, 0) > 0
+      AND (o.commerce_customer_id IS NOT NULL OR o.email_hash IS NOT NULL)
+  ),
+  -- Base population: every in-scope customer with at least one qualifying order up to the snapshot date
+  customer_measures AS (
+    SELECT
+      q.snapshot_date,
+      q.customer_key,
+      datediff(q.snapshot_date, MAX(q.order_date)) AS recency_days,
+      COUNT(DISTINCT CASE WHEN q.order_date > q.window_start_exclusive THEN q.order_id END) AS frequency_orders,
+      ROUND(SUM(CASE WHEN q.order_date > q.window_start_exclusive THEN q.net_revenue_reporting ELSE 0 END), 2) AS monetary_net_revenue
+    FROM qualifying_orders AS q
+    LEFT JOIN excluded_keys AS x
+      ON x.snapshot_date = q.snapshot_date AND x.customer_key = q.customer_key
+    WHERE x.customer_key IS NULL
+    GROUP BY q.snapshot_date, q.customer_key
+  ),
+  -- Customer-count quintiles over the scoring base only (at least one qualifying order in the window)
+  quintile_tiles AS (
+    SELECT
+      m.*,
+      NTILE(5) OVER (PARTITION BY m.snapshot_date ORDER BY m.recency_days DESC, m.customer_key) AS r_tile,
+      NTILE(5) OVER (PARTITION BY m.snapshot_date ORDER BY m.frequency_orders ASC, m.customer_key) AS f_tile,
+      NTILE(5) OVER (PARTITION BY m.snapshot_date ORDER BY m.monetary_net_revenue ASC, m.customer_key) AS m_tile
+    FROM customer_measures AS m
+    WHERE m.frequency_orders > 0
+  ),
+  -- Tied values share one score: the quintile of the first customer in the tie
+  tie_adjusted AS (
+    SELECT
+      t.*,
+      MIN(t.r_tile) OVER (PARTITION BY t.snapshot_date, t.recency_days) AS r_quintile,
+      MIN(t.f_tile) OVER (PARTITION BY t.snapshot_date, t.frequency_orders) AS f_quintile,
+      MIN(t.m_tile) OVER (PARTITION BY t.snapshot_date, t.monetary_net_revenue) AS m_quintile
+    FROM quintile_tiles AS t
+  ),
+  -- F scores 1 to 3 collapsed into one value when no customer holds F quintile 2 or 3
+  f_method AS (
+    SELECT
+      snapshot_date,
+      CASE WHEN SUM(CASE WHEN f_quintile IN (2, 3) THEN 1 ELSE 0 END) = 0 THEN true ELSE false END AS use_fixed_f_cutoffs
+    FROM tie_adjusted
+    GROUP BY snapshot_date
+  ),
+  scores AS (
+    SELECT
+      t.snapshot_date,
+      t.customer_key,
+      t.r_quintile AS r_score,
+      CASE
+        WHEN fm.use_fixed_f_cutoffs AND t.frequency_orders >= 6 THEN 5
+        WHEN fm.use_fixed_f_cutoffs AND t.frequency_orders >= 4 THEN 4
+        WHEN fm.use_fixed_f_cutoffs AND t.frequency_orders = 3 THEN 3
+        WHEN fm.use_fixed_f_cutoffs AND t.frequency_orders = 2 THEN 2
+        WHEN fm.use_fixed_f_cutoffs THEN 1
+        ELSE t.f_quintile
+      END AS f_score,
+      t.m_quintile AS m_score,
+      t.monetary_net_revenue,
+      CASE WHEN fm.use_fixed_f_cutoffs THEN 'fixed_cutoffs_1|2|3|4-5|6+' ELSE 'quintile' END AS f_score_method
+    FROM tie_adjusted AS t
+    JOIN f_method AS fm
+      ON fm.snapshot_date = t.snapshot_date
+  ),
+  -- Default 11-segment R x F map (all 25 cells); M is used only for ranking inside a segment
+  segmented AS (
+    SELECT
+      sc.*,
+      CASE
+        WHEN sc.r_score = 5 AND sc.f_score IN (4, 5) THEN 'Champions'
+        WHEN sc.r_score IN (3, 4) AND sc.f_score IN (4, 5) THEN 'Loyal Customers'
+        WHEN sc.r_score IN (4, 5) AND sc.f_score IN (2, 3) THEN 'Potential Loyalists'
+        WHEN sc.r_score = 5 AND sc.f_score = 1 THEN 'New Customers'
+        WHEN sc.r_score = 4 AND sc.f_score = 1 THEN 'Promising'
+        WHEN sc.r_score = 3 AND sc.f_score = 3 THEN 'Need Attention'
+        WHEN sc.r_score = 3 AND sc.f_score IN (1, 2) THEN 'About to Sleep'
+        WHEN sc.r_score IN (1, 2) AND sc.f_score IN (3, 4) THEN 'At Risk'
+        WHEN sc.r_score IN (1, 2) AND sc.f_score = 5 THEN 'Cannot Lose Them'
+        WHEN sc.r_score = 2 AND sc.f_score IN (1, 2) THEN 'Hibernating'
+        WHEN sc.r_score = 1 AND sc.f_score IN (1, 2) THEN 'Lost'
+      END AS rfm_segment
+    FROM scores AS sc
+  ),
+  ranked AS (
+    SELECT
+      sg.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY sg.snapshot_date, sg.rfm_segment
+        ORDER BY sg.m_score DESC, sg.monetary_net_revenue DESC, sg.customer_key
+      ) AS monetary_rank_in_segment
+    FROM segmented AS sg
+  )
+  SELECT
+    m.snapshot_date,
+    m.customer_key,
+    COALESCE(rk.rfm_segment, '(not scored)') AS rfm_segment,
+    rk.r_score,
+    rk.f_score,
+    rk.m_score,
+    rk.monetary_rank_in_segment,
+    rk.f_score_method,
+    m.recency_days,
+    m.frequency_orders,
+    m.monetary_net_revenue,
+    s.window_months AS scoring_window_months,
+    date_add(s.window_start_exclusive, 1) AS scoring_window_start_date,
+    s.map_version
+  FROM customer_measures AS m
+  JOIN snapshots AS s
+    ON s.snapshot_date = m.snapshot_date
+  LEFT JOIN ranked AS rk
+    ON rk.snapshot_date = m.snapshot_date AND rk.customer_key = m.customer_key
+  ORDER BY m.snapshot_date, COALESCE(rk.rfm_segment, '(not scored)'), rk.monetary_rank_in_segment, m.customer_key;
+
+Calculation Notes: |
+  1️⃣ Scoring window and base: the default window is the trailing 24 months ending at the snapshot date (end of day in the store's reporting time zone). Merchants in high-frequency categories such as grocery, beauty replenishment or pet supplies may govern a trailing 12-month window instead. The scoring base is every resolved customer with at least one qualifying order in the window. Customers whose last qualifying order falls before the window are outside the base: they are labelled '(not scored)', never forced into Lost, and they do not shift the quintile cut-offs.
+  2️⃣ Measures: Recency = days from the last qualifying order date to the snapshot date (the same quantity as Days Since Last Purchase). Frequency = count of distinct qualifying orders in the window (Orders per Customer at customer grain). Monetary = net merchandise revenue in the window after discounts, returns and refunds, excluding tax, shipping and gift card purchases, converted to the reporting currency at the order-date rate. A qualifying order is placed and not cancelled, not fully refunded, and has net merchandise value above zero. Test, draft, zero-value replacement and free-sample orders are removed. Partial refunds reduce Monetary but do not remove the order from Frequency.
+  3️⃣ Quintile basis: each measure is ranked across the scoring base and split into five customer-count quintiles, each holding about 20% of scored customers. 5 is best on every axis: most recent, most orders, highest net revenue, so Recency is ranked ascending on days. Tied values always get the same score, taking the quintile of the first customer in the tie. Because single-order customers usually make up more than half of an e-commerce base, F scores 1 to 3 often collapse into one value. When that happens, Frequency is scored on documented fixed order-count cut-offs (for example 1, 2, 3, 4–5, 6+) instead of forced quintiles, and the cut-off method is stored with the snapshot. Cut-offs are recalculated at every refresh and are never carried over from an earlier run.
+  4️⃣ Default 11-segment R×F map (cells given as R score, F score): Champions = R5 F4–5; Loyal Customers = R3–4 F4–5; Potential Loyalists = R4–5 F2–3; New Customers = R5 F1; Promising = R4 F1; Need Attention = R3 F3; About to Sleep = R3 F1–2; At Risk = R1–2 F3–4; Cannot Lose Them = R1–2 F5; Hibernating = R2 F1–2; Lost = R1 F1–2. All 25 cells map to exactly one segment. The label does not use the M score. M is kept as a separate score for ranking customers inside a segment, for example ordering Cannot Lose Them outreach by M. No composite RFM score, weighting or concatenated code is reported as the value.
+  5️⃣ Configurable map and variants: the segment map is governed reference data with a map_version, and every snapshot row records the version it was scored with, so trends are only compared within one version. The shorter Klaviyo variant uses Champions, Loyal, Recent, Needs Attention, At Risk and Inactive. When both are reported together, the crosswalk from the default map is: Champions → Champions; Loyal Customers and Potential Loyalists → Loyal; New Customers and Promising → Recent; Need Attention and About to Sleep → Needs Attention; At Risk and Cannot Lose Them → At Risk; Hibernating and Lost → Inactive. Segments calculated inside Klaviyo keep Klaviyo's own thresholds and are not re-scored.
+  6️⃣ Identity and exclusions: the customer key is the commerce platform customer ID (Shopify customer.id, Adobe Commerce sales_order.customer_id, Salesforce Commerce Cloud customerNo), reconciled to the CRM customer master. Guest orders are linked to a registered customer by normalised, hashed email. A guest email with no account becomes its own customer key and is never dropped. Employee, internal, reseller, B2B and wholesale accounts are removed before ranking because their volumes distort the F and M quintiles. Merged customer records are re-scored as one customer from the merge date onward. Marketplace orders without a merchant-owned customer identity are excluded.
+  7️⃣ Timing and use in journeys: segments are rebuilt as a batch job on a schedule (weekly by default, daily for high-volume merchants) and stored as dated snapshots, so migration analysis such as Champions → At Risk is never restated. Event-level and session-level analysis joins the segment in effect on the event date, never today's value. When the segment is exposed as a user property (rfm_segment), it is set at login or identity resolution and applies only to hits from that point forward. Scoring runs server-side and never starts or extends a session, so the 30-minute inactivity timeout does not affect it. Fixed-threshold views of the same inputs belong to the sibling dimensions last-purchase-recency-band and purchase-count-band, not to this label.
+
+Business Use Case: |
+  1️⃣ CRM & Lifecycle Marketing manager: after each weekly refresh, customers who moved from Champions or Loyal Customers into At Risk or Cannot Lose Them enter the win-back journey (personal outreach, early access, then an incentive only at step three). Champions are excluded from blanket discount campaigns to protect margin. Win-back success is reviewed monthly as the share of enrolled customers back in Loyal Customers or better at the next refresh.
+  2️⃣ Performance Marketing lead: on the weekly audience sync, Champions and Loyal Customers are uploaded as seed lists for lookalike and value-based bidding audiences. Lost and Hibernating customers go into suppression lists for full-price retargeting. When the Lost segment exceeds 25% of scored customers, budget is moved from retargeting to prospecting.
+  3️⃣ Head of Retention with Finance (FP&A): at the monthly retention review, read the segment migration matrix alongside Customer Retention Rate, Repeat Purchase Rate and Customer Churn Rate. When the share of trailing-window net revenue from At Risk and Cannot Lose Them rises by more than 3 percentage points month over month, flag the exposure in the Customer Lifetime Value forecast and approve extra retention budget for those segments.
+  4️⃣ Customer Service team lead: when an inbound contact comes from a customer whose CRM record shows Champions or Cannot Lose Them, route it to the priority queue with a shorter first-response target and appeasement authority. Resolution time and repeat contacts for these segments are reported at the weekly service review.
+
+Dependencies:
+  Dimensions: [order-status]
+  KPIs: [orders, revenue]
+
+Source Data: Commerce Platform Orders (Shopify / Adobe Commerce / Salesforce Commerce Cloud) + CRM Customer Master
+
+Report Attributes: |
+  Customer Status; Customer Loyalty Tier; First Order Cohort Month; Acquisition Channel (First Order); Primary Product Category; Country; Sales Channel; RFM Map Version
+
+Dashboard Usage: [RFM Segment Distribution & Migration, Customer Retention & LTV Overview, CRM Lifecycle & Win-Back Program Performance, Paid Media Audience Seeding & Suppression]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [customer-status, last-purchase-recency-band, purchase-count-band, customer-loyalty-tier, customer-segmentation-by-risk-profile]
+
+Derived Dimensions: [retention-type]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-15T13:35:46.75+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-18T01:42:03.072+00:00
+
