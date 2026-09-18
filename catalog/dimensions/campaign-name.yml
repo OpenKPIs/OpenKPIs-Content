@@ -1,7 +1,7 @@
 # Dimension: Campaign Name
-# Generated: 2026-09-18T17:12:07.125Z
+# Generated: 2026-09-18T17:12:16.161Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Campaign Name
 
@@ -10,31 +10,373 @@ Description: |
 
 Category: Acquisition
 
+Tags: [dimension, E-commerce: Top-of-Funnel & Marketing Acquisition]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Session
 
+Data Type: string
 
+Aggregation Window: Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  page_view
 
+Adobe Event: |
+  pageView
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "home",
+        "destinationURL": "https://www.example.com/?utm_source=google&utm_medium=cpc&utm_campaign=spring_sale&utm_id=cmp_12345",
+        "referringURL": "https://www.google.com/"
+      },
+      "attributes": {
+        "campaign": {
+          "campaignName": "spring_sale",
+          "campaignID": "cmp_12345",
+          "source": "google",
+          "medium": "cpc",
+          "trackingCode": "cpc_google_spring_sale_cmp_12345"
+        }
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_location": "https://www.example.com/?utm_source=google&utm_medium=cpc&utm_campaign=spring_sale&utm_id=cmp_12345",
+    "campaign_name": "spring_sale",
+    "campaign_id": "cmp_12345",
+    "campaign_source": "google",
+    "campaign_medium": "cpc"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "web": {
+      "webPageDetails": {
+        "URL": "https://www.example.com/?cid=cpc_google_spring_sale_cmp_12345",
+        "name": "home"
+      }
+    },
+    "marketing": {
+      "trackingCode": "cpc_google_spring_sale_cmp_12345",
+      "campaignName": "spring_sale",
+      "campaignID": "cmp_12345",
+      "channel": "paid_search"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web": {
+      "webPageDetails": {
+        "URL": "https://www.example.com/?cid=cpc_google_spring_sale_cmp_12345",
+        "name": "home",
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "marketing": {
+      "trackingCode": "cpc_google_spring_sale_cmp_12345",
+      "campaignName": "spring_sale"
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar20": "cmp_12345"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Campaign Name (session scope) with campaign_id as the join key to ad-platform cost.
+  -- Window: last 30 days, frozen at D+2 for late Google Ads name backfill.
+  WITH events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      user_pseudo_id,
+      event_name,
+      event_timestamp,
+      MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+      MAX(IF(ep.key = 'session_engaged', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS session_engaged,
+      ANY_VALUE(ecommerce.transaction_id) AS transaction_id,
+      ANY_VALUE(ecommerce.purchase_revenue) AS purchase_revenue,
+      ANY_VALUE(session_traffic_source_last_click.cross_channel_campaign.campaign_id) AS ss_campaign_id,
+      ANY_VALUE(session_traffic_source_last_click.cross_channel_campaign.campaign_name) AS ss_campaign_name,
+      ANY_VALUE(session_traffic_source_last_click.cross_channel_campaign.source) AS ss_source,
+      ANY_VALUE(session_traffic_source_last_click.cross_channel_campaign.medium) AS ss_medium,
+      ANY_VALUE(collected_traffic_source.manual_campaign_id) AS ct_campaign_id,
+      ANY_VALUE(collected_traffic_source.manual_campaign_name) AS ct_campaign_name,
+      ANY_VALUE(collected_traffic_source.manual_source) AS ct_source,
+      ANY_VALUE(collected_traffic_source.manual_medium) AS ct_medium
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 31 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY))
+    GROUP BY event_date, user_pseudo_id, event_name, event_timestamp, batch_event_index
+  ),
+  sessions AS (
+    SELECT
+      CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING)) AS session_key,
+      MIN(event_date) AS session_date,
+      COALESCE(
+        ARRAY_AGG(ss_campaign_id IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)],
+        ARRAY_AGG(ct_campaign_id IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)]
+      ) AS campaign_id,
+      LOWER(TRIM(COALESCE(
+        ARRAY_AGG(ss_campaign_name IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)],
+        ARRAY_AGG(ct_campaign_name IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)],
+        '(not set)'
+      ))) AS campaign_name,
+      LOWER(COALESCE(
+        ARRAY_AGG(ss_source IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)],
+        ARRAY_AGG(ct_source IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)],
+        '(direct)'
+      )) AS session_source,
+      LOWER(COALESCE(
+        ARRAY_AGG(ss_medium IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)],
+        ARRAY_AGG(ct_medium IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)],
+        '(none)'
+      )) AS session_medium,
+      MAX(IF(session_engaged = '1', 1, 0)) AS is_engaged,
+      COUNT(DISTINCT IF(event_name = 'purchase', transaction_id, NULL)) AS purchases,
+      SUM(IF(event_name = 'purchase', COALESCE(purchase_revenue, 0), 0)) AS purchase_revenue
+    FROM events
+    WHERE ga_session_id IS NOT NULL
+    GROUP BY session_key
+  ),
+  clean_sessions AS (
+    SELECT *
+    FROM sessions
+    WHERE NOT STARTS_WITH(campaign_name, 'test_')
+      AND NOT STARTS_WITH(campaign_name, 'qa_')
+      AND session_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+  ),
+  campaign_display_name AS (
+    SELECT
+      campaign_id,
+      ARRAY_AGG(campaign_name ORDER BY session_date DESC LIMIT 1)[OFFSET(0)] AS latest_campaign_name
+    FROM clean_sessions
+    WHERE campaign_id IS NOT NULL
+    GROUP BY campaign_id
+  ),
+  campaign_sessions AS (
+    SELECT
+      s.session_date,
+      COALESCE(s.campaign_id, '(not set)') AS campaign_id,
+      COALESCE(n.latest_campaign_name, s.campaign_name) AS campaign_name,
+      COUNT(DISTINCT s.session_key) AS sessions,
+      COUNT(DISTINCT IF(s.is_engaged = 1, s.session_key, NULL)) AS engaged_sessions,
+      COUNT(DISTINCT IF(s.purchases > 0, s.session_key, NULL)) AS converting_sessions,
+      SUM(s.purchases) AS purchases,
+      SUM(s.purchase_revenue) AS purchase_revenue
+    FROM clean_sessions AS s
+    LEFT JOIN campaign_display_name AS n
+      ON s.campaign_id = n.campaign_id
+    GROUP BY 1, 2, 3
+  ),
+  ad_cost AS (
+    SELECT
+      cost_date,
+      campaign_id,
+      SUM(cost) AS cost
+    FROM `your-project.ads.campaign_cost_daily`
+    WHERE cost_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY)
+    GROUP BY cost_date, campaign_id
+  )
+  SELECT
+    c.session_date,
+    c.campaign_id,
+    c.campaign_name,
+    c.sessions,
+    c.engaged_sessions,
+    SAFE_DIVIDE(c.engaged_sessions, c.sessions) AS engagement_rate,
+    c.converting_sessions,
+    SAFE_DIVIDE(c.converting_sessions, c.sessions) AS session_conversion_rate,
+    c.purchases,
+    c.purchase_revenue,
+    COALESCE(a.cost, 0) AS cost,
+    SAFE_DIVIDE(c.purchase_revenue, a.cost) AS roas
+  FROM campaign_sessions AS c
+  LEFT JOIN ad_cost AS a
+    ON c.campaign_id = a.campaign_id
+   AND c.session_date = a.cost_date
+  ORDER BY c.session_date DESC, c.sessions DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Campaign Name (visit scope): campaign resolved from the landing hit of each visit (instance value, not the persisted eVar).
+  -- Campaign ID (eVar20) is the join key to ad-platform cost. Window: last 30 days, frozen at D+2.
+  WITH hits AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS ecid,
+      timestamp,
+      eventType,
+      NULLIF(TRIM(_experience.analytics.customDimensions.eVars.eVar20), '') AS campaign_id,
+      NULLIF(LOWER(TRIM(marketing.campaignName)), '') AS campaign_name,
+      NULLIF(TRIM(marketing.trackingCode), '') AS tracking_code,
+      commerce.order.purchaseID AS purchase_id,
+      commerce.order.priceTotal AS order_total,
+      commerce.purchases.value AS purchase_count,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY endUserIDs._experience.ecid.id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS visit
+    FROM web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 31)
+      AND timestamp < date_sub(current_date(), 1)
+  ),
+  hits_in_visit AS (
+    SELECT
+      *,
+      CONCAT(ecid, '.', CAST(visit.num AS STRING)) AS visit_key,
+      ROW_NUMBER() OVER (
+        PARTITION BY ecid, visit.num
+        ORDER BY timestamp
+      ) AS hit_seq
+    FROM hits
+  ),
+  visit_campaign AS (
+    SELECT
+      visit_key,
+      CAST(timestamp AS DATE) AS visit_date,
+      campaign_id,
+      COALESCE(campaign_name, LOWER(tracking_code), '(not set)') AS campaign_name
+    FROM hits_in_visit
+    WHERE hit_seq = 1
+  ),
+  visit_outcomes AS (
+    SELECT
+      visit_key,
+      COUNT(*) AS hits,
+      COUNT(DISTINCT CASE WHEN purchase_count > 0 THEN purchase_id END) AS purchases,
+      SUM(CASE WHEN purchase_count > 0 THEN COALESCE(order_total, 0) ELSE 0 END) AS purchase_revenue
+    FROM hits_in_visit
+    GROUP BY visit_key
+  ),
+  clean_visits AS (
+    SELECT
+      v.visit_key,
+      v.visit_date,
+      v.campaign_id,
+      v.campaign_name,
+      o.hits,
+      o.purchases,
+      o.purchase_revenue
+    FROM visit_campaign AS v
+    JOIN visit_outcomes AS o
+      ON v.visit_key = o.visit_key
+    WHERE v.visit_date >= date_sub(current_date(), 30)
+      AND v.campaign_name NOT LIKE 'test\\_%'
+      AND v.campaign_name NOT LIKE 'qa\\_%'
+  ),
+  campaign_display_name AS (
+    SELECT
+      campaign_id,
+      campaign_name AS latest_campaign_name
+    FROM (
+      SELECT
+        campaign_id,
+        campaign_name,
+        ROW_NUMBER() OVER (PARTITION BY campaign_id ORDER BY visit_date DESC) AS rn
+      FROM clean_visits
+      WHERE campaign_id IS NOT NULL
+        AND campaign_name <> '(not set)'
+    ) AS ranked
+    WHERE rn = 1
+  ),
+  campaign_visits AS (
+    SELECT
+      c.visit_date,
+      COALESCE(c.campaign_id, '(not set)') AS campaign_id,
+      COALESCE(n.latest_campaign_name, c.campaign_name) AS campaign_name,
+      COUNT(DISTINCT c.visit_key) AS visits,
+      COUNT(DISTINCT CASE WHEN c.hits > 1 THEN c.visit_key END) AS engaged_visits,
+      COUNT(DISTINCT CASE WHEN c.purchases > 0 THEN c.visit_key END) AS converting_visits,
+      SUM(c.purchases) AS purchases,
+      SUM(c.purchase_revenue) AS purchase_revenue
+    FROM clean_visits AS c
+    LEFT JOIN campaign_display_name AS n
+      ON c.campaign_id = n.campaign_id
+    GROUP BY 1, 2, 3
+  ),
+  ad_cost AS (
+    SELECT
+      cost_date,
+      campaign_id,
+      SUM(cost) AS cost
+    FROM aep_ad_cost_dataset
+    WHERE cost_date BETWEEN date_sub(current_date(), 30) AND date_sub(current_date(), 2)
+    GROUP BY cost_date, campaign_id
+  )
+  SELECT
+    cv.visit_date,
+    cv.campaign_id,
+    cv.campaign_name,
+    cv.visits,
+    cv.engaged_visits,
+    CAST(cv.engaged_visits AS DOUBLE) / NULLIF(cv.visits, 0) AS engagement_rate,
+    cv.converting_visits,
+    CAST(cv.converting_visits AS DOUBLE) / NULLIF(cv.visits, 0) AS visit_conversion_rate,
+    cv.purchases,
+    cv.purchase_revenue,
+    COALESCE(a.cost, 0) AS cost,
+    cv.purchase_revenue / NULLIF(a.cost, 0) AS roas
+  FROM campaign_visits AS cv
+  LEFT JOIN ad_cost AS a
+    ON cv.campaign_id = a.campaign_id
+   AND cv.visit_date = a.cost_date
+  ORDER BY cv.visit_date DESC, cv.visits DESC;
 
+Calculation Notes: |
+  1️⃣ Resolution precedence: auto-tagged clicks (gclid / msclkid / dclid) take the campaign name and id from the linked ad account; manually tagged links use utm_campaign plus utm_id; Adobe resolves the cid query parameter into the Tracking Code (eVar0) and reads Campaign from the classification set keyed on that code. Values are trimmed and lower-cased at ingestion so that 'Spring_Sale' and 'spring_sale ' collapse into one row; the original casing is retained only on the ad-platform name.,2️⃣ Scope and session rules: the value is set from the landing page of the session and held for every hit in that session. GA4 uses a 30-minute inactivity timeout and does not open a new session when the campaign changes mid-visit, so a second tagged click inside an active session does not overwrite the session value; Adobe opens a new visit after 30 minutes of inactivity and the Tracking Code eVar keeps its configured expiry (default 30 days), so session-level reports must use the visit-instance value, not the persisted eVar value.,3️⃣ Untagged sessions: GA4 Session campaign follows cross-channel last non-direct click, so a direct return visit inherits the previous paid or email campaign within the 90-day acquisition lookback. Reserved tokens '(direct)', '(organic)', '(referral)' and '(not set)' are kept as explicit values, never blanked or dropped, so session totals reconcile to the property total. A '(not set)' share above 5% of paid-channel sessions is treated as a tagging defect, not as a campaign.,4️⃣ Join key to cost: spend is joined on campaign_id × date × ad platform (Google Ads campaign.id, Meta campaign_id, Microsoft Ads CampaignId, or utm_id for manually tagged channels), never on campaign name, because names are routinely edited while a campaign is running. The display name is taken as the most recent name per campaign_id (type-2 history retained) so a renamed campaign reports as a single line across the period.,5️⃣ Exclusions and hygiene: internal and developer traffic filters, known-bot filtering and test campaigns (prefix 'test_' or 'qa_') are excluded before aggregation. utm values are scanned for email addresses, phone numbers and customer IDs and redacted at collection, because any PII in a campaign string makes the whole dimension restricted. High-cardinality campaign lists collapse into '(other)' in standard GA4 reports; campaign-level analysis runs against the raw BigQuery export or Adobe Data Feeds.,6️⃣ Timing and latency: GA4 fills session_traffic_source_last_click in the BigQuery export (tables from mid-2024 onward; earlier dates fall back to collected_traffic_source on the first event of the session). Google Ads names for auto-tagged clicks can arrive 24–48 hours late, so daily campaign reporting is frozen at D+2 and any figure inside that window is labelled provisional.,7️⃣ Omnichannel stitching: store, call-centre and marketplace orders only receive a campaign when they can be linked to a tagged web session through the order ID or a signed-in user ID within the attribution window; unmatched offline orders are reported as '(offline – unattributed)' rather than distributed across campaigns.
 
+Business Use Case: |
+  1️⃣ Paid Media Manager: every Monday, reviews Return on Ad Spend by campaign on the campaign_id cost join; any campaign below the agreed ROAS floor for two consecutive weeks has its budget shifted to the top-quartile campaigns in the same channel or is paused.,2️⃣ Marketing Operations: when the daily governance check shows '(not set)' or unmapped campaign values above 5% of paid sessions, audits the UTM builder, corrects the offending links with the channel owner and re-issues the tagged URLs before the next send or flight.,3️⃣ Search Marketing Lead: when Paid Search Conversion Rate for a campaign drops more than 20% week over week, drills from Campaign Name into Ad Group and Keyword to isolate the failing term or landing page and adjusts bids, negatives or the destination URL.,4️⃣ Growth Marketing and Finance: at month-end close, rank campaigns by Marketing-Sourced New Customer Rate against spend to decide which prospecting campaigns keep their budget next month and to reconcile platform-reported spend to attributed revenue.
 
+Dependencies:
+  Events: [session-start, page-view]
+  Dimensions: [traffic-source]
 
+Source Data: Digital Analytics (GA4) + Ad Platform Cost Data (Google Ads, Meta, Microsoft Ads)
 
+Report Attributes: |
+  Campaign ID; Default Channel Grouping; Session Source / Medium; Ad Group; Keyword; Landing Page; Device Category; Date
 
+Dashboard Usage: [Paid Media Performance, Marketing Acquisition Overview, Campaign ROAS & Spend Reconciliation, UTM Tagging Governance]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [keyword, ad-group, default-channel-grouping, traffic-source]
 
+Derived Dimensions: [default-channel-grouping]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +384,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T17:12:06.71+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T17:12:15.917+00:00
 
