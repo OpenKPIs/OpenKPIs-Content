@@ -1,5 +1,5 @@
 # Dimension: Subscription Status
-# Generated: 2026-09-15T13:36:10.293Z
+# Generated: 2026-09-18T01:19:02.550Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -37,7 +37,7 @@ Google Analytics SQL: |
   -- Subscription Status (one value per subscription contract) from the subscription billing backend.
   -- Sources: billing.subscriptions (contract header), billing.subscription_status_history (type-2 provider status records
   -- keyed on the provider event timestamp), billing.subscription_migration_map, billing.subscription_customer_events
-  -- (server-side subscribe / cancel_subscription / purchase log) and billing.stores (reporting time zone).
+  -- (server-side subscribe / unsubscribe / purchase log) and billing.stores (reporting time zone).
   DECLARE report_start_date DATE DEFAULT DATE '2026-01-01';
   DECLARE report_end_date DATE DEFAULT DATE '2026-08-31';
   
@@ -156,7 +156,7 @@ Google Analytics SQL: |
   WHERE subscription_status IS NOT NULL
     AND valid_from < valid_to;
   
-  -- Step 2: status as of event time (journey analysis on subscribe, cancel_subscription, purchase).
+  -- Step 2: status as of event time (journey analysis on subscribe, unsubscribe, purchase).
   SELECT
     e.event_id,
     e.event_name,
@@ -174,7 +174,7 @@ Google Analytics SQL: |
     ON i.subscription_key = COALESCE(ml.subscription_id, e.subscription_id)
    AND e.event_ts >= i.valid_from
    AND e.event_ts < i.valid_to
-  WHERE e.event_name IN ('subscribe', 'cancel_subscription', 'purchase')
+  WHERE e.event_name IN ('subscribe', 'unsubscribe', 'purchase')
     AND DATE(e.event_ts) BETWEEN report_start_date AND report_end_date
   QUALIFY ROW_NUMBER() OVER (PARTITION BY e.event_id ORDER BY i.valid_from DESC) = 1;
   
@@ -238,7 +238,7 @@ AEP Query Service SQL: |
   -- ==========================================
   -- Subscription Status (one value per subscription contract) from backend datasets ingested from the billing platforms:
   -- subscription_contracts_dataset, subscription_status_history_dataset (type-2 records keyed on the provider event timestamp),
-  -- subscription_migration_map_dataset, subscription_customer_events_dataset (server-side subscribe / cancel_subscription /
+  -- subscription_migration_map_dataset, subscription_customer_events_dataset (server-side subscribe / unsubscribe /
   -- purchase log) and store_settings_dataset (reporting time zone). Reporting window: 2026-01-01 to 2026-08-31.
   
   -- Step 1: effective-dated canonical status intervals (valid_from <= ts < valid_to).
@@ -352,7 +352,7 @@ AEP Query Service SQL: |
   WHERE m.subscription_status IS NOT NULL
     AND m.valid_from < m.valid_to;
   
-  -- Step 2: status as of event time (journey analysis on subscribe, cancel_subscription, purchase).
+  -- Step 2: status as of event time (journey analysis on subscribe, unsubscribe, purchase).
   SELECT
     event_id,
     event_name,
@@ -382,7 +382,7 @@ AEP Query Service SQL: |
       ON i.subscription_key = COALESCE(ml.subscription_id, e.subscription_id)
      AND e.event_ts >= i.valid_from
      AND e.event_ts < i.valid_to
-    WHERE e.event_name IN ('subscribe', 'cancel_subscription', 'purchase')
+    WHERE e.event_name IN ('subscribe', 'unsubscribe', 'purchase')
       AND to_date(e.event_ts) BETWEEN to_date('2026-01-01') AND to_date('2026-08-31')
   ) AS x
   WHERE rn = 1;
@@ -457,9 +457,9 @@ Calculation Notes: |
   2️⃣ Stripe Billing mapping (subscription.status): trialing → trialing; active → active, except pause_collection set → paused (Stripe keeps status active while collection is paused); paused → paused (trial ended with no payment method under trial_settings.end_behavior.missing_payment_method = pause); past_due → past_due; unpaid → past_due, with retries exhausted but invoices still open; canceled → cancelled, or expired when the subscription ended on the final phase of a fixed-term subscription schedule or a cancel_at set at creation as the contract term; incomplete and incomplete_expired → excluded. cancel_at_period_end = true stays active until current_period_end and the value changes only when Stripe emits the canceled status.
   3️⃣ Shopify Subscription Contract mapping (SubscriptionContract.status): ACTIVE → active, or trialing when the contract's first billing cycle is zero-priced under its selling plan pricing policy and no successful billing attempt exists yet; PAUSED → paused; FAILED → past_due (billing attempts failed and the subscription app's dunning has not closed the contract); CANCELLED → cancelled; EXPIRED → expired. Billing attempt outcomes (SubscriptionBillingAttempt errorCode) are inputs used to confirm past_due and classify involuntary cancellations, never reporting values.
   4️⃣ Recharge mapping (subscription.status): active → active; cancelled → cancelled; expired → expired (fixed-length or prepaid plans reaching expire_after_specific_number_of_charges). Recharge has no native trialing, paused or past_due value, so they are derived: past_due when an active subscription's most recent charge has status error and a retry_date is scheduled or the retry limit is reached without cancellation; paused when the store's pause flow has skipped every charge through the next scheduled billing date (charge status skipped) or pushed next_charge_scheduled_at out under a pause action; trialing only when the first charge of a free-trial product has not yet processed. A one-off skipped delivery on an otherwise active subscription stays active.
-  5️⃣ Effective dating: every change is stored as a type-2 record (valid_from, valid_to) keyed on the provider's event timestamp (Stripe event.created on customer.subscription.updated/deleted, Shopify subscription_contracts/update updated_at, Recharge subscription webhook updated_at), never webhook receipt time, so out-of-order or replayed webhooks do not reorder states. Status as of event time joins the record whose interval contains the event timestamp and is the only valid basis for journey analysis on subscribe, cancel_subscription and purchase events; it is never back-filled with today's value. Status as of snapshot takes the record valid at 23:59:59 on the last day of the period in the store's reporting time zone and is used for subscriber base counts, month-end reconciliation and retention cohorts so closed periods are not restated. Status changes are server-side and never start or extend a web session; the 30-minute inactivity timeout applies only to the customer event carrying the value.
+  5️⃣ Effective dating: every change is stored as a type-2 record (valid_from, valid_to) keyed on the provider's event timestamp (Stripe event.created on customer.subscription.updated/deleted, Shopify subscription_contracts/update updated_at, Recharge subscription webhook updated_at), never webhook receipt time, so out-of-order or replayed webhooks do not reorder states. Status as of event time joins the record whose interval contains the event timestamp and is the only valid basis for journey analysis on subscribe, unsubscribe and purchase events; it is never back-filled with today's value. Status as of snapshot takes the record valid at 23:59:59 on the last day of the period in the store's reporting time zone and is used for subscriber base counts, month-end reconciliation and retention cohorts so closed periods are not restated. Status changes are server-side and never start or extend a web session; the 30-minute inactivity timeout applies only to the customer event carrying the value.
   6️⃣ Edge cases and exclusions: test-mode, internal staff and zero-value gifted contracts are removed. Cancellation request date and effective end date are held separately; Subscription Cancellations count on the effective end date unless stated otherwise. Reactivation of a cancelled contract on the same contract id is a new active interval, while a new contract id is a new subscription. Contracts migrated between platforms are linked by the migration mapping table and keep their original start date so they are not counted as a cancellation plus a new subscription. Customer-level rollup for multi-contract customers uses precedence active > past_due > trialing > paused > cancelled > expired. Cancellation Type is involuntary when the contract ended through failed-payment closure (Stripe cancellation_details.reason = payment_failed or payment_disputed, Shopify FAILED → CANCELLED transition, Recharge retry limit reached) and voluntary otherwise. Unmapped provider values resolve to '(other)' and are reviewed weekly rather than set to null.
-  7️⃣ Boundaries and value action by industry: plan catalog lifecycle (a plan's availability for sale, held as Subscription Plan Lifecycle Status on subscription-plan) is out of scope, as is which package the customer holds (subscription-plan). Email Subscription Status is marketing consent and is never inferred from this dimension. Customer Status describes the customer relationship as a whole (new, repeat, lapsed) and may consume this value but is not replaced by it. Value action by industry: E-commerce and Retail = recurring replenishment or membership order contract (subscribe, cancel_subscription); SaaS = seat or plan contract renewal; Media = paid digital access subscription; the value list and effective-dating rules are unchanged across industries.
+  7️⃣ Boundaries and value action by industry: plan catalog lifecycle (a plan's availability for sale, held as Subscription Plan Lifecycle Status on subscription-plan) is out of scope, as is which package the customer holds (subscription-plan). Email Subscription Status is marketing consent and is never inferred from this dimension. Customer Status describes the customer relationship as a whole (new, repeat, lapsed) and may consume this value but is not replaced by it. Value action by industry: E-commerce and Retail = recurring replenishment or membership order contract (subscribe, unsubscribe); SaaS = seat or plan contract renewal; Media = paid digital access subscription; the value list and effective-dating rules are unchanged across industries.
 
 Business Use Case: |
   1️⃣ Customer Service retention lead: each morning, subscriptions that moved to past_due in the prior 24 hours with a card-expired or insufficient-funds decline enter a payment-update outreach queue (email and SMS with a secure card-update link) ahead of the next scheduled retry; any contract still past_due after the final retry is assigned to an agent callback before the platform closes it as an involuntary cancellation.
@@ -468,7 +468,7 @@ Business Use Case: |
   4️⃣ Subscription program Product Manager: when the share of trialing contracts that move to cancelled before the first paid charge exceeds 25% for any plan cohort in two consecutive weeks, review that plan's default delivery cadence and first-charge messaging with Merchandising and measure the change in trial-to-active conversion over the next four cohorts.
 
 Dependencies:
-  Events: [subscribe, cancel-subscription]
+  Events: [subscription-start, subscription-cancellation, purchase]
   Dimensions: [subscription-plan]
 
 Source Data: Subscription Billing Backend (Stripe Billing / Shopify Subscription Contracts / Recharge)
@@ -497,5 +497,5 @@ Created At: 2026-09-15T13:36:01.474+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-15T13:36:09.874+00:00
+Last Modified At: 2026-09-18T01:19:02.167+00:00
 
