@@ -1,13 +1,13 @@
 # KPI: Zero-Results Search Rate
-# Generated: 2026-09-16T17:37:09.613Z
+# Generated: 2026-09-18T03:18:16.346Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 KPI Name: Zero-Results Search Rate
-Formula: (Searches where search_results_count = 0 / Total Searches, zero-result searches included) × 100
+Formula: (Searches where search_results_count = 0 / Submitted searches with a recorded search_results_count, deduplicated and excluding keyword redirects, zero-result searches included) × 100
 
 Description: |
-  Zero-Results Search Rate is the share of submitted on-site searches whose results page returns no products: searches with a search results count of zero divided by all searches in the period. It shows gaps in catalog coverage, synonym and spelling handling, and index freshness, and it is an early warning of lost search-driven revenue because shoppers who get no results rarely go on to add to cart.
+  Zero-Results Search Rate is the share of submitted on-site searches whose results page returns no products: searches with a search results count of zero divided by all submitted searches with a recorded results count in the period (deduplicated, keyword redirects excluded). It shows gaps in catalog coverage, synonym and spelling handling, and index freshness, and it is an early warning of lost search-driven revenue because shoppers who get no results rarely go on to add to cart.
 
 Category: Experience
 
@@ -69,7 +69,8 @@ GA4 Data Layer: |
     "search_results_count": 0,
     "search_type": "standard",
     "search_method": "enter_key",
-    "page_type": "search_results"
+    "page_type": "search_results",
+    "traffic_type": "standard"
   }
 
 Adobe Client Data Layer: |
@@ -91,7 +92,8 @@ Adobe Client Data Layer: |
       "search_results_count": 0,
       "search_type": "standard",
       "search_method": "enter_key"
-    }
+    },
+    "traffic_type": "standard"
   }
 
 XDM Mapping: |
@@ -110,6 +112,7 @@ XDM Mapping: |
       "phrase": "waterproof trail shoes"
     },
     "_tenant": {
+      "traffic_type": "standard",
       "search": {
         "search_term": "waterproof trail shoes",
         "search_term_original": "waterproof trail shoes",
@@ -176,7 +179,7 @@ Google Analytics SQL: |
     WHERE search_term IS NOT NULL
       AND TRIM(search_term) != ''
       AND COALESCE(search_type, 'standard') != 'redirect'
-      AND COALESCE(search_method, '') NOT IN ('pagination', 'sort', 'filter', 'typeahead_impression')
+      AND search_method IN ('enter_key', 'search_button', 'suggestion_select')
       AND COALESCE(traffic_type, '') NOT IN ('internal', 'qa', 'synthetic')
       AND COALESCE(debug_mode, '0') = '0'
   ),
@@ -226,7 +229,7 @@ AEP Query Service SQL: |
     FROM aep_web_events_dataset
     WHERE eventType = 'siteSearch.resultsView'
       AND timestamp >= date_sub(current_date(), 90)
-      AND COALESCE(environment.type, 'browser') != 'bot'
+      AND NOT (lower(COALESCE(environment.browserDetails.userAgent, '')) RLIKE 'bot|crawler|spider|slurp|headless|lighthouse')
       AND COALESCE(_tenant.traffic_type, '') NOT IN ('internal', 'qa', 'synthetic')
   ),
   qualified AS (
@@ -241,7 +244,7 @@ AEP Query Service SQL: |
     WHERE search_term IS NOT NULL
       AND trim(search_term) != ''
       AND COALESCE(search_type, 'standard') != 'redirect'
-      AND COALESCE(search_method, '') NOT IN ('pagination', 'sort', 'filter', 'typeahead_impression')
+      AND search_method IN ('enter_key', 'search_button', 'suggestion_select')
   ),
   deduplicated AS (
     SELECT
@@ -276,7 +279,7 @@ AEP Query Service SQL: |
 
 Calculation Notes: |
   1️⃣ Numerator: submitted search events (unified search / view_search_results) whose search_results_count parameter equals 0 after the search engine has applied all merchandising rules (synonyms, spell correction, boosts). Denominator: every qualifying search event in the same window, zero-result searches included, so the rate can never exceed 100%.
-  2️⃣ Only submitted queries count, from Enter, the search button or a selected suggestion. Typeahead suggestion impressions, keystroke-level autocomplete calls and empty or whitespace-only queries are excluded from both sides. Keyword redirects that send the shopper straight to a category or landing page without rendering a results page carry search_type = 'redirect' and are also excluded from both sides.
+  2️⃣ Only submitted queries count, from Enter, the search button or a selected suggestion: search_method must be one of 'enter_key', 'search_button' or 'suggestion_select', and any other or missing value is excluded. Typeahead suggestion impressions, keystroke-level autocomplete calls and empty or whitespace-only queries are excluded from both sides. Keyword redirects that send the shopper straight to a category or landing page without rendering a results page carry search_type = 'redirect' and are also excluded from both sides.
   3️⃣ Deduplication: pagination, sort changes and facet refinements on an existing results page are not new searches. Identical normalised terms resubmitted within 30 seconds in the same session (reloads, back-button re-renders) collapse into one search. Sessions follow the standard 30-minute inactivity timeout.
   4️⃣ Auto-corrected or 'did you mean' queries that render products count as non-zero, and the typed query is kept in search_term_original for diagnosis. A search counts as zero-result only when the final rendered product count is 0. Results narrowed to zero by facets after a successful query belong to a separate filter-level measure and do not enter this KPI.
   5️⃣ Events with a null or non-numeric search_results_count cannot be classified and are left out of both sides. Report their share of all search events as an instrumentation coverage check, and treat coverage below 98% as a data-quality incident before the rate is published.
@@ -317,5 +320,5 @@ Created At: 2026-09-16T17:37:00.681+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-16T17:37:09.362+00:00
+Last Modified At: 2026-09-18T03:18:15.92+00:00
 
