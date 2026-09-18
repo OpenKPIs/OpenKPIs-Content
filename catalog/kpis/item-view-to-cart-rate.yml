@@ -1,40 +1,283 @@
 # KPI: Item View to Cart Rate
-# Generated: 2026-08-25T00:04:08.577Z
+# Generated: 2026-09-18T00:10:04.406Z
 # Contributed by: devyendar-maganti
-
+# Last modified by: devyendarm
 
 KPI Name: Item View to Cart Rate
-Formula: Item View to Cart Rate (%) = 100 * (COUNT(DISTINCT add_to_cart_event_id) / COUNT(DISTINCT item_view_event_id)); Example SQL: WITH item_views AS (SELECT event_id AS item_view_event_id, user_id, session_id, item_id, event_timestamp FROM analytics_events WHERE event_name = 'item_view'), add_to_carts AS (SELECT event_id AS add_to_cart_event_id, user_id, session_id, item_id, event_timestamp FROM analytics_events WHERE event_name = 'add_to_cart'), attributed_carts AS (SELECT c.add_to_cart_event_id FROM add_to_carts c INNER JOIN item_views v ON c.user_id = v.user_id AND c.session_id = v.session_id AND c.item_id = v.item_id AND c.event_timestamp >= v.event_timestamp AND c.event_timestamp <= v.event_timestamp + INTERVAL '24 hours') SELECT 100.0 * COUNT(DISTINCT add_to_cart_event_id) / NULLIF((SELECT COUNT(DISTINCT item_view_event_id) FROM item_views), 0) AS item_view_to_cart_rate FROM attributed_carts;
+Formula: (Item views followed by an add_to_cart of the same item by the same user within 24 hours / Total item views) × 100
 
 Description: |
-  Item View to Cart Rate is an engagement KPI that measures the percentage of product detail views that result in an add-to-cart action for the same item within a defined attribution window. It is used to evaluate product page effectiveness, purchase intent, and merchandising performance by quantifying how efficiently item views convert into cart additions.
+  Item View to Cart Rate measures the percentage of product detail views (view_item) that are followed by an add_to_cart of the same item by the same user within 24 hours. It shows how effectively product pages turn shopper interest into purchase intent and is the standard product-page conversion benchmark used in GA4, Adobe Analytics and commerce platform reporting.
 
-Category: Engagement
+Category: Conversion
 
-Tags: [cart, engagement, product]
+Tags: [kpi, E-commerce: Product Discovery & Merchandising, cart, product, conversion]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  add_to_cart
 
+Adobe Event: |
+  scAdd
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "add_to_cart"
+        }
+      }
+    ],
+    "cart": {
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-12345",
+            "productName": "Classic Cotton T-Shirt",
+            "brand": "Acme"
+          },
+          "category": {
+            "primaryCategory": "Apparel"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 24.99,
+            "currency": "USD"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "add_to_cart",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 24.99,
+      "items": [
+        {
+          "item_id": "SKU-12345",
+          "item_name": "Classic Cotton T-Shirt",
+          "item_brand": "Acme",
+          "item_category": "Apparel",
+          "item_variant": "Blue / M",
+          "price": 24.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "add_to_cart",
+    "eventInfo": {
+      "eventName": "add_to_cart"
+    },
+    "commerce": {
+      "productListAdds": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-12345",
+        "name": "Classic Cotton T-Shirt",
+        "productCategories": [
+          {
+            "categoryID": "Apparel"
+          }
+        ],
+        "quantity": 1,
+        "priceTotal": 24.99,
+        "currencyCode": "USD"
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.productListAdds",
+    "commerce": {
+      "productListAdds": {
+        "value": 1
+      },
+      "productViews": {
+        "value": "1 on commerce.productViews events (denominator)"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-12345",
+        "name": "Classic Cotton T-Shirt",
+        "quantity": 1,
+        "priceTotal": 24.99,
+        "currencyCode": "USD"
+      }
+    ],
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "ecid_value",
+          "primary": true
+        }
+      ]
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Item View to Cart Rate: share of view_item item rows followed by an add_to_cart
+  -- of the same item_id by the same user within 24 hours.
+  WITH item_views AS (
+    SELECT
+      user_pseudo_id,
+      item.item_id,
+      ANY_VALUE(item.item_category) AS item_category,
+      event_timestamp AS view_ts
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(items) AS item
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name = 'view_item'
+      AND item.item_id IS NOT NULL
+    GROUP BY user_pseudo_id, item.item_id, event_timestamp
+  ),
+  cart_adds AS (
+    SELECT DISTINCT
+      user_pseudo_id,
+      item.item_id,
+      event_timestamp AS add_ts
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(items) AS item
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND event_name = 'add_to_cart'
+      AND item.item_id IS NOT NULL
+  ),
+  views_flagged AS (
+    SELECT
+      v.item_id,
+      v.item_category,
+      DATE(TIMESTAMP_MICROS(v.view_ts)) AS view_date,
+      MAX(IF(c.add_ts IS NOT NULL, 1, 0)) AS converted
+    FROM item_views v
+    LEFT JOIN cart_adds c
+      ON c.user_pseudo_id = v.user_pseudo_id
+     AND c.item_id = v.item_id
+     AND c.add_ts >= v.view_ts
+     AND c.add_ts <= v.view_ts + 24 * 3600 * 1000000
+    GROUP BY v.user_pseudo_id, v.item_id, v.item_category, v.view_ts
+  )
+  SELECT
+    view_date,
+    item_category,
+    COUNT(*) AS item_views,
+    SUM(converted) AS item_views_with_add_to_cart,
+    ROUND(100 * SAFE_DIVIDE(SUM(converted), COUNT(*)), 2) AS item_view_to_cart_rate_pct
+  FROM views_flagged
+  GROUP BY view_date, item_category
+  ORDER BY view_date, item_category;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Item View to Cart Rate on the XDM ExperienceEvent dataset: product views
+  -- (commerce.productViews) followed by an add (commerce.productListAdds) of the same SKU
+  -- by the same ECID within 24 hours.
+  WITH item_views AS (
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      pli.SKU AS sku,
+      timestamp AS view_ts
+    FROM web_experience_events
+    LATERAL VIEW explode(productListItems) t AS pli
+    WHERE timestamp >= date_sub(current_date(), 30)
+      AND timestamp < current_date()
+      AND commerce.productViews.value > 0
+      AND pli.SKU IS NOT NULL
+    GROUP BY identityMap['ECID'][0].id, pli.SKU, timestamp
+  ),
+  cart_adds AS (
+    SELECT DISTINCT
+      identityMap['ECID'][0].id AS ecid,
+      pli.SKU AS sku,
+      timestamp AS add_ts
+    FROM web_experience_events
+    LATERAL VIEW explode(productListItems) t AS pli
+    WHERE timestamp >= date_sub(current_date(), 30)
+      AND commerce.productListAdds.value > 0
+      AND pli.SKU IS NOT NULL
+  ),
+  views_flagged AS (
+    SELECT
+      v.sku,
+      to_date(v.view_ts) AS view_date,
+      MAX(CASE WHEN c.add_ts IS NOT NULL THEN 1 ELSE 0 END) AS converted
+    FROM item_views v
+    LEFT JOIN cart_adds c
+      ON c.ecid = v.ecid
+     AND c.sku = v.sku
+     AND c.add_ts >= v.view_ts
+     AND c.add_ts <= v.view_ts + INTERVAL 24 HOURS
+    GROUP BY v.ecid, v.sku, v.view_ts
+  )
+  SELECT
+    view_date,
+    COUNT(*) AS item_views,
+    SUM(converted) AS item_views_with_add_to_cart,
+    ROUND(100.0 * SUM(converted) / NULLIF(COUNT(*), 0), 2) AS item_view_to_cart_rate_pct
+  FROM views_flagged
+  GROUP BY view_date
+  ORDER BY view_date;
 
+Calculation Notes: |
+  1️⃣ The denominator is every view_item item row in the reporting period (all product detail views, per item_id), not only views from sessions that later carried a cart.
+  2️⃣ A view counts in the numerator when the same user adds the same item_id to cart at or after the view timestamp and within 24 hours; each view is counted at most once, so the rate cannot exceed 100%.
+  3️⃣ Add-to-cart actions with no preceding view of that item (e.g. quick-add from listing pages or re-order widgets) are excluded from the numerator; report them separately via Add-to-Cart Rate.
+  4️⃣ Views near the end of the reporting period need the full 24-hour look-forward window; close the period only after that lag has elapsed.
+  5️⃣ Exclude internal traffic, bots and test orders, and deduplicate repeated view_item hits for the same item fired within one second by page reloads.
+  6️⃣ Quantity is ignored; an add_to_cart of 3 units still converts a single view.
 
+Business Use Case: |
+  1️⃣ Merchandising teams review the rate weekly by product category and flag items more than 20% below their category average for image, copy and pricing fixes.
+  2️⃣ Product managers use the rate as the primary success metric for product detail page A/B tests (gallery layout, size guides, sticky add-to-cart buttons) and ship variants that lift it with statistical significance.
+  3️⃣ Marketing teams compare the rate by traffic source and campaign to shift paid budget away from campaigns that bring high-view but low-intent visitors.
+  4️⃣ Inventory planners watch sudden drops on in-stock items as an early signal of pricing or availability-message problems and alert Merchandising the same day.
 
+Dependencies:
+  Events: [product-view, add-to-cart]
+  Metrics: [product-view, add-to-cart]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Item ID; Item Category; Item Brand; Device Category; Session Source / Medium; Country
 
+Dashboard Usage: [E-commerce Performance Dashboard, Product Merchandising Dashboard, Conversion Funnel Dashboard]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [add-to-cart-rate, product-detail-view-rate, cart-to-checkout-rate, cart-to-purchase-rate, cart-abandonment-rate, cart-to-view-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +287,7 @@ Contributed By: devyendar-maganti
 
 Created At: 2026-08-25T00:04:05.884+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T00:10:04.189+00:00
 
