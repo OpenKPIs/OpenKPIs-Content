@@ -1,7 +1,7 @@
 # KPI: Delivery Notification Open Rate
-# Generated: 2026-09-18T16:43:14.088Z
+# Generated: 2026-09-18T16:43:22.898Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Delivery Notification Open Rate
 Formula: (Unique Opened Delivery Notifications / Delivered Delivery Notifications) × 100, where the numerator counts distinct notification message_ids with at least one qualifying (non-machine) open within 7 days of delivery and the denominator counts distinct notification message_ids confirmed delivered in the same send cohort
@@ -11,29 +11,378 @@ Description: |
 
 Category: Engagement
 
+Tags: [kpi, E-commerce: Post-Purchase Logistics & Fulfillment, transactional-messaging, wismo]
 
+Industry: [["E-commerce"]]
 
+Priority: Medium
 
+Core Area: Engagement
 
+Scope: Event
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  notification_open
 
+Adobe Event: |
+  notification_open
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "notification_open",
+          "eventAction": "open",
+          "type": "transactional_message",
+          "timeStamp": "2026-09-18T14:05:00Z"
+        },
+        "category": {
+          "primaryCategory": "post_purchase_messaging"
+        },
+        "attributes": {
+          "messageType": "shipping_notification",
+          "notificationType": "out_for_delivery",
+          "channel": "push",
+          "messageId": "msg_7f3a91c2",
+          "campaignId": "tx_shipping_ofd_v3",
+          "orderId": "ORD-100245",
+          "shipmentId": "SHP-558812",
+          "carrier": "UPS",
+          "openType": "direct"
+        }
+      }
+    ],
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "hashed_c1a9e0b4"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "notification_open",
+    "message_type": "shipping_notification",
+    "notification_type": "out_for_delivery",
+    "channel": "push",
+    "message_id": "msg_7f3a91c2",
+    "campaign_id": "tx_shipping_ofd_v3",
+    "order_id": "ORD-100245",
+    "shipment_id": "SHP-558812",
+    "carrier": "UPS",
+    "open_type": "direct"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "notification_open",
+    "eventInfo": {
+      "interactionType": "open"
+    },
+    "message": {
+      "messageType": "shipping_notification",
+      "notificationType": "out_for_delivery",
+      "channel": "push",
+      "messageId": "msg_7f3a91c2",
+      "campaignId": "tx_shipping_ofd_v3",
+      "openType": "direct"
+    },
+    "order": {
+      "orderId": "ORD-100245",
+      "shipmentId": "SHP-558812",
+      "carrier": "UPS"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "message.tracking",
+    "timestamp": "2026-09-18T14:05:00Z",
+    "_experience": {
+      "customerJourneyManagement": {
+        "messageInteraction": {
+          "interactionType": "open"
+        },
+        "messageExecution": {
+          "messageExecutionID": "msg_7f3a91c2",
+          "messageID": "tx_shipping_ofd_v3",
+          "messageType": "transactional"
+        },
+        "messageProfile": {
+          "channel": {
+            "_id": "https://ns.adobe.com/xdm/channels/push"
+          }
+        }
+      },
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "shipping_notification",
+            "eVar41": "out_for_delivery",
+            "eVar42": "push",
+            "eVar43": "ORD-100245"
+          }
+        }
+      }
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-100245"
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Delivery Notification Open Rate (MPP-adjusted), closed 7-day cohorts, by delivery date x channel x notification_type
+  -- Denominator: shipping notifications delivered (ESP / push provider delivery log)
+  -- Numerator: distinct delivered message_ids with a qualifying open within 7 days (push direct opens from GA4, email opens from the ESP engagement log)
+  WITH params AS (
+    SELECT
+      DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 97 DAY) AS start_date,
+      DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 8 DAY) AS end_date
+  ),
+  delivered_raw AS (
+    SELECT
+      d.message_id,
+      d.channel,
+      d.notification_type,
+      d.shipment_id,
+      d.delivered_at,
+      DATE(d.delivered_at, 'America/New_York') AS cohort_date,
+      LAG(d.delivered_at) OVER (PARTITION BY d.shipment_id, d.notification_type, d.channel ORDER BY d.delivered_at) AS prev_delivered_at
+    FROM `your-project.esp.message_delivery_log` AS d
+    CROSS JOIN params AS p
+    WHERE d.message_type = 'shipping_notification'
+      AND d.notification_type IN ('shipment_confirmation', 'in_transit', 'out_for_delivery', 'delivered', 'delivery_delay')
+      AND d.channel IN ('email', 'push')
+      AND d.delivery_status = 'delivered'
+      AND d.is_test_recipient = FALSE
+      AND d.is_partner_address = FALSE
+      AND DATE(d.delivered_at, 'America/New_York') BETWEEN p.start_date AND p.end_date
+  ),
+  delivered AS (
+    SELECT dr.message_id, dr.channel, dr.notification_type, dr.delivered_at, dr.cohort_date
+    FROM delivered_raw AS dr
+    WHERE (dr.prev_delivered_at IS NULL OR TIMESTAMP_DIFF(dr.delivered_at, dr.prev_delivered_at, HOUR) >= 24)
+      AND NOT EXISTS (
+        SELECT 1
+        FROM `your-project.oms.shipments` AS s
+        WHERE s.shipment_id = dr.shipment_id
+          AND (s.is_fraud = TRUE OR s.cancelled_before_first_scan = TRUE)
+      )
+  ),
+  ga4_push_opens AS (
+    SELECT
+      (SELECT ep.value.string_value FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'message_id') AS message_id,
+      'push' AS channel,
+      TIMESTAMP_MICROS(e.event_timestamp) AS opened_at,
+      FALSE AS is_machine_open
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 98 DAY))
+                            AND FORMAT_DATE('%Y%m%d', CURRENT_DATE('America/New_York'))
+      AND e.event_name = 'notification_open'
+      AND (SELECT ep.value.string_value FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'message_type') = 'shipping_notification'
+      AND (SELECT ep.value.string_value FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'channel') = 'push'
+      AND (SELECT ep.value.string_value FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'open_type') = 'direct'
+  ),
+  esp_email_opens AS (
+    SELECT
+      o.message_id,
+      'email' AS channel,
+      o.opened_at,
+      COALESCE(o.is_machine_open, FALSE) AS is_machine_open
+    FROM `your-project.esp.message_engagement_log` AS o
+    WHERE o.engagement_type = 'open'
+      AND o.message_type = 'shipping_notification'
+      AND o.channel = 'email'
+      AND DATE(o.opened_at, 'America/New_York') >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 98 DAY)
+  ),
+  all_opens AS (
+    SELECT message_id, channel, opened_at, is_machine_open FROM ga4_push_opens WHERE message_id IS NOT NULL
+    UNION ALL
+    SELECT message_id, channel, opened_at, is_machine_open FROM esp_email_opens
+  ),
+  message_status AS (
+    SELECT
+      d.message_id,
+      LOGICAL_OR(o.message_id IS NOT NULL) AS opened_raw,
+      LOGICAL_OR(
+        o.message_id IS NOT NULL
+        AND o.is_machine_open = FALSE
+        AND (d.channel = 'push' OR TIMESTAMP_DIFF(o.opened_at, d.delivered_at, SECOND) > 10)
+      ) AS opened_adjusted
+    FROM delivered AS d
+    LEFT JOIN all_opens AS o
+      ON o.message_id = d.message_id
+     AND o.channel = d.channel
+     AND o.opened_at >= d.delivered_at
+     AND o.opened_at < TIMESTAMP_ADD(d.delivered_at, INTERVAL 7 DAY)
+    GROUP BY d.message_id
+  )
+  SELECT
+    d.cohort_date,
+    COALESCE(d.channel, 'all_channels') AS channel,
+    COALESCE(d.notification_type, 'all_types') AS notification_type,
+    COUNT(DISTINCT d.message_id) AS delivered_notifications,
+    COUNT(DISTINCT IF(m.opened_raw, d.message_id, NULL)) AS unique_opens_raw,
+    COUNT(DISTINCT IF(m.opened_adjusted, d.message_id, NULL)) AS unique_opens_adjusted,
+    ROUND(100 * SAFE_DIVIDE(COUNT(DISTINCT IF(m.opened_raw, d.message_id, NULL)), COUNT(DISTINCT d.message_id)), 2) AS open_rate_raw_pct,
+    ROUND(100 * SAFE_DIVIDE(COUNT(DISTINCT IF(m.opened_adjusted, d.message_id, NULL)), COUNT(DISTINCT d.message_id)), 2) AS delivery_notification_open_rate_pct
+  FROM delivered AS d
+  JOIN message_status AS m
+    ON m.message_id = d.message_id
+  GROUP BY GROUPING SETS (
+    (d.cohort_date, d.channel, d.notification_type),
+    (d.cohort_date, d.channel),
+    (d.cohort_date)
+  )
+  ORDER BY d.cohort_date DESC, channel, notification_type;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Delivery Notification Open Rate (MPP-adjusted) from Journey Optimizer system datasets, closed 7-day cohorts
+  -- Denominator: shipping notification executions with a sent/delivered feedback status and no bounce, exclusion or error (AJO Message Feedback Event Dataset)
+  -- Numerator: distinct delivered executions with a qualifying open within 7 days (AJO Email Tracking and Push Tracking Experience Event Datasets)
+  -- shipping_notification_templates maps AJO messageID (template / campaign id) to message_type and notification_type
+  WITH templates AS (
+    SELECT message_id AS template_id, notification_type
+    FROM shipping_notification_templates
+    WHERE message_type = 'shipping_notification'
+      AND notification_type IN ('shipment_confirmation', 'in_transit', 'out_for_delivery', 'delivered', 'delivery_delay')
+  ),
+  feedback AS (
+    SELECT
+      f._experience.customerJourneyManagement.messageExecution.messageExecutionID AS message_id,
+      f._experience.customerJourneyManagement.messageExecution.messageID AS template_id,
+      CASE
+        WHEN f._experience.customerJourneyManagement.messageProfile.channel._id LIKE '%/channels/email' THEN 'email'
+        WHEN f._experience.customerJourneyManagement.messageProfile.channel._id LIKE '%/channels/push' THEN 'push'
+      END AS channel,
+      lower(f._experience.customerJourneyManagement.messageDeliveryfeedback.feedbackStatus) AS feedback_status,
+      f.timestamp AS feedback_ts
+    FROM ajo_message_feedback_event_dataset AS f
+    WHERE f.eventType = 'message.feedback'
+      AND f.timestamp >= date_sub(current_date(), 98)
+  ),
+  delivered AS (
+    SELECT
+      fb.message_id,
+      fb.channel,
+      t.notification_type,
+      MIN(CASE WHEN fb.feedback_status IN ('sent', 'delivered') THEN fb.feedback_ts END) AS delivered_at
+    FROM feedback AS fb
+    JOIN templates AS t
+      ON t.template_id = fb.template_id
+    WHERE fb.channel IN ('email', 'push')
+    GROUP BY fb.message_id, fb.channel, t.notification_type
+    HAVING SUM(CASE WHEN fb.feedback_status IN ('sent', 'delivered') THEN 1 ELSE 0 END) > 0
+       AND SUM(CASE WHEN fb.feedback_status IN ('bounce', 'exclude', 'error') THEN 1 ELSE 0 END) = 0
+  ),
+  cohort AS (
+    SELECT
+      d.message_id,
+      d.channel,
+      d.notification_type,
+      d.delivered_at,
+      to_date(from_utc_timestamp(d.delivered_at, 'America/New_York')) AS cohort_date
+    FROM delivered AS d
+    WHERE to_date(from_utc_timestamp(d.delivered_at, 'America/New_York')) BETWEEN date_sub(current_date(), 97) AND date_sub(current_date(), 8)
+  ),
+  opens AS (
+    SELECT
+      e._experience.customerJourneyManagement.messageExecution.messageExecutionID AS message_id,
+      'email' AS channel,
+      e.timestamp AS opened_at,
+      CASE WHEN e.environment.browserDetails.userAgent = 'Mozilla/5.0' THEN 1 ELSE 0 END AS is_machine_open
+    FROM ajo_email_tracking_experience_event_dataset AS e
+    WHERE e._experience.customerJourneyManagement.messageInteraction.interactionType = 'open'
+      AND e.timestamp >= date_sub(current_date(), 98)
+    UNION ALL
+    SELECT
+      p._experience.customerJourneyManagement.messageExecution.messageExecutionID AS message_id,
+      'push' AS channel,
+      p.timestamp AS opened_at,
+      0 AS is_machine_open
+    FROM ajo_push_tracking_experience_event_dataset AS p
+    WHERE p.eventType = 'pushTracking.applicationOpened'
+      AND p.timestamp >= date_sub(current_date(), 98)
+  ),
+  message_status AS (
+    SELECT
+      c.message_id,
+      MAX(CASE WHEN o.message_id IS NOT NULL THEN 1 ELSE 0 END) AS opened_raw,
+      MAX(CASE
+            WHEN o.message_id IS NOT NULL
+             AND o.is_machine_open = 0
+             AND (c.channel = 'push' OR unix_timestamp(o.opened_at) - unix_timestamp(c.delivered_at) > 10)
+            THEN 1 ELSE 0
+          END) AS opened_adjusted
+    FROM cohort AS c
+    LEFT JOIN opens AS o
+      ON o.message_id = c.message_id
+     AND o.channel = c.channel
+     AND o.opened_at >= c.delivered_at
+     AND o.opened_at < c.delivered_at + INTERVAL 7 DAYS
+    GROUP BY c.message_id
+  )
+  SELECT
+    c.cohort_date,
+    COALESCE(c.channel, 'all_channels') AS channel,
+    COALESCE(c.notification_type, 'all_types') AS notification_type,
+    COUNT(DISTINCT c.message_id) AS delivered_notifications,
+    COUNT(DISTINCT CASE WHEN m.opened_raw = 1 THEN c.message_id END) AS unique_opens_raw,
+    COUNT(DISTINCT CASE WHEN m.opened_adjusted = 1 THEN c.message_id END) AS unique_opens_adjusted,
+    ROUND(100.0 * COUNT(DISTINCT CASE WHEN m.opened_raw = 1 THEN c.message_id END) / NULLIF(COUNT(DISTINCT c.message_id), 0), 2) AS open_rate_raw_pct,
+    ROUND(100.0 * COUNT(DISTINCT CASE WHEN m.opened_adjusted = 1 THEN c.message_id END) / NULLIF(COUNT(DISTINCT c.message_id), 0), 2) AS delivery_notification_open_rate_pct
+  FROM cohort AS c
+  JOIN message_status AS m
+    ON m.message_id = c.message_id
+  GROUP BY GROUPING SETS (
+    (c.cohort_date, c.channel, c.notification_type),
+    (c.cohort_date, c.channel),
+    (c.cohort_date)
+  )
+  ORDER BY c.cohort_date DESC, channel, notification_type;
 
+Calculation Notes: |
+  1️⃣ Message scope: include only fulfillment-triggered notifications with notification_type in (shipment_confirmation, in_transit, out_for_delivery, delivered, delivery_delay / exception). Exclude order confirmation, review requests, return and refund messages and any promotional send, even when the same ESP template family is reused. A resend of the same notification_type for the same shipment_id within 24 hours is collapsed into one message so carrier webhook retries do not inflate the denominator.,2️⃣ Denominator is delivered, not sent: email excludes hard bounces, soft bounces still failing after retries, provider drops and suppression-list skips; push counts provider-accepted messages (FCM delivery receipts, APNs accepted status as the iOS proxy) and excludes invalid or unregistered tokens. SMS has no open signal, so it is excluded from this KPI and measured by link click-through instead.,3️⃣ Unique open deduplication: a message counts once in the numerator however many times it is opened, on however many devices or clients. For email this means the first pixel load per message_id; for push, a direct open (the notification tap that launches the app). Influenced opens (app opened within a few hours of the push without a tap) and opens of forwarded copies are excluded.,4️⃣ Apple Mail Privacy Protection and bot filtering: exclude opens the ESP flags as machine or prefetch opens (e.g. Klaviyo, Braze, SFMC and SendGrid MPP indicators), opens from Apple proxy user agents or IP ranges with no subsequent human signal, and security-scanner opens that fire within 10 seconds of delivery. Publish both the raw and the MPP-adjusted rate and treat the adjusted rate as the reportable KPI; because image blocking still suppresses some genuine opens, the adjusted rate is a floor, not an exact count.,5️⃣ Timing and attribution window: attribute each open to the send cohort (date of delivery in the store reporting timezone), not the date of the open. An open qualifies only if it occurs within 7 days of delivery. The daily figure is provisional until the window closes and is locked on day 8, so trend lines must compare closed cohorts only.,6️⃣ Channel blending: compute email and push separately first. The blended rate is the sum of unique opens over the sum of delivered messages across channels (delivery-volume weighted), never an average of the channel rates. Because a push tap and an email pixel load are not equivalent signals, the blended figure is for directional reporting only and every target is set per channel and per notification_type.,7️⃣ Population exclusions: remove seed, test, internal-domain and QA recipients, messages sent to marketplace or dropship partner addresses instead of the end customer, and orders later flagged as fraudulent or cancelled before the carrier's first scan. Recipient identifiers are joined only as hashed keys and the KPI is published at aggregate level only.
 
+Business Use Case: |
+  1️⃣ Customer Service operations: when the MPP-adjusted out_for_delivery open rate for a carrier or region falls more than 5 points below its trailing 8-week baseline while WISMO contact volume rises, the contact centre lead asks CRM to add a push or SMS fallback for non-openers and places a proactive tracking banner in the help centre for affected orders.,2️⃣ CRM / Lifecycle Marketing: each quarter the lifecycle manager ranks shipment_confirmation templates by adjusted open rate and A/B tests subject lines, sender name and send delay after carrier handoff, then promotes the winner. Cross-sell or loyalty modules are added only to templates holding an adjusted open rate above the agreed threshold.,3️⃣ Email Deliverability (Marketing): when the rate drops sharply for one mailbox provider (e.g. Gmail or Outlook) while other providers stay flat, the deliverability owner opens an inbox placement investigation covering SPF, DKIM and DMARC alignment, the transactional IP's reputation and spam complaint rate before the next peak season.,4️⃣ Product (mobile app team): the app product manager compares push direct-open rate with email adjusted open rate for the same notification_type to decide the default channel for out_for_delivery and delivered messages, and sets that default in the notification preference centre for app users with push enabled.
 
+Dependencies:
+  Events: [shipment-notification-open, delivery-confirmation]
+  Dimensions: [notification-channel]
 
+Source Data: Digital + ESP / Push Messaging Logs (Klaviyo, Braze, Salesforce Marketing Cloud) + Order Management (shipment events)
 
+Report Attributes: |
+  Notification Channel; Notification Type; Carrier; Mailbox Provider; Email Client / Device; Shipping Tier; Fulfillment Method; Delivery Region; Send Hour (Local); Customer Type (New vs Returning)
 
+Dashboard Usage: [Post-Purchase Experience Dashboard, Transactional Messaging Performance, WISMO Deflection Monitor]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [shipment-on-time-delivery-rate, email-click-to-purchase-conversion-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +392,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-18T16:43:13.658+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-18T16:43:22.538+00:00
 
