@@ -1,0 +1,800 @@
+# Dimension: Acquisition Cohort
+# Generated: 2026-09-18T00:19:11.812Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Acquisition Cohort
+
+Description: |
+  Acquisition Cohort is the calendar period in which a customer was acquired. In E-commerce that is the month (by default) of the customer's first completed, non-cancelled order in the store's reporting time zone, and it stays fixed for the life of the customer as the row key of retention triangles and LTV curves. Retention marketing, growth and finance teams compare cohorts at the same number of periods since acquisition to see whether customers won in a given month, promotion or seasonal peak repeat and build revenue faster or slower than earlier cohorts, separately from how the customer was acquired (first-touch channel) or where the customer stands today (customer status).
+
+Category: Retention
+
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV, retention, cohort, ltv]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User, Daily, Weekly, Monthly, Quarterly, Yearly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "purchase",
+            "eventAction": "purchase"
+          }
+        }
+      ],
+      "transaction": {
+        "transactionID": "ORD-100482",
+        "total": {
+          "basePrice": 118.5,
+          "shipping": 6.5,
+          "taxRate": 0.08,
+          "currency": "USD",
+          "transactionTotal": 134.48
+        }
+      },
+      "user": [
+        {
+          "profile": [
+            {
+              "profileInfo": {
+                "profileID": "CUST-58213"
+              },
+              "attributes": {
+                "loginStatus": "authenticated",
+                "acquisitionCohort": "2026-01",
+                "cohortGranularity": "month"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "user_id": "CUST-58213",
+    "user_properties": {
+      "acquisition_cohort": "2026-01",
+      "cohort_granularity": "month"
+    },
+    "ecommerce": {
+      "transaction_id": "ORD-100482",
+      "value": 118.5,
+      "tax": 9.48,
+      "shipping": 6.5,
+      "currency": "USD",
+      "items": [
+        {
+          "item_id": "SKU-20431",
+          "item_name": "Merino Crew Sweater",
+          "item_category": "Apparel",
+          "price": 59.25,
+          "quantity": 2
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "user": {
+      "customerId": "CUST-58213",
+      "loginStatus": "authenticated",
+      "acquisitionCohort": "2026-01",
+      "cohortGranularity": "month"
+    },
+    "transaction": {
+      "transactionId": "ORD-100482",
+      "revenue": 118.5,
+      "tax": 9.48,
+      "shipping": 6.5,
+      "currency": "USD",
+      "products": [
+        {
+          "productId": "SKU-20431",
+          "productName": "Merino Crew Sweater",
+          "category": "Apparel",
+          "price": 59.25,
+          "quantity": 2
+        }
+      ]
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "timestamp": "2026-09-15T14:32:00Z",
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "CUST-58213",
+          "authenticatedState": "authenticated",
+          "primary": true
+        }
+      ]
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-100482",
+        "priceTotal": 118.5,
+        "currencyCode": "USD"
+      },
+      "purchases": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-20431",
+        "name": "Merino Crew Sweater",
+        "productCategories": [
+          {
+            "categoryName": "Apparel"
+          }
+        ],
+        "priceTotal": 118.5,
+        "quantity": 2
+      }
+    ],
+    "_yourtenant": {
+      "customer": {
+        "acquisitionCohort": "2026-01",
+        "cohortGranularity": "month"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar60": "2026-01",
+            "eVar61": "month"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Part A: customer -> acquisition_cohort from native commerce order tables (anchor = earliest valid order).
+  -- Part B: GA4 export events and backend orders sliced by cohort into a Cohort Period Index grid.
+  WITH params AS (
+    SELECT
+      'America/Chicago' AS reporting_tz,        -- store reporting time zone (IANA)
+      'month'           AS cohort_granularity,  -- 'month' (default, YYYY-MM) | 'week' (ISO 8601 YYYY-Www) | 'day' (YYYY-MM-DD)
+      DATE '2025-01-01' AS first_cohort_date    -- earliest cohort shown in the grid; keep _TABLE_SUFFIX below aligned
+  ),
+  
+  customer_merge AS (
+    -- surviving profile for every merged customer ID (earliest cohort is kept via MIN anchor on the survivor)
+    SELECT merged_customer_id AS customer_id, surviving_customer_id
+    FROM `your-project.commerce.customer_merges`
+  ),
+  
+  email_to_customer AS (
+    -- guest orders link to the account through the normalised, SHA-256 hashed email
+    SELECT
+      TO_HEX(SHA256(LOWER(TRIM(c.email)))) AS email_sha256,
+      MIN(COALESCE(m.surviving_customer_id, c.customer_id)) AS customer_key
+    FROM `your-project.commerce.customers` AS c
+    LEFT JOIN customer_merge AS m ON m.customer_id = c.customer_id
+    WHERE c.email IS NOT NULL
+    GROUP BY email_sha256
+  ),
+  
+  orders_resolved AS (
+    -- orders table includes legacy-platform history loaded before the first assignment
+    SELECT
+      o.order_id,
+      COALESCE(
+        m.surviving_customer_id,
+        o.customer_id,
+        e.customer_key,
+        CONCAT('guest:', TO_HEX(SHA256(LOWER(TRIM(o.customer_email)))))
+      ) AS customer_key,                                                -- NULL when neither ID nor email exists
+      COALESCE(orig.created_at, o.created_at) AS placed_at,             -- edited orders keep the original placement time
+      COALESCE(o.grand_total, 0) - COALESCE(o.refunded_amount, 0) AS net_revenue,
+      (IFNULL(o.is_legacy_import, FALSE)
+        OR o.ingested_at <= TIMESTAMP_ADD(COALESCE(orig.created_at, o.created_at), INTERVAL 14 DAY)) AS is_timely_record,
+      CASE
+        WHEN IFNULL(o.is_test, FALSE) OR IFNULL(o.is_draft, FALSE) OR IFNULL(o.is_deleted, FALSE) THEN FALSE
+        WHEN UPPER(o.order_status) IN ('CREATED', 'FAILED') THEN FALSE                    -- SFCC not-placed states
+        WHEN LOWER(IFNULL(o.cancel_reason, '')) = 'fraud' THEN FALSE
+        WHEN LOWER(IFNULL(o.order_type, '')) IN ('replacement', 'warranty', 'exchange')
+          AND COALESCE(o.grand_total, 0) = 0 THEN FALSE
+        WHEN LOWER(IFNULL(o.customer_group, '')) IN ('wholesale', 'b2b', 'employee') THEN FALSE
+        WHEN IFNULL(o.is_marketplace_order, FALSE) THEN FALSE                             -- merchant does not own the identity
+        WHEN o.cancelled_at IS NOT NULL                                                   -- cancel or void timestamp
+          AND o.cancelled_at < TIMESTAMP_ADD(COALESCE(orig.created_at, o.created_at), INTERVAL 14 DAY) THEN FALSE
+        ELSE TRUE                                                                         -- full refunds still anchor
+      END AS is_valid_order,                                                              -- cohort anchor eligibility
+      CASE
+        WHEN IFNULL(o.is_test, FALSE) OR IFNULL(o.is_draft, FALSE) OR IFNULL(o.is_deleted, FALSE) THEN FALSE
+        WHEN UPPER(o.order_status) IN ('CREATED', 'FAILED') THEN FALSE
+        WHEN o.cancelled_at IS NOT NULL OR LOWER(IFNULL(o.cancel_reason, '')) = 'fraud' THEN FALSE  -- any cancel or void, whenever it happens
+        WHEN LOWER(IFNULL(o.order_type, '')) IN ('replacement', 'warranty', 'exchange')
+          AND COALESCE(o.grand_total, 0) = 0 THEN FALSE
+        WHEN LOWER(IFNULL(o.customer_group, '')) IN ('wholesale', 'b2b', 'employee') THEN FALSE
+        WHEN IFNULL(o.is_marketplace_order, FALSE) THEN FALSE
+        ELSE TRUE
+      END AS is_valid_activity_order                                                      -- feeds order_activity counts
+    FROM `your-project.commerce.orders` AS o
+    LEFT JOIN `your-project.commerce.orders` AS orig ON orig.order_id = o.original_order_id
+    LEFT JOIN customer_merge AS m ON m.customer_id = o.customer_id
+    LEFT JOIN email_to_customer AS e
+      ON o.customer_id IS NULL
+     AND e.email_sha256 = TO_HEX(SHA256(LOWER(TRIM(o.customer_email))))
+  ),
+  
+  customer_anchor AS (
+    -- orders recorded inside their own 14-day window (or legacy history) win; back-dated imports cannot move a locked cohort
+    SELECT
+      customer_key,
+      ARRAY_AGG(STRUCT(order_id, placed_at) ORDER BY is_timely_record DESC, placed_at, order_id LIMIT 1)[OFFSET(0)] AS anchor
+    FROM orders_resolved
+    WHERE is_valid_order
+      AND customer_key IS NOT NULL
+    GROUP BY customer_key
+  ),
+  
+  acquisition_cohort AS (
+    SELECT
+      a.customer_key,
+      a.anchor.order_id AS anchor_order_id,
+      a.anchor.placed_at AS anchor_placed_at,
+      p.cohort_granularity,
+      FORMAT_DATE('%Y-%m', d.anchor_local_date)    AS acquisition_cohort_month,
+      FORMAT_DATE('%G-W%V', d.anchor_local_date)   AS acquisition_cohort_week,
+      FORMAT_DATE('%Y-%m-%d', d.anchor_local_date) AS acquisition_cohort_day,
+      CASE p.cohort_granularity
+        WHEN 'week' THEN FORMAT_DATE('%G-W%V', d.anchor_local_date)
+        WHEN 'day'  THEN FORMAT_DATE('%Y-%m-%d', d.anchor_local_date)
+        ELSE FORMAT_DATE('%Y-%m', d.anchor_local_date)
+      END AS acquisition_cohort,
+      CASE p.cohort_granularity
+        WHEN 'week' THEN DATE_TRUNC(d.anchor_local_date, ISOWEEK)
+        WHEN 'day'  THEN d.anchor_local_date
+        ELSE DATE_TRUNC(d.anchor_local_date, MONTH)
+      END AS cohort_start_date,
+      CURRENT_TIMESTAMP() >= TIMESTAMP_ADD(a.anchor.placed_at, INTERVAL 14 DAY) AS is_cohort_locked
+    FROM customer_anchor AS a
+    CROSS JOIN params AS p
+    CROSS JOIN UNNEST([STRUCT(DATE(a.anchor.placed_at, p.reporting_tz) AS anchor_local_date)]) AS d
+  ),
+  
+  cohort_size AS (
+    -- full cohort at period 0 is the denominator for every cell
+    SELECT
+      ac.acquisition_cohort,
+      ac.cohort_granularity,
+      ac.cohort_start_date,
+      COUNT(DISTINCT ac.customer_key) AS cohort_size,
+      LOGICAL_AND(ac.is_cohort_locked) AS all_assignments_locked
+    FROM acquisition_cohort AS ac
+    CROSS JOIN params AS p
+    WHERE ac.cohort_start_date >= p.first_cohort_date
+    GROUP BY 1, 2, 3
+  ),
+  
+  period_grid AS (
+    SELECT
+      cs.acquisition_cohort,
+      cs.cohort_granularity,
+      cs.cohort_start_date,
+      cs.cohort_size,
+      cs.all_assignments_locked,
+      idx AS cohort_period_index,
+      CASE cs.cohort_granularity
+        WHEN 'week' THEN DATE_ADD(cs.cohort_start_date, INTERVAL 7 * (idx + 1) DAY)
+        WHEN 'day'  THEN DATE_ADD(cs.cohort_start_date, INTERVAL idx + 1 DAY)
+        ELSE DATE_ADD(cs.cohort_start_date, INTERVAL idx + 1 MONTH)
+      END <= DATE(CURRENT_TIMESTAMP(), p.reporting_tz) AS is_period_complete   -- open periods are right-censored
+    FROM cohort_size AS cs
+    CROSS JOIN params AS p
+    CROSS JOIN UNNEST(GENERATE_ARRAY(0,
+      CASE cs.cohort_granularity
+        WHEN 'week' THEN DATE_DIFF(DATE(CURRENT_TIMESTAMP(), p.reporting_tz), cs.cohort_start_date, ISOWEEK)
+        WHEN 'day'  THEN DATE_DIFF(DATE(CURRENT_TIMESTAMP(), p.reporting_tz), cs.cohort_start_date, DAY)
+        ELSE DATE_DIFF(DATE(CURRENT_TIMESTAMP(), p.reporting_tz), cs.cohort_start_date, MONTH)
+      END)) AS idx
+  ),
+  
+  order_activity AS (
+    SELECT
+      ac.acquisition_cohort,
+      CASE ac.cohort_granularity
+        WHEN 'week' THEN DATE_DIFF(DATE(o.placed_at, p.reporting_tz), ac.cohort_start_date, ISOWEEK)
+        WHEN 'day'  THEN DATE_DIFF(DATE(o.placed_at, p.reporting_tz), ac.cohort_start_date, DAY)
+        ELSE DATE_DIFF(DATE(o.placed_at, p.reporting_tz), ac.cohort_start_date, MONTH)
+      END AS cohort_period_index,
+      COUNT(DISTINCT o.customer_key) AS purchasing_customers,
+      COUNT(DISTINCT o.order_id)     AS orders,
+      SUM(o.net_revenue)             AS net_revenue
+    FROM orders_resolved AS o
+    JOIN acquisition_cohort AS ac USING (customer_key)
+    CROSS JOIN params AS p
+    WHERE o.is_valid_activity_order
+      AND o.placed_at >= ac.anchor_placed_at
+    GROUP BY 1, 2
+  ),
+  
+  ga4_events AS (
+    -- only authenticated traffic (user_id) can carry a first-order cohort; user_pseudo_id alone is excluded
+    SELECT
+      COALESCE(m.surviving_customer_id, e.user_id) AS customer_key,
+      DATE(TIMESTAMP_MICROS(e.event_timestamp), p.reporting_tz) AS activity_date,   -- event time, not session start
+      e.user_pseudo_id,
+      e.event_name,
+      e.ecommerce.transaction_id,
+      e.ecommerce.purchase_revenue,
+      (SELECT MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL))
+         FROM UNNEST(e.event_params) AS ep) AS ga_session_id,
+      (SELECT MAX(IF(ep.key = 'session_engaged', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL))
+         FROM UNNEST(e.event_params) AS ep) AS session_engaged
+    FROM `your-project.analytics_123456789.events_*` AS e
+    CROSS JOIN params AS p
+    LEFT JOIN customer_merge AS m ON m.customer_id = e.user_id
+    WHERE _TABLE_SUFFIX BETWEEN '20241231' AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND e.user_id IS NOT NULL
+  ),
+  
+  ga4_events_cohort AS (
+    SELECT
+      ac.acquisition_cohort,
+      CASE ac.cohort_granularity
+        WHEN 'week' THEN DATE_DIFF(g.activity_date, ac.cohort_start_date, ISOWEEK)
+        WHEN 'day'  THEN DATE_DIFF(g.activity_date, ac.cohort_start_date, DAY)
+        ELSE DATE_DIFF(g.activity_date, ac.cohort_start_date, MONTH)
+      END AS cohort_period_index,
+      g.*
+    FROM ga4_events AS g
+    JOIN acquisition_cohort AS ac USING (customer_key)
+    WHERE g.activity_date >= ac.cohort_start_date
+  ),
+  
+  ga4_activity AS (
+    SELECT
+      acquisition_cohort,
+      cohort_period_index,
+      COUNT(DISTINCT customer_key) AS digitally_active_customers,
+      COUNT(DISTINCT IF(session_engaged = '1', customer_key, NULL)) AS engaged_customers,
+      COUNT(DISTINCT CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING))) AS sessions
+    FROM ga4_events_cohort
+    GROUP BY 1, 2
+  ),
+  
+  ga4_purchases AS (
+    -- unified purchase event, de-duplicated by transaction_id
+    SELECT
+      acquisition_cohort,
+      cohort_period_index,
+      SUM(purchase_revenue) AS online_purchase_revenue
+    FROM (
+      SELECT
+        acquisition_cohort,
+        transaction_id,
+        MIN(cohort_period_index) AS cohort_period_index,
+        MAX(purchase_revenue)    AS purchase_revenue
+      FROM ga4_events_cohort
+      WHERE event_name = 'purchase'
+        AND transaction_id IS NOT NULL
+      GROUP BY 1, 2
+    )
+    GROUP BY 1, 2
+  )
+  
+  SELECT
+    g.acquisition_cohort,
+    g.cohort_granularity,
+    g.cohort_period_index,
+    g.cohort_size,
+    g.all_assignments_locked AS cohort_locked,
+    g.is_period_complete,
+    IF(g.is_period_complete, COALESCE(oa.purchasing_customers, 0), NULL) AS purchasing_customers,
+    IF(g.is_period_complete, SAFE_DIVIDE(COALESCE(oa.purchasing_customers, 0), g.cohort_size), NULL) AS purchase_retention_rate,
+    IF(g.is_period_complete, SAFE_DIVIDE(COALESCE(oa.orders, 0), g.cohort_size), NULL) AS orders_per_cohort_customer,
+    IF(g.is_period_complete, SAFE_DIVIDE(COALESCE(oa.net_revenue, 0), g.cohort_size), NULL) AS net_revenue_per_cohort_customer,
+    IF(g.is_period_complete,
+       SAFE_DIVIDE(SUM(COALESCE(oa.net_revenue, 0)) OVER (PARTITION BY g.acquisition_cohort ORDER BY g.cohort_period_index), g.cohort_size),
+       NULL) AS cumulative_net_revenue_per_cohort_customer,
+    IF(g.is_period_complete, COALESCE(ga.digitally_active_customers, 0), NULL) AS digitally_active_customers,
+    IF(g.is_period_complete, SAFE_DIVIDE(COALESCE(ga.digitally_active_customers, 0), g.cohort_size), NULL) AS digital_active_rate,
+    IF(g.is_period_complete, SAFE_DIVIDE(COALESCE(ga.engaged_customers, 0), g.cohort_size), NULL) AS digital_engaged_rate,
+    IF(g.is_period_complete, COALESCE(ga.sessions, 0), NULL) AS ga4_sessions,
+    IF(g.is_period_complete, SAFE_DIVIDE(COALESCE(gp.online_purchase_revenue, 0), g.cohort_size), NULL) AS ga4_online_revenue_per_cohort_customer
+  FROM period_grid AS g
+  LEFT JOIN order_activity AS oa
+    ON oa.acquisition_cohort = g.acquisition_cohort AND oa.cohort_period_index = g.cohort_period_index
+  LEFT JOIN ga4_activity AS ga
+    ON ga.acquisition_cohort = g.acquisition_cohort AND ga.cohort_period_index = g.cohort_period_index
+  LEFT JOIN ga4_purchases AS gp
+    ON gp.acquisition_cohort = g.acquisition_cohort AND gp.cohort_period_index = g.cohort_period_index
+  ORDER BY g.cohort_start_date, g.cohort_period_index;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Part A: customer -> acquisition_cohort from the backend commerce order datasets (anchor = earliest valid order).
+  -- Part B: AEP web events (identityMap CRMID) and backend orders sliced by cohort into a Cohort Period Index grid.
+  WITH params AS (
+    SELECT
+      'America/Chicago' AS reporting_tz,        -- store reporting time zone (IANA)
+      'month'           AS cohort_granularity,  -- 'month' (default, YYYY-MM) | 'week' (ISO 8601 YYYY-Www) | 'day' (YYYY-MM-DD)
+      DATE '2025-01-01' AS first_cohort_date    -- earliest cohort shown in the grid; keep the web events time filter aligned
+  ),
+  
+  customer_merge AS (
+    SELECT merged_customer_id AS customer_id, surviving_customer_id
+    FROM commerce_customer_merges_dataset
+  ),
+  
+  email_to_customer AS (
+    SELECT
+      sha2(lower(trim(c.email)), 256) AS email_sha256,
+      MIN(COALESCE(m.surviving_customer_id, c.customer_id)) AS customer_key
+    FROM commerce_customers_dataset AS c
+    LEFT JOIN customer_merge AS m ON m.customer_id = c.customer_id
+    WHERE c.email IS NOT NULL
+    GROUP BY sha2(lower(trim(c.email)), 256)
+  ),
+  
+  orders_resolved AS (
+    -- dataset includes legacy-platform history loaded before the first assignment
+    SELECT
+      o.order_id,
+      COALESCE(
+        m.surviving_customer_id,
+        o.customer_id,
+        e.customer_key,
+        CASE WHEN o.customer_email IS NOT NULL THEN concat('guest:', sha2(lower(trim(o.customer_email)), 256)) END
+      ) AS customer_key,
+      COALESCE(orig.created_at, o.created_at) AS placed_at,             -- edited orders keep the original placement time
+      COALESCE(o.grand_total, 0) - COALESCE(o.refunded_amount, 0) AS net_revenue,
+      (COALESCE(o.is_legacy_import, false)
+        OR o.ingested_at <= COALESCE(orig.created_at, o.created_at) + INTERVAL 14 DAYS) AS is_timely_record,
+      CASE
+        WHEN COALESCE(o.is_test, false) OR COALESCE(o.is_draft, false) OR COALESCE(o.is_deleted, false) THEN false
+        WHEN upper(o.order_status) IN ('CREATED', 'FAILED') THEN false                    -- SFCC not-placed states
+        WHEN lower(COALESCE(o.cancel_reason, '')) = 'fraud' THEN false
+        WHEN lower(COALESCE(o.order_type, '')) IN ('replacement', 'warranty', 'exchange')
+          AND COALESCE(o.grand_total, 0) = 0 THEN false
+        WHEN lower(COALESCE(o.customer_group, '')) IN ('wholesale', 'b2b', 'employee') THEN false
+        WHEN COALESCE(o.is_marketplace_order, false) THEN false
+        WHEN o.cancelled_at IS NOT NULL                                                   -- cancel or void timestamp
+          AND o.cancelled_at < COALESCE(orig.created_at, o.created_at) + INTERVAL 14 DAYS THEN false
+        ELSE true                                                                         -- full refunds still anchor
+      END AS is_valid_order,                                                              -- cohort anchor eligibility
+      CASE
+        WHEN COALESCE(o.is_test, false) OR COALESCE(o.is_draft, false) OR COALESCE(o.is_deleted, false) THEN false
+        WHEN upper(o.order_status) IN ('CREATED', 'FAILED') THEN false
+        WHEN o.cancelled_at IS NOT NULL OR lower(COALESCE(o.cancel_reason, '')) = 'fraud' THEN false  -- any cancel or void, whenever it happens
+        WHEN lower(COALESCE(o.order_type, '')) IN ('replacement', 'warranty', 'exchange')
+          AND COALESCE(o.grand_total, 0) = 0 THEN false
+        WHEN lower(COALESCE(o.customer_group, '')) IN ('wholesale', 'b2b', 'employee') THEN false
+        WHEN COALESCE(o.is_marketplace_order, false) THEN false
+        ELSE true
+      END AS is_valid_activity_order                                                      -- feeds order_activity counts
+    FROM commerce_orders_dataset AS o
+    LEFT JOIN commerce_orders_dataset AS orig ON orig.order_id = o.original_order_id
+    LEFT JOIN customer_merge AS m ON m.customer_id = o.customer_id
+    LEFT JOIN email_to_customer AS e
+      ON o.customer_id IS NULL
+     AND e.email_sha256 = sha2(lower(trim(o.customer_email)), 256)
+  ),
+  
+  customer_anchor AS (
+    -- orders recorded inside their own 14-day window (or legacy history) win; back-dated imports cannot move a locked cohort
+    SELECT customer_key, order_id AS anchor_order_id, placed_at AS anchor_placed_at
+    FROM (
+      SELECT
+        customer_key,
+        order_id,
+        placed_at,
+        ROW_NUMBER() OVER (
+          PARTITION BY customer_key
+          ORDER BY CASE WHEN is_timely_record THEN 0 ELSE 1 END, placed_at, order_id
+        ) AS rn
+      FROM orders_resolved
+      WHERE is_valid_order
+        AND customer_key IS NOT NULL
+    ) ranked
+    WHERE rn = 1
+  ),
+  
+  anchor_local AS (
+    SELECT
+      a.*,
+      p.cohort_granularity,
+      to_date(from_utc_timestamp(a.anchor_placed_at, p.reporting_tz)) AS anchor_local_date
+    FROM customer_anchor AS a
+    CROSS JOIN params AS p
+  ),
+  
+  acquisition_cohort AS (
+    SELECT
+      customer_key,
+      anchor_order_id,
+      anchor_placed_at,
+      cohort_granularity,
+      date_format(anchor_local_date, 'yyyy-MM') AS acquisition_cohort_month,
+      concat(CAST(year(date_add(to_date(date_trunc('WEEK', anchor_local_date)), 3)) AS STRING),
+             '-W', lpad(CAST(weekofyear(anchor_local_date) AS STRING), 2, '0')) AS acquisition_cohort_week,
+      date_format(anchor_local_date, 'yyyy-MM-dd') AS acquisition_cohort_day,
+      CASE cohort_granularity
+        WHEN 'week' THEN concat(CAST(year(date_add(to_date(date_trunc('WEEK', anchor_local_date)), 3)) AS STRING),
+                                '-W', lpad(CAST(weekofyear(anchor_local_date) AS STRING), 2, '0'))
+        WHEN 'day'  THEN date_format(anchor_local_date, 'yyyy-MM-dd')
+        ELSE date_format(anchor_local_date, 'yyyy-MM')
+      END AS acquisition_cohort,
+      CASE cohort_granularity
+        WHEN 'week' THEN to_date(date_trunc('WEEK', anchor_local_date))
+        WHEN 'day'  THEN anchor_local_date
+        ELSE trunc(anchor_local_date, 'MM')
+      END AS cohort_start_date,
+      current_timestamp() >= anchor_placed_at + INTERVAL 14 DAYS AS is_cohort_locked
+    FROM anchor_local
+  ),
+  
+  cohort_size AS (
+    -- full cohort at period 0 is the denominator for every cell
+    SELECT
+      ac.acquisition_cohort,
+      ac.cohort_granularity,
+      ac.cohort_start_date,
+      COUNT(DISTINCT ac.customer_key) AS cohort_size,
+      bool_and(ac.is_cohort_locked) AS all_assignments_locked
+    FROM acquisition_cohort AS ac
+    CROSS JOIN params AS p
+    WHERE ac.cohort_start_date >= p.first_cohort_date
+    GROUP BY ac.acquisition_cohort, ac.cohort_granularity, ac.cohort_start_date
+  ),
+  
+  today AS (
+    SELECT to_date(from_utc_timestamp(current_timestamp(), p.reporting_tz)) AS local_today
+    FROM params AS p
+  ),
+  
+  period_grid AS (
+    SELECT
+      x.acquisition_cohort,
+      x.cohort_granularity,
+      x.cohort_start_date,
+      x.cohort_size,
+      x.all_assignments_locked,
+      x.cohort_period_index,
+      CASE x.cohort_granularity
+        WHEN 'week' THEN date_add(x.cohort_start_date, 7 * (x.cohort_period_index + 1))
+        WHEN 'day'  THEN date_add(x.cohort_start_date, x.cohort_period_index + 1)
+        ELSE add_months(x.cohort_start_date, x.cohort_period_index + 1)
+      END <= t.local_today AS is_period_complete                      -- open periods are right-censored
+    FROM (
+      SELECT
+        cs.*,
+        explode(sequence(0,
+          CASE cs.cohort_granularity
+            WHEN 'week' THEN CAST(datediff(to_date(date_trunc('WEEK', t0.local_today)), cs.cohort_start_date) / 7 AS INT)
+            WHEN 'day'  THEN datediff(t0.local_today, cs.cohort_start_date)
+            ELSE (year(t0.local_today) - year(cs.cohort_start_date)) * 12 + (month(t0.local_today) - month(cs.cohort_start_date))
+          END)) AS cohort_period_index
+      FROM cohort_size AS cs
+      CROSS JOIN today AS t0
+    ) x
+    CROSS JOIN today AS t
+  ),
+  
+  order_activity AS (
+    SELECT
+      acquisition_cohort,
+      cohort_period_index,
+      COUNT(DISTINCT customer_key) AS purchasing_customers,
+      COUNT(DISTINCT order_id)     AS orders,
+      SUM(net_revenue)             AS net_revenue
+    FROM (
+      SELECT
+        ac.acquisition_cohort,
+        o.customer_key,
+        o.order_id,
+        o.net_revenue,
+        CASE ac.cohort_granularity
+          WHEN 'week' THEN CAST(datediff(to_date(date_trunc('WEEK', to_date(from_utc_timestamp(o.placed_at, p.reporting_tz)))), ac.cohort_start_date) / 7 AS INT)
+          WHEN 'day'  THEN datediff(to_date(from_utc_timestamp(o.placed_at, p.reporting_tz)), ac.cohort_start_date)
+          ELSE (year(from_utc_timestamp(o.placed_at, p.reporting_tz)) - year(ac.cohort_start_date)) * 12
+             + (month(from_utc_timestamp(o.placed_at, p.reporting_tz)) - month(ac.cohort_start_date))
+        END AS cohort_period_index
+      FROM orders_resolved AS o
+      JOIN acquisition_cohort AS ac ON ac.customer_key = o.customer_key
+      CROSS JOIN params AS p
+      WHERE o.is_valid_activity_order
+        AND o.placed_at >= ac.anchor_placed_at
+    ) oc
+    GROUP BY acquisition_cohort, cohort_period_index
+  ),
+  
+  web_events AS (
+    -- only authenticated traffic (CRMID) can carry a first-order cohort; ECID-only hits are excluded
+    SELECT
+      COALESCE(m.surviving_customer_id, w.crm_id) AS customer_key,
+      w.ecid,
+      w.event_ts,
+      to_date(from_utc_timestamp(w.event_ts, p.reporting_tz)) AS activity_date,   -- event time, not session start
+      w.eventType,
+      w.purchase_id,
+      w.order_total,
+      w.session_num
+    FROM (
+      -- sessions are built over ALL hits of the ECID (anonymous + authenticated) before the CRMID filter
+      SELECT
+        raw.*,
+        SESS_TIMEOUT(raw.event_ts, 60 * 30) OVER (
+          PARTITION BY raw.ecid ORDER BY raw.event_ts
+          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ).num AS session_num
+      FROM (
+        SELECT
+          identityMap['CRMID'][0].id AS crm_id,
+          identityMap['ECID'][0].id  AS ecid,
+          timestamp                  AS event_ts,
+          eventType,
+          commerce.order.purchaseID  AS purchase_id,
+          commerce.order.priceTotal  AS order_total
+        FROM web_events_dataset
+        WHERE timestamp >= TIMESTAMP '2024-12-31 00:00:00'
+      ) raw
+    ) w
+    CROSS JOIN params AS p
+    LEFT JOIN customer_merge AS m ON m.customer_id = w.crm_id
+    WHERE w.crm_id IS NOT NULL
+  ),
+  
+  web_events_cohort AS (
+    SELECT
+      ac.acquisition_cohort,
+      CASE ac.cohort_granularity
+        WHEN 'week' THEN CAST(datediff(to_date(date_trunc('WEEK', we.activity_date)), ac.cohort_start_date) / 7 AS INT)
+        WHEN 'day'  THEN datediff(we.activity_date, ac.cohort_start_date)
+        ELSE (year(we.activity_date) - year(ac.cohort_start_date)) * 12 + (month(we.activity_date) - month(ac.cohort_start_date))
+      END AS cohort_period_index,
+      we.customer_key,
+      we.ecid,
+      we.session_num,
+      we.eventType,
+      we.purchase_id,
+      we.order_total
+    FROM web_events AS we
+    JOIN acquisition_cohort AS ac ON ac.customer_key = we.customer_key
+    WHERE we.activity_date >= ac.cohort_start_date
+  ),
+  
+  web_activity AS (
+    SELECT
+      acquisition_cohort,
+      cohort_period_index,
+      COUNT(DISTINCT customer_key) AS digitally_active_customers,
+      COUNT(DISTINCT concat(ecid, '-', CAST(session_num AS STRING))) AS sessions
+    FROM web_events_cohort
+    GROUP BY acquisition_cohort, cohort_period_index
+  ),
+  
+  web_purchases AS (
+    -- unified commerce.purchases event, de-duplicated by purchaseID
+    SELECT
+      acquisition_cohort,
+      cohort_period_index,
+      SUM(order_total) AS online_purchase_revenue
+    FROM (
+      SELECT
+        acquisition_cohort,
+        purchase_id,
+        MIN(cohort_period_index) AS cohort_period_index,
+        MAX(order_total)         AS order_total
+      FROM web_events_cohort
+      WHERE eventType = 'commerce.purchases'
+        AND purchase_id IS NOT NULL
+      GROUP BY acquisition_cohort, purchase_id
+    ) dedup
+    GROUP BY acquisition_cohort, cohort_period_index
+  )
+  
+  SELECT
+    g.acquisition_cohort,
+    g.cohort_granularity,
+    g.cohort_period_index,
+    g.cohort_size,
+    g.all_assignments_locked AS cohort_locked,
+    g.is_period_complete,
+    CASE WHEN g.is_period_complete THEN COALESCE(oa.purchasing_customers, 0) END AS purchasing_customers,
+    CASE WHEN g.is_period_complete THEN COALESCE(oa.purchasing_customers, 0) / NULLIF(CAST(g.cohort_size AS DOUBLE), 0) END AS purchase_retention_rate,
+    CASE WHEN g.is_period_complete THEN COALESCE(oa.orders, 0) / NULLIF(CAST(g.cohort_size AS DOUBLE), 0) END AS orders_per_cohort_customer,
+    CASE WHEN g.is_period_complete THEN COALESCE(oa.net_revenue, 0) / NULLIF(CAST(g.cohort_size AS DOUBLE), 0) END AS net_revenue_per_cohort_customer,
+    CASE WHEN g.is_period_complete THEN
+      SUM(COALESCE(oa.net_revenue, 0)) OVER (PARTITION BY g.acquisition_cohort ORDER BY g.cohort_period_index
+                                             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+      / NULLIF(CAST(g.cohort_size AS DOUBLE), 0) END AS cumulative_net_revenue_per_cohort_customer,
+    CASE WHEN g.is_period_complete THEN COALESCE(wa.digitally_active_customers, 0) END AS digitally_active_customers,
+    CASE WHEN g.is_period_complete THEN COALESCE(wa.digitally_active_customers, 0) / NULLIF(CAST(g.cohort_size AS DOUBLE), 0) END AS digital_active_rate,
+    CASE WHEN g.is_period_complete THEN COALESCE(wa.sessions, 0) END AS web_sessions,
+    CASE WHEN g.is_period_complete THEN COALESCE(wp.online_purchase_revenue, 0) / NULLIF(CAST(g.cohort_size AS DOUBLE), 0) END AS web_online_revenue_per_cohort_customer
+  FROM period_grid AS g
+  LEFT JOIN order_activity AS oa
+    ON oa.acquisition_cohort = g.acquisition_cohort AND oa.cohort_period_index = g.cohort_period_index
+  LEFT JOIN web_activity AS wa
+    ON wa.acquisition_cohort = g.acquisition_cohort AND wa.cohort_period_index = g.cohort_period_index
+  LEFT JOIN web_purchases AS wp
+    ON wp.acquisition_cohort = g.acquisition_cohort AND wp.cohort_period_index = g.cohort_period_index
+  ORDER BY g.cohort_start_date, g.cohort_period_index;
+
+Calculation Notes: |
+  1️⃣ Anchor order: the acquisition timestamp is the placement timestamp (Shopify processed_at, Adobe Commerce sales_order.created_at, Salesforce Commerce Cloud creationDate) of the customer's earliest valid order. Valid means placed and not cancelled or voided before fulfillment. Test, draft, deleted and fraud-cancelled orders do not anchor a cohort, and neither do SFCC CREATED/FAILED orders or zero-value replacement, warranty and exchange orders. Wholesale/B2B accounts, employee purchases and marketplace orders where the merchant does not own the customer identity (e.g. Amazon, Zalando) are excluded or reported as separate cohort populations. A first order that is later refunded or returned in full still anchors the cohort, because the acquisition did happen; refunds are handled in the LTV metric, not in the cohort key. When an Adobe Commerce order is edited (the original is cancelled and reissued with a -1 increment_id), the cohort uses the original placement timestamp.
+  2️⃣ Immutability: the value is written to the customer profile once and never reassigned. Because cancellations can arrive days after checkout, the assignment stays provisional for 14 days after placement. If the anchor order is cancelled inside that window, the next valid order becomes the anchor. After that the value is locked, and later cancellations, back-dated imports and profile merges cannot move the customer. On a merge, the surviving profile keeps the earliest locked cohort. A lapsed customer who buys again stays in the original cohort; reactivation is recorded in customer-status, not by creating a new cohort.
+  3️⃣ Customer identity: the key is the platform customer ID (Shopify customer.id, Adobe Commerce customer_id, SFCC customerNo). Guest orders are linked to that customer through a normalised, hashed email (trimmed, lower-cased, SHA-256), so a guest first order and a later account order count as one customer. Orders that have neither an ID nor an email are left out of cohort counts. Before the first assignment, load legacy-platform order history; otherwise every existing customer appears newly acquired in the migration month. On the digital side, sessions join to the cohort through the user_id sent at login and purchase. Traffic identified only by user_pseudo_id or ECID cannot carry a first-order cohort.
+  4️⃣ Granularity, format and time zone: monthly YYYY-MM is the default. Weekly cohorts use ISO 8601 YYYY-Www: weeks start on Monday and belong to the year that contains their Thursday, so 2027-01-01 falls in 2026-W53. Daily cohorts use YYYY-MM-DD. Granularity is stored in a companion cohort_granularity attribute and shown on every report, and one table or chart never mixes granularities. Period boundaries follow the store's reporting time zone as an IANA zone, so daylight saving time is handled correctly, rather than UTC. For example, an order at 23:30 on 31 January in America/Chicago is 05:30 UTC on 1 February but belongs to 2026-01.
+  5️⃣ Period index and censoring: Cohort Period Index is the number of whole calendar periods, at the cohort's granularity, between the cohort period and the activity period. Period 0 is the acquisition period. The first order always falls in period 0, so period-0 purchase retention is 100% except for customers whose anchor order was cancelled after the 14-day lock, who remain in cohort_size but are not counted as period-0 purchasers; repeat orders placed later in the same month also count in period 0. A cell whose period has not yet ended for that cohort is right-censored and shown as null, not zero. The current, still-open period is left out of trend comparisons. Retention and LTV denominators always use the full cohort size at period 0, never the customers who were active in the previous period. Whether retention is calculated as standard, rolling or cumulative is defined by retention-type, not by this dimension. Period activity (purchasing customers, orders, revenue) counts only orders that were never cancelled or voided: an order cancelled after the 14-day lock can still be the cohort anchor, but it is not counted as activity in any period.
+  6️⃣ Value action by industry: E-commerce/Retail = first completed order, as in Shopify's customer cohort analysis, which groups customers by first-order month. GA4 default = first_visit (web) or first_open (app) date, the 'First touch (acquisition date)' inclusion criterion in Cohort exploration. Adobe Analytics Cohort Analysis = the configured inclusion metric, set to Orders for purchase cohorts. Education = first enrollment (industry variant enrollment-cohort). SaaS = account sign-up, or activation where the plan defines acquisition as activation. Cohorts built on different anchors cannot be compared directly: a GA4 acquisition-date cohort includes visitors who never buy, so it is larger and starts earlier than the first-order cohort for the same customers.
+  7️⃣ Boundaries and timing: this dimension records when a customer was acquired, not through which channel (first-touch-channel-grouping). It is not a retention calculation method (retention-type), and it is not a lifecycle state such as new, returning, lapsed or reactivated (customer-status), which changes over time while the cohort does not. Purchase frequency (purchase-count-band) is derived from the same anchor, counting valid orders from the acquisition order onward; recency-frequency-monetary position (rfm-segment) is a separate breakdown. Customer Retention Rate, Customer Lifetime Value and Second-Purchase Conversion Rate are reported by this key. Assignment is user-scoped and does not depend on the 30-minute session timeout: a session that crosses midnight at month-end keeps the cohort of its order timestamp, not the session start.
+
+Business Use Case: |
+  1️⃣ CRM & Retention Marketing manager: at the monthly cohort review, if a new cohort's period-1 repeat purchase rate is more than 20% below the average of the previous six cohorts, audit that cohort's first-order categories, discount codes and post-purchase email flow, then send the cohort's non-repeaters a second-purchase offer before day 60.
+  2️⃣ Performance Marketing lead: each quarter, compare 6- and 12-month cumulative gross margin per customer for peak-season cohorts (e.g. November BFCM) with CAC by first-touch channel. If a cohort will not reach CAC payback within 12 months, lower next year's promotional discount depth and bid caps for that period, and move budget to the months whose cohorts pay back fastest.
+  3️⃣ Finance (FP&A): at each forecast cycle, build the returning-customer revenue line as a cohort layer cake, projecting existing cohorts along their observed LTV curves and adding planned new customers on the most recent comparable curve. Flag any cohort whose actual cumulative revenue per customer differs by more than 10% from the curve used in the budget.
+  4️⃣ Loyalty Program manager: after a loyalty tier or points change goes live, compare the first three post-launch cohorts with the three pre-launch cohorts at the same Cohort Period Index for repeat rate and orders per customer. Keep the change only if post-launch cohorts beat the pre-launch baseline by the target set in the program business case by period 3.
+
+Dependencies:
+  Events: [purchase]
+
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Adobe Commerce / Salesforce Commerce Cloud)
+
+Report Attributes: |
+  Cohort Period Index; First-Touch Channel Grouping; First Order Item Category; First Order Coupon; Purchase Count Band; RFM Segment; Sales Channel; Country; Device Category
+
+Dashboard Usage: [Customer Cohort Retention Triangle, Cohort LTV Curves & CAC Payback, Repeat Purchase & Second-Order Conversion, Returning-Customer Revenue Forecast (Cohort Layer Cake)]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [enrollment-cohort, first-touch-channel-grouping, rfm-segment, customer-status, retention-type]
+
+Derived Dimensions: [purchase-count-band]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-15T13:35:13.865+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-18T00:19:11.522+00:00
+
