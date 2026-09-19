@@ -1,7 +1,7 @@
 # Dimension: Item ID
-# Generated: 2026-09-19T18:06:00.688Z
+# Generated: 2026-09-19T18:06:09.847Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Item ID
 
@@ -10,31 +10,297 @@ Description: |
 
 Category: Performance
 
+Tags: [dimension, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  view_item
 
+Adobe Event: |
+  prodView
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "pageInfo": {
+          "pageName": "pdp:running-shoe-aero-2",
+          "pageType": "product"
+        }
+      },
+      "product": [
+        {
+          "productInfo": {
+            "productID": "SKU-0042",
+            "sku": "SKU-0042-BLU-42",
+            "productName": "Aero Running Shoe 2",
+            "manufacturer": "Aero"
+          },
+          "category": {
+            "primaryCategory": "Footwear",
+            "subCategory1": "Running"
+          },
+          "attributes": {
+            "variant": "Blue / 42",
+            "listName": "Running Shoes Collection"
+          },
+          "price": {
+            "basePrice": 129.99,
+            "currency": "USD"
+          },
+          "quantity": 1
+        }
+      ],
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "view_item",
+            "eventAction": "product_detail_view"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "view_item",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 129.99,
+      "items": [
+        {
+          "item_id": "SKU-0042",
+          "item_name": "Aero Running Shoe 2",
+          "item_brand": "Aero",
+          "item_category": "Footwear",
+          "item_category2": "Running",
+          "item_variant": "Blue / 42",
+          "item_list_id": "running_shoes",
+          "item_list_name": "Running Shoes Collection",
+          "index": 0,
+          "price": 129.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "prodView",
+    "eventInfo": {
+      "eventName": "prodView"
+    },
+    "commerce": {
+      "productViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-0042",
+        "name": "Aero Running Shoe 2",
+        "productCategories": [
+          {
+            "categoryID": "footwear/running",
+            "categoryName": "Running"
+          }
+        ],
+        "priceTotal": 129.99,
+        "currencyCode": "USD",
+        "quantity": 1
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.productViews",
+    "commerce": {
+      "productViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-0042",
+        "name": "Aero Running Shoe 2",
+        "productCategories": [
+          {
+            "categoryID": "footwear/running",
+            "categoryName": "Running"
+          }
+        ],
+        "priceTotal": 129.99,
+        "currencyCode": "USD",
+        "quantity": 1
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar5": "SKU-0042"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Item ID product performance: item-scoped measures only, one row per normalised Item ID.
+  WITH item_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      e.event_name,
+      e.user_pseudo_id,
+      (SELECT ep.value.int_value FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'ga_session_id') AS ga_session_id,
+      UPPER(TRIM(i.item_id)) AS item_id,
+      i.item_name,
+      i.item_brand,
+      i.item_category,
+      COALESCE(i.quantity, 1) AS quantity,
+      COALESCE(i.item_revenue, 0) AS item_revenue,
+      COALESCE(i.item_refund, 0) AS item_refund
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.items) AS i
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY))
+                              AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name IN ('view_item_list', 'select_item', 'view_item', 'add_to_cart', 'begin_checkout', 'purchase', 'refund')
+      AND i.item_id IS NOT NULL
+      AND TRIM(i.item_id) NOT IN ('', '(not set)')
+  ),
+  item_rollup AS (
+    SELECT
+      item_id,
+      ANY_VALUE(item_name) AS item_name,
+      ANY_VALUE(item_brand) AS item_brand,
+      ANY_VALUE(item_category) AS item_category,
+      COUNTIF(event_name = 'view_item_list') AS list_impressions,
+      COUNTIF(event_name = 'select_item') AS list_clicks,
+      COUNT(DISTINCT IF(event_name = 'view_item', CONCAT(user_pseudo_id, '-', CAST(ga_session_id AS STRING)), NULL)) AS view_sessions,
+      COUNT(DISTINCT IF(event_name = 'add_to_cart', CONCAT(user_pseudo_id, '-', CAST(ga_session_id AS STRING)), NULL)) AS add_to_cart_sessions,
+      SUM(IF(event_name = 'add_to_cart', quantity, 0)) AS units_added_to_cart,
+      SUM(IF(event_name = 'purchase', quantity, 0)) AS units_purchased,
+      SUM(IF(event_name = 'purchase', item_revenue, 0)) AS item_revenue,
+      SUM(IF(event_name = 'refund', item_refund, 0)) AS item_refund_amount
+    FROM item_events
+    GROUP BY item_id
+  )
+  SELECT
+    item_id,
+    item_name,
+    item_brand,
+    item_category,
+    list_impressions,
+    list_clicks,
+    SAFE_DIVIDE(list_clicks, list_impressions) AS item_list_click_through_rate,
+    view_sessions,
+    add_to_cart_sessions,
+    SAFE_DIVIDE(add_to_cart_sessions, view_sessions) AS item_add_to_cart_rate,
+    units_added_to_cart,
+    units_purchased,
+    ROUND(item_revenue, 2) AS item_revenue,
+    ROUND(item_refund_amount, 2) AS item_refund_amount,
+    ROUND(item_revenue - item_refund_amount, 2) AS net_item_revenue
+  FROM item_rollup
+  ORDER BY item_revenue DESC, view_sessions DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Item ID product performance from the XDM ExperienceEvent dataset, exploding productListItems.
+  WITH item_events AS (
+    SELECT
+      CAST(e.timestamp AS DATE) AS event_date,
+      e.eventType AS event_type,
+      e.identityMap['ECID'][0].id AS ecid,
+      e._id AS event_id,
+      UPPER(TRIM(pli.SKU)) AS item_id,
+      pli.name AS item_name,
+      COALESCE(pli.quantity, 1) AS quantity,
+      COALESCE(pli.priceTotal, 0) AS price_total
+    FROM (
+      SELECT timestamp, eventType, identityMap, _id, explode(productListItems) AS pli
+      FROM aep_web_experience_events
+      WHERE timestamp >= date_sub(current_date(), 28)
+        AND timestamp < current_date()
+        AND eventType IN ('commerce.productViews', 'commerce.productListAdds', 'commerce.checkouts', 'commerce.purchases')
+        AND productListItems IS NOT NULL
+    ) AS e
+    WHERE pli.SKU IS NOT NULL
+      AND TRIM(pli.SKU) <> ''
+  ),
+  item_rollup AS (
+    SELECT
+      item_id,
+      MAX(item_name) AS item_name,
+      COUNT(DISTINCT CASE WHEN event_type = 'commerce.productViews' THEN event_id END) AS product_views,
+      COUNT(DISTINCT CASE WHEN event_type = 'commerce.productViews' THEN ecid END) AS viewing_visitors,
+      COUNT(DISTINCT CASE WHEN event_type = 'commerce.productListAdds' THEN ecid END) AS adding_visitors,
+      SUM(CASE WHEN event_type = 'commerce.productListAdds' THEN quantity ELSE 0 END) AS units_added_to_cart,
+      COUNT(DISTINCT CASE WHEN event_type = 'commerce.checkouts' THEN event_id END) AS checkouts,
+      SUM(CASE WHEN event_type = 'commerce.purchases' THEN quantity ELSE 0 END) AS units_purchased,
+      SUM(CASE WHEN event_type = 'commerce.purchases' THEN price_total ELSE 0 END) AS item_revenue
+    FROM item_events
+    GROUP BY item_id
+  )
+  SELECT
+    item_id,
+    item_name,
+    product_views,
+    viewing_visitors,
+    adding_visitors,
+    CASE WHEN viewing_visitors > 0 THEN CAST(adding_visitors AS DOUBLE) / viewing_visitors END AS item_add_to_cart_rate,
+    units_added_to_cart,
+    checkouts,
+    units_purchased,
+    ROUND(item_revenue, 2) AS item_revenue
+  FROM item_rollup
+  ORDER BY item_revenue DESC, product_views DESC;
 
+Calculation Notes: |
+  1️⃣ Identifier grain: capture the value at the same grain as the product catalog and the Merchant Center / marketplace feed id (parent product ID with the size/colour held in item_variant, or child SKU throughout, but never a mix); the chosen grain must be identical on view_item_list, select_item, view_item, add_to_cart, begin_checkout, purchase and refund so funnels join cleanly.,2️⃣ Normalisation: trim whitespace, apply a single case convention and strip locale or channel prefixes before storage; values that differ only by case or padding (e.g. 'SKU-0042' vs 'sku-0042 ') are treated as the same item, and hits carrying neither item_id nor item_name are excluded rather than reported as '(not set)'.,3️⃣ Item scope versus event scope: Item ID lives inside the items[] array (GA4) or productListItems[] (AEP XDM), so reporting must UNNEST the array and pair it only with item-scoped measures (item_revenue, quantity, items viewed, items added to cart); combining it with event-scoped measures such as sessions or purchase revenue inflates totals by the number of items per event.,4️⃣ Exclusions: non-merchandise lines (shipping protection, gift wrap, donations, service fees) and internal test or QA SKUs are excluded from product performance views via a maintained exclusion list; gift cards and bundles are retained but flagged so bundle revenue is not double counted against its component SKUs.,5️⃣ Cardinality and thresholds: catalogs with more than a few thousand active SKUs will hit GA4 standard-report row limits and '(other)' grouping, so product-level analysis of the long tail runs on the BigQuery export or AEP Query Service rather than the interface.,6️⃣ Timing and lifecycle: identifiers are joined to the catalog snapshot valid on the event date, because SKUs are retired, reused or remapped during replatforming; a reused ID must never inherit the prior product's history, and remaps are maintained in a dated crosswalk table.,7️⃣ Session and attribution rules: product-level conversion paths use the standard 30-minute inactivity session timeout, and the list or promotion credited to an item (item_list_name, promotion_name) persists from select_item or select_promotion to add_to_cart and purchase of the same Item ID within that session only.
 
+Business Use Case: |
+  1️⃣ Merchandising Managers review the weekly product performance report by Item ID and, when a SKU shows a high view_item volume but an add-to-cart rate in the bottom decile of its category, trigger a PDP content, image and price review for that item.,2️⃣ Inventory Planners join Item ID revenue and unit velocity to on-hand stock daily and, when projected days of cover for a top-50 SKU falls below the supplier lead time, raise a replenishment purchase order before the item goes out of stock.,3️⃣ Performance Marketing reconciles Item ID in site purchase data against the Merchant Center feed id and, when a SKU with active Shopping spend records zero on-site purchases for 14 days, excludes it from the campaign or fixes the feed mismatch.,4️⃣ Site Search and Merchandising teams use Item ID click-through from search and category listings to re-rank results, demoting SKUs with persistent low select_item rates and pinning high-converting items to the first row of their collection pages.
 
+Dependencies:
+  Events: [view-item-list, select-item, view-item, add-to-cart, begin-checkout, purchase]
 
+Source Data: Digital Analytics (GA4) + Product Catalog (PIM)
 
+Report Attributes: |
+  Product Name; Item Brand; Item Category; Item Variant; Item List Name; Promotion Name; Device Category; Session Default Channel Group
 
+Dashboard Usage: [Product Performance Dashboard, Merchandising & Category Review, Product Discovery Funnel (List > PDP > Cart), Inventory Velocity & Stock-out Risk, Shopping Feed Reconciliation]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [product-name, item-list-name, promotion-name, item-brand, item-variant]
 
+Derived Dimensions: [item-category, item-brand, item-variant]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +308,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T18:06:00.421+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T18:06:09.549+00:00
 
