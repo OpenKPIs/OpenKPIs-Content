@@ -1,12 +1,12 @@
 # Dimension: Store Distance Band
-# Generated: 2026-09-18T16:35:16.079Z
+# Generated: 2026-09-19T18:14:20.432Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Store Distance Band
 
 Description: |
-  Buckets the distance between the shopper's location and the store they selected — or the nearest store returned to them — into four fixed trade-area ranges (under 2 miles, 2–5 miles, 5–10 miles, 10 or more miles), and carries that band on store locator searches, store selections and purchases. Shopper-to-store proximity is the strongest single predictor of BOPIS selection and pickup completion, which makes this the standard trade-area cut for omnichannel reporting; it is distinct from carrier leg distance between fulfillment nodes, which is a backend logistics measure and not a customer-facing trade-area attribute.
+  Buckets the distance between the shopper's location and the store they selected — or the nearest store returned to them — into four fixed trade-area ranges (`<2 mi`, `2-5 mi`, `5-10 mi`, `10+ mi`), and carries that band on store locator searches, store selections and purchases. Store locator searches ride on the unified `search` event (`search_type = store_locator`), store selections on the unified `select_item` event carrying the chosen `store_id` as its store-context parameter, and orders on `purchase`. It is a common trade-area cut in omnichannel and BOPIS reporting; it is distinct from carrier leg distance between fulfillment nodes, which is a backend logistics measure and not a customer-facing trade-area attribute.
 
 Category: Conversion
 
@@ -69,6 +69,21 @@ W3 Data Layer: |
             "distanceOriginBasis": "device_geolocation_consented",
             "fulfillmentIntent": "bopis"
           }
+        },
+        {
+          "eventInfo": {
+            "eventName": "purchase",
+            "eventAction": "Order Placed",
+            "eventTrigger": "order_confirmation_rendered"
+          },
+          "attributes": {
+            "transactionID": "ORD-100482",
+            "orderTotal": 84.97,
+            "currency": "USD",
+            "storeID": "1042",
+            "storeDistanceBand": "<2 mi",
+            "fulfillmentIntent": "bopis"
+          }
         }
       ],
       "privacy": {
@@ -92,7 +107,25 @@ GA4 Data Layer: |
     "distance_origin_basis": "device_geolocation_consented",
     "fulfillment_intent": "bopis",
     "geo_precision": "band_only",
-    "precise_location_collected": false
+    "precise_location_collected": false,
+    "purchase_push_example": {
+      "event": "purchase",
+      "ecommerce": {
+        "transaction_id": "ORD-100482",
+        "value": 84.97,
+        "currency": "USD",
+        "items": [
+          {
+            "item_id": "SKU-55120",
+            "price": 84.97,
+            "quantity": 1
+          }
+        ]
+      },
+      "store_id": "1042",
+      "store_distance_band": "<2 mi",
+      "fulfillment_intent": "bopis"
+    }
   }
 
 Adobe Client Data Layer: |
@@ -125,17 +158,33 @@ Adobe Client Data Layer: |
       "geoPrecision": "band_only",
       "preciseLocationCollected": false,
       "bandComputedClientSide": true
+    },
+    "purchasePushExample": {
+      "event": "purchase",
+      "eventInfo": {
+        "eventName": "Purchase",
+        "trigger": "order_confirmation_rendered"
+      },
+      "transaction": {
+        "id": "ORD-100482",
+        "total": 84.97,
+        "currency": "USD"
+      },
+      "store": {
+        "id": "1042",
+        "distanceBand": "<2 mi",
+        "fulfillmentIntent": "bopis"
+      }
     }
   }
 
 XDM Mapping: |
   {
-    "eventType": "web.webinteraction.linkClicks",
+    "eventType": "web.webpagedetails.pageViews",
     "web": {
-      "webInteraction": {
-        "name": "Store Locator Search",
-        "type": "other",
-        "linkClicks": {
+      "webPageDetails": {
+        "name": "Store Locator: Results",
+        "pageViews": {
           "value": 1
         }
       }
@@ -177,6 +226,76 @@ XDM Mapping: |
           }
         }
       }
+    },
+    "_tenant": {
+      "trafficType": "external"
+    },
+    "store_selection_event": {
+      "eventType": "web.webinteraction.linkClicks",
+      "web": {
+        "webInteraction": {
+          "name": "Store Selected",
+          "type": "other",
+          "linkClicks": {
+            "value": 1
+          }
+        }
+      },
+      "placeContext": {
+        "POIinteraction": {
+          "POIDetail": {
+            "POIID": "1042"
+          }
+        }
+      },
+      "_experience": {
+        "analytics": {
+          "customDimensions": {
+            "eVars": {
+              "eVar27": {
+                "value": "<2 mi"
+              }
+            }
+          }
+        }
+      },
+      "_tenant": {
+        "trafficType": "external"
+      }
+    },
+    "purchase_event": {
+      "eventType": "commerce.purchases",
+      "commerce": {
+        "purchases": {
+          "value": 1
+        },
+        "order": {
+          "purchaseID": "ORD-100482",
+          "priceTotal": 84.97,
+          "currencyCode": "USD"
+        }
+      },
+      "placeContext": {
+        "POIinteraction": {
+          "POIDetail": {
+            "POIID": "1042"
+          }
+        }
+      },
+      "_experience": {
+        "analytics": {
+          "customDimensions": {
+            "eVars": {
+              "eVar27": {
+                "value": "<2 mi"
+              }
+            }
+          }
+        }
+      },
+      "_tenant": {
+        "trafficType": "external"
+      }
     }
   }
 
@@ -185,7 +304,7 @@ Google Analytics SQL: |
   -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
   -- Dimension: Store Distance Band (store-distance-band) | data_type: string | scope: Event
-  -- Carrier events: search (store locator results), select_item (store selection), purchase.
+  -- Carrier events: search (store locator results), select_item with store_id (store selection), purchase.
   -- Output: the band value, the events it rides on, and volume / share by band.
   --
   -- PRIVACY CONTRACT: this query reads the pre-computed band parameter only.
@@ -215,18 +334,14 @@ Google Analytics SQL: |
       MAX(IF(p.key = 'distance_origin_basis',  p.value.string_value,             NULL))   AS distance_origin_basis,
       MAX(IF(p.key = 'fulfillment_intent',     p.value.string_value,             NULL))   AS fulfillment_intent,
       MAX(IF(p.key = 'search_type',            p.value.string_value,             NULL))   AS search_type,
-      MAX(IF(p.key = 'geo_precision',          p.value.string_value,             NULL))   AS geo_precision
+      MAX(IF(p.key = 'geo_precision',          p.value.string_value,             NULL))   AS geo_precision,
+      MAX(IF(p.key = 'traffic_type',           p.value.string_value,             NULL))   AS traffic_type
     FROM `your-project.analytics_123456789.events_*` AS e
     LEFT JOIN UNNEST(e.event_params) AS p
     WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY))
                             AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
       -- Unified standard events only; the technical locator/store-picker widgets all map to these.
       AND e.event_name IN ('search', 'select_item', 'purchase')
-      -- Exclusion rule 5: internal, store-associate and known bot traffic never reaches the bands.
-      AND COALESCE(
-            (SELECT up.value.string_value FROM UNNEST(e.user_properties) AS up WHERE up.key = 'traffic_type'),
-            'external'
-          ) NOT IN ('internal', 'store_associate', 'bot')
     GROUP BY event_day, event_name, user_pseudo_id, event_timestamp, event_bundle_sequence_id, device_category
   ),
   
@@ -246,13 +361,17 @@ Google Analytics SQL: |
       -- Only spelling variants of the same four buckets are normalised.
       CASE
         WHEN TRIM(store_distance_band_raw) IN ('<2 mi', '2-5 mi', '5-10 mi', '10+ mi') THEN TRIM(store_distance_band_raw)
-        WHEN REPLACE(TRIM(store_distance_band_raw), '–', '-') IN ('<2 mi', '2-5 mi', '5-10 mi', '10+ mi')
-          THEN REPLACE(TRIM(store_distance_band_raw), '–', '-')
+        WHEN REPLACE(TRIM(store_distance_band_raw), '\u2013', '-') IN ('<2 mi', '2-5 mi', '5-10 mi', '10+ mi')
+          THEN REPLACE(TRIM(store_distance_band_raw), '\u2013', '-')
         ELSE 'Unknown'
       END AS store_distance_band
     FROM base_events
-    -- Store locator searches only; site-search hits carry no store context.
-    WHERE event_name <> 'search' OR search_type = 'store_locator'
+    -- Exclusion rule 5: internal, store-associate and known bot traffic never reaches the bands.
+    WHERE COALESCE(traffic_type, 'external') NOT IN ('internal', 'store_associate', 'bot')
+      -- Store locator searches only; site-search hits carry no store context.
+      AND (event_name <> 'search' OR search_type = 'store_locator')
+      -- select_item counts as a store selection only when it carries the store_id context parameter.
+      AND (event_name <> 'select_item' OR store_id IS NOT NULL)
   ),
   
   band_volume AS (
@@ -284,8 +403,6 @@ Google Analytics SQL: |
     SUM(band_events) OVER (PARTITION BY event_name)               AS all_events_for_carrier,
     ROUND(SAFE_DIVIDE(band_events,
                       SUM(band_events) OVER (PARTITION BY event_name)) * 100, 2) AS pct_of_carrier_events,
-    ROUND(SAFE_DIVIDE(band_events,
-                      SUM(band_events) OVER ()) * 100, 2)         AS pct_of_all_banded_traffic,
     ROUND(SAFE_DIVIDE(bopis_intent_events, band_events) * 100, 2) AS pct_bopis_intent_in_band,
     ROUND(SAFE_DIVIDE(driving_basis_events, band_events) * 100, 2)      AS pct_driving_basis,
     ROUND(SAFE_DIVIDE(straight_line_basis_events, band_events) * 100, 2) AS pct_straight_line_basis,
@@ -314,7 +431,10 @@ AEP Query Service SQL: |
   --   _experience.analytics.customDimensions.props.prop27.value  -> distance origin basis
   --   _experience.analytics.customDimensions.props.prop28.value  -> geo precision contract
   --   placeContext.POIinteraction.POIDetail.POIID                -> store id
-  --   web.webInteraction.name                                    -> store locator search interaction
+  --   web.webPageDetails.name ('Store Locator: Results')         -> store locator search (results page view)
+  --   eventType 'web.webinteraction.linkClicks' + web.webInteraction.name ('Store Selected') -> store selection (xdm_mapping.store_selection_event)
+  --   eventType 'commerce.purchases'                             -> purchase (xdm_mapping.purchase_event)
+  --   _tenant.trafficType                                        -> internal / store-associate / bot exclusion
   --
   -- PRIVACY CONTRACT: placeContext.geo latitude / longitude and any precise origin
   -- point are deliberately NOT referenced. The band arrives pre-bucketed from the
@@ -329,9 +449,10 @@ AEP Query Service SQL: |
       eventType                                                         AS xdm_event_type,
       CASE
         WHEN eventType = 'commerce.purchases'                           THEN 'purchase'
-        WHEN eventType = 'commerce.productListOpens'                    THEN 'select_item'
         WHEN eventType = 'web.webinteraction.linkClicks'
-         AND lower(web.webInteraction.name) LIKE '%store locator search%' THEN 'search'
+         AND web.webInteraction.name = 'Store Selected'                 THEN 'select_item'
+        WHEN eventType = 'web.webpagedetails.pageViews'
+         AND web.webPageDetails.name = 'Store Locator: Results'         THEN 'search'
         ELSE NULL
       END                                                               AS carrier_event,
       _experience.analytics.customDimensions.eVars.eVar27.value         AS store_distance_band_raw,
@@ -339,12 +460,13 @@ AEP Query Service SQL: |
       _experience.analytics.customDimensions.props.prop27.value         AS distance_origin_basis,
       _experience.analytics.customDimensions.props.prop28.value         AS geo_precision_contract,
       placeContext.POIinteraction.POIDetail.POIID                       AS store_id,
+      _tenant.trafficType                                               AS traffic_type,
       endUserIDs._experience.mcid.id                                    AS marketing_cloud_id,
       _id                                                               AS hit_id
     FROM experience_events
     WHERE timestamp >= date_sub(current_date, 90)
       AND timestamp <  current_date
-      AND eventType IN ('web.webinteraction.linkClicks', 'commerce.productListOpens', 'commerce.purchases')
+      AND eventType IN ('web.webpagedetails.pageViews', 'web.webinteraction.linkClicks', 'commerce.purchases')
   ),
   
   carrier_events AS (
@@ -361,12 +483,16 @@ AEP Query Service SQL: |
       CASE
         WHEN trim(store_distance_band_raw) IN ('<2 mi', '2-5 mi', '5-10 mi', '10+ mi')
           THEN trim(store_distance_band_raw)
-        WHEN replace(trim(store_distance_band_raw), '–', '-') IN ('<2 mi', '2-5 mi', '5-10 mi', '10+ mi')
-          THEN replace(trim(store_distance_band_raw), '–', '-')
+        WHEN replace(trim(store_distance_band_raw), '\u2013', '-') IN ('<2 mi', '2-5 mi', '5-10 mi', '10+ mi')
+          THEN replace(trim(store_distance_band_raw), '\u2013', '-')
         ELSE 'Unknown'
       END AS store_distance_band
     FROM base_events
     WHERE carrier_event IS NOT NULL
+      -- Exclusion rule 5: internal, store-associate and known bot traffic never reaches the bands.
+      AND coalesce(traffic_type, 'external') NOT IN ('internal', 'store_associate', 'bot')
+      -- A 'Store Selected' click counts as a store selection only when it carries the store id.
+      AND (carrier_event <> 'select_item' OR store_id IS NOT NULL)
   ),
   
   band_volume AS (
@@ -395,7 +521,6 @@ AEP Query Service SQL: |
     -- Base population = ALL carrier events of that type, 'Unknown' included.
     sum(band_events) OVER (PARTITION BY carrier_event)                                   AS all_events_for_carrier,
     round(100.0 * band_events / sum(band_events) OVER (PARTITION BY carrier_event), 2)   AS pct_of_carrier_events,
-    round(100.0 * band_events / sum(band_events) OVER (), 2)                             AS pct_of_all_banded_traffic,
     round(100.0 * driving_basis_events / band_events, 2)                                 AS pct_driving_basis,
     round(100.0 * straight_line_basis_events / band_events, 2)                           AS pct_straight_line_basis,
     round(100.0 * consented_geo_events / band_events, 2)                                 AS pct_consented_device_origin,
@@ -413,13 +538,13 @@ AEP Query Service SQL: |
     END;
 
 Calculation Notes: |
-  1️⃣ Band edges are fixed and non-negotiable across all reporting: `<2 mi`, `2–5 mi`, `5–10 mi`, `10+ mi`. Each band is lower-bound inclusive and upper-bound exclusive, so exactly 2.00 miles resolves to `2–5 mi` and exactly 10.00 miles resolves to `10+ mi`. This follows the same banding pattern as Price Band and Cart Size Band; markets reporting in kilometres convert to miles before banding so that band membership stays comparable across regions.,2️⃣ Distance is straight-line (great-circle) between the shopper's origin point and the store's geocode, unless the store locator itself returns a driving distance for that result — in that case the locator's driving distance is used and the basis is recorded on the hit. Straight-line and driving distances are never blended within a single row, and mixed-basis reporting is flagged rather than silently averaged.,3️⃣ Scope is Event, not Session, by design: one session routinely contains several locator searches, inventory checks and store selections for different stores, so a session-scoped band would require an arbitrary first-value or last-value rule and would misattribute demand between trade areas. The band is bound to the individual hit and rolled up through the aggregation window (Event → Session → Daily and above) with an explicit rule stated in each report.,4️⃣ When geolocation permission is denied, unavailable or times out, distance is computed from the centroid of the postal code the shopper typed into the locator and the origin basis is recorded as `postal_centroid`; centroid-derived distances near a band edge are therefore directionally accurate rather than exact. When there is neither a consented device location nor a typed postal code, the band is set to `Unknown` — never defaulted to the nearest band — and `Unknown` is excluded from band-share denominators while still being reported as a coverage figure.,5️⃣ Exclusions and filters: internal and store-associate traffic, known bot and crawler traffic, test stores, and stores flagged as closed or not yet open are removed before banding; ship-to-home and digital-delivery orders with no store selection carry no band and are excluded rather than bucketed; and hits where the resolved coordinates fall outside the operating country of the selected store are treated as `Unknown` because proxy and corporate network egress commonly distort them.,6️⃣ Timing: the band is stamped at the moment of the hit using the store geocode in effect that day, and historical rows are never restated. A store relocation, opening or closure changes the band only for hits from the effective date forward, which keeps trade-area trends auditable and prevents retroactive shifts in BOPIS pickup-rate history.,7️⃣ Privacy: only the coarse band is persisted on the row. Raw latitude/longitude, full postal code and any precise origin point are used transiently to compute the band and are dropped at collection, so the attribute carries no direct or reasonably re-identifiable personal data — hence pii_flag false. Sensitivity remains Internal rather than Public because trade-area demand distribution is commercially sensitive store-network intelligence.
+  1️⃣ Band edges are fixed and non-negotiable across all reporting: `<2 mi`, `2-5 mi`, `5-10 mi`, `10+ mi`. Each band is lower-bound inclusive and upper-bound exclusive, so exactly 2.00 miles resolves to `2-5 mi` and exactly 10.00 miles resolves to `10+ mi`. This follows the same banding pattern as `cart-size-band`; markets reporting in kilometres convert to miles before banding so that band membership stays comparable across regions.,2️⃣ Distance is straight-line (great-circle) between the shopper's origin point and the store's geocode, unless the store locator itself returns a driving distance for that result — in that case the locator's driving distance is used and the basis is recorded on the hit. Straight-line and driving distances are never blended within a single row, and mixed-basis reporting is flagged rather than silently averaged.,3️⃣ Scope is Event, not Session, by design: one session routinely contains several locator searches, inventory checks and store selections for different stores, so a session-scoped band would require an arbitrary first-value or last-value rule and would misattribute demand between trade areas. The band is bound to the individual hit and rolled up through the aggregation window (Event → Session → Daily and above) with an explicit rule stated in each report.,4️⃣ When geolocation permission is denied, unavailable or times out, distance is computed from the centroid of the postal code the shopper typed into the locator and the origin basis is recorded as `postal_centroid`; centroid-derived distances near a band edge are therefore directionally accurate rather than exact. When there is neither a consented device location nor a typed postal code, the band is set to `Unknown` — never defaulted to the nearest band — and `Unknown` stays in the full base population of every band-share denominator, reported as its own row so band coverage is visible and all bands reconcile to 100% of carrier events.,5️⃣ Exclusions and filters: internal and store-associate traffic and known bot and crawler traffic are removed in both queries before banding (`traffic_type` in GA4, the traffic-type field in XDM). Test stores, stores flagged as closed or not yet open, and out-of-country coordinates are filtered at collection — the store locator only returns open, live stores and never stamps a band from coordinates outside the store's operating country — so they never reach the export. Ship-to-home and digital-delivery orders with no store selection carry no band, remain in the base population and are bucketed as `Unknown` (split them out with `fulfillment-method` when a store-only view is needed).,6️⃣ Timing: the band is stamped at the moment of the hit using the store geocode in effect that day, and historical rows are never restated. A store relocation, opening or closure changes the band only for hits from the effective date forward, which keeps trade-area trends auditable and prevents retroactive shifts in BOPIS pickup-rate history.,7️⃣ Privacy: only the coarse band is persisted on the row. Raw latitude/longitude, full postal code and any precise origin point are used transiently to compute the band and are dropped at collection, so the attribute carries no direct or reasonably re-identifiable personal data — hence pii_flag false. Sensitivity remains Internal rather than Public because trade-area demand distribution is commercially sensitive store-network intelligence.
 
 Business Use Case: |
-  1️⃣ The Omnichannel Merchandising Manager reviews BOPIS pickup completion by band in the weekly trade-area report; when completion in the `10+ mi` band drops below the chain benchmark for two consecutive weeks, they reallocate the affected local assortment toward ship-from-store and suppress pickup promises for those long-distance results.,2️⃣ Store Operations leads size pickup and curbside staffing from the band mix of open orders: a store whose inbound pickup demand is dominated by the `<2 mi` band sees most collections inside two hours, so the team shifts associate hours into the same-day window instead of holding a flat all-day pickup desk.,3️⃣ The Local Marketing Manager tunes proximity targeting radii and local inventory ad budgets each cycle by comparing store-selection and purchase rates across bands; when performance collapses beyond `5–10 mi` for a store cluster, they tighten the campaign radius to the profitable bands and redeploy the spend to underserved bands around higher-capacity stores.,4️⃣ Store Network Planning uses the annual band distribution of online demand to rank catchment gaps: a market where a large share of BOPIS-intent demand originates in the `10+ mi` band becomes a candidate for a new site, a pickup point, or an extended ship-from-store footprint in the next capital plan.
+  1️⃣ The Omnichannel Merchandising Manager reviews BOPIS pickup completion by band in the weekly trade-area report; when completion in the `10+ mi` band drops below the chain benchmark for two consecutive weeks, they reallocate the affected local assortment toward ship-from-store and suppress pickup promises for those long-distance results.,2️⃣ Store Operations leads size pickup and curbside staffing from the band mix of open orders: a store whose inbound pickup demand is dominated by the `<2 mi` band sees most collections inside two hours, so the team shifts associate hours into the same-day window instead of holding a flat all-day pickup desk.,3️⃣ The Local Marketing Manager tunes proximity targeting radii and local inventory ad budgets each cycle by comparing store-selection and purchase rates across bands; when performance collapses beyond `5-10 mi` for a store cluster, they tighten the campaign radius to the profitable bands and redeploy the spend to underserved bands around higher-capacity stores.,4️⃣ Store Network Planning uses the annual band distribution of online demand to rank catchment gaps: a market where a large share of BOPIS-intent demand originates in the `10+ mi` band becomes a candidate for a new site, a pickup point, or an extended ship-from-store footprint in the next capital plan.
 
 Dependencies:
-  Events: [search, select-item, purchase]
+  Events: [purchase]
   Dimensions: [store-id, fulfillment-method]
 
 Source Data: Digital Analytics (GA4) + Store Locator & Point-of-Sale Pickup Records (omnichannel-stitched)
@@ -432,9 +557,9 @@ Dashboard Usage: [BOPIS Performance Dashboard, Store Trade Area Report, Omnichan
 Segment Eligibility: |
   true
 
-Related Dimensions: [store-id, fulfillment-method]
+Related Dimensions: [store-id, fulfillment-method, store-zip-code-local-market]
 
-Derived Dimensions: [store-trade-area-tier, pickup-proximity-segment]
+Derived Dimensions: [pickup-window]
 
 Data Sensitivity: Internal
 
@@ -448,5 +573,5 @@ Created At: 2026-09-18T16:35:03.965+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-18T16:35:15.724+00:00
+Last Modified At: 2026-09-19T18:14:20.176+00:00
 
