@@ -1,10 +1,10 @@
 # KPI: Failed Delivery Rate
-# Generated: 2026-09-18T16:43:39.560Z
+# Generated: 2026-09-19T21:17:19.584Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 KPI Name: Failed Delivery Rate
-Formula: (Shipments whose First Delivery Attempt Failed / Shipments with a First Out-for-Delivery Scan in the Period) × 100
+Formula: (Shipments whose First Delivery Attempt Failed / Shipments with a First Out-for-Delivery Scan in the Period and a Posted First-Attempt Outcome) × 100
 
 Description: |
   Failed Delivery Rate is the percentage of shipments out for delivery in the period whose first delivery attempt failed because the recipient was not available, the address was incorrect or undeliverable, the driver could not get access, or the recipient refused the parcel. Unlike Delivery Accuracy Rate (right items reaching the right address intact) and Shipment On-Time Delivery Rate (delivery date against promise date), it isolates failure at the last-mile handover, the main cause of redelivery surcharges, return-to-sender cost and 'where is my order' contacts.
@@ -81,8 +81,10 @@ Google Analytics SQL: |
            e.destination_type, e.signature_required,
            DATE(f.first_ofd_ts, e.destination_timezone) AS ofd_local_date,
            CASE
+             -- No outcome yet: in_flight while the out-for-delivery scan is under 48h old at run time, pending from 48h on
+             WHEN o.tracking_number IS NULL AND f.first_ofd_ts > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR) THEN 'in_flight'
              WHEN o.tracking_number IS NULL THEN 'pending'
-             WHEN o.is_unmapped THEN 'unmapped'
+             WHEN o.is_unmapped THEN 'unmapped'  -- posted outcome: stays in the denominator, never in the numerator
              WHEN o.exception_type IN ('recipient_unavailable', 'address_issue', 'access_issue', 'refused', 'redirected_to_pickup_point') THEN 'failed'
              ELSE 'not_failed'  -- delivered (incl. safe place / neighbour / mailroom) or carrier-caused non-attempt
            END AS first_attempt_outcome
@@ -93,10 +95,12 @@ Google Analytics SQL: |
   agg AS (
     SELECT ofd_local_date, carrier, carrier_service_level, delivery_region, destination_type, signature_required,
            COUNT(*) AS shipments_with_ofd_scan,
-           COUNTIF(first_attempt_outcome != 'pending') AS shipments_out_for_delivery,
+           COUNTIF(first_attempt_outcome != 'in_flight') AS shipments_ofd_48h_elapsed,
+           COUNTIF(first_attempt_outcome NOT IN ('pending', 'in_flight')) AS shipments_out_for_delivery,
            COUNTIF(first_attempt_outcome = 'failed') AS failed_first_attempts,
            COUNTIF(first_attempt_outcome = 'unmapped') AS unmapped_first_outcomes,
-           COUNTIF(first_attempt_outcome = 'pending') AS outcome_pending_shipments
+           COUNTIF(first_attempt_outcome = 'pending') AS outcome_pending_shipments,
+           COUNTIF(first_attempt_outcome = 'in_flight') AS in_flight_shipments
     FROM shipment_outcomes
     GROUP BY ofd_local_date, carrier, carrier_service_level, delivery_region, destination_type, signature_required
   ),
@@ -112,7 +116,8 @@ Google Analytics SQL: |
          a.failed_first_attempts,
          a.unmapped_first_outcomes,
          a.outcome_pending_shipments,
-         ROUND(SAFE_DIVIDE(a.outcome_pending_shipments, a.shipments_with_ofd_scan) * 100, 2) AS outcome_pending_share_pct,
+         a.in_flight_shipments,
+         ROUND(SAFE_DIVIDE(a.outcome_pending_shipments, a.shipments_ofd_48h_elapsed) * 100, 2) AS outcome_pending_share_pct,
          ROUND(c.carrier_unmapped_share * 100, 2) AS carrier_unmapped_share_pct,
          IF(c.carrier_unmapped_share > 0.02, NULL,
             ROUND(SAFE_DIVIDE(a.failed_first_attempts, a.shipments_out_for_delivery) * 100, 2)) AS failed_delivery_rate_pct
@@ -175,8 +180,10 @@ AEP Query Service SQL: |
            e.destination_type, e.signature_required,
            to_date(from_utc_timestamp(f.first_ofd_ts, e.destination_timezone)) AS ofd_local_date,
            CASE
+             -- No outcome yet: in_flight while the out-for-delivery scan is under 48h old at run time, pending from 48h on
+             WHEN o.tracking_number IS NULL AND f.first_ofd_ts > current_timestamp() - INTERVAL 48 HOURS THEN 'in_flight'
              WHEN o.tracking_number IS NULL THEN 'pending'
-             WHEN o.is_unmapped = TRUE THEN 'unmapped'
+             WHEN o.is_unmapped = TRUE THEN 'unmapped'  -- posted outcome: stays in the denominator, never in the numerator
              WHEN o.exception_type IN ('recipient_unavailable', 'address_issue', 'access_issue', 'refused', 'redirected_to_pickup_point') THEN 'failed'
              ELSE 'not_failed'
            END AS first_attempt_outcome
@@ -187,10 +194,12 @@ AEP Query Service SQL: |
   agg AS (
     SELECT ofd_local_date, carrier, carrier_service_level, delivery_region, destination_type, signature_required,
            COUNT(*) AS shipments_with_ofd_scan,
-           SUM(CASE WHEN first_attempt_outcome <> 'pending' THEN 1 ELSE 0 END) AS shipments_out_for_delivery,
+           SUM(CASE WHEN first_attempt_outcome <> 'in_flight' THEN 1 ELSE 0 END) AS shipments_ofd_48h_elapsed,
+           SUM(CASE WHEN first_attempt_outcome NOT IN ('pending', 'in_flight') THEN 1 ELSE 0 END) AS shipments_out_for_delivery,
            SUM(CASE WHEN first_attempt_outcome = 'failed' THEN 1 ELSE 0 END) AS failed_first_attempts,
            SUM(CASE WHEN first_attempt_outcome = 'unmapped' THEN 1 ELSE 0 END) AS unmapped_first_outcomes,
-           SUM(CASE WHEN first_attempt_outcome = 'pending' THEN 1 ELSE 0 END) AS outcome_pending_shipments
+           SUM(CASE WHEN first_attempt_outcome = 'pending' THEN 1 ELSE 0 END) AS outcome_pending_shipments,
+           SUM(CASE WHEN first_attempt_outcome = 'in_flight' THEN 1 ELSE 0 END) AS in_flight_shipments
     FROM shipment_outcomes
     GROUP BY ofd_local_date, carrier, carrier_service_level, delivery_region, destination_type, signature_required
   ),
@@ -206,7 +215,8 @@ AEP Query Service SQL: |
          a.failed_first_attempts,
          a.unmapped_first_outcomes,
          a.outcome_pending_shipments,
-         ROUND(CAST(a.outcome_pending_shipments AS DOUBLE) / NULLIF(a.shipments_with_ofd_scan, 0) * 100, 2) AS outcome_pending_share_pct,
+         a.in_flight_shipments,
+         ROUND(CAST(a.outcome_pending_shipments AS DOUBLE) / NULLIF(a.shipments_ofd_48h_elapsed, 0) * 100, 2) AS outcome_pending_share_pct,
          ROUND(c.carrier_unmapped_share * 100, 2) AS carrier_unmapped_share_pct,
          CASE WHEN c.carrier_unmapped_share > 0.02 THEN NULL
               ELSE ROUND(CAST(a.failed_first_attempts AS DOUBLE) / NULLIF(a.shipments_out_for_delivery, 0) * 100, 2)
@@ -221,8 +231,8 @@ Calculation Notes: |
   1️⃣ Grain and denominator: one row per outbound tracking number. A shipment enters the denominator on its first carrier scan normalised to out_for_delivery, dated in the destination's local time zone rather than the warehouse or UTC date. Each package of a split shipment counts separately. Excluded: return and exchange labels, store pickup (BOPIS), ship-to-store orders, and parcels addressed at checkout to a locker or pickup point (none of these has a doorstep attempt).
   2️⃣ Numerator: the first attempt outcome is the first attempt-terminal scan that follows the first out-for-delivery scan. The attempt is failed when its normalised reason is recipient_unavailable, address_issue (incorrect, incomplete or undeliverable), access_issue (gated community, secured building, business closed) or refused. Deliveries to a safe place, a neighbour or a mailroom count as successful. A redirect to a pickup point after an attempt counts as a failed first attempt.
   3️⃣ Carrier-caused non-attempts are not failures in this KPI: 'delivery not attempted', vehicle breakdown, weather, missort and 'ran out of time'. These shipments stay in the denominator. They are reported through the delivery-exception-occurrence event and Shipment On-Time Delivery Rate, so a carrier's capacity problems are not blamed on customer address quality.
-  4️⃣ Exception code normalisation: raw UPS, FedEx, USPS, DHL and regional carrier status and exception codes are mapped to the governed Delivery Exception Type taxonomy through a version-controlled mapping table. Unmapped codes are excluded from the numerator and flagged. When unmapped codes exceed 2% of first-attempt outcomes for a carrier, that carrier's figures are withheld until the mapping is updated.
-  5️⃣ Late and duplicate tracking data: carrier webhooks and aggregator feeds can arrive late, duplicated or out of order. Sequence scans by the carrier event timestamp, not the ingestion timestamp. Deduplicate on tracking number + status code + event timestamp. Each day is restated for 72 hours. A shipment with an out-for-delivery scan but no terminal scan after 48 hours is held as outcome-pending and left out of both numerator and denominator until an outcome posts. The pending share is published alongside the rate.
+  4️⃣ Exception code normalisation: raw UPS, FedEx, USPS, DHL and regional carrier status and exception codes are mapped to the governed Delivery Exception Type taxonomy through a version-controlled mapping table. A first-attempt outcome with an unmapped code counts as a posted outcome, so it stays in the denominator but is excluded from the numerator, and it is flagged. When unmapped codes exceed 2% of first-attempt outcomes for a carrier, that carrier's figures are withheld until the mapping is updated.
+  5️⃣ Late and duplicate tracking data: carrier webhooks and aggregator feeds can arrive late, duplicated or out of order. Sequence scans by the carrier event timestamp, not the ingestion timestamp. Deduplicate on tracking number + status code + event timestamp. Each day is restated for 72 hours. A shipment with an out-for-delivery scan but no attempt-terminal scan yet is in-flight while that scan is less than 48 hours old relative to the run time, and becomes outcome-pending once 48 hours have passed. Both are left out of the numerator and the denominator until an outcome posts. The pending share (outcome-pending shipments over shipments whose out-for-delivery scan is at least 48 hours old) is published alongside the rate; in-flight shipments do not count towards it.
   6️⃣ How it relates to other KPIs: the complement (100 − rate) is the First Attempt Delivery Success Rate. Do not combine this KPI with, or subtract it from, Delivery Accuracy Rate or Shipment On-Time Delivery Rate. A failed first attempt can still be re-delivered inside the promise window, and a late shipment may never have had a failed attempt.
   7️⃣ Mix effects: shipments that need an adult signature or age verification, and high-value shipments, fail far more often at the first attempt. Commercial addresses delivered outside business hours map to access_issue. When comparing carriers, regions or periods, break the rate down by signature requirement and by residential versus commercial destination, because changes in shipment mix can hide real changes in carrier performance.
 
@@ -260,5 +270,5 @@ Created At: 2026-09-18T16:43:28.921+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-18T16:43:39.217+00:00
+Last Modified At: 2026-09-19T21:17:19.226+00:00
 
