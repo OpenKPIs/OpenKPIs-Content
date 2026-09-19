@@ -1,0 +1,84 @@
+# Event: Pickup Ready Notification
+# Generated: 2026-09-19T18:28:27.536Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Pickup Ready Notification
+Event Serialization: always
+
+Description: |
+  Backend send event recorded when the order management system confirms a Buy Online, Pick Up In Store order has been picked, staged and marked ready to collect, and the email, SMS or push message telling the shopper so is dispatched through the ESP/CRM. Joined to the originating online purchase on transaction_id, it marks the store's ready-for-pickup commitment, so it anchors order-to-ready time, pickup completion and abandoned-pickup (return-to-stock) exposure by store and channel.
+
+Category: Operations
+
+Tags: [event, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store), BOPIS, Order Fulfillment, Transactional Messaging]
+
+Industry: Retail
+
+Priority: High
+
+Core Area: Generic
+
+
+Event Type: custom
+
+Aggregation Window: Event, Hourly, Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Parameters: |
+  {
+    "transaction_id": "string - Order identifier from the originating online purchase; join key to purchase and order-pickup for order-to-ready time and pickup completion",
+    "store_id": "string - Fulfilling store code from the OMS fulfillment group; resolves to store name, region and timezone",
+    "notification_channel": "string - Delivery channel of the message: email | sms | push",
+    "sent_timestamp": "timestamp - UTC time the ESP/CRM accepted the message for delivery",
+    "notification_sequence": "integer - 1 for the initial ready notice, 2+ for reminder sends before the hold window expires",
+    "fulfillment_group_id": "string - OMS fulfillment group identifier when an order is split across stores or release waves",
+    "pickup_location_type": "string - Collection point: in_store_counter | curbside | locker",
+    "send_status": "string - Provider outcome: sent | delivered | bounced | failed | suppressed",
+    "message_id": "string - ESP/CRM message identifier used to deduplicate provider retries and webhook replays",
+    "pickup_hold_expiry": "timestamp - Date and time after which the uncollected order is returned to stock and refunded"
+  }
+
+
+
+Dependencies:
+  Events: [purchase]
+  Dimensions: [store-id, notification-channel, fulfillment-method]
+
+Source Data: Order Management (OMS) + ESP/CRM send logs (Salesforce Marketing Cloud / Braze)
+
+    Report Attributes: |
+  store_id; store_region; notification_channel; notification_sequence; pickup_location_type; fulfillment_method; send_status; hour_of_day_store_local; day_of_week
+
+    Dashboard Usage: [BOPIS Fulfillment Operations, Store Pickup SLA Scorecard, Transactional Messaging Performance, Omnichannel Order Lifecycle]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [order-pickup, shipment-notification-open, store-id, notification-channel, fulfillment-method]
+
+    Derived Dimensions: [pickup-ready-timestamp, order-to-ready-sla-status, pickup-location-type]
+
+    Derived Metrics: [pickup-ready-notifications-sent, pickup-reminder-notifications-sent, order-to-ready-time, uncollected-bopis-orders]
+
+    Derived KPIs: [bopis-order-ready-time, pickup-completion-rate, bopis-ready-sla-attainment-rate, abandoned-pickup-rate]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: draft
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-19T18:28:19.073+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-19T18:28:27.321+00:00
+
