@@ -1,0 +1,225 @@
+# Dimension: Carrier
+# Generated: 2026-09-19T19:42:03.707Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Carrier
+
+Description: |
+  Carrier identifies the shipping provider (for example UPS, FedEx, USPS, DHL, a regional parcel carrier or a last-mile delivery partner) that carries an order shipment from the warehouse or store to the customer, taken from the governed carrier name rather than raw label or tracking codes. It lets E-commerce teams compare delivery speed, on-time rate, failed deliveries, shipping cost and customer experience by provider so volume, promises and contracts can be managed carrier by carrier.
+
+Category: Operations
+
+Tags: [dimension, E-commerce: Fulfillment & Delivery, Logistics & Supply Chain, shipping, logistics]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Carrier: normalizes the raw carrier code on each order shipment to the governed carrier name
+  -- and reports shipment volume and delivery performance by carrier and ship date (shipments shipped in the last 90 days, bucketed in the store time zone).
+  WITH carrier_map AS (
+    SELECT raw_carrier_code, carrier_name, carrier_parent_group, carrier_type
+    FROM (
+      SELECT
+        UPPER(TRIM(m.raw_carrier_code)) AS raw_carrier_code,
+        m.carrier_name,
+        m.carrier_parent_group,
+        m.carrier_type,
+        ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(m.raw_carrier_code)) ORDER BY m.updated_at DESC) AS rn
+      FROM `your-project.commerce.carrier_code_map` AS m
+    )
+    WHERE rn = 1
+  ),
+  shipments AS (
+    SELECT
+      shipment_id, order_id, carrier_code, service_level, shipped_at, delivered_at,
+      promised_delivery_date, shipment_status, shipping_cost, is_test_order, fulfillment_method
+    FROM (
+      SELECT
+        s.*,
+        ROW_NUMBER() OVER (PARTITION BY s.shipment_id ORDER BY s.updated_at DESC) AS rn
+      FROM `your-project.commerce.order_shipments` AS s
+      -- Replace 'America/New_York' with the store's own time zone.
+      WHERE DATE(s.shipped_at, 'America/New_York') >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 90 DAY)
+    )
+    WHERE rn = 1
+      AND COALESCE(is_test_order, FALSE) = FALSE
+      AND fulfillment_method IN ('ship_to_address', 'ship_from_store')
+  ),
+  labelled AS (
+    SELECT
+      s.*,
+      DATE(s.shipped_at, 'America/New_York') AS ship_date,
+      CASE
+        WHEN s.carrier_code IS NULL OR TRIM(s.carrier_code) = '' THEN 'Unknown Carrier'
+        WHEN m.carrier_name IS NULL THEN 'Unmapped Carrier'
+        ELSE m.carrier_name
+      END AS carrier,
+      COALESCE(m.carrier_parent_group, 'Unassigned') AS carrier_parent_group,
+      COALESCE(m.carrier_type, 'Unassigned') AS carrier_type
+    FROM shipments AS s
+    LEFT JOIN carrier_map AS m
+      ON UPPER(TRIM(s.carrier_code)) = m.raw_carrier_code
+  )
+  SELECT
+    ship_date,
+    carrier,
+    carrier_parent_group,
+    carrier_type,
+    COUNT(*) AS shipments,
+    COUNT(DISTINCT order_id) AS orders,
+    COUNTIF(delivered_at IS NOT NULL) AS delivered_shipments,
+    -- Denominator: every shipment whose promised date has passed; undelivered ones count as late.
+    -- Numerator is restricted to the same population so the rate never exceeds 100%.
+    SAFE_DIVIDE(
+      COUNTIF(promised_delivery_date < CURRENT_DATE('America/New_York') AND delivered_at IS NOT NULL AND DATE(delivered_at, 'America/New_York') <= promised_delivery_date),
+      COUNTIF(promised_delivery_date < CURRENT_DATE('America/New_York'))
+    ) AS on_time_delivery_rate,
+    SAFE_DIVIDE(
+      COUNTIF(shipment_status IN ('failed_attempt', 'returned_to_sender', 'lost')),
+      COUNTIF(shipped_at IS NOT NULL)
+    ) AS failed_delivery_rate,
+    ROUND(AVG(IF(delivered_at IS NOT NULL AND shipped_at IS NOT NULL,
+      TIMESTAMP_DIFF(delivered_at, shipped_at, HOUR) / 24.0, NULL)), 2) AS avg_transit_days,
+    ROUND(SAFE_DIVIDE(SUM(shipping_cost), NULLIF(COUNTIF(shipping_cost IS NOT NULL), 0)), 2) AS avg_shipping_cost_per_shipment
+  FROM labelled
+  GROUP BY ship_date, carrier, carrier_parent_group, carrier_type
+  ORDER BY ship_date DESC, shipments DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Carrier: same logic against the order shipment and carrier code map datasets ingested from the commerce backend.
+  WITH carrier_map AS (
+    SELECT raw_carrier_code, carrier_name, carrier_parent_group, carrier_type
+    FROM (
+      SELECT
+        UPPER(TRIM(m.raw_carrier_code)) AS raw_carrier_code,
+        m.carrier_name,
+        m.carrier_parent_group,
+        m.carrier_type,
+        ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(m.raw_carrier_code)) ORDER BY m.updated_at DESC) AS rn
+      FROM commerce_carrier_code_map AS m
+    ) AS x
+    WHERE rn = 1
+  ),
+  shipments AS (
+    SELECT
+      shipment_id, order_id, carrier_code, service_level, shipped_at, delivered_at,
+      promised_delivery_date, shipment_status, shipping_cost, is_test_order, fulfillment_method
+    FROM (
+      SELECT
+        s.*,
+        ROW_NUMBER() OVER (PARTITION BY s.shipment_id ORDER BY s.updated_at DESC) AS rn
+      FROM commerce_order_shipments AS s
+      -- Replace 'America/New_York' with the store's own time zone.
+      WHERE to_date(from_utc_timestamp(s.shipped_at, 'America/New_York')) >= date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 90)
+    ) AS y
+    WHERE rn = 1
+      AND COALESCE(is_test_order, FALSE) = FALSE
+      AND fulfillment_method IN ('ship_to_address', 'ship_from_store')
+  ),
+  labelled AS (
+    SELECT
+      s.*,
+      to_date(from_utc_timestamp(s.shipped_at, 'America/New_York')) AS ship_date,
+      CASE
+        WHEN s.carrier_code IS NULL OR TRIM(s.carrier_code) = '' THEN 'Unknown Carrier'
+        WHEN m.carrier_name IS NULL THEN 'Unmapped Carrier'
+        ELSE m.carrier_name
+      END AS carrier,
+      COALESCE(m.carrier_parent_group, 'Unassigned') AS carrier_parent_group,
+      COALESCE(m.carrier_type, 'Unassigned') AS carrier_type
+    FROM shipments AS s
+    LEFT JOIN carrier_map AS m
+      ON UPPER(TRIM(s.carrier_code)) = m.raw_carrier_code
+  )
+  SELECT
+    ship_date,
+    carrier,
+    carrier_parent_group,
+    carrier_type,
+    COUNT(*) AS shipments,
+    COUNT(DISTINCT order_id) AS orders,
+    SUM(CASE WHEN delivered_at IS NOT NULL THEN 1 ELSE 0 END) AS delivered_shipments,
+    -- Numerator and denominator share the promised-date-passed population so the rate never exceeds 100%.
+    SUM(CASE WHEN promised_delivery_date < to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')) AND delivered_at IS NOT NULL AND to_date(from_utc_timestamp(delivered_at, 'America/New_York')) <= promised_delivery_date THEN 1 ELSE 0 END) * 1.0
+      / NULLIF(SUM(CASE WHEN promised_delivery_date < to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')) THEN 1 ELSE 0 END), 0) AS on_time_delivery_rate,
+    SUM(CASE WHEN shipment_status IN ('failed_attempt', 'returned_to_sender', 'lost') THEN 1 ELSE 0 END) * 1.0
+      / NULLIF(SUM(CASE WHEN shipped_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS failed_delivery_rate,
+    ROUND(AVG(CASE WHEN delivered_at IS NOT NULL AND shipped_at IS NOT NULL
+      THEN (unix_timestamp(delivered_at) - unix_timestamp(shipped_at)) / 86400.0 END), 2) AS avg_transit_days,
+    ROUND(SUM(shipping_cost) * 1.0 / NULLIF(SUM(CASE WHEN shipping_cost IS NOT NULL THEN 1 ELSE 0 END), 0), 2) AS avg_shipping_cost_per_shipment
+  FROM labelled
+  GROUP BY ship_date, carrier, carrier_parent_group, carrier_type
+  ORDER BY ship_date DESC, shipments DESC;
+
+Calculation Notes: |
+  1️⃣ Assign the carrier at shipment (package) level from the label or tracking number issued at fulfillment; an order split into several shipments can carry several carriers, so roll up to order level only as "multiple carriers" or by the first shipment, never by overwriting.  
+  2️⃣ Normalize raw carrier codes (e.g. "UPSN", "ups_ground", "UPS") through the governed carrier code map to one display name and a stable carrier key; the service level (Ground, 2Day, Express) is a separate attribute, not part of the carrier value.  
+  3️⃣ Use "Unknown Carrier" when no carrier code was captured and "Unmapped Carrier" when a code exists but is not yet in the map, so data-quality gaps stay visible and can be fixed.  
+  4️⃣ The value is the carrier of record that issued the tracking number; for consolidator and hybrid services that hand off to a postal last mile (e.g. UPS Ground Saver, FedEx Ground Economy, DHL eCommerce with USPS final delivery), keep the carrier of record as the value and expose the handoff through the Carrier Type attribute rather than a second carrier value.
+  5️⃣ Exclude test orders, digital goods, and buy-online-pickup-in-store orders (no carrier); ship-from-store orders are included.  
+  6️⃣ If a shipment is re-labelled with another carrier (reship, carrier switch after an exception), attribute performance to the carrier on the final delivered label and keep the original carrier in shipment history.  
+  7️⃣ Stamp the carrier at label creation and bucket by ship date in the store time zone; when carrier KPIs are cut by this dimension, on-time rate denominators are all shipments whose promised date has passed, with undelivered shipments counted as late.
+
+Business Use Case: |
+  1️⃣ The Operations fulfillment team reviews on-time delivery and failed-delivery rates by carrier each week and shifts volume to a better-performing carrier in a region when one falls below its contracted service level.  
+  2️⃣ The Finance team compares average shipping cost per shipment by carrier and service level before annual rate negotiations, and uses the gap to renegotiate rates or move lightweight parcels to a cheaper carrier.  
+  3️⃣ The Customer Service team monitors "Where is my order" contacts and delivery exceptions by carrier and raises escalations or claims with the carrier account manager when a spike appears.  
+  4️⃣ The Product team that owns checkout recalibrates the delivery-date promise per carrier, service level and destination region each month from observed transit-day percentiles, tightening or widening the dates shown to shoppers when actual transit drifts from the promise.
+
+Dependencies:
+  Events: [delivery-confirmation, delivery-exception-occurrence]
+  Metrics: [orders-shipped, orders-delivered, late-deliveries, average-delivery-time]
+  Dimensions: [shipping-tier, shipment-status, fulfillment-method]
+  KPIs: [shipment-on-time-delivery-rate, failed-delivery-rate]
+
+Source Data: Commerce backend: OMS order shipments + shipping platform labels (Shopify Fulfillments, Salesforce Commerce OMS, Adobe Commerce shipments, ShipStation) + carrier tracking feeds
+
+Report Attributes: |
+  Carrier Parent Group; Carrier Type; Shipping Tier; Service Level; Shipment Status; Fulfillment Method; Delivery Region; Ship-From Location; Shipment Weight Band; Delivery Exception Type; Ship Date; Sales Channel
+
+Dashboard Usage: [Carrier Performance Scorecard, Fulfillment and Delivery Dashboard, On-Time Delivery Dashboard, Shipping Cost Dashboard, Delivery Exceptions and WISMO Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [shipping-tier, shipment-mode, shipment-status, fulfillment-method, delivery-region, delivery-location, delivery-promise-date, delivery-exception-type, shipment-weight-band, number-of-shipments, return-method, carrier-performance]
+
+Derived Dimensions: [Carrier Parent Group, Carrier Type, Carrier Service Level]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-10T22:30:36.947324+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-19T19:42:03.385+00:00
+
