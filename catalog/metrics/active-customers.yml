@@ -1,7 +1,7 @@
 # Metric: Active Customers
-# Generated: 2026-09-19T17:56:24.904Z
+# Generated: 2026-09-19T17:56:33.545Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Active Customers
 Formula: COUNT(DISTINCT customer_id) WHERE order_status NOT IN ('cancelled','fraud','test') AND net_order_value > 0 AND order_date > as_of_date − INTERVAL 12 MONTH AND order_date <= as_of_date
@@ -11,32 +11,481 @@ Description: |
 
 Category: Retention
 
+Tags: [metric, E-commerce: Customer Retention, Loyalty & LTV, Omnichannel, Customer Base]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Monetization
 
+Scope: User
 
+Measure Type: Counter
 
+Aggregation Window: Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "purchase",
+          "eventAction": "order_complete",
+          "timeStamp": "2026-09-19T12:49:00-05:00"
+        },
+        "category": {
+          "primaryCategory": "commerce"
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "ORD-100245871",
+      "profile": {
+        "profileInfo": {
+          "profileID": "CUST-00482913",
+          "loyaltyID": "LTY-7781204"
+        }
+      },
+      "total": {
+        "basePrice": 129.97,
+        "shipping": 5.99,
+        "taxRate": 0.0826,
+        "priceWithTax": 140.71,
+        "transactionTotal": 146.7,
+        "currency": "USD"
+      },
+      "attributes": {
+        "channel": "online",
+        "orderStatus": "placed",
+        "customerType": "returning"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-44821",
+            "productName": "Merino Crew Sweater"
+          },
+          "category": {
+            "primaryCategory": "Apparel"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 129.97,
+            "currency": "USD"
+          }
+        }
+      ]
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "CUST-00482913",
+              "loyaltyTier": "Gold",
+              "customerStatus": "active"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "user_id": "CUST-00482913",
+    "user_properties": {
+      "customer_status": "active",
+      "loyalty_tier": "Gold"
+    },
+    "ecommerce": {
+      "transaction_id": "ORD-100245871",
+      "value": 129.97,
+      "tax": 10.74,
+      "shipping": 5.99,
+      "currency": "USD",
+      "coupon": "",
+      "customer_type": "returning",
+      "items": [
+        {
+          "item_id": "SKU-44821",
+          "item_name": "Merino Crew Sweater",
+          "item_category": "Apparel",
+          "price": 129.97,
+          "quantity": 1
+        }
+      ]
+    },
+    "customer_id": "CUST-00482913",
+    "loyalty_tier": "Gold",
+    "purchase_channel": "online"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "user": {
+      "customerId": "CUST-00482913",
+      "customerStatus": "active",
+      "loyaltyTier": "Gold",
+      "customerType": "returning"
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-100245871",
+        "priceTotal": 129.97,
+        "taxAmount": 10.74,
+        "shippingAmount": 5.99,
+        "currencyCode": "USD",
+        "channel": "online"
+      },
+      "products": [
+        {
+          "SKU": "SKU-44821",
+          "name": "Merino Crew Sweater",
+          "category": "Apparel",
+          "quantity": 1,
+          "priceTotal": 129.97
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "CUST-00482913",
+          "primary": true,
+          "authenticatedState": "authenticated"
+        }
+      ]
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD-100245871",
+        "priceTotal": 129.97,
+        "currencyCode": "USD",
+        "taxAmount": 10.74
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-44821",
+        "name": "Merino Crew Sweater",
+        "quantity": 1,
+        "priceTotal": 129.97
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "CUST-00482913",
+            "eVar11": "Gold",
+            "eVar12": "returning",
+            "eVar13": "online"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Active Customers: distinct resolved customers with >= 1 net-valid purchase (online or store)
+  -- in the trailing 12 months ending on the as-of date (point-in-time snapshot, never summed).
+  WITH params AS (
+    SELECT DATE '2026-08-31' AS as_of_date, 'America/New_York' AS reporting_tz
+  ),
+  -- GA4 purchase events: recover the logged-in customer id per transaction for online orders
+  ga4_purchases AS (
+    SELECT
+      e.ecommerce.transaction_id AS transaction_id,
+      MAX(e.user_id) AS ga4_user_id,
+      MAX(IF(ep.key = 'customer_id', ep.value.string_value, NULL)) AS ga4_customer_id
+    FROM `your-project.analytics_123456789.events_*` AS e
+    LEFT JOIN UNNEST(e.event_params) AS ep
+    CROSS JOIN params AS p
+    WHERE e.event_name = 'purchase'
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(p.as_of_date, INTERVAL 12 MONTH))
+                              AND FORMAT_DATE('%Y%m%d', DATE_ADD(p.as_of_date, INTERVAL 1 DAY))
+      AND e.ecommerce.transaction_id IS NOT NULL
+    GROUP BY transaction_id
+  ),
+  -- Returns and refunds processed up to the snapshot date only (no restatement of closed periods)
+  refunds AS (
+    SELECT r.order_id, SUM(r.refund_amount) AS refund_amount
+    FROM `your-project.oms.order_refunds` AS r
+    CROSS JOIN params AS p
+    WHERE DATE(r.refund_ts, p.reporting_tz) <= p.as_of_date
+    GROUP BY r.order_id
+  ),
+  crm_email AS (
+    SELECT hashed_email, MIN(customer_id) AS customer_id
+    FROM `your-project.crm.customers`
+    WHERE hashed_email IS NOT NULL
+    GROUP BY hashed_email
+  ),
+  crm_loyalty AS (
+    SELECT loyalty_id, MIN(customer_id) AS customer_id
+    FROM `your-project.crm.customers`
+    WHERE loyalty_id IS NOT NULL
+    GROUP BY loyalty_id
+  ),
+  online_orders AS (
+    SELECT
+      o.order_id,
+      'online' AS channel,
+      DATE(o.order_ts, p.reporting_tz) AS order_date,
+      LOWER(o.order_status) AS order_status,
+      o.order_total - COALESCE(rf.refund_amount, 0) AS net_order_value,
+      COALESCE(o.is_gift_card_only, FALSE) AS is_gift_card_only,
+      COALESCE(o.is_marketplace_order, FALSE) AS is_marketplace_order,
+      COALESCE(o.retailer_owns_customer_record, TRUE) AS retailer_owns_customer_record,
+      COALESCE(o.customer_id, g.ga4_customer_id, g.ga4_user_id, ce.customer_id) AS raw_customer_id
+    FROM `your-project.oms.orders` AS o
+    CROSS JOIN params AS p
+    LEFT JOIN ga4_purchases AS g ON g.transaction_id = o.order_id
+    LEFT JOIN refunds AS rf ON rf.order_id = o.order_id
+    LEFT JOIN crm_email AS ce ON ce.hashed_email = o.hashed_email
+  ),
+  -- POS transactions resolved through loyalty ID, then hashed email; unresolved rows stay NULL and are excluded
+  store_orders AS (
+    SELECT
+      t.pos_transaction_id AS order_id,
+      'store' AS channel,
+      DATE(t.transaction_ts, p.reporting_tz) AS order_date,
+      LOWER(t.transaction_status) AS order_status,
+      t.transaction_total - COALESCE(rf.refund_amount, 0) AS net_order_value,
+      COALESCE(t.is_gift_card_only, FALSE) AS is_gift_card_only,
+      FALSE AS is_marketplace_order,
+      TRUE AS retailer_owns_customer_record,
+      COALESCE(cl.customer_id, ce.customer_id) AS raw_customer_id
+    FROM `your-project.pos.transactions` AS t
+    CROSS JOIN params AS p
+    LEFT JOIN refunds AS rf ON rf.order_id = t.pos_transaction_id
+    LEFT JOIN crm_loyalty AS cl ON cl.loyalty_id = t.loyalty_id
+    LEFT JOIN crm_email AS ce ON ce.hashed_email = t.hashed_email
+  ),
+  all_orders AS (
+    SELECT * FROM online_orders
+    UNION ALL
+    SELECT * FROM store_orders
+  ),
+  qualifying_orders AS (
+    SELECT
+      COALESCE(m.surviving_customer_id, a.raw_customer_id) AS customer_id,
+      a.order_id,
+      a.channel
+    FROM all_orders AS a
+    CROSS JOIN params AS p
+    LEFT JOIN `your-project.crm.customer_merge_map` AS m ON m.merged_customer_id = a.raw_customer_id
+    WHERE a.raw_customer_id IS NOT NULL
+      AND a.order_status NOT IN ('cancelled', 'fraud', 'fraud_rejected', 'test')
+      AND a.net_order_value > 0
+      AND NOT a.is_gift_card_only
+      AND (NOT a.is_marketplace_order OR a.retailer_owns_customer_record)
+      AND a.order_date > DATE_SUB(p.as_of_date, INTERVAL 12 MONTH)
+      AND a.order_date <= p.as_of_date
+  ),
+  -- B2B buyers are counted at account level and reported separately from B2C
+  active_buyers AS (
+    SELECT
+      IF(c.customer_type = 'B2B', 'B2B', 'B2C') AS customer_segment,
+      IF(c.customer_type = 'B2B', c.account_id, c.customer_id) AS counting_id,
+      LOGICAL_OR(q.channel = 'online') AS bought_online,
+      LOGICAL_OR(q.channel = 'store') AS bought_store
+    FROM qualifying_orders AS q
+    JOIN `your-project.crm.customers` AS c ON c.customer_id = q.customer_id
+    LEFT JOIN `your-project.crm.erasure_requests` AS er ON er.customer_id = q.customer_id
+    WHERE er.customer_id IS NULL
+      AND NOT COALESCE(c.is_internal_account, FALSE)
+    GROUP BY customer_segment, counting_id
+  )
+  SELECT
+    p.as_of_date,
+    b.customer_segment,
+    COUNT(DISTINCT b.counting_id) AS active_customers,
+    COUNTIF(b.bought_online AND NOT b.bought_store) AS online_only_active_customers,
+    COUNTIF(b.bought_store AND NOT b.bought_online) AS store_only_active_customers,
+    COUNTIF(b.bought_online AND b.bought_store) AS omnichannel_active_customers
+  FROM active_buyers AS b
+  CROSS JOIN params AS p
+  GROUP BY p.as_of_date, b.customer_segment
+  ORDER BY b.customer_segment;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Active Customers: distinct resolved customers with >= 1 net-valid purchase (online or store)
+  -- in the trailing 12 months ending on the as-of date (point-in-time snapshot, never summed).
+  WITH params AS (
+    SELECT CAST('2026-08-31' AS DATE) AS as_of_date, 'America/New_York' AS reporting_tz
+  ),
+  -- Web purchase ExperienceEvents: authenticated CRMID per purchaseID for online orders
+  web_purchases AS (
+    SELECT
+      w.commerce.order.purchaseID AS transaction_id,
+      MAX(w.identityMap['CRMID'][0].id) AS web_customer_id
+    FROM aep_web_events_dataset AS w
+    CROSS JOIN params AS p
+    WHERE w.eventType = 'commerce.purchases'
+      AND w.commerce.order.purchaseID IS NOT NULL
+      AND w.timestamp >= CAST(add_months(p.as_of_date, -12) AS TIMESTAMP) - INTERVAL 1 DAY
+      AND w.timestamp < CAST(date_add(p.as_of_date, 2) AS TIMESTAMP)
+    GROUP BY w.commerce.order.purchaseID
+  ),
+  -- Returns and refunds processed up to the snapshot date only (no restatement of closed periods)
+  refunds AS (
+    SELECT r.order_id, SUM(r.refund_amount) AS refund_amount
+    FROM oms_order_refunds_dataset AS r
+    CROSS JOIN params AS p
+    WHERE to_date(from_utc_timestamp(r.refund_ts, p.reporting_tz)) <= p.as_of_date
+    GROUP BY r.order_id
+  ),
+  crm_email AS (
+    SELECT hashed_email, MIN(customer_id) AS customer_id
+    FROM crm_customers_dataset
+    WHERE hashed_email IS NOT NULL
+    GROUP BY hashed_email
+  ),
+  crm_loyalty AS (
+    SELECT loyalty_id, MIN(customer_id) AS customer_id
+    FROM crm_customers_dataset
+    WHERE loyalty_id IS NOT NULL
+    GROUP BY loyalty_id
+  ),
+  online_orders AS (
+    SELECT
+      o.order_id,
+      'online' AS channel,
+      to_date(from_utc_timestamp(o.order_ts, p.reporting_tz)) AS order_date,
+      LOWER(o.order_status) AS order_status,
+      o.order_total - COALESCE(rf.refund_amount, 0) AS net_order_value,
+      COALESCE(o.is_gift_card_only, FALSE) AS is_gift_card_only,
+      COALESCE(o.is_marketplace_order, FALSE) AS is_marketplace_order,
+      COALESCE(o.retailer_owns_customer_record, TRUE) AS retailer_owns_customer_record,
+      COALESCE(o.customer_id, wp.web_customer_id, ce.customer_id) AS raw_customer_id
+    FROM oms_orders_dataset AS o
+    CROSS JOIN params AS p
+    LEFT JOIN web_purchases AS wp ON wp.transaction_id = o.order_id
+    LEFT JOIN refunds AS rf ON rf.order_id = o.order_id
+    LEFT JOIN crm_email AS ce ON ce.hashed_email = o.hashed_email
+  ),
+  -- POS transactions resolved through loyalty ID, then hashed email; unresolved rows stay NULL and are excluded
+  store_orders AS (
+    SELECT
+      t.pos_transaction_id AS order_id,
+      'store' AS channel,
+      to_date(from_utc_timestamp(t.transaction_ts, p.reporting_tz)) AS order_date,
+      LOWER(t.transaction_status) AS order_status,
+      t.transaction_total - COALESCE(rf.refund_amount, 0) AS net_order_value,
+      COALESCE(t.is_gift_card_only, FALSE) AS is_gift_card_only,
+      FALSE AS is_marketplace_order,
+      TRUE AS retailer_owns_customer_record,
+      COALESCE(cl.customer_id, ce.customer_id) AS raw_customer_id
+    FROM pos_transactions_dataset AS t
+    CROSS JOIN params AS p
+    LEFT JOIN refunds AS rf ON rf.order_id = t.pos_transaction_id
+    LEFT JOIN crm_loyalty AS cl ON cl.loyalty_id = t.loyalty_id
+    LEFT JOIN crm_email AS ce ON ce.hashed_email = t.hashed_email
+  ),
+  all_orders AS (
+    SELECT * FROM online_orders
+    UNION ALL
+    SELECT * FROM store_orders
+  ),
+  qualifying_orders AS (
+    SELECT
+      COALESCE(m.surviving_customer_id, a.raw_customer_id) AS customer_id,
+      a.order_id,
+      a.channel
+    FROM all_orders AS a
+    CROSS JOIN params AS p
+    LEFT JOIN crm_customer_merge_map_dataset AS m ON m.merged_customer_id = a.raw_customer_id
+    WHERE a.raw_customer_id IS NOT NULL
+      AND a.order_status NOT IN ('cancelled', 'fraud', 'fraud_rejected', 'test')
+      AND a.net_order_value > 0
+      AND NOT a.is_gift_card_only
+      AND (NOT a.is_marketplace_order OR a.retailer_owns_customer_record)
+      AND a.order_date > add_months(p.as_of_date, -12)
+      AND a.order_date <= p.as_of_date
+  ),
+  -- B2B buyers are counted at account level and reported separately from B2C
+  active_buyers AS (
+    SELECT
+      CASE WHEN c.customer_type = 'B2B' THEN 'B2B' ELSE 'B2C' END AS customer_segment,
+      CASE WHEN c.customer_type = 'B2B' THEN c.account_id ELSE c.customer_id END AS counting_id,
+      MAX(CASE WHEN q.channel = 'online' THEN 1 ELSE 0 END) AS bought_online,
+      MAX(CASE WHEN q.channel = 'store' THEN 1 ELSE 0 END) AS bought_store
+    FROM qualifying_orders AS q
+    JOIN crm_customers_dataset AS c ON c.customer_id = q.customer_id
+    LEFT JOIN crm_erasure_requests_dataset AS er ON er.customer_id = q.customer_id
+    WHERE er.customer_id IS NULL
+      AND NOT COALESCE(c.is_internal_account, FALSE)
+    GROUP BY
+      CASE WHEN c.customer_type = 'B2B' THEN 'B2B' ELSE 'B2C' END,
+      CASE WHEN c.customer_type = 'B2B' THEN c.account_id ELSE c.customer_id END
+  )
+  SELECT
+    p.as_of_date,
+    b.customer_segment,
+    COUNT(DISTINCT b.counting_id) AS active_customers,
+    SUM(CASE WHEN b.bought_online = 1 AND b.bought_store = 0 THEN 1 ELSE 0 END) AS online_only_active_customers,
+    SUM(CASE WHEN b.bought_store = 1 AND b.bought_online = 0 THEN 1 ELSE 0 END) AS store_only_active_customers,
+    SUM(CASE WHEN b.bought_online = 1 AND b.bought_store = 1 THEN 1 ELSE 0 END) AS omnichannel_active_customers
+  FROM active_buyers AS b
+  CROSS JOIN params AS p
+  GROUP BY p.as_of_date, b.customer_segment
+  ORDER BY b.customer_segment;
 
+Calculation Notes: |
+  1️⃣ Window: trailing 12 months ending on the as-of date (inclusive), recomputed as a point-in-time snapshot at each period close; never sum monthly values, since the same customer is active across overlapping windows. Where a 6-month or 24-month window is used for fast- or slow-replenishment categories, the window length must be stated alongside the value and held constant across comparisons.,2️⃣ Identity: the counting key is the resolved customer_id from the order management or CRM system, not the GA4 user_pseudo_id or ECID. Online purchase events are joined to backend orders on transaction_id, and in-store POS transactions are attached through loyalty ID or hashed email; guest checkouts are deduplicated on hashed email, and POS transactions that cannot be resolved to a customer are excluded rather than counted as anonymous buyers.,3️⃣ Qualifying purchase: an order with status not in cancelled, fraud-rejected or test, and net value above zero after returns and refunds. Customers whose only purchases in the window were fully refunded, $0 promotional or sample orders, gift-card-only purchases, or internal and employee test accounts are excluded.,4️⃣ Timing: the qualifying date is the order placement timestamp in the store's reporting time zone, not ship or delivery date. Returns processed after the snapshot is taken do not restate prior closed periods unless the finance restatement policy is applied consistently to every period in the trend.,5️⃣ Scope boundaries: marketplace orders fulfilled by third parties count only when the retailer owns the customer record; B2B account buyers are counted at the account level and reported separately from B2C. Subscription renewals qualify as purchases here, but the subscriber base itself is measured by Active Subscriber Count, which uses entitlement status rather than purchase recency.,6️⃣ Merges and deletions: customer records merged by identity resolution are counted once under the surviving ID, and records erased under GDPR or CCPA deletion requests drop out of recomputed history, so restated prior periods can differ slightly from originally published values.
 
+Business Use Case: |
+  1️⃣ The CRM and Retention team reviews the monthly snapshot and, when Active Customers declines for two consecutive months while new-customer acquisition holds steady, triggers win-back journeys for customers entering months 9 to 12 since their last order before they fall out of the window.,2️⃣ Finance uses the quarter-end Active Customers value as the denominator for revenue per active customer and purchase frequency in the board pack, and flags any quarter where growth in revenue outpaces growth in Active Customers for concentration risk review.,3️⃣ The Loyalty Program manager compares Active Customers split by loyalty tier and channel (online-only, store-only, omnichannel) after each program change, and reallocates points incentives toward the segment whose active count is shrinking fastest.,4️⃣ Merchandising planners size category assortment and inventory depth each season against Active Customers by primary category, and cut breadth in categories whose buyer base has contracted year over year.
 
+Dependencies:
+  Events: [purchase, refund]
+  Dimensions: [customer-id, customer-status]
 
+Source Data: Digital Analytics (GA4) + Order Management/POS + CRM (Salesforce)
 
+Report Attributes: |
+  Channel (Online / Store / Omnichannel); Loyalty Tier; Customer Status; Acquisition Cohort; Region; Primary Product Category; Device Category
 
+Dashboard Usage: [Customer Base Health, Retention & Loyalty Performance, Executive Commercial Scorecard, Customer Lifetime Value Analysis]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [new-customers, returning-customers, lapsed-customers, total-orders, active-subscriber-count]
 
+Derived KPIs: [customer-retention-rate, customer-lifetime-value, purchase-frequency, revenue-per-customer, customer-churn-rate]
 
+Data Sensitivity: Restricted
 
-Contains PII: No
+Contains PII: Yes
 
 Status: draft
 
@@ -44,5 +493,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T17:56:24.225+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T17:56:33.28+00:00
 
