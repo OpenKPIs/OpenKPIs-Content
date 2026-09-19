@@ -1,12 +1,12 @@
 # Dimension: Fulfillment Method
-# Generated: 2026-09-18T16:33:44.073Z
+# Generated: 2026-09-19T18:14:45.264Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Fulfillment Method
 
 Description: |
-  Fulfillment Method records the customer-visible way an order is handed over — BOPIS (buy online, pick up in store), curbside pickup, ship-to-store, ship-to-home or same-day delivery — captured at the shipping step and frozen on the completed order, making it the anchor that stitches the digital order to its offline pickup or delivery leg and the primary slice for every BOPIS and omnichannel KPI. It is deliberately narrower than Shipping Tier, which describes delivery speed and the service level the customer paid for (Standard, Expedited, Overnight), and than Fulfillment Strategy, which describes the backend sourcing decision (store-ship-from, dark store, regional distribution centre); those two are maintained as separate published rows and Fulfillment Method never carries their values.
+  Fulfillment Method records the customer-visible way an order is handed over — BOPIS (buy online, pick up in store), curbside pickup, ship-to-store, ship-to-home or same-day delivery — captured at the shipping step and frozen on the completed order, making it the anchor that stitches the digital order to its offline pickup or delivery leg and the primary slice for every BOPIS and omnichannel KPI. It is deliberately narrower than Shipping Tier, which describes delivery speed and the service level the customer paid for (Standard, Expedited, Overnight), and than Fulfillment Strategy, which describes the backend sourcing decision (store-ship-from, dark store, regional distribution centre); those two are maintained as separate catalog rows and Fulfillment Method never carries their values.
 
 Category: Operations
 
@@ -28,7 +28,7 @@ GA4 Event: |
   add_shipping_info
 
 Adobe Event: |
-  Checkout: Fulfillment Method Selected
+  Shipping Info Added
 
 W3 Data Layer: |
   {
@@ -100,8 +100,7 @@ W3 Data Layer: |
               "currency": "USD"
             },
             "attributes": {
-              "fulfillmentMethod": "ship_to_home",
-              "pickupLocationID": "not_set"
+              "fulfillmentMethod": "ship_to_home"
             }
           }
         ]
@@ -157,8 +156,7 @@ GA4 Data Layer: |
           "item_variant": "Charcoal / L",
           "price": 22.5,
           "quantity": 2,
-          "fulfillment_method": "ship_to_home",
-          "pickup_location_id": "not_set"
+          "fulfillment_method": "ship_to_home"
         }
       ]
     }
@@ -169,12 +167,18 @@ Adobe Client Data Layer: |
     "event": "add_shipping_info",
     "eventInfo": {
       "path": "commerce.shipping",
-      "trigger": "Checkout: Fulfillment Method Selected"
+      "trigger": "Shipping Info Added"
+    },
+    "_experience": {
+      "analytics": {
+        "event1to100": {
+          "event12": {
+            "value": 1
+          }
+        }
+      }
     },
     "commerce": {
-      "checkouts": {
-        "value": 1
-      },
       "shipping": {
         "fulfillmentMethod": "split",
         "shippingTier": "Standard",
@@ -197,8 +201,7 @@ Adobe Client Data Layer: |
         "quantity": 2,
         "priceTotal": 45,
         "currencyCode": "USD",
-        "fulfillmentMethod": "ship_to_home",
-        "pickupLocationId": "not_set"
+        "fulfillmentMethod": "ship_to_home"
       }
     ],
     "cart": {
@@ -217,13 +220,12 @@ XDM Mapping: |
     "eventType": "commerce.checkouts",
     "timestamp": "2026-09-17T14:32:08.000Z",
     "commerce": {
-      "checkouts": {
-        "value": 1
-      },
       "shipping": {
-        "shippingMethod": "split",
-        "shippingTier": "Standard"
+        "shippingMethod": "split"
       }
+    },
+    "_tenant": {
+      "shippingTier": "Standard"
     },
     "productListItems": [
       {
@@ -247,6 +249,11 @@ XDM Mapping: |
     },
     "_experience": {
       "analytics": {
+        "event1to100": {
+          "event12": {
+            "value": 1
+          }
+        },
         "customDimensions": {
           "eVars": {
             "eVar23": "split",
@@ -283,6 +290,8 @@ Google Analytics SQL: |
   -- basket mixes methods) and item grain (line-level method for mixed baskets).
   -- Event-scoped params are pivoted with UNNEST + MAX(IF(...)) inside scalar subqueries so no row fan-out occurs
   -- and the items ARRAY stays intact for the line-level pass.
+  -- carrier_role labels each carrier event: begin_checkout fires BEFORE the shipping selection and is the
+  -- pre_selection_base where 'not_set' is expected; add_shipping_info is the selection; purchase is the system of record.
   WITH base AS (
     SELECT
       PARSE_DATE('%Y%m%d', e.event_date) AS event_day,
@@ -329,6 +338,12 @@ Google Analytics SQL: |
   event_mix AS (
     SELECT
       event_name AS carrier_event,
+      CASE event_name
+        WHEN 'begin_checkout' THEN 'pre_selection_base'
+        WHEN 'add_shipping_info' THEN 'selection'
+        WHEN 'purchase' THEN 'system_of_record'
+        ELSE 'inherited'
+      END AS carrier_role,
       fulfillment_method,
       COUNT(*) AS events,
       COUNT(DISTINCT CONCAT(user_pseudo_id, '-', CAST(ga_session_id AS STRING))) AS sessions,
@@ -336,7 +351,7 @@ Google Analytics SQL: |
       COUNT(DISTINCT pickup_location_id) AS pickup_locations,
       SAFE_DIVIDE(COUNT(*), SUM(COUNT(*)) OVER (PARTITION BY event_name)) AS share_of_carrier_event
     FROM events_typed
-    GROUP BY carrier_event, fulfillment_method
+    GROUP BY carrier_event, carrier_role, fulfillment_method
   ),
   -- Purchase snapshot, deduplicated to one row per transaction_id.
   purchases AS (
@@ -347,10 +362,13 @@ Google Analytics SQL: |
     QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1
   ),
   -- Grain 3 source: item-scoped fulfillment_method, pivoted out of item_params the same way.
+  -- LEFT JOIN keeps purchases with an empty items array so the order grain divides by every deduplicated purchase.
   purchase_items AS (
     SELECT
       p.transaction_id,
       p.event_day,
+      p.fulfillment_method AS event_fulfillment_method,
+      it IS NOT NULL AS has_line,
       it.item_id,
       it.item_name,
       it.item_category,
@@ -367,16 +385,20 @@ Google Analytics SQL: |
         WHEN '' THEN 'not_set'
         ELSE '(unmapped)'
       END AS item_fulfillment_method
-    FROM purchases AS p,
-      UNNEST(p.items) AS it
+    FROM purchases AS p
+    LEFT JOIN UNNEST(p.items) AS it
   ),
   -- Grain 2: order-level value. Two or more distinct line methods resolve to 'split' so pickup orders are never inflated.
+  -- When no line carries a governed value (or the order has no lines), fall back to the event-level value, then 'not_set'.
   order_method AS (
     SELECT
       pi.transaction_id,
       IF(COUNT(DISTINCT IF(pi.item_fulfillment_method IN ('not_set', '(unmapped)'), NULL, pi.item_fulfillment_method)) > 1,
          'split',
-         COALESCE(MAX(IF(pi.item_fulfillment_method IN ('not_set', '(unmapped)'), NULL, pi.item_fulfillment_method)), 'not_set')
+         COALESCE(
+           MAX(IF(pi.item_fulfillment_method IN ('not_set', '(unmapped)'), NULL, pi.item_fulfillment_method)),
+           MAX(IF(pi.event_fulfillment_method IN ('not_set', '(unmapped)'), NULL, pi.event_fulfillment_method)),
+           'not_set')
       ) AS order_fulfillment_method,
       SUM(pi.quantity) AS units,
       SUM(pi.item_revenue) AS item_revenue
@@ -401,11 +423,13 @@ Google Analytics SQL: |
       ROUND(SUM(pi.item_revenue), 2) AS revenue,
       SAFE_DIVIDE(SUM(pi.quantity), SUM(SUM(pi.quantity)) OVER ()) AS share_of_all_units
     FROM purchase_items AS pi
+    WHERE pi.has_line
     GROUP BY fulfillment_method
   )
   SELECT
     'event' AS grain,
     em.carrier_event,
+    em.carrier_role,
     em.fulfillment_method,
     em.events,
     em.sessions,
@@ -420,6 +444,7 @@ Google Analytics SQL: |
   SELECT
     'order',
     'purchase',
+    'system_of_record',
     om.fulfillment_method,
     CAST(NULL AS INT64),
     CAST(NULL AS INT64),
@@ -434,6 +459,7 @@ Google Analytics SQL: |
   SELECT
     'item',
     'purchase',
+    'system_of_record',
     im.fulfillment_method,
     CAST(NULL AS INT64),
     CAST(NULL AS INT64),
@@ -451,9 +477,14 @@ AEP Query Service SQL: |
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
   -- Fulfillment Method distribution on the ExperienceEvent dataset, reading the XDM paths the mapping declares:
-  -- commerce.shipping.shippingMethod (order/checkout value), _experience.analytics.customDimensions.eVars.eVar23
+  -- commerce.shipping.shippingMethod (holds the governed Fulfillment Method value), _tenant.shippingTier (tenant field,
+  -- not standard XDM), refunds on eventType commerce.backofficeCreditMemoIssued, _experience.analytics.customDimensions.eVars.eVar23
   -- (fulfillment method), eVar24 (pickup location), eVar25 (transaction channel), props.prop23 and
   -- customDimensions.lists.list1 (SKU|method pairs for mixed baskets).
+  -- Schema notes: the governed Fulfillment Method value lives in commerce.shipping.shippingMethod; refunds arrive as
+  -- eventType commerce.backofficeCreditMemoIssued. Checkout steps are told apart by their success events, never by the
+  -- fulfillment value: _experience.analytics.event1to100.event12 = Shipping Info Added (add_shipping_info) and
+  -- commerce.checkouts = begin_checkout, which fires BEFORE the selection and is the pre_selection_base where 'not_set' is expected.
   WITH base AS (
     SELECT
       endUserIDs._experience.ecid.id AS ecid,
@@ -461,9 +492,9 @@ AEP Query Service SQL: |
       eventType AS event_type,
       CASE
         WHEN eventType = 'commerce.purchases' THEN 'purchase'
-        WHEN eventType = 'commerce.returns' THEN 'refund'
-        WHEN commerce.shipping.shippingMethod IS NOT NULL AND TRIM(commerce.shipping.shippingMethod) <> '' THEN 'add_shipping_info'
-        ELSE 'begin_checkout'
+        WHEN eventType = 'commerce.backofficeCreditMemoIssued' THEN 'refund'
+        WHEN _experience.analytics.event1to100.event12.value > 0 THEN 'add_shipping_info'
+        WHEN commerce.checkouts.value > 0 THEN 'begin_checkout'
       END AS carrier_event,
       LOWER(TRIM(COALESCE(
         commerce.shipping.shippingMethod,
@@ -473,7 +504,7 @@ AEP Query Service SQL: |
       ))) AS fulfillment_method_raw,
       _experience.analytics.customDimensions.eVars.eVar24 AS pickup_location_id,
       COALESCE(_experience.analytics.customDimensions.eVars.eVar25, channel.typeAtSource) AS transaction_channel,
-      commerce.shipping.shippingTier AS shipping_tier,
+      _tenant.shippingTier AS shipping_tier,
       commerce.order.purchaseID AS purchase_id,
       commerce.order.priceTotal AS order_total,
       productListItems AS product_list_items,
@@ -481,7 +512,11 @@ AEP Query Service SQL: |
     FROM aep_web_events_dataset
     WHERE timestamp >= date_sub(current_date(), 30)
       AND timestamp < current_date()
-      AND eventType IN ('commerce.checkouts', 'commerce.purchases', 'commerce.returns')
+      AND (
+        eventType IN ('commerce.purchases', 'commerce.backofficeCreditMemoIssued')
+        OR _experience.analytics.event1to100.event12.value > 0
+        OR commerce.checkouts.value > 0
+      )
   ),
   -- Controlled vocabulary; unlisted values become '(unmapped)' data-quality volume, empty stays 'not_set'.
   events_typed AS (
@@ -504,13 +539,19 @@ AEP Query Service SQL: |
   event_mix AS (
     SELECT
       carrier_event,
+      CASE carrier_event
+        WHEN 'begin_checkout' THEN 'pre_selection_base'
+        WHEN 'add_shipping_info' THEN 'selection'
+        WHEN 'purchase' THEN 'system_of_record'
+        ELSE 'inherited'
+      END AS carrier_role,
       fulfillment_method,
       COUNT(*) AS events,
       COUNT(DISTINCT ecid) AS visitors,
       COUNT(DISTINCT pickup_location_id) AS pickup_locations,
       CAST(COUNT(*) AS DOUBLE) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY carrier_event), 0) AS share_of_base
     FROM events_typed
-    GROUP BY carrier_event, fulfillment_method
+    GROUP BY carrier_event, carrier_role, fulfillment_method
   ),
   purchases AS (
     SELECT ecid, event_ts, purchase_id, order_total, fulfillment_method, product_list_items, item_method_list
@@ -524,8 +565,9 @@ AEP Query Service SQL: |
     ) p
     WHERE rn = 1
   ),
+  -- explode_outer keeps purchases with no productListItems so the order grain divides by every deduplicated purchase.
   purchase_lines AS (
-    SELECT purchase_id, order_total, explode(product_list_items) AS line
+    SELECT purchase_id, order_total, fulfillment_method AS event_fulfillment_method, explode_outer(product_list_items) AS line
     FROM purchases
   ),
   line_methods AS (
@@ -542,6 +584,8 @@ AEP Query Service SQL: |
   purchase_items AS (
     SELECT
       pl.purchase_id,
+      pl.event_fulfillment_method,
+      pl.line IS NOT NULL AS has_line,
       pl.line.SKU AS sku,
       COALESCE(pl.line.quantity, 0) AS quantity,
       COALESCE(pl.line.priceTotal, 0) AS line_revenue,
@@ -560,12 +604,16 @@ AEP Query Service SQL: |
      AND mp.sku = pl.line.SKU
   ),
   -- Grain 2: order value, 'split' when the basket mixes two or more governed methods.
+  -- When no line carries a governed value (or the order has no lines), fall back to the event-level value, then 'not_set'.
   order_method AS (
     SELECT
       purchase_id,
       CASE
         WHEN COUNT(DISTINCT CASE WHEN item_fulfillment_method NOT IN ('not_set', '(unmapped)') THEN item_fulfillment_method END) > 1 THEN 'split'
-        ELSE COALESCE(MAX(CASE WHEN item_fulfillment_method NOT IN ('not_set', '(unmapped)') THEN item_fulfillment_method END), 'not_set')
+        ELSE COALESCE(
+          MAX(CASE WHEN item_fulfillment_method NOT IN ('not_set', '(unmapped)') THEN item_fulfillment_method END),
+          MAX(CASE WHEN event_fulfillment_method NOT IN ('not_set', '(unmapped)') THEN event_fulfillment_method END),
+          'not_set')
       END AS fulfillment_method,
       SUM(quantity) AS units,
       SUM(line_revenue) AS revenue
@@ -590,11 +638,13 @@ AEP Query Service SQL: |
       ROUND(SUM(line_revenue), 2) AS revenue,
       CAST(SUM(quantity) AS DOUBLE) / NULLIF(SUM(SUM(quantity)) OVER (), 0) AS share_of_base
     FROM purchase_items
+    WHERE has_line
     GROUP BY item_fulfillment_method
   )
   SELECT
     'event' AS grain,
     carrier_event,
+    carrier_role,
     fulfillment_method,
     events,
     visitors,
@@ -608,6 +658,7 @@ AEP Query Service SQL: |
   SELECT
     'order',
     'purchase',
+    'system_of_record',
     fulfillment_method,
     CAST(NULL AS BIGINT),
     CAST(NULL AS BIGINT),
@@ -621,6 +672,7 @@ AEP Query Service SQL: |
   SELECT
     'item',
     'purchase',
+    'system_of_record',
     fulfillment_method,
     CAST(NULL AS BIGINT),
     CAST(NULL AS BIGINT),
@@ -633,14 +685,16 @@ AEP Query Service SQL: |
   ORDER BY grain, carrier_event, share_of_base DESC, fulfillment_method;
 
 Calculation Notes: |
-  1️⃣ Controlled vocabulary only — the permitted values are bopis_in_store, curbside_pickup, ship_to_store, ship_to_home and same_day_delivery, normalised to lower snake case at collection. Curbside is kept distinct from in-store pickup because the hand-off operation, staffing model and dwell-time targets differ; collapsing the two is the most common reporting error and destroys curbside SLA measurement.,2️⃣ Excludes all sourcing-node, warehouse and carrier-routing attributes. Ship-from-store node ids, distribution-centre codes, dark-store flags, carrier or parcel-service names and routing rules belong to Fulfillment Strategy and Shipping Tier respectively and must never be written into this dimension — a customer who chose ship_to_home stays ship_to_home whether the parcel was picked in a store or a regional centre.,3️⃣ Set on add_shipping_info when the shopper selects the hand-off mode, carried forward on begin_checkout, and snapshotted immutably on purchase. The purchase-time value is the system of record for all reporting; any later change of mind is handled as a cancellation plus a new order, never as a retroactive rewrite of the original row.,4️⃣ Mixed-basket split-fulfillment orders are resolved at line-item grain: every item carries its own Fulfillment Method, and item-level BOPIS metrics sum across the basket without double counting. At order grain the value is 'split' when two or more distinct methods are present on one order, so order-level pickup counts are never inflated by shipped lines; report the pure methods and 'split' together to reconcile to total orders.,5️⃣ Sessions that never reach add_shipping_info — browse-only traffic, cart abandonment before shipping selection, and digital gift-card or e-delivery orders where no physical hand-off exists — are recorded as 'not_set' rather than defaulted to ship_to_home. Denominators for method mix must exclude 'not_set' and digital-only lines, and report them separately as data-quality volume.,6️⃣ The pickup leg is deliberately not bounded by the analytics session timeout. The store hand-off routinely occurs hours or days after the ordering session ends, so the dimension is keyed to the order identifier, not the session; pickup and collection events joined back to the order inherit the purchase-time value even when the offline leg falls in a later day, week or month than the order.,7️⃣ Refunds, returns and cancellations inherit the original purchase value so return-rate-by-method analysis stays comparable, including in-store returns of items originally shipped to home. Orders cancelled because the pickup window expired keep their pickup value and are flagged through the cancellation reason, not by moving them out of the method.
+  1️⃣ Controlled vocabulary only — the permitted values are bopis_in_store, curbside_pickup, ship_to_store, ship_to_home and same_day_delivery, normalised to lower snake case at collection, plus two reserved values: 'split' (order grain only, never on a line item) and 'not_set' (no hand-off mode selected). Curbside is kept distinct from in-store pickup because the hand-off operation, staffing model and dwell-time targets differ; collapsing the two is the most common reporting error and destroys curbside SLA measurement.,2️⃣ Excludes all sourcing-node, warehouse and carrier-routing attributes. Ship-from-store node ids, distribution-centre codes, dark-store flags, carrier or parcel-service names and routing rules belong to Fulfillment Strategy and Shipping Tier respectively and must never be written into this dimension — a customer who chose ship_to_home stays ship_to_home whether the parcel was picked in a store or a regional centre.,3️⃣ Set on add_shipping_info when the shopper selects the hand-off mode, carried forward on add_payment_info, and snapshotted immutably on purchase. begin_checkout fires before the selection, so it is reported only as the pre-selection base where 'not_set' is expected. The purchase-time value is the system of record for all reporting; any later change of mind is handled as a cancellation plus a new order, never as a retroactive rewrite of the original row.,4️⃣ Mixed-basket split-fulfillment orders are resolved at line-item grain: every item carries its own Fulfillment Method, and item-level BOPIS metrics sum across the basket without double counting. At order grain the value is 'split' when two or more distinct methods are present on one order, so order-level pickup counts are never inflated by shipped lines; report the pure methods and 'split' together to reconcile to total orders.,5️⃣ Sessions that never reach add_shipping_info — browse-only traffic, cart abandonment before shipping selection, and digital gift-card or e-delivery orders where no physical hand-off exists — are recorded as 'not_set' rather than defaulted to ship_to_home. Method-mix shares use the full base population, including 'not_set', so the shares of each grain sum to 1; 'not_set' and '(unmapped)' are reported as their own rows so data-quality volume stays visible rather than being dropped from the denominator.,6️⃣ The pickup leg is deliberately not bounded by the analytics session timeout. The store hand-off routinely occurs hours or days after the ordering session ends, so the dimension is keyed to the order identifier, not the session; pickup and collection events joined back to the order inherit the purchase-time value even when the offline leg falls in a later day, week or month than the order.,7️⃣ Refunds, returns and cancellations inherit the original purchase value so return-rate-by-method analysis stays comparable, including in-store returns of items originally shipped to home. Orders cancelled because the pickup window expired keep their pickup value and are flagged through the cancellation reason, not by moving them out of the method.
 
 Business Use Case: |
   1️⃣ The Omnichannel Merchandising lead reviews weekly method mix by store cluster and, when BOPIS and curbside share falls below plan in a market, moves the pickup promise higher in the product detail page and checkout messaging for that market and re-tests the following week.,2️⃣ Store Operations planners use pickup-method volume by store and day-part to staff the collection desk and curbside lanes, triggering a rota change whenever a store's curbside orders exceed its hourly hand-off capacity two weeks running.,3️⃣ The Customer Service team segments contact drivers and refunds by method to isolate pickup-specific failure modes — order not ready, wrong item staged, expired pickup window — and routes the top offending stores to the regional manager for corrective action.,4️⃣ Finance uses the method split on completed orders to attribute shipping cost, last-mile spend and in-store attachment revenue, quantifying the margin difference between pickup and ship-to-home orders in the monthly channel profitability review.
 
 Dependencies:
-  Events: [add-shipping-info, begin-checkout, purchase, refund]
+  Events: [checkout-initiation, purchase, refund-issued, order-pickup]
+  Metrics: [shipping-info-added, begin-checkout]
   Dimensions: [transaction-channel]
+  KPIs: [pickup-completion-rate]
 
 Source Data: Digital Analytics (GA4) + Order Management / Store Pickup Records (omnichannel stitched on order id)
 
@@ -652,9 +706,9 @@ Dashboard Usage: [Omnichannel Fulfillment Performance, BOPIS & Curbside Operatio
 Segment Eligibility: |
   true
 
-Related Dimensions: [shipping-tier, fulfillment-strategy, transaction-channel]
+Related Dimensions: [shipping-tier, fulfillment-strategy, transaction-channel, store-id]
 
-Derived Dimensions: [pickup-location-id]
+Derived Dimensions: [pickup-window]
 
 Data Sensitivity: Internal
 
@@ -668,5 +722,5 @@ Created At: 2026-09-18T16:33:33.415+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-18T16:33:43.162+00:00
+Last Modified At: 2026-09-19T18:14:44.891+00:00
 
