@@ -1,7 +1,7 @@
 # Dimension: Item Brand
-# Generated: 2026-09-19T18:05:44.885Z
+# Generated: 2026-09-19T18:05:54.558Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Item Brand
 
@@ -10,31 +10,340 @@ Description: |
 
 Category: Conversion
 
+Tags: [dimension, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  view_item
 
+Adobe Event: |
+  prodView
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "Product Viewed",
+            "eventAction": "view_item"
+          },
+          "category": {
+            "primaryCategory": "ecommerce"
+          }
+        }
+      ],
+      "product": [
+        {
+          "productInfo": {
+            "productID": "SKU_12345",
+            "sku": "SKU_12345",
+            "productName": "Air Zoom Pegasus 41",
+            "manufacturer": "Nike",
+            "brand": "Nike"
+          },
+          "category": {
+            "primaryCategory": "Footwear",
+            "subCategory1": "Running Shoes"
+          },
+          "attributes": {
+            "brandType": "national",
+            "itemVariant": "Black / UK 9"
+          },
+          "price": {
+            "basePrice": 129.99,
+            "currency": "USD"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "view_item",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 129.99,
+      "items": [
+        {
+          "item_id": "SKU_12345",
+          "item_name": "Air Zoom Pegasus 41",
+          "item_brand": "Nike",
+          "item_category": "Footwear",
+          "item_category2": "Running Shoes",
+          "item_variant": "Black / UK 9",
+          "item_list_name": "Search Results",
+          "affiliation": "Online Store",
+          "price": 129.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "prodView",
+    "eventInfo": {
+      "eventName": "view_item"
+    },
+    "commerce": {
+      "productViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU_12345",
+        "name": "Air Zoom Pegasus 41",
+        "brand": "Nike",
+        "productCategories": [
+          {
+            "categoryID": "footwear/running-shoes"
+          }
+        ],
+        "priceTotal": 129.99,
+        "currencyCode": "USD",
+        "quantity": 1
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.productViews",
+    "commerce": {
+      "productViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU_12345",
+        "name": "Air Zoom Pegasus 41",
+        "priceTotal": 129.99,
+        "currencyCode": "USD",
+        "quantity": 1,
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "eVar10": "Nike"
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Item Brand: item-scoped funnel and revenue by canonical brand (last 28 complete days).
+  -- Brand is resolved from the current brand master row per item_id; the collected items.item_brand
+  -- is normalised through the alias table and used only as a fallback. Missing values are kept
+  -- as 'Unbranded / Not Set'. Non-reportable lines (gift cards, fees, protection plans) are excluded.
+  WITH item_rows AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS event_date,
+      e.event_name,
+      e.user_pseudo_id,
+      (SELECT MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL))
+         FROM UNNEST(e.event_params) AS ep) AS ga_session_id,
+      it.item_id,
+      it.item_brand AS raw_item_brand,
+      COALESCE(it.quantity, 1) AS quantity,
+      COALESCE(it.item_revenue, 0) AS item_revenue
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.items) AS it
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY))
+                              AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name IN ('view_item_list', 'select_item', 'view_item', 'add_to_cart', 'begin_checkout', 'purchase')
+      AND it.item_id IS NOT NULL
+  ),
+  resolved AS (
+    SELECT
+      r.*,
+      COALESCE(
+        bm.canonical_brand,
+        ba.canonical_brand,
+        NULLIF(NULLIF(TRIM(REGEXP_REPLACE(r.raw_item_brand, r'[™®©]', '')), ''), '(not set)'),
+        'Unbranded / Not Set'
+      ) AS item_brand
+    FROM item_rows AS r
+    LEFT JOIN `your-project.catalog.brand_master` AS bm
+      ON bm.item_id = r.item_id
+     AND bm.valid_to IS NULL
+    LEFT JOIN `your-project.catalog.brand_alias` AS ba
+      ON ba.alias_normalized = LOWER(TRIM(REGEXP_REPLACE(r.raw_item_brand, r'[™®©]', '')))
+    WHERE COALESCE(bm.is_brand_reportable, TRUE)
+  ),
+  brand_agg AS (
+    SELECT
+      item_brand,
+      COUNTIF(event_name = 'view_item_list') AS items_viewed_in_list,
+      COUNTIF(event_name = 'select_item') AS items_clicked_in_list,
+      COUNTIF(event_name = 'view_item') AS items_viewed,
+      COUNT(DISTINCT IF(event_name = 'view_item',
+        CONCAT(user_pseudo_id, '-', CAST(ga_session_id AS STRING)), NULL)) AS sessions_viewing_brand,
+      SUM(IF(event_name = 'add_to_cart', quantity, 0)) AS items_added_to_cart,
+      SUM(IF(event_name = 'begin_checkout', quantity, 0)) AS items_checked_out,
+      SUM(IF(event_name = 'purchase', quantity, 0)) AS items_purchased,
+      SUM(IF(event_name = 'purchase', item_revenue, 0)) AS item_revenue
+    FROM resolved
+    GROUP BY item_brand
+  )
+  SELECT
+    item_brand,
+    items_viewed_in_list,
+    items_clicked_in_list,
+    items_viewed,
+    sessions_viewing_brand,
+    items_added_to_cart,
+    items_checked_out,
+    items_purchased,
+    ROUND(item_revenue, 2) AS item_revenue,
+    ROUND(SAFE_DIVIDE(items_clicked_in_list, items_viewed_in_list), 4) AS item_list_click_rate,
+    ROUND(SAFE_DIVIDE(items_added_to_cart, items_viewed), 4) AS item_view_to_cart_rate,
+    ROUND(SAFE_DIVIDE(items_purchased, items_viewed), 4) AS item_view_to_purchase_rate,
+    ROUND(SAFE_DIVIDE(item_revenue, SUM(item_revenue) OVER ()), 4) AS brand_revenue_share,
+    ROUND(SAFE_DIVIDE(items_viewed, SUM(items_viewed) OVER ()), 4) AS brand_item_view_share
+  FROM brand_agg
+  ORDER BY item_revenue DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Item Brand: item-scoped funnel and revenue by canonical brand (last 28 complete days).
+  -- Brand is resolved from the current brand master row per SKU; the collected product eVar10
+  -- is normalised through the alias dataset and used only as a fallback. Missing values are kept
+  -- as 'Unbranded / Not Set'. Non-reportable lines (gift cards, fees, protection plans) are excluded.
+  WITH sessionized AS (
+    SELECT
+      timestamp,
+      eventType,
+      endUserIDs._experience.ecid.id AS ecid,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY endUserIDs._experience.ecid.id
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session,
+      productListItems
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 28)
+      AND timestamp < current_date()
+  ),
+  item_rows AS (
+    SELECT
+      CAST(timestamp AS DATE) AS event_date,
+      eventType,
+      ecid,
+      session.num AS session_num,
+      explode(productListItems) AS pli
+    FROM sessionized
+    WHERE eventType IN (
+      'commerce.productListViews', 'commerce.productListClicks', 'commerce.productViews',
+      'commerce.productListAdds', 'commerce.checkouts', 'commerce.purchases'
+    )
+  ),
+  resolved AS (
+    SELECT
+      r.event_date,
+      r.eventType,
+      r.ecid,
+      r.session_num,
+      r.pli.SKU AS sku,
+      COALESCE(r.pli.quantity, 1) AS quantity,
+      COALESCE(r.pli.priceTotal, 0) AS price_total,
+      COALESCE(
+        bm.canonical_brand,
+        ba.canonical_brand,
+        NULLIF(NULLIF(TRIM(regexp_replace(r.pli._experience.analytics.customDimensions.eVars.eVar10, '[™®©]', '')), ''), '(not set)'),
+        'Unbranded / Not Set'
+      ) AS item_brand
+    FROM item_rows r
+    LEFT JOIN aep_brand_master_dataset bm
+      ON bm.item_id = r.pli.SKU
+     AND bm.valid_to IS NULL
+    LEFT JOIN aep_brand_alias_dataset ba
+      ON ba.alias_normalized = lower(TRIM(regexp_replace(r.pli._experience.analytics.customDimensions.eVars.eVar10, '[™®©]', '')))
+    WHERE r.pli.SKU IS NOT NULL
+      AND COALESCE(bm.is_brand_reportable, TRUE)
+  ),
+  brand_agg AS (
+    SELECT
+      item_brand,
+      SUM(CASE WHEN eventType = 'commerce.productListViews' THEN 1 ELSE 0 END) AS items_viewed_in_list,
+      SUM(CASE WHEN eventType = 'commerce.productListClicks' THEN 1 ELSE 0 END) AS items_clicked_in_list,
+      SUM(CASE WHEN eventType = 'commerce.productViews' THEN 1 ELSE 0 END) AS items_viewed,
+      COUNT(DISTINCT CASE WHEN eventType = 'commerce.productViews'
+        THEN concat(ecid, '-', CAST(session_num AS STRING)) END) AS sessions_viewing_brand,
+      SUM(CASE WHEN eventType = 'commerce.productListAdds' THEN quantity ELSE 0 END) AS items_added_to_cart,
+      SUM(CASE WHEN eventType = 'commerce.checkouts' THEN quantity ELSE 0 END) AS items_checked_out,
+      SUM(CASE WHEN eventType = 'commerce.purchases' THEN quantity ELSE 0 END) AS items_purchased,
+      SUM(CASE WHEN eventType = 'commerce.purchases' THEN price_total ELSE 0 END) AS item_revenue
+    FROM resolved
+    GROUP BY item_brand
+  )
+  SELECT
+    item_brand,
+    items_viewed_in_list,
+    items_clicked_in_list,
+    items_viewed,
+    sessions_viewing_brand,
+    items_added_to_cart,
+    items_checked_out,
+    items_purchased,
+    ROUND(item_revenue, 2) AS item_revenue,
+    ROUND(items_clicked_in_list / NULLIF(items_viewed_in_list, 0), 4) AS item_list_click_rate,
+    ROUND(items_added_to_cart / NULLIF(items_viewed, 0), 4) AS item_view_to_cart_rate,
+    ROUND(items_purchased / NULLIF(items_viewed, 0), 4) AS item_view_to_purchase_rate,
+    ROUND(item_revenue / NULLIF(SUM(item_revenue) OVER (), 0), 4) AS brand_revenue_share,
+    ROUND(items_viewed / NULLIF(SUM(items_viewed) OVER (), 0), 4) AS brand_item_view_share
+  FROM brand_agg
+  ORDER BY item_revenue DESC;
 
+Calculation Notes: |
+  1️⃣ Scope and pairing: Item Brand is item-scoped (one value per element of items[]), not event- or session-scoped. Pair it only with item-scoped measures (items viewed, items viewed in list, items added to cart, items purchased, item revenue); combining it with event-scoped counts such as sessions or event_count repeats the event once per item and inflates totals for multi-item events like view_item_list and purchase.,2️⃣ Source of truth: the value is the catalog/PIM brand for the item_id at the moment of the interaction, not free text typed by merchandisers into page templates. When the browser payload and the product feed disagree, the feed wins; resolve at query time with a join on item_id to the brand master, and treat the raw items.item_brand value as a fallback only.,3️⃣ Normalisation: trim whitespace, collapse case variants and legal suffixes to one canonical brand ('NIKE', 'Nike Inc.', 'nike' → 'Nike') through a maintained alias table, and strip trademark symbols. GA4 truncates item parameter values at 100 characters, so long brand names must be mapped to a canonical short form before collection.,4️⃣ Missing and non-attributable values: items sent without item_brand surface as '(not set)' in GA4 and NULL in BigQuery; report them as a separate 'Unbranded / Not Set' bucket and never drop them, because dropping them overstates branded share. Store-owned lines are labelled with the house-brand name, not left blank, so private-label versus national-brand share can be read directly. Monitor the not-set rate per event; above 2% of item views it points to a template or feed defect.,5️⃣ Bundles, marketplace and gift cards: a multi-brand bundle SKU carries 'Multi-brand' at the bundle level, and component brands are credited only when components are sent as separate items. Marketplace (third-party seller) items carry the manufacturer brand, never the seller name, which belongs in affiliation. Gift cards, shipping protection and service fees are excluded from brand reporting.,6️⃣ Consistency across the funnel: the same item_id must carry the same item_brand on view_item_list, select_item, view_item, add_to_cart, begin_checkout and purchase. GA4 does not carry the brand forward from an earlier event, so any event that omits it breaks brand-level funnel ratios; refunds are credited to the brand recorded on the original transaction_id, not to the current catalog value.,7️⃣ Timing and history: brand renames, acquisitions and re-parenting are handled as slowly changing attributes (valid_from / valid_to on the brand master). Year-over-year brand trends use the current canonical brand by default; vendor settlement and retail media billing use the as-captured value for the billing period. Dates follow the property reporting time zone, and session-level roll-ups use GA4's 30-minute inactivity timeout keyed on user_pseudo_id + ga_session_id.
 
+Business Use Case: |
+  1️⃣ Category Managers (Merchandising) review brand performance every week; when a brand's item-view-to-purchase ratio falls more than 20% below the category median for two weeks running, they take back its premium PDP and listing placements and ask the brand for new imagery and content.,2️⃣ The Vendor Partnerships / Retail Media team (Sales) pulls brand-level item list views, item views and item revenue for sponsored placements at each month-end close, and uses them to invoice co-op and retail media spend and to set targets in joint business plan renewals.,3️⃣ The Site Search & Navigation product team compares brand facet selections and brand-query conversion with category averages every quarter; brands whose facet-driven sessions convert above average are moved up the filter panel order and added to search synonym and redirect rules.,4️⃣ Revenue Management checks brand-level item revenue and discount depth against margin targets before each promotional calendar is locked, and drops brands from site-wide promotions when discount-driven unit lift does not cover the margin given up.
 
+Dependencies:
+  Dimensions: [item-id]
 
+Source Data: Digital Analytics (GA4) + Product Catalog / PIM
 
+Report Attributes: |
+  item-category; item-id; product-name; item-variant; item-list-name; promotion-name; device-category; traffic-source
 
+Dashboard Usage: [Brand Performance Scorecard, Category Merchandising Review, Retail Media & Vendor Performance Report, Product Discovery Funnel (List to PDP to Cart)]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [product-name, item-category, item-id, item-list-name, promotion-name, item-variant]
 
+Derived Dimensions: [brand-type, brand-tier]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +351,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T18:05:44.342+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T18:05:54.285+00:00
 
