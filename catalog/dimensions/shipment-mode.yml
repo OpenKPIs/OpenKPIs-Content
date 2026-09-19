@@ -1,12 +1,12 @@
 # Dimension: Shipment Mode
-# Generated: 2026-09-19T18:40:08.704Z
+# Generated: 2026-09-19T19:18:52.001Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Shipment Mode
 
 Description: |
-  Shipment Mode classifies each order by the normalized delivery service confirmed at purchase, such as Standard, Expedited, Same-Day, Pickup or Digital, and is the order-level Shipping Method used in fulfillment reporting. It differs from Shipping Tier, which records the option a shopper selects during checkout, because Shipment Mode reflects the service actually attached to the completed order rather than the carrier's physical transport method.
+  Shipment Mode classifies each shipped order by the normalized shipping service level confirmed at purchase (Standard, Expedited, Same-Day, or Mixed when an order is split across services) and is the order-level Shipping Method used in fulfillment reporting. It differs from Shipping Tier, which records the option a shopper selects on add_shipping_info during checkout, because Shipment Mode is the service actually attached to the completed order. It also differs from Fulfillment Method, which says how an order reaches the customer (ship to home, store pickup, digital delivery); Shipment Mode applies only to orders that ship and says how fast they ship, so pickup and digital orders are classified by Fulfillment Method and not here.
 
 Category: Operations
 
@@ -56,12 +56,12 @@ W3 Data Layer: |
 GA4 Data Layer: |
   {
     "event": "purchase",
+    "shipment_mode": "expedited",
     "ecommerce": {
       "transaction_id": "T-100245",
       "value": 129.99,
       "currency": "USD",
       "shipping": 8.99,
-      "shipping_tier": "expedited",
       "items": [
         {
           "item_id": "SKU-1234",
@@ -120,7 +120,7 @@ Google Analytics SQL: |
     SELECT
       e.ecommerce.transaction_id AS transaction_id,
       MAX(e.ecommerce.purchase_revenue) AS purchase_revenue,
-      MAX(IF(ep.key = 'shipping_tier', ep.value.string_value, NULL)) AS shipping_tier_raw
+      MAX(IF(ep.key = 'shipment_mode', ep.value.string_value, NULL)) AS shipment_mode_raw
     FROM `your-project.analytics_123456789.events_*` AS e
     LEFT JOIN UNNEST(e.event_params) AS ep
     WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
@@ -135,13 +135,13 @@ Google Analytics SQL: |
       transaction_id,
       purchase_revenue,
       CASE
-        WHEN shipping_tier_raw IS NULL OR TRIM(shipping_tier_raw) = '' THEN 'Unknown'
-        WHEN REGEXP_CONTAINS(LOWER(shipping_tier_raw), r'mixed|multiple') THEN 'Mixed'
-        WHEN REGEXP_CONTAINS(LOWER(shipping_tier_raw), r'same[ _-]?day') THEN 'Same-Day'
-        WHEN REGEXP_CONTAINS(LOWER(shipping_tier_raw), r'pick[ _-]?up|bopis|click[ _-]?(and|&)[ _-]?collect|in[ _-]?store') THEN 'Pickup'
-        WHEN REGEXP_CONTAINS(LOWER(shipping_tier_raw), r'digital|download|e-?delivery') THEN 'Digital'
-        WHEN REGEXP_CONTAINS(LOWER(shipping_tier_raw), r'express|expedited|overnight|next[ _-]?day|priority|2[ _-]?day|two[ _-]?day') THEN 'Expedited'
-        WHEN REGEXP_CONTAINS(LOWER(shipping_tier_raw), r'standard|ground|economy|free') THEN 'Standard'
+        WHEN shipment_mode_raw IS NULL OR TRIM(shipment_mode_raw) = '' THEN 'Unknown'
+        -- store pickup and digital delivery have no shipment service (Fulfillment Method dimension): excluded below
+        WHEN REGEXP_CONTAINS(LOWER(shipment_mode_raw), r'pick[ _-]?up|bopis|click[ _-]?(and|&)[ _-]?collect|in[ _-]?store|digital|download|e-?delivery') THEN NULL
+        WHEN REGEXP_CONTAINS(LOWER(shipment_mode_raw), r'mixed|multiple') THEN 'Mixed'
+        WHEN REGEXP_CONTAINS(LOWER(shipment_mode_raw), r'same[ _-]?day') THEN 'Same-Day'
+        WHEN REGEXP_CONTAINS(LOWER(shipment_mode_raw), r'express|expedited|overnight|next[ _-]?day|priority|2[ _-]?day|two[ _-]?day') THEN 'Expedited'
+        WHEN REGEXP_CONTAINS(LOWER(shipment_mode_raw), r'standard|ground|economy|free') THEN 'Standard'
         ELSE 'Unknown'
       END AS shipment_mode
     FROM purchases
@@ -152,6 +152,7 @@ Google Analytics SQL: |
     SUM(purchase_revenue) AS revenue,
     SAFE_DIVIDE(COUNT(DISTINCT transaction_id), SUM(COUNT(DISTINCT transaction_id)) OVER ()) AS order_share
   FROM normalized
+  WHERE shipment_mode IS NOT NULL
   GROUP BY shipment_mode
   ORDER BY orders DESC;
 
@@ -178,10 +179,10 @@ AEP Query Service SQL: |
       purchase_revenue,
       CASE
         WHEN shipping_method_raw IS NULL OR TRIM(shipping_method_raw) = '' THEN 'Unknown'
+        -- store pickup and digital delivery have no shipment service (Fulfillment Method dimension): excluded below
+        WHEN LOWER(shipping_method_raw) RLIKE 'pick[ _-]?up|bopis|click[ _-]?(and|&)[ _-]?collect|in[ _-]?store|digital|download|e-?delivery' THEN NULL
         WHEN LOWER(shipping_method_raw) RLIKE 'mixed|multiple' THEN 'Mixed'
         WHEN LOWER(shipping_method_raw) RLIKE 'same[ _-]?day' THEN 'Same-Day'
-        WHEN LOWER(shipping_method_raw) RLIKE 'pick[ _-]?up|bopis|click[ _-]?(and|&)[ _-]?collect|in[ _-]?store' THEN 'Pickup'
-        WHEN LOWER(shipping_method_raw) RLIKE 'digital|download|e-?delivery' THEN 'Digital'
         WHEN LOWER(shipping_method_raw) RLIKE 'express|expedited|overnight|next[ _-]?day|priority|2[ _-]?day|two[ _-]?day' THEN 'Expedited'
         WHEN LOWER(shipping_method_raw) RLIKE 'standard|ground|economy|free' THEN 'Standard'
         ELSE 'Unknown'
@@ -194,12 +195,13 @@ AEP Query Service SQL: |
     SUM(purchase_revenue) AS revenue,
     COUNT(DISTINCT purchase_id) * 1.0 / NULLIF(SUM(COUNT(DISTINCT purchase_id)) OVER (), 0) AS order_share
   FROM normalized
+  WHERE shipment_mode IS NOT NULL
   GROUP BY shipment_mode
   ORDER BY orders DESC;
 
 Calculation Notes: |
-  1️⃣ Read the shipping option confirmed on the purchase event (GA4 parameter shipping_tier mapped as an event parameter; XDM shipping.shippingMethod); the checkout-stage selection on add_shipping_info belongs to the Shipping Tier dimension.
-  2️⃣ Normalize raw platform values to the governed vocabulary Standard, Expedited, Same-Day, Pickup, Digital, Mixed and Unknown with a case-insensitive mapping table maintained by Fulfillment Operations.
+  1️⃣ Read the shipping service confirmed on the purchase event (GA4 top-level event parameter shipment_mode registered as an event-scoped custom dimension, because GA4 recognises shipping_tier only on add_shipping_info; ACDL and XDM shipping.shippingMethod); the checkout-stage selection on add_shipping_info belongs to the Shipping Tier dimension.
+  2️⃣ Normalize raw platform values to the governed vocabulary Standard, Expedited, Same-Day, Mixed and Unknown with a case-insensitive mapping table maintained by Fulfillment Operations; store pickup and digital delivery orders have no shipment service, belong to the Fulfillment Method dimension and are excluded from Shipment Mode reporting.
   3️⃣ Deduplicate purchase events by transaction ID before counting so that repeated confirmation-page loads do not inflate any mode.
   4️⃣ Send Mixed when one order is split across more than one delivery service and the implementation carries a single order-level string.
   5️⃣ Keep Unknown for missing, blank or unmapped values instead of defaulting them to Standard, and review the Unknown share weekly.
@@ -213,8 +215,6 @@ Business Use Case: |
 
 Dependencies:
   Events: [purchase]
-  Metrics: [shipping-info-added]
-  Dimensions: [shipping-tier]
 
 Source Data: Digital Analytics (GA4)
 
@@ -242,5 +242,5 @@ Created At: 2026-09-08T19:30:12.729087+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-19T18:40:08.481+00:00
+Last Modified At: 2026-09-19T19:18:51.728+00:00
 
