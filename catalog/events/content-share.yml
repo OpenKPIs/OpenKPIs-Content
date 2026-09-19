@@ -1,5 +1,5 @@
 # Event: Content Share
-# Generated: 2026-09-17T23:36:10.983Z
+# Generated: 2026-09-19T01:24:16.129Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -7,7 +7,7 @@ Event Name: Content Share
 Event Serialization: always
 
 Description: |
-  Fires when a shopper sends a product, cart, wishlist, order or editorial page outward to a social network, a messaging app, the native OS share sheet or a copied link, captured as the single GA4 `share` event with the destination carried in the `method` parameter rather than as separate per-surface events. It quantifies outbound advocacy only — who shares, what they share and from which surface — while inbound traffic and revenue arriving on a shared URL are attributed through session source/medium and campaign reporting, so this event deliberately carries no referral or referred-conversion fields.
+  Fires when a shopper sends a product, cart, wishlist, order or editorial page outward to a social network, a messaging app, the native OS share sheet or a copied link, captured as the single GA4 `share` event with the destination carried in the `method` parameter rather than as separate per-surface events. It quantifies outbound advocacy only — who shares, what they share and from which surface — cut by the sharing session's acquisition context (the GA4 session last-click source / medium; in Adobe the marketing channel type of the session's entry hit). Inbound traffic and revenue arriving on a shared URL are attributed separately through session source/medium and campaign reporting, so this event deliberately carries no referral or referred-conversion fields.
 
 Category: Engagement
 
@@ -28,7 +28,7 @@ GA4 Event: |
   share
 
 Adobe Event: |
-  Content Share
+  share
 
 W3 Data Layer: |
   {
@@ -75,7 +75,7 @@ W3 Data Layer: |
       "event": [
         {
           "eventInfo": {
-            "eventName": "Content Share",
+            "eventName": "share",
             "eventAction": "share",
             "type": "engagement",
             "timeStamp": "2026-09-17T14:22:08.412Z"
@@ -86,6 +86,7 @@ W3 Data Layer: |
             "itemId": "SKU-88421",
             "itemCategory": "Apparel/Women/Outerwear",
             "shareSurface": "pdp_share_button",
+            "pageType": "product",
             "customerLifecycleStage": "repeat_buyer",
             "loyaltyTier": "gold"
           }
@@ -102,6 +103,7 @@ GA4 Data Layer: |
     "item_id": "SKU-88421",
     "item_category": "Apparel/Women/Outerwear",
     "share_surface": "pdp_share_button",
+    "page_type": "product",
     "customer_lifecycle_stage": "repeat_buyer",
     "loyalty_tier": "gold"
   }
@@ -110,7 +112,7 @@ Adobe Client Data Layer: |
   {
     "event": "share",
     "eventInfo": {
-      "eventName": "Content Share",
+      "eventName": "share",
       "eventType": "web.webinteraction.linkClicks",
       "timestamp": "2026-09-17T14:22:08.412Z"
     },
@@ -139,7 +141,7 @@ Adobe Client Data Layer: |
         "siteSection": "product"
       },
       "webInteraction": {
-        "name": "Content Share",
+        "name": "share",
         "type": "other",
         "linkClicks": {
           "value": 1
@@ -154,7 +156,7 @@ XDM Mapping: |
     "timestamp": "2026-09-17T14:22:08.412Z",
     "web": {
       "webInteraction": {
-        "name": "Content Share",
+        "name": "share",
         "type": "other",
         "linkClicks": {
           "value": 1
@@ -199,20 +201,25 @@ Parameters: |
     "item_id": "string - SKU or catalogue product ID when content_type = product; cart, wishlist or order identifier for basket-level shares; null for editorial pages with no catalogue object.",
     "item_category": "string - Merchandising category hierarchy of the shared item at share time, aligned to the item-category dimension; null for non-catalogue shares.",
     "share_surface": "string - UI affordance that raised the share: pdp_share_button, gallery_share, wishlist_share, cart_share, order_confirmation, article_footer, app_native_menu.",
+    "page_type": "string - Template type of the page the share was raised from, aligned to the page-type dimension (product, category, cart, wishlist, order_confirmation, article). Maps to web.webPageDetails.siteSection in XDM.",
     "customer_lifecycle_stage": "string - Lifecycle state of the sharer at event time: prospect, first_time_buyer, repeat_buyer, loyalty_member, lapsed. Null for unauthenticated visitors with no resolved customer record.",
     "loyalty_tier": "string - Loyalty programme tier of a signed-in sharer (e.g. base, silver, gold, elite); null for anonymous visitors and non-members."
   }
 
+Calculation Notes: |
+  1️⃣ One standard event, many surfaces: social networks, messaging apps, the native OS share sheet and copy-link are all values of `method` on a single `share` event. Per-surface events (share_facebook, copy_link, whatsapp_share) are non-conformant and must be remapped at the tag layer, otherwise channel totals double count and the schema grows with every new network — coverage of those surfaces is therefore complete, not missing.,2️⃣ Intent, not delivery: the browser reports that the share dialog or `navigator.share()` call was invoked, not that a post was published. Sheet cancellations and promise rejections are indistinguishable on most platforms, so read volumes as share intent and expect a 5–15% gap against platform-side post counts; never reconcile this event to network-reported posts as if it were the same measure.,3️⃣ De-duplication and exclusions: serialize once per user, item_id and method within a session, suppressing repeats on the same target inside a 30-second window to absorb double taps and client re-renders. Exclude events from internal IP ranges, QA accounts and link-preview crawlers, which trigger share endpoints without a human actor.,4️⃣ Sessionisation and timing: the standard 30-minute inactivity timeout with midnight and campaign-change boundaries applies. A dialog opened before the boundary and completed after it belongs to the later session, so anchor every attribution on the `share` event timestamp rather than on the preceding page view or product view.,5️⃣ Self-directed shares are counted but flagged: email-to-self, copy-link pasted within the same session, and wishlist sends that are in fact gift registries remain valid `share` events but must stay identifiable through `method` and `share_surface` (content_type = wishlist, share_surface = registry) so advocacy reporting can exclude them from true peer-to-peer counts.,6️⃣ Outbound advocacy only: sessions arriving on the shared URL are classified by session source/medium, campaign parameters or the share link's tracking id and are never joined back onto this event as a referral or conversion field. Share-assisted revenue is produced by a separate attribution model and does not belong on this row.,7️⃣ Value action by industry: E-commerce = product, cart or wishlist share; Retail = store availability or pick-up page share; Media = article or episode share; SaaS = report or dashboard share; Finance = statement or calculator result share; Education = course or certificate share; Travel = itinerary share.
 
+Business Use Case: |
+  1️⃣ The Loyalty & CRM Manager (Marketing) reviews share counts by customer_lifecycle_stage each week; where loyalty members share at two or more times the rate of first-time buyers, they surface the share module in the post-purchase email and the member dashboard for that cohort, and pull it from lapsed-customer journeys where it under-delivers against the programme benchmark.,2️⃣ The Merchandising Manager ranks SKUs every Monday by shares per 1,000 product views; top-decile SKUs not yet in the paid social catalogue feed are handed to the Paid Social team as creative candidates, while SKUs with high shares but weak add-to-cart performance are queued for PDP content, imagery or price review.,3️⃣ The Social Media Lead monitors the `method` mix daily by device; when copy_link overtakes in-page network buttons on mobile, they reorder the share tray and raise a Product ticket to expose the native share sheet on mobile PDPs, then confirm the shift in mix in the following week's report.,4️⃣ The Customer Insights Lead in the Retention team builds a quarterly cohort comparing sharers with non-sharers matched on recency, order count and acquisition channel, measuring 12-month repeat purchase rate and customer lifetime value; where the sharer lift survives matching, they defend the advocacy budget line and set the share-rate target in the loyalty roadmap.
 
 Dependencies:
   Events: [page-view, product-view, customer-login]
-  Dimensions: [device-category, traffic-source, page-type, item-category]
+  Dimensions: [device-category, traffic-source, page-type, item-category, customer-loyalty-tier]
 
 Source Data: Digital Analytics (GA4)
 
     Report Attributes: |
-  Share Method; Content Type; Share Surface; Customer Lifecycle Stage; Loyalty Tier; Item Category; Device Category; Traffic Source; Page Type
+  Share Method; Content Type; Share Surface; Customer Lifecycle Stage; Customer Loyalty Tier; Item Category; Device Category; Traffic Source; Page Type
 
     Dashboard Usage: [Customer Loyalty & Advocacy Dashboard, Merchandising Performance Dashboard, Social & Organic Channel Performance, Customer Lifecycle Cohort Dashboard]
 
@@ -221,11 +228,11 @@ Source Data: Digital Analytics (GA4)
 
     Related Dimensions: [device-category, traffic-source, page-type, item-category, customer-loyalty-tier]
 
-    Derived Dimensions: [share-method, share-content-type, share-surface]
+    Derived Dimensions: [share-method, share-content-type, share-surface, customer-lifecycle-stage]
 
     Derived Metrics: [content-shares, sharing-users]
 
-    Derived KPIs: [customer-lifetime-value, customer-retention-rate]
+    Derived KPIs: [share-rate]
 
     Data Sensitivity: Internal
 
@@ -239,5 +246,5 @@ Source Data: Digital Analytics (GA4)
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-09-17T23:36:10.635+00:00
+    Last Modified At: 2026-09-19T01:24:15.902+00:00
 
