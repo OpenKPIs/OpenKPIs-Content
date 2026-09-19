@@ -1,5 +1,5 @@
 # KPI: Payment Failure Rate
-# Generated: 2026-09-17T23:16:48.696Z
+# Generated: 2026-09-19T01:23:26.981Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -146,6 +146,7 @@ GA4 Data Layer: |
     "payment_attempt_id": "pa-2f41c9",
     "payment_attempt_number": 2,
     "three_d_secure_outcome": "challenged_returned",
+    "traffic_type": "external",
     "ecommerce": {
       "currency": "USD",
       "value": 189.9,
@@ -162,34 +163,6 @@ GA4 Data Layer: |
           "quantity": 2
         }
       ]
-    },
-    "success_attempt_payload": {
-      "event": "purchase",
-      "payment_type": "credit_card",
-      "payment_provider": "primary_acquirer",
-      "checkout_step": "payment",
-      "checkout_type": "guest",
-      "payment_attempt_id": "pa-2f41c9-r3",
-      "payment_attempt_number": 3,
-      "ecommerce": {
-        "transaction_id": "T-10058821",
-        "currency": "USD",
-        "value": 189.9,
-        "tax": 15.2,
-        "shipping": 0,
-        "coupon": "FALL10",
-        "items": [
-          {
-            "item_id": "SKU-4471",
-            "item_name": "Merino Crew Sweater",
-            "item_brand": "Northbound",
-            "item_category": "Apparel",
-            "item_category2": "Tops",
-            "price": 94.95,
-            "quantity": 2
-          }
-        ]
-      }
     }
   }
 
@@ -203,7 +176,6 @@ Adobe Client Data Layer: |
     },
     "commerce": {
       "checkout": {
-        "value": 1,
         "step": 3,
         "stepName": "payment",
         "checkoutType": "guest"
@@ -237,49 +209,14 @@ Adobe Client Data Layer: |
         }
       ]
     },
-    "successAttemptPayload": {
-      "event": "purchase",
-      "eventInfo": {
-        "eventName": "Purchase",
-        "path": "commerce.order",
-        "timestamp": "2026-09-17T14:33:41.000Z"
-      },
-      "commerce": {
-        "purchases": {
-          "value": 1
-        },
-        "paymentAttempt": {
-          "attemptID": "pa-2f41c9-r3",
-          "attemptNumber": 3,
-          "outcome": "succeeded",
-          "paymentType": "credit_card",
-          "paymentProvider": "primary_acquirer"
-        },
-        "order": {
-          "purchaseID": "T-10058821",
-          "currencyCode": "USD",
-          "priceTotal": 189.9,
-          "payments": [
-            {
-              "paymentType": "credit_card",
-              "paymentAmount": 189.9,
-              "currencyCode": "USD",
-              "transactionID": "T-10058821"
-            }
-          ]
-        }
-      }
-    }
+    "trafficType": "external"
   }
 
 XDM Mapping: |
   {
-    "eventType": "commerce.checkouts",
+    "eventType": "commerce.checkoutError",
     "timestamp": "2026-09-17T14:32:08.000Z",
     "commerce": {
-      "checkouts": {
-        "value": 1
-      },
       "order": {
         "currencyCode": "USD",
         "priceTotal": 189.9,
@@ -319,13 +256,15 @@ XDM Mapping: |
       }
     },
     "_openkpis": {
+      "checkout": {
+        "checkoutStep": "payment",
+        "checkoutType": "guest"
+      },
       "checkoutError": {
         "errorType": "payment",
         "errorCode": "do_not_honor_05",
         "errorMessage": "Issuer declined the authorization. Ask the customer to try another card or wallet.",
-        "errorSource": "issuer",
-        "checkoutStep": "payment",
-        "checkoutType": "guest"
+        "errorSource": "issuer"
       },
       "paymentAttempt": {
         "attemptID": "pa-2f41c9",
@@ -334,38 +273,8 @@ XDM Mapping: |
         "paymentType": "credit_card",
         "paymentProvider": "primary_acquirer",
         "threeDSecureOutcome": "challenged_returned"
-      }
-    },
-    "successAttemptMapping": {
-      "eventType": "commerce.purchases",
-      "timestamp": "2026-09-17T14:33:41.000Z",
-      "commerce": {
-        "purchases": {
-          "value": 1
-        },
-        "order": {
-          "purchaseID": "T-10058821",
-          "currencyCode": "USD",
-          "priceTotal": 189.9,
-          "payments": [
-            {
-              "paymentType": "credit_card",
-              "paymentAmount": 189.9,
-              "currencyCode": "USD",
-              "transactionID": "T-10058821"
-            }
-          ]
-        }
       },
-      "_openkpis": {
-        "paymentAttempt": {
-          "attemptID": "pa-2f41c9-r3",
-          "attemptNumber": 3,
-          "outcome": "succeeded",
-          "paymentType": "credit_card",
-          "paymentProvider": "primary_acquirer"
-        }
-      }
+      "trafficType": "external"
     }
   }
 
@@ -379,6 +288,7 @@ Google Analytics SQL: |
   -- Base population (denominator) = successful submissions, carried by the unified `purchase` event,
   -- UNION ALL failed submissions, carried by the unified `checkout_error` event whose contextual
   -- parameter error_type = 'payment'. The numerator is the failed subset of that same population.
+  -- Grain of output: hour (America/Chicago) and date; roll hours up for daily/weekly/monthly views.
   -- Breakdown: payment_type (required), payment_provider and device_category; error_code as the
   -- secondary drill-down, reported on the failure side only so it cannot distort the denominator.
   
@@ -389,6 +299,7 @@ Google Analytics SQL: |
     SELECT
       PARSE_DATE('%Y%m%d', event_date)  AS attempt_date,
       TIMESTAMP_MICROS(event_timestamp) AS attempt_ts,
+      TIMESTAMP_TRUNC(TIMESTAMP_MICROS(event_timestamp), HOUR, 'America/Chicago') AS attempt_hour,
       event_timestamp,
       event_name,
       user_pseudo_id,
@@ -406,6 +317,7 @@ Google Analytics SQL: |
     SELECT
       attempt_date,
       attempt_ts,
+      attempt_hour,
       event_timestamp,
       event_name,
       user_pseudo_id,
@@ -424,7 +336,7 @@ Google Analytics SQL: |
       MAX(IF(p.key = 'traffic_type',           p.value.string_value, NULL)) AS traffic_type,
       MAX(IF(p.key = 'value', COALESCE(p.value.double_value, CAST(p.value.int_value AS FLOAT64)), NULL)) AS attempt_value
     FROM base_events, UNNEST(event_params) AS p
-    GROUP BY attempt_date, attempt_ts, event_timestamp, event_name, user_pseudo_id, device_category, country
+    GROUP BY attempt_date, attempt_ts, attempt_hour, event_timestamp, event_name, user_pseudo_id, device_category, country
   ),
   
   -- One row per payment attempt: successes and failures unified into a single base population.
@@ -432,6 +344,7 @@ Google Analytics SQL: |
     SELECT
       attempt_date,
       attempt_ts,
+      attempt_hour,
       user_pseudo_id,
       device_category,
       country,
@@ -495,6 +408,7 @@ Google Analytics SQL: |
   
   SELECT
     a.attempt_date,
+    a.attempt_hour,                                                             -- hourly grain (America/Chicago) for intraday monitoring
     a.payment_type,
     a.payment_provider,
     a.device_category,
@@ -511,8 +425,8 @@ Google Analytics SQL: |
   LEFT JOIN top_error t
     ON t.attempt_date = a.attempt_date
    AND t.payment_type = a.payment_type
-  GROUP BY a.attempt_date, a.payment_type, a.payment_provider, a.device_category, a.country
-  ORDER BY a.attempt_date DESC, payment_attempts DESC;
+  GROUP BY a.attempt_date, a.attempt_hour, a.payment_type, a.payment_provider, a.device_category, a.country
+  ORDER BY a.attempt_hour DESC, payment_attempts DESC;
 
 AEP Query Service SQL: |
   -- ==========================================
@@ -521,8 +435,12 @@ AEP Query Service SQL: |
   -- Payment Failure Rate = Failed Payment Attempts / (Successful + Failed Payment Attempts) * 100
   -- ExperienceEvent dataset, attempt grain. The denominator unions the two attempt populations
   -- mapped in XDM: successes on eventType = 'commerce.purchases' (commerce.purchases.value) and
-  -- failures on eventType = 'commerce.checkouts' (commerce.checkouts.value) qualified by the
-  -- contextual field _openkpis.checkoutError.errorType = 'payment'. Retries stay separate attempts.
+  -- failures on the non-counting error interaction eventType = 'commerce.checkoutError' (no
+  -- commerce.checkouts value, so standard Checkouts is not inflated) qualified by the contextual
+  -- field _openkpis.checkoutError.errorType = 'payment'. Retries stay separate attempts.
+  -- Checkout type is read from the shared _openkpis.checkout object set on both event types;
+  -- internal, test and bot traffic is excluded via _openkpis.trafficType in both branches.
+  -- Grain of output: hour (America/Chicago) and date; roll hours up for daily/weekly/monthly views.
   -- Breakdown: _openkpis.paymentAttempt.paymentType (required), paymentProvider, device type;
   -- _openkpis.checkoutError.errorCode as the secondary, failure-side drill-down.
   
@@ -531,10 +449,11 @@ AEP Query Service SQL: |
     SELECT
       to_date(timestamp)                                              AS attempt_date,
       timestamp                                                       AS attempt_ts,
+      date_trunc('hour', from_utc_timestamp(timestamp, 'America/Chicago')) AS attempt_hour,
       endUserIDs._experience.mcid.id                                  AS visitor_id,
       coalesce(_openkpis.paymentAttempt.paymentType, '(not set)')     AS payment_type,
       coalesce(_openkpis.paymentAttempt.paymentProvider, '(not set)') AS payment_provider,
-      coalesce(_openkpis.checkoutError.checkoutType, '(not set)')     AS checkout_type,
+      coalesce(_openkpis.checkout.checkoutType, '(not set)')          AS checkout_type,
       coalesce(device.type, '(not set)')                              AS device_type,
       coalesce(placeContext.geo.countryCode, '(not set)')             AS country,
       coalesce(_openkpis.checkoutError.errorCode, '(not set)')        AS error_code,
@@ -548,9 +467,9 @@ AEP Query Service SQL: |
     FROM your_experience_event_dataset
     WHERE timestamp >= date_trunc('day', current_timestamp - interval '28 day')
       AND timestamp <  date_trunc('day', current_timestamp)
-      AND eventType = 'commerce.checkouts'
-      AND commerce.checkouts.value >= 1
+      AND eventType = 'commerce.checkoutError'
       AND _openkpis.checkoutError.errorType = 'payment'
+      AND coalesce(_openkpis.trafficType, 'external') NOT IN ('internal', 'test', 'bot')
       AND coalesce(_openkpis.paymentAttempt.paymentType, '(not set)') NOT IN ('gift_card', 'store_credit')
       AND coalesce(commerce.order.priceTotal, 0) > 0
   
@@ -560,11 +479,12 @@ AEP Query Service SQL: |
     SELECT
       to_date(timestamp)                                              AS attempt_date,
       timestamp                                                       AS attempt_ts,
+      date_trunc('hour', from_utc_timestamp(timestamp, 'America/Chicago')) AS attempt_hour,
       endUserIDs._experience.mcid.id                                  AS visitor_id,
       coalesce(_openkpis.paymentAttempt.paymentType,
                commerce.order.payments[0].paymentType, '(not set)')   AS payment_type,
       coalesce(_openkpis.paymentAttempt.paymentProvider, '(not set)') AS payment_provider,
-      coalesce(_openkpis.checkoutError.checkoutType, '(not set)')     AS checkout_type,
+      coalesce(_openkpis.checkout.checkoutType, '(not set)')          AS checkout_type,
       coalesce(device.type, '(not set)')                              AS device_type,
       coalesce(placeContext.geo.countryCode, '(not set)')             AS country,
       '(not set)'                                                     AS error_code,
@@ -580,6 +500,7 @@ AEP Query Service SQL: |
       AND timestamp <  date_trunc('day', current_timestamp)
       AND eventType = 'commerce.purchases'
       AND commerce.purchases.value >= 1
+      AND coalesce(_openkpis.trafficType, 'external') NOT IN ('internal', 'test', 'bot')
       AND coalesce(_openkpis.paymentAttempt.paymentType,
                    commerce.order.payments[0].paymentType, '(not set)') NOT IN ('gift_card', 'store_credit')
       AND coalesce(commerce.order.priceTotal, 0) > 0
@@ -622,6 +543,7 @@ AEP Query Service SQL: |
   
   SELECT
     a.attempt_date,
+    a.attempt_hour,
     a.payment_type,
     a.payment_provider,
     a.device_type,
@@ -638,19 +560,19 @@ AEP Query Service SQL: |
   LEFT JOIN top_error t
     ON t.attempt_date = a.attempt_date
    AND t.payment_type = a.payment_type
-  GROUP BY a.attempt_date, a.payment_type, a.payment_provider, a.device_type, a.country
-  ORDER BY a.attempt_date DESC, payment_attempts DESC;
+  GROUP BY a.attempt_date, a.attempt_hour, a.payment_type, a.payment_provider, a.device_type, a.country
+  ORDER BY a.attempt_hour DESC, payment_attempts DESC;
 
 Calculation Notes: |
-  1️⃣ The grain is the payment attempt, not the session or the checkout. Denominator = every payment submission that reached the processor: successful submissions (one per `purchase`) plus failed submissions (`checkout_error` where `error_type = 'payment'`). Numerator = the failed submissions only.,2️⃣ `add_payment_info` is deliberately excluded from both numerator and denominator: entering card details is a preceding funnel step, not an authorization attempt, and using it as the base inflates the denominator with shoppers who never pressed Pay. It is retained only as a related funnel-step reference for drop-off analysis.,3️⃣ Retries are separate attempts. A shopper who is declined twice and succeeds on the third try contributes 3 attempts and 2 failures (66.7%), never one attempt per checkout. Report a companion 'attempts per successful order' figure so a rising rate driven purely by retry behaviour is not read as a rising decline rate.,4️⃣ Failure is qualified by the contextual parameter `error_type = 'payment'` on the unified `checkout_error` event, with `error_code` carrying the gateway or issuer reason. Fragmented event names such as `payment_failed` or `card_declined` are not accepted in the definition; non-payment checkout errors (address validation, shipping eligibility, inventory, coupon, tax service) are excluded.,5️⃣ Exclude internal QA and test orders, zero-authorization amounts, orders settled entirely by gift card or store credit (no external authorization is requested), and known bot or synthetic-monitor traffic. Deduplicate repeated `checkout_error` hits carrying the same attempt or transaction identifier within a 2-second window, which are client re-renders rather than new submissions.,6️⃣ Attempts are stamped to the timestamp of the attempt itself in the reporting time zone, not to the order date; a retry that lands after the 30-minute session inactivity timeout starts a new session but is still counted as its own attempt, so hourly and daily totals must be built from event time and never from session-level aggregation.,7️⃣ Redirect and 3-D Secure challenge flows only count as a failure when the return leg fires `checkout_error` with `error_type = 'payment'`; challenges abandoned without a return leg are reported separately as unknown outcome. Payment Type is a mandatory breakdown — a blended rate hides card, wallet and BNPL behaving very differently — and the monthly total is reconciled against the processor's authorization report with a ±1 percentage point tolerance.
+  1️⃣ The grain is the payment attempt, not the session or the checkout. Denominator = every payment submission that reached the processor: successful submissions (one per `purchase`) plus failed submissions (`checkout_error` where `error_type = 'payment'`). Numerator = the failed submissions only. The success side is the standard, separate `purchase` push (ecommerce.transaction_id, value, currency, items; XDM eventType `commerce.purchases` with `commerce.purchases.value = 1`) carrying the same payment_type, payment_provider, checkout_type, payment_attempt_id, payment_attempt_number and traffic_type parameters, mapped to the shared `_openkpis.checkout`, `_openkpis.paymentAttempt` and `_openkpis.trafficType` fields.,2️⃣ `add_payment_info` is deliberately excluded from both numerator and denominator: entering card details is a preceding funnel step, not an authorization attempt, and using it as the base inflates the denominator with shoppers who never pressed Pay. It is not a dependency of this KPI.,3️⃣ Retries are separate attempts. A shopper who is declined twice and succeeds on the third try contributes 3 attempts and 2 failures (66.7%), never one attempt per checkout. Report a companion 'attempts per successful order' figure so a rising rate driven purely by retry behaviour is not read as a rising decline rate.,4️⃣ Failure is qualified by the contextual parameter `error_type = 'payment'` on the unified `checkout_error` event, with `error_code` carrying the gateway or issuer reason. Fragmented event names such as `payment_failed` or `card_declined` are not accepted in the definition; non-payment checkout errors (address validation, shipping eligibility, inventory, coupon, tax service) are excluded.,5️⃣ Exclude internal QA and test orders, zero-authorization amounts, orders settled entirely by gift card or store credit (no external authorization is requested), and known bot or synthetic-monitor traffic. Deduplicate repeated `checkout_error` hits carrying the same attempt or transaction identifier within a 2-second window, which are client re-renders rather than new submissions.,6️⃣ Attempts are stamped to the timestamp of the attempt itself in the reporting time zone, not to the order date; a retry that lands after the 30-minute session inactivity timeout starts a new session but is still counted as its own attempt, so hourly and daily totals must be built from event time and never from session-level aggregation.,7️⃣ Redirect and 3-D Secure challenge flows only count as a failure when the return leg fires `checkout_error` with `error_type = 'payment'`; challenges abandoned without a return leg are reported separately as unknown outcome. Payment Type is a mandatory breakdown — a blended rate hides card, wallet and BNPL behaving very differently — and the monthly total is reconciled against the processor's authorization report with a ±1 percentage point tolerance.
 
 Business Use Case: |
   1️⃣ The Payments Manager in Finance monitors the hourly rate by Payment Type and payment provider; when any method runs more than 2 percentage points above its trailing 28-day baseline for two consecutive hours, they open a severity ticket with the gateway and shift that method's traffic to the backup acquirer until the rate normalises.,2️⃣ The Checkout Product Manager reviews the weekly rate split by device category, browser and card brand; when failures concentrate in one combination (for example wallet attempts on in-app browsers), they prioritise the corresponding checkout fixes — field formatting, tokenised wallet fallback, inline retry messaging — into the next sprint.,3️⃣ The Customer Service Operations Lead uses the daily failure volume by error code to staff and script contact channels, pushing proactive 'try another card or wallet' guidance into the checkout error state and the post-failure email whenever soft declines exceed the weekly norm.,4️⃣ The Head of Revenue Management quantifies recoverable revenue at the monthly trading review by multiplying failed attempts that never converted by average order value, and uses that figure to justify adding a payment method, a local acquirer or an account-updater service for stored cards.
 
 Dependencies:
-  Events: [purchase, checkout-error, add-payment-info]
-  Metrics: [purchases, checkouts-initiated]
-  Dimensions: [payment-type, checkout-step]
+  Events: [purchase]
+  Metrics: [begin-checkout]
+  Dimensions: [payment-method, checkout-step]
   KPIs: [checkout-completion-rate]
 
 Source Data: Digital Analytics (GA4)
@@ -663,7 +585,7 @@ Dashboard Usage: [Checkout Funnel Health, Payment Performance Monitor, Revenue O
 Segment Eligibility: |
   true
 
-Related KPIs: [checkout-completion-rate, checkout-conversion-rate, checkout-abandonment-rate, cart-abandonment-rate]
+Related KPIs: [checkout-completion-rate, checkout-conversion-rate, cart-abandonment-rate]
 
 Data Sensitivity: Internal
 
@@ -677,5 +599,5 @@ Created At: 2026-09-17T23:16:39.424+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-17T23:16:48.356+00:00
+Last Modified At: 2026-09-19T01:23:26.462+00:00
 
