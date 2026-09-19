@@ -1,7 +1,7 @@
 # Dimension: Item List Name
-# Generated: 2026-09-19T18:06:16.319Z
+# Generated: 2026-09-19T18:06:25.479Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Item List Name
 
@@ -10,31 +10,465 @@ Description: |
 
 Category: Engagement
 
+Tags: [dimension, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  select_item
 
+Adobe Event: |
+  Product List Item Click
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "pdp:running-shoes:aerorun-2",
+        "pageType": "product_detail"
+      }
+    },
+    "product": [
+      {
+        "productInfo": {
+          "productID": "SKU_12345",
+          "productName": "AeroRun 2 Running Shoe",
+          "manufacturer": "Stride"
+        },
+        "category": {
+          "primaryCategory": "Footwear",
+          "subCategory1": "Running Shoes"
+        },
+        "attributes": {
+          "listName": "Related Products",
+          "listID": "pdp_related_products",
+          "listPosition": 3
+        },
+        "price": {
+          "basePrice": 89.99,
+          "currency": "USD"
+        }
+      }
+    ],
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "Product List Item Click",
+          "eventAction": "select_item",
+          "type": "product_list"
+        },
+        "attributes": {
+          "listName": "Related Products",
+          "listID": "pdp_related_products"
+        }
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "select_item",
+    "ecommerce": {
+      "item_list_id": "pdp_related_products",
+      "item_list_name": "Related Products",
+      "items": [
+        {
+          "item_id": "SKU_12345",
+          "item_name": "AeroRun 2 Running Shoe",
+          "item_brand": "Stride",
+          "item_category": "Footwear",
+          "item_category2": "Running Shoes",
+          "item_variant": "blue-10",
+          "item_list_id": "pdp_related_products",
+          "item_list_name": "Related Products",
+          "index": 3,
+          "price": 89.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "product-list-item-click",
+    "eventInfo": {
+      "listId": "pdp_related_products",
+      "listName": "Related Products",
+      "position": 3
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU_12345",
+        "name": "AeroRun 2 Running Shoe",
+        "priceTotal": 89.99,
+        "currencyCode": "USD",
+        "quantity": 1,
+        "listId": "pdp_related_products",
+        "listName": "Related Products",
+        "position": 3
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "web": {
+      "webInteraction": {
+        "name": "Product List Item Click",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU_12345",
+        "name": "AeroRun 2 Running Shoe",
+        "priceTotal": 89.99,
+        "currencyCode": "USD",
+        "quantity": 1,
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "eVar20": "pdp_related_products",
+                "eVar21": "Related Products"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar20": "pdp_related_products",
+            "eVar21": "Related Products"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Item List Name: list impressions, list clicks, list click-through rate and
+  -- last-selected list attribution of add_to_cart / purchase items (session scope).
+  -- Key: item_list_id (governed); fallback: normalised item_list_name; else '(direct / no list)'.
+  WITH ev AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      event_timestamp,
+      event_name,
+      user_pseudo_id,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'item_list_id') AS ev_list_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'item_list_name') AS ev_list_name,
+      items
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name IN ('view_item_list', 'select_item', 'add_to_cart', 'purchase')
+  ),
+  item_rows AS (
+    SELECT
+      ev.event_date,
+      ev.event_timestamp,
+      ev.event_name,
+      ev.user_pseudo_id,
+      ev.ga_session_id,
+      item_pos,
+      it.item_id,
+      it.item_list_index,
+      IFNULL(it.quantity, 0) AS quantity,
+      IFNULL(it.item_revenue, 0) AS item_revenue,
+      -- item-level value wins; event-level value applies only when the item carries none
+      COALESCE(
+        NULLIF(TRIM(COALESCE(NULLIF(it.item_list_id, '(not set)'), ev.ev_list_id)), ''),
+        NULLIF(LOWER(REGEXP_REPLACE(TRIM(COALESCE(NULLIF(it.item_list_name, '(not set)'), ev.ev_list_name)), r'[^A-Za-z0-9]+', '_')), '')
+      ) AS list_key,
+      NULLIF(TRIM(COALESCE(NULLIF(it.item_list_name, '(not set)'), ev.ev_list_name)), '') AS item_list_name
+    FROM ev, UNNEST(ev.items) AS it WITH OFFSET AS item_pos
+  ),
+  list_touch AS (
+    SELECT user_pseudo_id, ga_session_id, item_id, event_timestamp, event_name, list_key, item_list_name
+    FROM item_rows
+    WHERE event_name IN ('view_item_list', 'select_item')
+      AND list_key IS NOT NULL
+  ),
+  list_labels AS (
+    SELECT
+      list_key,
+      ARRAY_AGG(item_list_name IGNORE NULLS ORDER BY event_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS item_list_name
+    FROM list_touch
+    GROUP BY list_key
+  ),
+  impressions AS (
+    -- deduplicated on session + list + item + index (infinite scroll / carousel re-fires)
+    SELECT
+      event_date,
+      list_key,
+      COUNT(DISTINCT CONCAT(user_pseudo_id, '|', IFNULL(CAST(ga_session_id AS STRING), ''), '|',
+                            IFNULL(item_id, ''), '|', IFNULL(item_list_index, ''))) AS list_impressions
+    FROM item_rows
+    WHERE event_name = 'view_item_list' AND list_key IS NOT NULL
+    GROUP BY event_date, list_key
+  ),
+  clicks AS (
+    SELECT event_date, list_key, COUNT(*) AS list_item_clicks
+    FROM item_rows
+    WHERE event_name = 'select_item' AND list_key IS NOT NULL
+    GROUP BY event_date, list_key
+  ),
+  attributed AS (
+    -- most recent select_item, falling back to most recent view_item_list, same session + item_id
+    SELECT
+      c.event_date,
+      c.event_name,
+      c.quantity,
+      c.item_revenue,
+      COALESCE(c.list_key, t.list_key, '(direct / no list)') AS list_key
+    FROM item_rows AS c
+    LEFT JOIN list_touch AS t
+      ON  t.user_pseudo_id = c.user_pseudo_id
+      AND t.ga_session_id = c.ga_session_id
+      AND t.item_id = c.item_id
+      AND t.event_timestamp <= c.event_timestamp
+    WHERE c.event_name IN ('add_to_cart', 'purchase')
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY c.user_pseudo_id, c.ga_session_id, c.event_timestamp, c.event_name, c.item_pos
+      ORDER BY IF(t.event_name = 'select_item', 0, 1), t.event_timestamp DESC
+    ) = 1
+  ),
+  conversions AS (
+    SELECT
+      event_date,
+      list_key,
+      COUNTIF(event_name = 'add_to_cart') AS attributed_add_to_carts,
+      SUM(IF(event_name = 'purchase', quantity, 0)) AS attributed_purchased_units,
+      SUM(IF(event_name = 'purchase', item_revenue, 0)) AS attributed_item_revenue
+    FROM attributed
+    GROUP BY event_date, list_key
+  ),
+  keys AS (
+    SELECT event_date, list_key FROM impressions
+    UNION DISTINCT
+    SELECT event_date, list_key FROM clicks
+    UNION DISTINCT
+    SELECT event_date, list_key FROM conversions
+  )
+  SELECT
+    k.event_date,
+    k.list_key AS item_list_id,
+    COALESCE(l.item_list_name, IF(k.list_key = '(direct / no list)', '(direct / no list)', k.list_key)) AS item_list_name,
+    IFNULL(i.list_impressions, 0) AS list_impressions,
+    IFNULL(cl.list_item_clicks, 0) AS list_item_clicks,
+    SAFE_DIVIDE(cl.list_item_clicks, i.list_impressions) AS list_click_through_rate,
+    IFNULL(cv.attributed_add_to_carts, 0) AS attributed_add_to_carts,
+    IFNULL(cv.attributed_purchased_units, 0) AS attributed_purchased_units,
+    IFNULL(cv.attributed_item_revenue, 0) AS attributed_item_revenue,
+    SAFE_DIVIDE(IFNULL(cv.attributed_item_revenue, 0) * 1000, i.list_impressions) AS item_revenue_per_1000_impressions,
+    -- denominator = all item revenue of the day, including '(direct / no list)'
+    SAFE_DIVIDE(IFNULL(cv.attributed_item_revenue, 0),
+                SUM(IFNULL(cv.attributed_item_revenue, 0)) OVER (PARTITION BY k.event_date)) AS share_of_item_revenue
+  FROM keys AS k
+  LEFT JOIN list_labels AS l ON l.list_key = k.list_key
+  LEFT JOIN impressions AS i ON i.event_date = k.event_date AND i.list_key = k.list_key
+  LEFT JOIN clicks AS cl ON cl.event_date = k.event_date AND cl.list_key = k.list_key
+  LEFT JOIN conversions AS cv ON cv.event_date = k.event_date AND cv.list_key = k.list_key
+  ORDER BY k.event_date DESC, attributed_item_revenue DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Item List Name: list impressions, list clicks, list click-through rate and
+  -- last-selected list attribution of cart adds / purchases (30-minute session scope).
+  -- List key: eVar20 (item_list_id) on productListItems, event-level eVar20 as fallback,
+  -- then normalised eVar21 (item_list_name); otherwise '(direct / no list)'.
+  WITH ev AS (
+    SELECT
+      _id AS event_id,
+      timestamp AS event_ts,
+      CAST(timestamp AS DATE) AS event_date,
+      eventType,
+      identityMap['ECID'][0].id AS ecid,
+      _experience.analytics.customDimensions.eVars.eVar20 AS ev_list_id,
+      _experience.analytics.customDimensions.eVars.eVar21 AS ev_list_name,
+      productListItems
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 30)
+      AND timestamp < current_date()
+  ),
+  sess AS (
+    SELECT
+      ev.*,
+      SESS_TIMEOUT(event_ts, 60 * 30) OVER (
+        PARTITION BY ecid ORDER BY event_ts
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session_info
+    FROM ev
+  ),
+  item_rows AS (
+    SELECT
+      s.event_id,
+      s.event_ts,
+      s.event_date,
+      s.eventType,
+      s.ecid,
+      s.session_info.num AS session_num,
+      pl.item_pos,
+      pl.pli.SKU AS sku,
+      COALESCE(pl.pli.quantity, 0) AS quantity,
+      COALESCE(pl.pli.priceTotal, 0) AS price_total,
+      COALESCE(
+        NULLIF(TRIM(COALESCE(pl.pli._experience.analytics.customDimensions.eVars.eVar20, s.ev_list_id)), ''),
+        NULLIF(regexp_replace(lower(TRIM(COALESCE(pl.pli._experience.analytics.customDimensions.eVars.eVar21, s.ev_list_name))), '[^a-z0-9]+', '_'), '')
+      ) AS list_key,
+      NULLIF(TRIM(COALESCE(pl.pli._experience.analytics.customDimensions.eVars.eVar21, s.ev_list_name)), '') AS item_list_name
+    FROM sess s
+    LATERAL VIEW posexplode(s.productListItems) pl AS item_pos, pli
+  ),
+  list_touch AS (
+    -- clicks = web.webinteraction.linkClicks; impressions = non-commerce list renders
+    SELECT
+      ecid, session_num, sku, event_ts, list_key, item_list_name, item_pos,
+      CASE WHEN eventType = 'web.webinteraction.linkClicks' THEN 'click' ELSE 'impression' END AS touch_type,
+      event_date
+    FROM item_rows
+    WHERE list_key IS NOT NULL
+      AND eventType NOT LIKE 'commerce.%'
+  ),
+  list_labels AS (
+    SELECT list_key, item_list_name
+    FROM (
+      SELECT list_key, item_list_name,
+             ROW_NUMBER() OVER (PARTITION BY list_key ORDER BY event_ts DESC) AS rn
+      FROM list_touch
+      WHERE item_list_name IS NOT NULL
+    ) x
+    WHERE rn = 1
+  ),
+  impressions AS (
+    SELECT
+      event_date,
+      list_key,
+      COUNT(DISTINCT concat_ws('|', ecid, CAST(session_num AS STRING), sku, CAST(item_pos AS STRING))) AS list_impressions
+    FROM list_touch
+    WHERE touch_type = 'impression'
+    GROUP BY event_date, list_key
+  ),
+  clicks AS (
+    SELECT event_date, list_key, COUNT(*) AS list_item_clicks
+    FROM list_touch
+    WHERE touch_type = 'click'
+    GROUP BY event_date, list_key
+  ),
+  attributed AS (
+    -- most recent click, falling back to most recent impression, same ECID + session + SKU
+    SELECT event_date, eventType, quantity, price_total, list_key
+    FROM (
+      SELECT
+        c.event_date,
+        c.eventType,
+        c.quantity,
+        c.price_total,
+        COALESCE(c.list_key, t.list_key, '(direct / no list)') AS list_key,
+        ROW_NUMBER() OVER (
+          PARTITION BY c.event_id, c.item_pos
+          ORDER BY CASE WHEN t.touch_type = 'click' THEN 0 ELSE 1 END, t.event_ts DESC
+        ) AS rn
+      FROM item_rows c
+      LEFT JOIN list_touch t
+        ON  t.ecid = c.ecid
+        AND t.session_num = c.session_num
+        AND t.sku = c.sku
+        AND t.event_ts <= c.event_ts
+      WHERE c.eventType IN ('commerce.productListAdds', 'commerce.purchases')
+    ) a
+    WHERE rn = 1
+  ),
+  conversions AS (
+    SELECT
+      event_date,
+      list_key,
+      SUM(CASE WHEN eventType = 'commerce.productListAdds' THEN 1 ELSE 0 END) AS attributed_add_to_carts,
+      SUM(CASE WHEN eventType = 'commerce.purchases' THEN quantity ELSE 0 END) AS attributed_purchased_units,
+      SUM(CASE WHEN eventType = 'commerce.purchases' THEN price_total ELSE 0 END) AS attributed_item_revenue
+    FROM attributed
+    GROUP BY event_date, list_key
+  ),
+  keys AS (
+    SELECT event_date, list_key FROM impressions
+    UNION
+    SELECT event_date, list_key FROM clicks
+    UNION
+    SELECT event_date, list_key FROM conversions
+  )
+  SELECT
+    k.event_date,
+    k.list_key AS item_list_id,
+    COALESCE(l.item_list_name, k.list_key) AS item_list_name,
+    COALESCE(i.list_impressions, 0) AS list_impressions,
+    COALESCE(cl.list_item_clicks, 0) AS list_item_clicks,
+    CASE WHEN i.list_impressions > 0 THEN cl.list_item_clicks / i.list_impressions END AS list_click_through_rate,
+    COALESCE(cv.attributed_add_to_carts, 0) AS attributed_add_to_carts,
+    COALESCE(cv.attributed_purchased_units, 0) AS attributed_purchased_units,
+    COALESCE(cv.attributed_item_revenue, 0) AS attributed_item_revenue,
+    CASE WHEN i.list_impressions > 0 THEN COALESCE(cv.attributed_item_revenue, 0) * 1000 / i.list_impressions END AS item_revenue_per_1000_impressions,
+    -- denominator = all item revenue of the day, including '(direct / no list)'
+    COALESCE(cv.attributed_item_revenue, 0)
+      / NULLIF(SUM(COALESCE(cv.attributed_item_revenue, 0)) OVER (PARTITION BY k.event_date), 0) AS share_of_item_revenue
+  FROM keys k
+  LEFT JOIN list_labels l ON l.list_key = k.list_key
+  LEFT JOIN impressions i ON i.event_date = k.event_date AND i.list_key = k.list_key
+  LEFT JOIN clicks cl ON cl.event_date = k.event_date AND cl.list_key = k.list_key
+  LEFT JOIN conversions cv ON cv.event_date = k.event_date AND cv.list_key = k.list_key
+  ORDER BY k.event_date DESC, attributed_item_revenue DESC;
 
+Calculation Notes: |
+  1️⃣ Capture and precedence: item_list_name and item_list_id are populated inside each element of the items[] array on view_item_list and select_item. When an item-level value is present, GA4 ignores the event-level value. When it is absent, the event-level item_list_name/item_list_id applies to every item in the payload. Both levels must never carry conflicting values in the same push.,2️⃣ Downstream persistence: the GA4 reporting UI attributes the list to later add_to_cart, begin_checkout and purchase events for the same item_id on a last-selected basis within the session. The BigQuery export stores only what was sent, so warehouse models must rebuild the binding themselves: take the most recent select_item (falling back to the most recent view_item_list) for the same user_pseudo_id + ga_session_id + item_id, ordered by event_timestamp. In Adobe Analytics the equivalent is a merchandising eVar with product-syntax binding on the prodView/scAdd events, expiring on purchase or at the end of the visit.,3️⃣ item_list_id is the governed key, and item_list_name is its display label. Use a stable, template-level ID such as search_results, plp_grid, pdp_related_products, cart_cross_sell or home_new_arrivals, and resolve it against a list registry owned by Merchandising. Trend reporting, joins and experiments key on item_list_id so that a renamed label ('You May Also Like' → 'Recommended For You') does not break the series. When the ID is missing, fall back to a normalised name, not '(not set)'.,4️⃣ Cardinality control: dynamic tokens such as search terms, category IDs, page numbers, sort orders and experiment variants must not be concatenated into item_list_name. They belong in search_term, item_category, index and experiment parameters. Values are trimmed, lower-snake-cased for the ID, and capped at 100 characters. Any list exceeding roughly 500 distinct values per day indicates leakage and pushes rows into GA4's '(other)' bucket.,5️⃣ Unattributed traffic: items reached by PDP deep links, paid shopping ads, email or direct URL entry legitimately carry no list. Report them as an explicit '(direct / no list)' member rather than dropping or imputing them. Keep them in totals so that list share of item revenue sums to 100% and list-driven revenue is not overstated.,6️⃣ Impression hygiene: infinite scroll, lazy loading and carousel rotation can fire view_item_list repeatedly for the same items. Fire only for items at least 50% in viewport, batch them per render, and deduplicate impressions on session + item_list_id + item_id + index. Pagination is a new render and counts separately. Server-side re-renders from filter changes count as a new impression set.,7️⃣ Timing and windows: the list binding is scoped to the session (30-minute inactivity timeout in both GA4 and Adobe) and ends at purchase for that item. A cross-session add_to_cart from a wishlist or saved cart therefore reports '(direct / no list)', not the original list. Daily export tables settle within 24–72 hours, so list-level revenue for the last two days is provisional. This dimension feeds the Product List Click-Through Rate KPI (product-list-click-through-rate).
 
+Business Use Case: |
+  1️⃣ The Merchandising Manager reviews Product List Click-Through Rate and item revenue per 1,000 list impressions by item_list_id every week. When a PDP module such as pdp_related_products falls more than 20% below its trailing 8-week baseline, the manager replaces its product feed rule or moves the module above the fold on the next merchandising release.,2️⃣ The Search & Discovery Product Manager checks the search_results list after every ranking or relevance-tuning deployment. If list click-through or list-to-cart rate drops outside the pre/post confidence interval within 72 hours, the team rolls back the ranking configuration and opens a relevance defect.,3️⃣ The Personalisation team A/B tests competing recommendation strategies (e.g. Frequently Bought Together vs. Similar Items) in the same slot, splitting results by item_list_id and experiment variant. The variant with higher attributed item revenue per session gets the permanent PDP slot and a larger share of recommendation-engine compute.,4️⃣ The CRM/Retention Marketing team builds an audience of users who selected items from home_new_arrivals or plp_sale_grid in the past 7 days without purchasing. The audience is exported to email and paid-social remarketing with creative that matches the originating list.
 
+Dependencies:
+  Events: [view-item-list, select-item]
+  Dimensions: [item-id]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  item_list_id; item_id; item_name; item_category; item_brand; index; search_term; page_type; device_category; session_default_channel_group
 
+Dashboard Usage: [Product Discovery Performance, Merchandising Module Effectiveness, Onsite Search Analytics, Recommendation Engine Performance]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [item-id, promotion-name, item-brand, item-variant]
 
+Derived Dimensions: [product-finding-method]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +476,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T18:06:16.012+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T18:06:25.116+00:00
 
