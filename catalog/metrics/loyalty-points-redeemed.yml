@@ -1,7 +1,7 @@
 # Metric: Loyalty Points Redeemed
-# Generated: 2026-09-19T17:56:55.948Z
+# Generated: 2026-09-19T17:57:05.647Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Loyalty Points Redeemed
 Formula: SUM(points_redeemed on confirmed loyalty_reward_redemption transactions) − SUM(points_reversed on redemption reversals posted against those transactions)
@@ -11,30 +11,442 @@ Description: |
 
 Category: Retention
 
+Tags: [metric, E-commerce: Customer Retention, Loyalty & LTV, Loyalty Program, Points Liability]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Monetization
 
+Scope: Global
 
+Measure Type: Sum
 
+Aggregation Window: Daily, Weekly, Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  spend_virtual_currency
 
+Adobe Event: |
+  loyaltyRewardRedemption
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "loyaltyRewardRedemption",
+          "eventAction": "reward_redemption",
+          "type": "loyalty"
+        },
+        "category": {
+          "primaryCategory": "loyalty"
+        },
+        "attributes": {
+          "redemption_id": "RDM-20260919-000123",
+          "points_redeemed": 2500,
+          "loyalty_tier": "gold",
+          "loyalty_program_id": "rewards_us",
+          "reward_type": "discount_voucher",
+          "reward_id": "RWD-10OFF",
+          "redemption_channel": "web",
+          "currency_name": "loyalty_points"
+        }
+      }
+    ],
+    "user": [
+      {
+        "profile": [
+          {
+            "attributes": {
+              "loyalty_tier": "gold",
+              "loyalty_program_id": "rewards_us"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "spend_virtual_currency",
+    "virtual_currency_name": "loyalty_points",
+    "value": 2500,
+    "item_name": "RWD-10OFF",
+    "points_redeemed": 2500,
+    "redemption_id": "RDM-20260919-000123",
+    "loyalty_tier": "gold",
+    "loyalty_program_id": "rewards_us",
+    "reward_type": "discount_voucher",
+    "redemption_channel": "web"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "loyaltyRewardRedemption",
+    "eventInfo": {
+      "eventName": "loyaltyRewardRedemption"
+    },
+    "loyalty": {
+      "redemptionId": "RDM-20260919-000123",
+      "pointsRedeemed": 2500,
+      "loyaltyTier": "gold",
+      "programId": "rewards_us",
+      "rewardType": "discount_voucher",
+      "rewardId": "RWD-10OFF",
+      "redemptionChannel": "web"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "loyalty.rewardRedemption",
+    "_id": "RDM-20260919-000123",
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "RDM-20260919-000123",
+            "eVar41": "gold",
+            "eVar42": "discount_voucher",
+            "eVar43": "rewards_us"
+          }
+        },
+        "event1to100": {
+          "event40": {
+            "value": 1,
+            "id": "RDM-20260919-000123"
+          },
+          "event41": {
+            "value": 2500
+          }
+        }
+      }
+    },
+    "_tenant": {
+      "loyaltyRedemption": {
+        "redemptionID": "RDM-20260919-000123",
+        "pointsRedeemed": 2500,
+        "loyaltyTier": "gold",
+        "programID": "rewards_us",
+        "rewardType": "discount_voucher",
+        "redemptionChannel": "web"
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Net Loyalty Points Redeemed = confirmed ledger redemptions (deduplicated on redemption_id) minus reversals posted against them.
+  -- Ledger is the system of record; spend_virtual_currency (virtual_currency_name = 'loyalty_points') only enriches digital rows
+  -- with device category and provides a digital-vs-ledger reconciliation column.
+  WITH excluded_members AS (
+    SELECT member_id
+    FROM `your-project.loyalty.members`
+    WHERE is_test_account OR is_employee OR is_fraud_flagged
+  ),
+  ledger_redemption_lines AS (
+    SELECT
+      redemption_id,
+      line_id,
+      member_id,
+      program_id,
+      loyalty_tier,
+      reward_type,
+      channel,
+      ABS(points_amount) AS points_redeemed,
+      IF(channel = 'store', business_date, DATE(posting_ts, 'America/New_York')) AS redemption_date
+    FROM `your-project.loyalty.points_ledger`
+    WHERE entry_type = 'REDEMPTION'
+      AND entry_status = 'CONFIRMED'
+      AND posting_ts >= TIMESTAMP('2026-07-01')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY redemption_id, line_id ORDER BY ingested_at DESC) = 1
+  ),
+  redemptions AS (
+    SELECT
+      l.redemption_id,
+      ANY_VALUE(l.program_id) AS program_id,
+      ANY_VALUE(l.loyalty_tier) AS loyalty_tier,
+      ANY_VALUE(l.channel) AS redemption_channel,
+      IF(COUNT(DISTINCT l.reward_type) > 1, 'multiple', ANY_VALUE(l.reward_type)) AS reward_type,
+      MIN(l.redemption_date) AS redemption_date,
+      SUM(l.points_redeemed) AS points_redeemed
+    FROM ledger_redemption_lines AS l
+    LEFT JOIN excluded_members AS x
+      ON l.member_id = x.member_id
+    WHERE x.member_id IS NULL
+    GROUP BY l.redemption_id
+  ),
+  ledger_reversals AS (
+    SELECT
+      reversal_id,
+      redemption_id,
+      ABS(points_amount) AS points_reversed,
+      IF(channel = 'store', business_date, DATE(posting_ts, 'America/New_York')) AS reversal_posting_date
+    FROM `your-project.loyalty.points_ledger`
+    WHERE entry_type = 'REDEMPTION_REVERSAL'
+      AND entry_status = 'CONFIRMED'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY reversal_id ORDER BY ingested_at DESC) = 1
+  ),
+  reversals AS (
+    SELECT
+      r.redemption_id,
+      rv.points_reversed,
+      IF(c.close_date IS NULL OR rv.reversal_posting_date <= c.close_date,
+         r.redemption_date,
+         rv.reversal_posting_date) AS report_date
+    FROM ledger_reversals AS rv
+    JOIN redemptions AS r
+      ON rv.redemption_id = r.redemption_id
+    LEFT JOIN `your-project.finance.period_close_calendar` AS c
+      ON r.redemption_date BETWEEN c.period_start AND c.period_end
+  ),
+  ga4_redemptions AS (
+    SELECT
+      redemption_id,
+      device_category,
+      ga4_points_redeemed
+    FROM (
+      SELECT
+        (SELECT MAX(IF(ep.key = 'redemption_id', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS redemption_id,
+        (SELECT MAX(IF(ep.key = 'virtual_currency_name', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS virtual_currency_name,
+        (SELECT MAX(IF(ep.key = 'points_redeemed', COALESCE(ep.value.int_value, CAST(ep.value.double_value AS INT64)), NULL)) FROM UNNEST(event_params) AS ep) AS ga4_points_redeemed,
+        device.category AS device_category,
+        event_timestamp
+      FROM `your-project.analytics_123456789.events_*`
+      WHERE _TABLE_SUFFIX BETWEEN '20260731' AND '20260901'
+        AND event_name = 'spend_virtual_currency'
+    )
+    WHERE virtual_currency_name = 'loyalty_points'
+      AND redemption_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY redemption_id ORDER BY event_timestamp) = 1
+  ),
+  movements AS (
+    SELECT
+      r.redemption_date AS report_date,
+      r.program_id,
+      r.loyalty_tier,
+      r.redemption_channel,
+      r.reward_type,
+      COALESCE(g.device_category, IF(r.redemption_channel = 'store', 'in_store', 'unmatched_digital')) AS device_category,
+      r.redemption_id,
+      r.points_redeemed AS gross_points,
+      0 AS reversed_points,
+      g.ga4_points_redeemed
+    FROM redemptions AS r
+    LEFT JOIN ga4_redemptions AS g
+      ON r.redemption_id = g.redemption_id
+    UNION ALL
+    SELECT
+      v.report_date,
+      r.program_id,
+      r.loyalty_tier,
+      r.redemption_channel,
+      r.reward_type,
+      COALESCE(g.device_category, IF(r.redemption_channel = 'store', 'in_store', 'unmatched_digital')) AS device_category,
+      CAST(NULL AS STRING) AS redemption_id,
+      0 AS gross_points,
+      v.points_reversed AS reversed_points,
+      CAST(NULL AS INT64) AS ga4_points_redeemed
+    FROM reversals AS v
+    JOIN redemptions AS r
+      ON v.redemption_id = r.redemption_id
+    LEFT JOIN ga4_redemptions AS g
+      ON r.redemption_id = g.redemption_id
+  )
+  SELECT
+    report_date,
+    program_id,
+    loyalty_tier,
+    redemption_channel,
+    reward_type,
+    device_category,
+    COUNT(DISTINCT redemption_id) AS confirmed_redemptions,
+    SUM(gross_points) AS gross_points_redeemed,
+    SUM(reversed_points) AS points_reversed,
+    SUM(gross_points) - SUM(reversed_points) AS net_loyalty_points_redeemed,
+    SUM(ga4_points_redeemed) AS digital_event_points_matched
+  FROM movements
+  WHERE report_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-31'
+  GROUP BY report_date, program_id, loyalty_tier, redemption_channel, reward_type, device_category
+  ORDER BY report_date, program_id, loyalty_tier, redemption_channel;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Net Loyalty Points Redeemed from the loyalty ledger backend dataset (system of record), deduplicated on redemptionID,
+  -- net of reversals; web/app loyalty.rewardRedemption events only enrich digital rows and feed the reconciliation column.
+  WITH excluded_members AS (
+    SELECT memberID AS member_id
+    FROM loyalty_members_dataset
+    WHERE isTestAccount = true OR isEmployee = true OR isFraudFlagged = true
+  ),
+  ledger_redemption_lines AS (
+    SELECT redemption_id, line_id, member_id, program_id, loyalty_tier, reward_type, channel, points_redeemed, redemption_date
+    FROM (
+      SELECT
+        l._tenant.loyaltyLedger.redemptionID AS redemption_id,
+        l._tenant.loyaltyLedger.lineID AS line_id,
+        l._tenant.loyaltyLedger.memberID AS member_id,
+        l._tenant.loyaltyLedger.programID AS program_id,
+        l._tenant.loyaltyLedger.loyaltyTier AS loyalty_tier,
+        l._tenant.loyaltyLedger.rewardType AS reward_type,
+        l._tenant.loyaltyLedger.channel AS channel,
+        ABS(l._tenant.loyaltyLedger.pointsAmount) AS points_redeemed,
+        CASE WHEN l._tenant.loyaltyLedger.channel = 'store'
+             THEN CAST(l._tenant.loyaltyLedger.businessDate AS DATE)
+             ELSE TO_DATE(FROM_UTC_TIMESTAMP(l.timestamp, 'America/New_York')) END AS redemption_date,
+        ROW_NUMBER() OVER (PARTITION BY l._tenant.loyaltyLedger.redemptionID, l._tenant.loyaltyLedger.lineID
+                           ORDER BY l._acp_system_metadata.ingestTime DESC) AS rn
+      FROM aep_backend_dataset AS l
+      WHERE l._tenant.loyaltyLedger.entryType = 'REDEMPTION'
+        AND l._tenant.loyaltyLedger.entryStatus = 'CONFIRMED'
+        AND l.timestamp >= TIMESTAMP '2026-07-01 00:00:00'
+    ) AS d
+    WHERE rn = 1
+  ),
+  redemptions AS (
+    SELECT
+      l.redemption_id,
+      MAX(l.program_id) AS program_id,
+      MAX(l.loyalty_tier) AS loyalty_tier,
+      MAX(l.channel) AS redemption_channel,
+      CASE WHEN COUNT(DISTINCT l.reward_type) > 1 THEN 'multiple' ELSE MAX(l.reward_type) END AS reward_type,
+      MIN(l.redemption_date) AS redemption_date,
+      SUM(l.points_redeemed) AS points_redeemed
+    FROM ledger_redemption_lines AS l
+    LEFT JOIN excluded_members AS x
+      ON l.member_id = x.member_id
+    WHERE x.member_id IS NULL
+    GROUP BY l.redemption_id
+  ),
+  ledger_reversals AS (
+    SELECT reversal_id, redemption_id, points_reversed, reversal_posting_date
+    FROM (
+      SELECT
+        l._tenant.loyaltyLedger.reversalID AS reversal_id,
+        l._tenant.loyaltyLedger.redemptionID AS redemption_id,
+        ABS(l._tenant.loyaltyLedger.pointsAmount) AS points_reversed,
+        CASE WHEN l._tenant.loyaltyLedger.channel = 'store'
+             THEN CAST(l._tenant.loyaltyLedger.businessDate AS DATE)
+             ELSE TO_DATE(FROM_UTC_TIMESTAMP(l.timestamp, 'America/New_York')) END AS reversal_posting_date,
+        ROW_NUMBER() OVER (PARTITION BY l._tenant.loyaltyLedger.reversalID
+                           ORDER BY l._acp_system_metadata.ingestTime DESC) AS rn
+      FROM aep_backend_dataset AS l
+      WHERE l._tenant.loyaltyLedger.entryType = 'REDEMPTION_REVERSAL'
+        AND l._tenant.loyaltyLedger.entryStatus = 'CONFIRMED'
+    ) AS d
+    WHERE rn = 1
+  ),
+  reversals AS (
+    SELECT
+      r.redemption_id,
+      rv.points_reversed,
+      CASE WHEN c.close_date IS NULL OR rv.reversal_posting_date <= c.close_date
+           THEN r.redemption_date
+           ELSE rv.reversal_posting_date END AS report_date
+    FROM ledger_reversals AS rv
+    JOIN redemptions AS r
+      ON rv.redemption_id = r.redemption_id
+    LEFT JOIN finance_period_close_calendar AS c
+      ON r.redemption_date BETWEEN c.period_start AND c.period_end
+  ),
+  digital_redemptions AS (
+    SELECT redemption_id, device_category, digital_points_redeemed
+    FROM (
+      SELECT
+        e._tenant.loyaltyRedemption.redemptionID AS redemption_id,
+        e.device.type AS device_category,
+        e._tenant.loyaltyRedemption.pointsRedeemed AS digital_points_redeemed,
+        ROW_NUMBER() OVER (PARTITION BY e._tenant.loyaltyRedemption.redemptionID ORDER BY e.timestamp) AS rn
+      FROM web_app_events_dataset AS e
+      WHERE e.eventType = 'loyalty.rewardRedemption'
+        AND e._tenant.loyaltyRedemption.redemptionID IS NOT NULL
+        AND e.timestamp >= TIMESTAMP '2026-07-31 00:00:00'
+        AND e.timestamp < TIMESTAMP '2026-09-02 00:00:00'
+    ) AS d
+    WHERE rn = 1
+  ),
+  movements AS (
+    SELECT
+      r.redemption_date AS report_date,
+      r.program_id,
+      r.loyalty_tier,
+      r.redemption_channel,
+      r.reward_type,
+      COALESCE(g.device_category, CASE WHEN r.redemption_channel = 'store' THEN 'in_store' ELSE 'unmatched_digital' END) AS device_category,
+      r.redemption_id,
+      r.points_redeemed AS gross_points,
+      0 AS reversed_points,
+      g.digital_points_redeemed
+    FROM redemptions AS r
+    LEFT JOIN digital_redemptions AS g
+      ON r.redemption_id = g.redemption_id
+    UNION ALL
+    SELECT
+      v.report_date,
+      r.program_id,
+      r.loyalty_tier,
+      r.redemption_channel,
+      r.reward_type,
+      COALESCE(g.device_category, CASE WHEN r.redemption_channel = 'store' THEN 'in_store' ELSE 'unmatched_digital' END) AS device_category,
+      CAST(NULL AS STRING) AS redemption_id,
+      0 AS gross_points,
+      v.points_reversed AS reversed_points,
+      CAST(NULL AS BIGINT) AS digital_points_redeemed
+    FROM reversals AS v
+    JOIN redemptions AS r
+      ON v.redemption_id = r.redemption_id
+    LEFT JOIN digital_redemptions AS g
+      ON r.redemption_id = g.redemption_id
+  )
+  SELECT
+    report_date,
+    program_id,
+    loyalty_tier,
+    redemption_channel,
+    reward_type,
+    device_category,
+    COUNT(DISTINCT redemption_id) AS confirmed_redemptions,
+    SUM(gross_points) AS gross_points_redeemed,
+    SUM(reversed_points) AS points_reversed,
+    SUM(gross_points) - SUM(reversed_points) AS net_loyalty_points_redeemed,
+    SUM(digital_points_redeemed) AS digital_event_points_matched
+  FROM movements
+  WHERE report_date BETWEEN DATE '2026-08-01' AND DATE '2026-08-31'
+  GROUP BY report_date, program_id, loyalty_tier, redemption_channel, reward_type, device_category
+  ORDER BY report_date, program_id, loyalty_tier, redemption_channel;
 
+Calculation Notes: |
+  1️⃣ System of record is the loyalty platform ledger (debit entries of type REDEMPTION). Digital loyalty_reward_redemption events are matched to ledger rows on redemption_id; the ledger value wins on any mismatch, and client-side events with no confirmed ledger debit (declined payment, abandoned checkout, validation failure) are excluded.,2️⃣ Deduplicate on redemption_id before summing: page reloads, app retries and server-to-server replays of the same redemption count once. A redemption split across multiple rewards in one basket is one redemption_id with the points summed at line level.,3️⃣ Net of reversals: points re-credited because the order was cancelled, the reward was refunded or the redemption was voided are subtracted. Reversals inside the open reporting period restate the original redemption date; reversals posted after period close are booked in the period they post so closed figures reconcile to the finance close.,4️⃣ Exclusions: points expiry/breakage, manual goodwill or service adjustments, balance transfers and household pooling moves, account-merge corrections, points-to-partner-currency conversions not debited as a reward, and test, employee and fraud-flagged member accounts.,5️⃣ Omnichannel stitching: in-store POS redemptions enter through the ledger with channel = store and are attributed to the store's local business date; digital redemptions use the ledger posting timestamp converted to the reporting timezone. The 30-minute GA4 session timeout has no bearing on the count because inclusion is ledger-driven, not session-driven.,6️⃣ Pay-with-points and points-plus-cash tenders count only the points component; the cash portion belongs to revenue metrics. Partial returns on a points-funded order reverse points pro rata per the program's refund rules, never the full redemption by default.,7️⃣ Report in points, never summed across programs or brands with different point valuations; split by program_id first. The monetary equivalent (points × cost-per-point) is a separate Finance measure and must not be substituted for this raw point count.
 
+Business Use Case: |
+  1️⃣ The Loyalty Program Manager reviews weekly points redeemed by customer loyalty tier; when a tier's burn falls more than 15% below forecast for two consecutive weeks, they launch a targeted redemption campaign (bonus reward, lowered redemption threshold) to that tier to cut dormant balances before expiry-driven churn.,2️⃣ The Finance Controller uses the monthly net figure at close to release the deferred revenue held against the points liability (ASC 606 / IFRS 15 material right) and reconciles it to the ledger; any variance above 0.5% between the digital and ledger totals is escalated to the loyalty operations team before sign-off.,3️⃣ Merchandising compares points redeemed by reward type and SKU each quarter and removes or re-prices catalog rewards that draw less than 2% of redemptions, reallocating margin to the rewards that actually move points.,4️⃣ The CRM Marketing team monitors the store versus digital split of redemptions; when the in-store share rises while app redemptions stall, they trigger in-app wallet and push prompts at checkout to shift redemption into the lower-cost digital channel.
 
+Dependencies:
+  Events: [loyalty-reward-redemption]
+  Dimensions: [customer-loyalty-tier]
 
+Source Data: Digital + Loyalty Platform Ledger (POS in-store redemptions)
 
+Report Attributes: |
+  customer-loyalty-tier; Redemption Channel (web, app, store); Reward Type; Loyalty Program ID; Store / Region; Device Category; Member Tenure Band
 
+Dashboard Usage: [Loyalty Program Performance, Points Liability & Breakage Reconciliation, Customer Retention & LTV Overview, Omnichannel Loyalty Engagement]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [loyalty-points-earned, loyalty-points-expired, loyalty-points-outstanding-balance, loyalty-redemptions]
 
+Derived KPIs: [loyalty-redemption-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +456,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T17:56:55.667+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T17:57:05.318+00:00
 
