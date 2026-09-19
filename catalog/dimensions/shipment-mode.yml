@@ -1,0 +1,246 @@
+# Dimension: Shipment Mode
+# Generated: 2026-09-19T19:41:51.908Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Shipment Mode
+
+Description: |
+  Shipment Mode classifies each shipped order by the normalized shipping service level confirmed at purchase (Standard, Expedited, Same-Day, or Mixed when an order is split across services) and is the order-level Shipping Method used in fulfillment reporting. It differs from Shipping Tier, which records the option a shopper selects on add_shipping_info during checkout, because Shipment Mode is the service actually attached to the completed order. It also differs from Fulfillment Method, which says how an order reaches the customer (ship to home, store pickup, digital delivery); Shipment Mode applies only to orders that ship and says how fast they ship, so pickup and digital orders are classified by Fulfillment Method and not here.
+
+Category: Operations
+
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "transaction": {
+        "transactionID": "T-100245",
+        "total": {
+          "basePrice": 121,
+          "shipping": 8.99,
+          "shippingMethod": "expedited",
+          "transactionTotal": 129.99,
+          "currency": "USD"
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "purchase"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "shipment_mode": "expedited",
+    "ecommerce": {
+      "transaction_id": "T-100245",
+      "value": 129.99,
+      "currency": "USD",
+      "shipping": 8.99,
+      "items": [
+        {
+          "item_id": "SKU-1234",
+          "item_name": "Trail Running Shoe",
+          "price": 121,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100245",
+        "priceTotal": 129.99,
+        "currencyCode": "USD"
+      }
+    },
+    "shipping": {
+      "shippingMethod": "expedited",
+      "shippingAmount": 8.99
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100245",
+        "priceTotal": 129.99,
+        "currencyCode": "USD"
+      }
+    },
+    "shipping": {
+      "shippingMethod": "expedited",
+      "shippingAmount": 8.99
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Orders, revenue and order share by normalized Shipment Mode (value confirmed at purchase), last 30 complete days
+  WITH purchases AS (
+    SELECT
+      e.ecommerce.transaction_id AS transaction_id,
+      MAX(e.ecommerce.purchase_revenue) AS purchase_revenue,
+      MAX(IF(ep.key = 'shipment_mode', ep.value.string_value, NULL)) AS shipment_mode_raw
+    FROM `your-project.analytics_123456789.events_*` AS e
+    LEFT JOIN UNNEST(e.event_params) AS ep
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+                              AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name = 'purchase'
+      AND e.ecommerce.transaction_id IS NOT NULL
+      AND e.ecommerce.transaction_id != '(not set)'
+    GROUP BY transaction_id
+  ),
+  normalized AS (
+    SELECT
+      transaction_id,
+      purchase_revenue,
+      CASE
+        WHEN shipment_mode_raw IS NULL OR TRIM(shipment_mode_raw) = '' THEN 'Unknown'
+        -- store pickup and digital delivery have no shipment service (Fulfillment Method dimension): excluded below
+        WHEN REGEXP_CONTAINS(LOWER(shipment_mode_raw), r'pick[ _-]?up|bopis|click[ _-]?(and|&)[ _-]?collect|in[ _-]?store|digital|download|e-?delivery') THEN NULL
+        WHEN REGEXP_CONTAINS(LOWER(shipment_mode_raw), r'mixed|multiple') THEN 'Mixed'
+        WHEN REGEXP_CONTAINS(LOWER(shipment_mode_raw), r'same[ _-]?day') THEN 'Same-Day'
+        WHEN REGEXP_CONTAINS(LOWER(shipment_mode_raw), r'express|expedited|overnight|next[ _-]?day|priority|2[ _-]?day|two[ _-]?day') THEN 'Expedited'
+        WHEN REGEXP_CONTAINS(LOWER(shipment_mode_raw), r'standard|ground|economy|free') THEN 'Standard'
+        ELSE 'Unknown'
+      END AS shipment_mode
+    FROM purchases
+  )
+  SELECT
+    shipment_mode,
+    COUNT(DISTINCT transaction_id) AS orders,
+    SUM(purchase_revenue) AS revenue,
+    SAFE_DIVIDE(COUNT(DISTINCT transaction_id), SUM(COUNT(DISTINCT transaction_id)) OVER ()) AS order_share
+  FROM normalized
+  WHERE shipment_mode IS NOT NULL
+  GROUP BY shipment_mode
+  ORDER BY orders DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Orders, revenue and order share by normalized Shipment Mode (value confirmed at purchase), last 30 complete days
+  WITH purchases AS (
+    SELECT
+      commerce.order.purchaseID AS purchase_id,
+      MAX(commerce.order.priceTotal) AS purchase_revenue,
+      MAX(shipping.shippingMethod) AS shipping_method_raw
+    FROM commerce_experience_event_dataset
+    WHERE commerce.purchases.value = 1
+      AND commerce.order.purchaseID IS NOT NULL
+      AND timestamp >= date_sub(current_date(), 30)
+      AND timestamp < current_date()
+    GROUP BY commerce.order.purchaseID
+  ),
+  normalized AS (
+    SELECT
+      purchase_id,
+      purchase_revenue,
+      CASE
+        WHEN shipping_method_raw IS NULL OR TRIM(shipping_method_raw) = '' THEN 'Unknown'
+        -- store pickup and digital delivery have no shipment service (Fulfillment Method dimension): excluded below
+        WHEN LOWER(shipping_method_raw) RLIKE 'pick[ _-]?up|bopis|click[ _-]?(and|&)[ _-]?collect|in[ _-]?store|digital|download|e-?delivery' THEN NULL
+        WHEN LOWER(shipping_method_raw) RLIKE 'mixed|multiple' THEN 'Mixed'
+        WHEN LOWER(shipping_method_raw) RLIKE 'same[ _-]?day' THEN 'Same-Day'
+        WHEN LOWER(shipping_method_raw) RLIKE 'express|expedited|overnight|next[ _-]?day|priority|2[ _-]?day|two[ _-]?day' THEN 'Expedited'
+        WHEN LOWER(shipping_method_raw) RLIKE 'standard|ground|economy|free' THEN 'Standard'
+        ELSE 'Unknown'
+      END AS shipment_mode
+    FROM purchases
+  )
+  SELECT
+    shipment_mode,
+    COUNT(DISTINCT purchase_id) AS orders,
+    SUM(purchase_revenue) AS revenue,
+    COUNT(DISTINCT purchase_id) * 1.0 / NULLIF(SUM(COUNT(DISTINCT purchase_id)) OVER (), 0) AS order_share
+  FROM normalized
+  WHERE shipment_mode IS NOT NULL
+  GROUP BY shipment_mode
+  ORDER BY orders DESC;
+
+Calculation Notes: |
+  1️⃣ Read the shipping service confirmed on the purchase event (GA4 top-level event parameter shipment_mode registered as an event-scoped custom dimension, because GA4 recognises shipping_tier only on add_shipping_info; ACDL and XDM shipping.shippingMethod); the checkout-stage selection on add_shipping_info belongs to the Shipping Tier dimension.
+  2️⃣ Normalize raw platform values to the governed vocabulary Standard, Expedited, Same-Day, Mixed and Unknown with a case-insensitive mapping table maintained by Fulfillment Operations; store pickup and digital delivery orders have no shipment service, belong to the Fulfillment Method dimension and are excluded from Shipment Mode reporting.
+  3️⃣ Deduplicate purchase events by transaction ID before counting so that repeated confirmation-page loads do not inflate any mode.
+  4️⃣ Send Mixed when one order is split across more than one delivery service and the implementation carries a single order-level string.
+  5️⃣ Keep Unknown for missing, blank or unmapped values instead of defaulting them to Standard, and review the Unknown share weekly.
+  6️⃣ Use the value captured at purchase as the historical record; later carrier upgrades or customer changes are tracked in shipment-level data and never overwrite the event.
+  7️⃣ Exclude test orders always; exclude cancelled orders only for completed-fulfillment analysis and retain them for checkout and demand analysis.
+
+Business Use Case: |
+  1️⃣ The E-commerce Merchandising team reviews order share and revenue by Shipment Mode each month and, when Expedited share falls after a price change, adjusts the expedited shipping fee or free-shipping threshold.
+  2️⃣ Fulfillment Operations forecasts pick, pack and carrier capacity from the weekly Same-Day and Expedited order volume and adds labor or carrier pickups before peak periods.
+  3️⃣ Finance compares shipping revenue with shipping cost by Shipment Mode each quarter and flags modes that run at a loss for repricing or removal from checkout.
+
+Dependencies:
+  Events: [purchase]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Event Date; Device Category; Default Channel Group; Delivery Region; Product Category; Order Status
+
+Dashboard Usage: [Shipping Option Performance, Fulfillment Experience, Digital Checkout Performance, E-commerce Conversion Overview]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [shipping-tier, carrier, fulfillment-method, delivery-promise-date, number-of-shipments, order-status, delivery-region]
+
+Derived Dimensions: [shipment-mode-distribution]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-08T19:30:12.729087+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-19T19:41:51.49+00:00
+
