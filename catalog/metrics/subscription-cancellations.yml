@@ -1,7 +1,7 @@
 # Metric: Subscription Cancellations
-# Generated: 2026-09-19T17:57:28.524Z
+# Generated: 2026-09-19T17:57:38.321Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Subscription Cancellations
 Formula: COUNT(DISTINCT subscription_id) WHERE subscription_status transitions to 'cancelled' AND cancellation_effective_date BETWEEN period_start AND period_end (web subscription_cancellation events UNION billing-platform cancellation records, deduplicated by subscription_id)
@@ -11,30 +11,549 @@ Description: |
 
 Category: Retention
 
+Tags: [metric, E-commerce: Customer Retention, Loyalty & LTV, subscription, churn, replenishment, omnichannel]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Monetization
 
+Scope: Global
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
 
+GA4 Event: |
+  cancel_subscription
 
+Adobe Event: |
+  subscription:cancel
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "cancel_subscription",
+          "eventAction": "subscription_cancel",
+          "timeStamp": "2026-09-19T14:32:05Z"
+        },
+        "category": {
+          "primaryCategory": "subscription",
+          "subCategory1": "account_management"
+        },
+        "attributes": {
+          "subscriptionId": "SUB-000123456",
+          "subscriptionStatus": "cancelled",
+          "cancellationType": "voluntary",
+          "cancellationReason": "too_much_product",
+          "cancellationChannel": "self_serve_web",
+          "cancellationTiming": "end_of_term",
+          "cancellationEffectiveDate": "2026-10-01",
+          "subscriptionFrequency": "every_30_days",
+          "subscriptionTenureDays": 184,
+          "planId": "SNS-COFFEE-30",
+          "saveOfferShown": true,
+          "saveOfferAccepted": false,
+          "recurringValue": 34.99,
+          "currency": "USD"
+        }
+      }
+    ],
+    "product": [
+      {
+        "productInfo": {
+          "sku": "COF-BLEND-1KG",
+          "productName": "House Blend Coffee 1kg"
+        },
+        "category": {
+          "primaryCategory": "Coffee"
+        },
+        "quantity": 1
+      }
+    ],
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "CUST-88421",
+              "loginStatus": "logged_in"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "cancel_subscription",
+    "subscription_id": "SUB-000123456",
+    "subscription_status": "cancelled",
+    "cancellation_type": "voluntary",
+    "cancellation_reason": "too_much_product",
+    "cancellation_channel": "self_serve_web",
+    "cancellation_timing": "end_of_term",
+    "cancellation_effective_date": "2026-10-01",
+    "subscription_frequency": "every_30_days",
+    "subscription_tenure_days": 184,
+    "plan_id": "SNS-COFFEE-30",
+    "save_offer_shown": true,
+    "save_offer_accepted": false,
+    "value": 34.99,
+    "currency": "USD",
+    "items": [
+      {
+        "item_id": "COF-BLEND-1KG",
+        "item_name": "House Blend Coffee 1kg",
+        "item_category": "Coffee",
+        "item_variant": "every_30_days",
+        "price": 34.99,
+        "quantity": 1
+      }
+    ]
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "subscription:cancel",
+    "eventInfo": {
+      "path": "subscription.cancellation"
+    },
+    "subscription": {
+      "subscriptionId": "SUB-000123456",
+      "status": "cancelled",
+      "planId": "SNS-COFFEE-30",
+      "frequency": "every_30_days",
+      "tenureDays": 184,
+      "recurringValue": 34.99,
+      "currency": "USD",
+      "cancellation": {
+        "type": "voluntary",
+        "reason": "too_much_product",
+        "channel": "self_serve_web",
+        "timing": "end_of_term",
+        "effectiveDate": "2026-10-01",
+        "saveOfferShown": true,
+        "saveOfferAccepted": false
+      }
+    },
+    "product": [
+      {
+        "productInfo": {
+          "sku": "COF-BLEND-1KG",
+          "name": "House Blend Coffee 1kg",
+          "category": "Coffee",
+          "quantity": 1,
+          "price": 34.99
+        }
+      }
+    ],
+    "user": {
+      "profileId": "CUST-88421",
+      "loginStatus": "logged_in"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "subscription.cancel",
+    "timestamp": "2026-09-19T14:32:05Z",
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "CUST-88421",
+          "authenticatedState": "authenticated",
+          "primary": true
+        }
+      ]
+    },
+    "productListItems": [
+      {
+        "SKU": "COF-BLEND-1KG",
+        "name": "House Blend Coffee 1kg",
+        "productCategories": [
+          {
+            "categoryID": "Coffee"
+          }
+        ],
+        "quantity": 1,
+        "priceTotal": 34.99,
+        "currencyCode": "USD"
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "event1to100": {
+          "event20": {
+            "value": 1,
+            "id": "SUB-000123456"
+          }
+        },
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "SUB-000123456",
+            "eVar41": "voluntary",
+            "eVar42": "too_much_product",
+            "eVar43": "self_serve_web",
+            "eVar44": "every_30_days"
+          },
+          "props": {
+            "prop20": "end_of_term"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Subscription Cancellations: distinct subscriptions whose status moved to 'cancelled',
+  -- dated on the effective date in the store timezone. Billing platform status history is the
+  -- source of truth; GA4 cancel_subscription events add channel attribution and cover
+  -- cancellations the billing sync has not yet received. One row per subscription_id per period.
+  WITH params AS (
+    SELECT
+      DATE '2026-09-01'  AS period_start,
+      DATE '2026-09-30'  AS period_end,
+      'America/New_York' AS store_tz,
+      7                  AS grace_days,      -- save-offer reactivation window
+      120                AS web_lookback_days -- end-of-term requests placed before the period
+  ),
+  
+  -- Billing platform: every status change with its neighbours
+  status_history AS (
+    SELECT
+      h.subscription_id,
+      h.customer_id,
+      h.status,
+      h.status_changed_at,
+      h.cancellation_effective_at,
+      h.cancellation_type,
+      h.cancellation_reason,
+      h.cancellation_channel,
+      h.migrated_to_subscription_id,
+      LAG(h.status)             OVER w AS prev_status,
+      LEAD(h.status)            OVER w AS next_status,
+      LEAD(h.status_changed_at) OVER w AS next_status_changed_at
+    FROM `your-project.billing.subscription_status_history` h
+    WINDOW w AS (PARTITION BY h.subscription_id ORDER BY h.status_changed_at)
+  ),
+  
+  -- Eligible subscriptions: produced a successful first charge, not test / internal / employee
+  eligible_subscriptions AS (
+    SELECT
+      s.subscription_id,
+      s.product_category,
+      s.subscription_frequency,
+      COALESCE(s.is_trial_or_sample, FALSE) AS is_trial_or_sample
+    FROM `your-project.billing.subscriptions` s
+    WHERE s.first_successful_charge_at IS NOT NULL
+      AND NOT COALESCE(s.is_test, FALSE)
+      AND NOT COALESCE(s.is_internal_account, FALSE)
+  ),
+  
+  -- Billing cancellations: genuine transitions into 'cancelled', not reactivated within the grace window,
+  -- not SKU-discontinuation migrations, dated on the effective date (dunning exhaustion for involuntary)
+  billing_cancellations AS (
+    SELECT
+      sh.subscription_id,
+      sh.customer_id,
+      DATE(COALESCE(sh.cancellation_effective_at, sh.status_changed_at), p.store_tz) AS cancellation_date,
+      LOWER(sh.cancellation_type)    AS cancellation_type,
+      LOWER(sh.cancellation_reason)  AS cancellation_reason,
+      LOWER(sh.cancellation_channel) AS cancellation_channel,
+      sh.status_changed_at
+    FROM status_history sh
+    CROSS JOIN params p
+    WHERE sh.status = 'cancelled'
+      AND COALESCE(sh.prev_status, '') <> 'cancelled'
+      AND sh.migrated_to_subscription_id IS NULL
+      AND NOT (
+        sh.next_status = 'active'
+        AND sh.next_status_changed_at <= TIMESTAMP_ADD(sh.status_changed_at, INTERVAL p.grace_days DAY)
+      )
+      AND DATE(COALESCE(sh.cancellation_effective_at, sh.status_changed_at), p.store_tz)
+          BETWEEN p.period_start AND p.period_end
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY sh.subscription_id ORDER BY sh.status_changed_at DESC) = 1
+  ),
+  
+  -- GA4 cancel_subscription events, event_params pivoted to one row per event
+  web_events AS (
+    SELECT
+      e.user_pseudo_id,
+      e.user_id,
+      e.event_timestamp,
+      MAX(IF(ep.key = 'subscription_id',             ep.value.string_value, NULL)) AS subscription_id,
+      MAX(IF(ep.key = 'cancellation_type',           ep.value.string_value, NULL)) AS cancellation_type,
+      MAX(IF(ep.key = 'cancellation_reason',         ep.value.string_value, NULL)) AS cancellation_reason,
+      MAX(IF(ep.key = 'cancellation_channel',        ep.value.string_value, NULL)) AS cancellation_channel,
+      MAX(IF(ep.key = 'cancellation_timing',         ep.value.string_value, NULL)) AS cancellation_timing,
+      MAX(IF(ep.key = 'cancellation_effective_date', ep.value.string_value, NULL)) AS cancellation_effective_date,
+      MAX(IF(ep.key = 'save_offer_accepted',
+             COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS save_offer_accepted
+    FROM `your-project.analytics_123456789.events_*` e
+    CROSS JOIN UNNEST(e.event_params) ep
+    CROSS JOIN params p
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(p.period_start, INTERVAL p.web_lookback_days DAY))
+                              AND FORMAT_DATE('%Y%m%d', p.period_end)
+      AND e.event_name = 'cancel_subscription'
+    GROUP BY e.user_pseudo_id, e.user_id, e.event_timestamp
+  ),
+  
+  -- Latest web cancellation per subscription_id (stitched on subscription_id, independent of sessions)
+  web_cancellations AS (
+    SELECT
+      w.subscription_id,
+      w.user_id AS customer_id,
+      TIMESTAMP_MICROS(w.event_timestamp) AS event_ts,
+      COALESCE(SAFE.PARSE_DATE('%Y-%m-%d', w.cancellation_effective_date),
+               DATE(TIMESTAMP_MICROS(w.event_timestamp), p.store_tz)) AS cancellation_date,
+      LOWER(w.cancellation_type)    AS cancellation_type,
+      LOWER(w.cancellation_reason)  AS cancellation_reason,
+      LOWER(w.cancellation_channel) AS cancellation_channel
+    FROM web_events w
+    CROSS JOIN params p
+    WHERE w.subscription_id IS NOT NULL
+      AND LOWER(COALESCE(w.save_offer_accepted, 'false')) NOT IN ('true', '1')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY w.subscription_id ORDER BY w.event_timestamp DESC) = 1
+  ),
+  
+  -- Web-only records: billing has not yet received any status change at or after the web event
+  -- (a billing reversal or a synced cancellation makes the billing record authoritative)
+  web_pending_sync AS (
+    SELECT wc.*
+    FROM web_cancellations wc
+    CROSS JOIN params p
+    WHERE wc.cancellation_date BETWEEN p.period_start AND p.period_end
+      AND NOT EXISTS (
+        SELECT 1
+        FROM status_history sh
+        WHERE sh.subscription_id = wc.subscription_id
+          AND sh.status_changed_at >= wc.event_ts
+      )
+  ),
+  
+  -- Unified, deduplicated by subscription_id: billing first, web for channel attribution and sync gaps
+  unified AS (
+    SELECT
+      COALESCE(b.subscription_id, w.subscription_id)                        AS subscription_id,
+      COALESCE(b.cancellation_date, w.cancellation_date)                    AS cancellation_date,
+      COALESCE(b.cancellation_type, w.cancellation_type, 'unknown')         AS cancellation_type,
+      COALESCE(b.cancellation_reason, w.cancellation_reason, 'not_provided') AS cancellation_reason,
+      COALESCE(wa.cancellation_channel, b.cancellation_channel, w.cancellation_channel, 'billing_system') AS cancellation_channel,
+      IF(b.subscription_id IS NULL, 'web_pending_billing_sync', 'billing_platform') AS record_source
+    FROM billing_cancellations b
+    FULL OUTER JOIN web_pending_sync w
+      ON b.subscription_id = w.subscription_id
+    LEFT JOIN web_cancellations wa
+      ON wa.subscription_id = b.subscription_id
+  )
+  
+  SELECT
+    u.cancellation_date,
+    u.cancellation_type,
+    u.cancellation_channel,
+    u.cancellation_reason,
+    es.product_category,
+    es.subscription_frequency,
+    es.is_trial_or_sample,
+    COUNT(DISTINCT u.subscription_id) AS subscription_cancellations,
+    COUNT(DISTINCT IF(u.record_source = 'web_pending_billing_sync', u.subscription_id, NULL)) AS cancellations_pending_billing_sync
+  FROM unified u
+  JOIN eligible_subscriptions es
+    ON es.subscription_id = u.subscription_id
+  GROUP BY 1, 2, 3, 4, 5, 6, 7
+  ORDER BY u.cancellation_date, subscription_cancellations DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Subscription Cancellations: distinct subscriptions whose status moved to 'cancelled',
+  -- dated on the effective date in the store timezone. The billing status history dataset is the
+  -- source of truth; web subscription.cancel ExperienceEvents add channel attribution and cover
+  -- cancellations the billing sync has not yet received. One row per subscription_id per period.
+  WITH params AS (
+    SELECT
+      to_date('2026-09-01') AS period_start,
+      to_date('2026-09-30') AS period_end,
+      'America/New_York'    AS store_tz,
+      7                     AS grace_days,
+      120                   AS web_lookback_days
+  ),
+  
+  status_history AS (
+    SELECT
+      h.subscription_id,
+      h.customer_id,
+      h.status,
+      h.status_changed_at,
+      h.cancellation_effective_at,
+      h.cancellation_type,
+      h.cancellation_reason,
+      h.cancellation_channel,
+      h.migrated_to_subscription_id,
+      LAG(h.status)             OVER (PARTITION BY h.subscription_id ORDER BY h.status_changed_at) AS prev_status,
+      LEAD(h.status)            OVER (PARTITION BY h.subscription_id ORDER BY h.status_changed_at) AS next_status,
+      LEAD(h.status_changed_at) OVER (PARTITION BY h.subscription_id ORDER BY h.status_changed_at) AS next_status_changed_at
+    FROM aep_backend_dataset_subscription_status_history h
+  ),
+  
+  eligible_subscriptions AS (
+    SELECT
+      s.subscription_id,
+      s.product_category,
+      s.subscription_frequency,
+      COALESCE(s.is_trial_or_sample, false) AS is_trial_or_sample
+    FROM aep_backend_dataset_subscriptions s
+    WHERE s.first_successful_charge_at IS NOT NULL
+      AND NOT COALESCE(s.is_test, false)
+      AND NOT COALESCE(s.is_internal_account, false)
+  ),
+  
+  billing_ranked AS (
+    SELECT
+      sh.subscription_id,
+      sh.customer_id,
+      to_date(from_utc_timestamp(COALESCE(sh.cancellation_effective_at, sh.status_changed_at), p.store_tz)) AS cancellation_date,
+      lower(sh.cancellation_type)    AS cancellation_type,
+      lower(sh.cancellation_reason)  AS cancellation_reason,
+      lower(sh.cancellation_channel) AS cancellation_channel,
+      ROW_NUMBER() OVER (PARTITION BY sh.subscription_id ORDER BY sh.status_changed_at DESC) AS rn
+    FROM status_history sh
+    CROSS JOIN params p
+    WHERE sh.status = 'cancelled'
+      AND COALESCE(sh.prev_status, '') <> 'cancelled'
+      AND sh.migrated_to_subscription_id IS NULL
+      AND NOT (
+        COALESCE(sh.next_status, '') = 'active'
+        AND unix_timestamp(sh.next_status_changed_at) - unix_timestamp(sh.status_changed_at) <= p.grace_days * 86400
+      )
+      AND to_date(from_utc_timestamp(COALESCE(sh.cancellation_effective_at, sh.status_changed_at), p.store_tz))
+          BETWEEN p.period_start AND p.period_end
+  ),
+  
+  billing_cancellations AS (
+    SELECT subscription_id, customer_id, cancellation_date, cancellation_type, cancellation_reason, cancellation_channel
+    FROM billing_ranked
+    WHERE rn = 1
+  ),
+  
+  -- Web ExperienceEvents: subscription.cancel with subscription_id in eVar40
+  web_ranked AS (
+    SELECT
+      e._experience.analytics.customDimensions.eVars.eVar40 AS subscription_id,
+      e.identityMap['CRMID'][0].id                          AS customer_id,
+      e.timestamp                                           AS event_ts,
+      to_date(from_utc_timestamp(e.timestamp, p.store_tz))  AS event_date,
+      lower(e._experience.analytics.customDimensions.eVars.eVar41) AS cancellation_type,
+      lower(e._experience.analytics.customDimensions.eVars.eVar42) AS cancellation_reason,
+      lower(e._experience.analytics.customDimensions.eVars.eVar43) AS cancellation_channel,
+      lower(e._experience.analytics.customDimensions.props.prop20) AS cancellation_timing,
+      ROW_NUMBER() OVER (
+        PARTITION BY e._experience.analytics.customDimensions.eVars.eVar40
+        ORDER BY e.timestamp DESC
+      ) AS rn
+    FROM web_experience_events e
+    CROSS JOIN params p
+    WHERE e.eventType = 'subscription.cancel'
+      AND e._experience.analytics.customDimensions.eVars.eVar40 IS NOT NULL
+      AND e.timestamp >= to_timestamp(date_sub(p.period_start, p.web_lookback_days))
+      AND e.timestamp <  to_timestamp(date_add(p.period_end, 1))
+  ),
+  
+  web_cancellations AS (
+    SELECT subscription_id, customer_id, event_ts, event_date, cancellation_type,
+           cancellation_reason, cancellation_channel, cancellation_timing
+    FROM web_ranked
+    WHERE rn = 1
+  ),
+  
+  -- Web-only records: immediate cancellations billing has not yet synced; end-of-term requests
+  -- stay out until billing supplies the effective date (reported as scheduled cancellations)
+  web_pending_sync AS (
+    SELECT
+      wc.subscription_id,
+      wc.event_date AS cancellation_date,
+      wc.cancellation_type,
+      wc.cancellation_reason,
+      wc.cancellation_channel
+    FROM web_cancellations wc
+    CROSS JOIN params p
+    WHERE wc.event_date BETWEEN p.period_start AND p.period_end
+      AND COALESCE(wc.cancellation_timing, 'immediate') <> 'end_of_term'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM status_history sh
+        WHERE sh.subscription_id = wc.subscription_id
+          AND sh.status_changed_at >= wc.event_ts
+      )
+  ),
+  
+  unified AS (
+    SELECT
+      COALESCE(b.subscription_id, w.subscription_id)                         AS subscription_id,
+      COALESCE(b.cancellation_date, w.cancellation_date)                     AS cancellation_date,
+      COALESCE(b.cancellation_type, w.cancellation_type, 'unknown')          AS cancellation_type,
+      COALESCE(b.cancellation_reason, w.cancellation_reason, 'not_provided') AS cancellation_reason,
+      COALESCE(wa.cancellation_channel, b.cancellation_channel, w.cancellation_channel, 'billing_system') AS cancellation_channel,
+      CASE WHEN b.subscription_id IS NULL THEN 'web_pending_billing_sync' ELSE 'billing_platform' END AS record_source
+    FROM billing_cancellations b
+    FULL OUTER JOIN web_pending_sync w
+      ON b.subscription_id = w.subscription_id
+    LEFT JOIN web_cancellations wa
+      ON wa.subscription_id = b.subscription_id
+  )
+  
+  SELECT
+    u.cancellation_date,
+    u.cancellation_type,
+    u.cancellation_channel,
+    u.cancellation_reason,
+    es.product_category,
+    es.subscription_frequency,
+    es.is_trial_or_sample,
+    COUNT(DISTINCT u.subscription_id) AS subscription_cancellations,
+    COUNT(DISTINCT CASE WHEN u.record_source = 'web_pending_billing_sync' THEN u.subscription_id END) AS cancellations_pending_billing_sync
+  FROM unified u
+  JOIN eligible_subscriptions es
+    ON es.subscription_id = u.subscription_id
+  GROUP BY u.cancellation_date, u.cancellation_type, u.cancellation_channel, u.cancellation_reason,
+           es.product_category, es.subscription_frequency, es.is_trial_or_sample
+  ORDER BY u.cancellation_date, subscription_cancellations DESC;
 
+Calculation Notes: |
+  1️⃣ Unit of count is the subscription, not the customer or the order: a shopper cancelling three SKU subscriptions in one flow contributes 3, and the same subscription_id is counted once per period even when the web event, the billing webhook and a CRM case all record it.,2️⃣ Source of truth is the billing platform (Recharge, Ordergroove, Stripe Billing, Salesforce Commerce subscriptions); the web subscription_cancellation event is used for channel attribution and for cancellations the billing sync has not yet received, and is dropped when the billing record carries a reversal within 24 hours.,3️⃣ Date the cancellation on its effective date in the reporting timezone of the store, not the request timestamp; end-of-term cancellations requested in March and effective in April belong to April, and the pending count is reported separately as scheduled cancellations.,4️⃣ Split every count by cancellation_type: voluntary (customer self-serve or agent on customer request) versus involuntary (dunning exhaustion after the final failed payment retry, fraud or compliance closure); involuntary cancellations are dated on the day the retry schedule is exhausted, not the first failed charge.,5️⃣ Exclude pauses, skips, delivery-date changes, frequency changes and product swaps, which keep the subscription active; exclude cancellations reactivated within the save-offer grace window (default 7 days) and subscriptions cancelled by merchant-side SKU discontinuation where a migration to a replacement SKU occurred.,6️⃣ Exclude test orders, internal and employee accounts, and subscriptions that never produced a successful first charge (checkout abandonment of a subscription cart is a conversion loss, not churn); cancellations of trial or sample-box subscriptions are reported in a separate cohort flag.,7️⃣ Web-side cancellation attribution does not rely on session boundaries: the self-serve event is stitched to the subscription through subscription_id and customer_id, so a 30-minute session timeout or cross-device account login does not split or drop the record.
 
+Business Use Case: |
+  1️⃣ The Retention Marketing manager reviews weekly voluntary cancellations by cancellation_reason and, when "too much product" exceeds 30% of the week's total, launches a frequency-downgrade and skip-next-order save offer in the cancel flow.,2️⃣ Finance forecasts next-quarter recurring revenue by applying the trailing three-month cancellation count by product line to the active subscription base, and re-forecasts whenever monthly cancellations move more than 15% against plan.,3️⃣ The Payments and Billing lead monitors daily involuntary cancellations; a spike after a card-network or gateway change triggers a review of dunning retry cadence and enablement of card account updater before further subscriptions lapse.,4️⃣ Customer Service leadership compares agent-assisted cancellations against self-serve cancellations by week and, when agent-handled share rises, audits the save script and escalates cancel-flow friction issues to the Product team.
 
+Dependencies:
+  Events: [subscription-cancellation]
+  Metrics: [active-subscriptions]
+  Dimensions: [subscription-status, cancellation-reason]
 
+Source Data: Digital + Subscription Billing (Recharge / Stripe Billing)
 
+Report Attributes: |
+  Cancellation Type (Voluntary / Involuntary); Cancellation Reason; Cancellation Channel (Self-Serve Web, App, Customer Service, Billing System); Product Category; Subscription Frequency; Subscription Tenure Band; Acquisition Channel; Discount Tier
 
+Dashboard Usage: [Subscription Health & Churn, Customer Retention & LTV, Recurring Revenue Forecast, Payments & Dunning Performance]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [subscription-renewal-rate, active-subscriptions, new-subscriptions, subscription-pauses]
 
+Derived KPIs: [subscription-churn-rate, subscription-retention-rate, involuntary-churn-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +563,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T17:57:28.156+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T17:57:37.981+00:00
 
