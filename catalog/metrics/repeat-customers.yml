@@ -1,7 +1,7 @@
 # Metric: Repeat Customers
-# Generated: 2026-09-19T17:57:12.149Z
+# Generated: 2026-09-19T17:57:21.997Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Repeat Customers
 Formula: COUNT(DISTINCT customer_id) WHERE orders_in_period >= 1 AND lifetime_order_count_at_period_end >= 2
@@ -11,30 +11,416 @@ Description: |
 
 Category: Retention
 
+Tags: [metric, E-commerce: Customer Retention, Loyalty & LTV, retention, repeat purchase, customer lifecycle]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Monetization
 
+Scope: User
 
+Measure Type: Counter
 
+Aggregation Window: Weekly, Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "ORD-100245",
+      "total": {
+        "basePrice": 118.5,
+        "shipping": 6.95,
+        "taxRate": 0.08,
+        "priceWithTax": 127.98,
+        "transactionTotal": 134.93,
+        "currency": "USD",
+        "voucherCode": "WELCOMEBACK10"
+      },
+      "profile": {
+        "profileInfo": {
+          "profileID": "CUST-558812",
+          "customerType": "returning",
+          "lifetimeOrderCount": 3,
+          "firstPurchaseDate": "2025-11-02",
+          "loyaltyTier": "silver"
+        }
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-20931",
+            "productName": "Organic Cotton Crew Tee"
+          },
+          "category": {
+            "primaryCategory": "Apparel"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 29.25,
+            "currency": "USD"
+          }
+        },
+        {
+          "productInfo": {
+            "productID": "SKU-41177",
+            "productName": "Everyday Chino"
+          },
+          "category": {
+            "primaryCategory": "Apparel"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 60,
+            "currency": "USD"
+          }
+        }
+      ]
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "CUST-558812",
+              "customerType": "returning",
+              "lifetimeOrderCount": 3,
+              "loginStatus": "authenticated"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "user_id": "CUST-558812",
+    "customer_id": "CUST-558812",
+    "customer_type": "returning",
+    "customer_lifetime_order_count": 3,
+    "loyalty_tier": "silver",
+    "ecommerce": {
+      "transaction_id": "ORD-100245",
+      "value": 118.5,
+      "tax": 9.48,
+      "shipping": 6.95,
+      "currency": "USD",
+      "coupon": "WELCOMEBACK10",
+      "customer_type": "returning",
+      "items": [
+        {
+          "item_id": "SKU-20931",
+          "item_name": "Organic Cotton Crew Tee",
+          "item_category": "Apparel",
+          "price": 29.25,
+          "quantity": 2
+        },
+        {
+          "item_id": "SKU-41177",
+          "item_name": "Everyday Chino",
+          "item_category": "Apparel",
+          "price": 60,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase",
+      "eventAction": "order_complete"
+    },
+    "user": {
+      "customerID": "CUST-558812",
+      "authState": "authenticated",
+      "customerType": "returning",
+      "lifetimeOrderCount": 3,
+      "loyaltyTier": "silver"
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-100245",
+        "priceTotal": 134.93,
+        "currencyCode": "USD",
+        "discountCode": "WELCOMEBACK10",
+        "taxAmount": 9.48,
+        "shippingAmount": 6.95
+      },
+      "purchases": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-20931",
+        "name": "Organic Cotton Crew Tee",
+        "productCategory": "Apparel",
+        "quantity": 2,
+        "priceTotal": 58.5
+      },
+      {
+        "SKU": "SKU-41177",
+        "name": "Everyday Chino",
+        "productCategory": "Apparel",
+        "quantity": 1,
+        "priceTotal": 60
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "CUST-558812",
+          "authenticatedState": "authenticated",
+          "primary": true
+        }
+      ]
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD-100245",
+        "priceTotal": 134.93,
+        "currencyCode": "USD",
+        "taxAmount": 9.48
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-20931",
+        "name": "Organic Cotton Crew Tee",
+        "quantity": 2,
+        "priceTotal": 58.5
+      },
+      {
+        "SKU": "SKU-41177",
+        "name": "Everyday Chino",
+        "quantity": 1,
+        "priceTotal": 60
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar20": "CUST-558812",
+            "eVar21": "returning",
+            "eVar22": "3",
+            "eVar23": "silver"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Repeat Customers: distinct customers with >= 1 valid order in the period and a lifetime valid order count >= 2 at period end.
+  -- Order validity and lifetime history come from the commerce order ledger; GA4 purchase events add device context and a data-layer check.
+  WITH params AS (
+    SELECT DATE '2026-08-01' AS period_start, DATE '2026-08-31' AS period_end
+  ),
+  valid_orders AS (
+    SELECT
+      o.order_id,
+      COALESCE(m.surviving_customer_id, o.customer_id, o.customer_email_sha256) AS customer_key,
+      DATE(o.order_placed_at, 'America/New_York') AS order_date,
+      o.order_placed_at
+    FROM `your-project.commerce.orders` AS o
+    CROSS JOIN params AS p
+    LEFT JOIN `your-project.crm.customer_merge_map` AS m
+      ON m.source_customer_id = COALESCE(o.customer_id, o.customer_email_sha256)
+    WHERE DATE(o.order_placed_at, 'America/New_York') <= p.period_end
+      AND o.is_test_order = FALSE
+      AND o.is_staff_account = FALSE
+      AND LOWER(o.order_status) NOT IN ('cancelled', 'voided')
+      AND LOWER(o.financial_status) NOT IN ('refunded', 'charged_back')
+      AND o.order_total > 0
+      AND LOWER(o.order_type) NOT IN ('replacement', 'warranty', 'subscription_renewal', 'b2b_wholesale', 'marketplace_3p')
+      AND COALESCE(m.surviving_customer_id, o.customer_id, o.customer_email_sha256) IS NOT NULL
+  ),
+  customer_orders AS (
+    SELECT
+      v.customer_key,
+      COUNT(DISTINCT IF(v.order_date BETWEEN p.period_start AND p.period_end, v.order_id, NULL)) AS orders_in_period,
+      COUNT(DISTINCT v.order_id) AS lifetime_order_count_at_period_end,
+      ARRAY_AGG(IF(v.order_date BETWEEN p.period_start AND p.period_end, v.order_id, NULL) IGNORE NULLS ORDER BY v.order_placed_at DESC LIMIT 1)[SAFE_OFFSET(0)] AS last_period_order_id
+    FROM valid_orders AS v
+    CROSS JOIN params AS p
+    GROUP BY v.customer_key
+  ),
+  ga4_purchases AS (
+    SELECT
+      e.ecommerce.transaction_id AS transaction_id,
+      ANY_VALUE(e.device.category) AS device_category,
+      MAX((SELECT ep.value.string_value FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'customer_type')) AS customer_type_collected
+    FROM `your-project.analytics_123456789.events_*` AS e
+    CROSS JOIN params AS p
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(p.period_start, INTERVAL 1 DAY))
+                              AND FORMAT_DATE('%Y%m%d', DATE_ADD(p.period_end, INTERVAL 1 DAY))
+      AND e.event_name = 'purchase'
+      AND e.ecommerce.transaction_id IS NOT NULL
+    GROUP BY transaction_id
+  ),
+  period_customers AS (
+    SELECT
+      c.customer_key,
+      c.lifetime_order_count_at_period_end,
+      COALESCE(g.device_category, 'offline / unattributed') AS device_category,
+      g.customer_type_collected
+    FROM customer_orders AS c
+    LEFT JOIN ga4_purchases AS g
+      ON g.transaction_id = c.last_period_order_id
+    WHERE c.orders_in_period >= 1
+  )
+  SELECT
+    IF(GROUPING(device_category) = 1, 'All devices', device_category) AS device_segment,
+    COUNT(DISTINCT IF(lifetime_order_count_at_period_end >= 2, customer_key, NULL)) AS repeat_customers,
+    COUNT(DISTINCT IF(lifetime_order_count_at_period_end = 1, customer_key, NULL)) AS new_customers,
+    COUNT(DISTINCT customer_key) AS purchasing_customers,
+    SAFE_DIVIDE(
+      COUNT(DISTINCT IF(lifetime_order_count_at_period_end >= 2, customer_key, NULL)),
+      COUNT(DISTINCT customer_key)
+    ) AS repeat_purchase_rate,
+    COUNTIF(lifetime_order_count_at_period_end >= 2 AND customer_type_collected = 'new') AS data_layer_status_mismatches
+  FROM period_customers
+  GROUP BY ROLLUP(device_category)
+  ORDER BY GROUPING(device_category) DESC, repeat_customers DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Repeat Customers: distinct customers with >= 1 valid order in the period and a lifetime valid order count >= 2 at period end.
+  -- Order validity and lifetime history come from the order ledger dataset; XDM commerce.purchases events add device context and a data-layer check.
+  WITH params AS (
+    SELECT to_date('2026-08-01') AS period_start, to_date('2026-08-31') AS period_end
+  ),
+  valid_orders AS (
+    SELECT
+      o.order_id,
+      COALESCE(m.surviving_customer_id, o.customer_id, o.customer_email_sha256) AS customer_key,
+      to_date(from_utc_timestamp(o.order_placed_at, 'America/New_York')) AS order_date,
+      o.order_placed_at
+    FROM commerce_order_ledger AS o
+    CROSS JOIN params AS p
+    LEFT JOIN crm_customer_merge_map AS m
+      ON m.source_customer_id = COALESCE(o.customer_id, o.customer_email_sha256)
+    WHERE to_date(from_utc_timestamp(o.order_placed_at, 'America/New_York')) <= p.period_end
+      AND o.is_test_order = FALSE
+      AND o.is_staff_account = FALSE
+      AND LOWER(o.order_status) NOT IN ('cancelled', 'voided')
+      AND LOWER(o.financial_status) NOT IN ('refunded', 'charged_back')
+      AND o.order_total > 0
+      AND LOWER(o.order_type) NOT IN ('replacement', 'warranty', 'subscription_renewal', 'b2b_wholesale', 'marketplace_3p')
+      AND COALESCE(m.surviving_customer_id, o.customer_id, o.customer_email_sha256) IS NOT NULL
+  ),
+  customer_orders AS (
+    SELECT
+      v.customer_key,
+      COUNT(DISTINCT CASE WHEN v.order_date BETWEEN p.period_start AND p.period_end THEN v.order_id END) AS orders_in_period,
+      COUNT(DISTINCT v.order_id) AS lifetime_order_count_at_period_end
+    FROM valid_orders AS v
+    CROSS JOIN params AS p
+    GROUP BY v.customer_key
+  ),
+  last_period_order AS (
+    SELECT customer_key, order_id AS last_period_order_id
+    FROM (
+      SELECT
+        v.customer_key,
+        v.order_id,
+        ROW_NUMBER() OVER (PARTITION BY v.customer_key ORDER BY v.order_placed_at DESC) AS rn
+      FROM valid_orders AS v
+      CROSS JOIN params AS p
+      WHERE v.order_date BETWEEN p.period_start AND p.period_end
+    ) ranked
+    WHERE rn = 1
+  ),
+  web_purchases AS (
+    SELECT
+      e.commerce.order.purchaseID AS transaction_id,
+      MAX(e.device.type) AS device_category,
+      MAX(e._experience.analytics.customDimensions.eVars.eVar21) AS customer_type_collected
+    FROM web_events_dataset AS e
+    CROSS JOIN params AS p
+    WHERE e.eventType = 'commerce.purchases'
+      AND e.commerce.purchases.value > 0
+      AND e.commerce.order.purchaseID IS NOT NULL
+      AND to_date(e.timestamp) BETWEEN date_sub(p.period_start, 1) AND date_add(p.period_end, 1)
+    GROUP BY e.commerce.order.purchaseID
+  ),
+  period_customers AS (
+    SELECT
+      c.customer_key,
+      c.lifetime_order_count_at_period_end,
+      COALESCE(w.device_category, 'offline / unattributed') AS device_category,
+      w.customer_type_collected
+    FROM customer_orders AS c
+    JOIN last_period_order AS l
+      ON l.customer_key = c.customer_key
+    LEFT JOIN web_purchases AS w
+      ON w.transaction_id = l.last_period_order_id
+    WHERE c.orders_in_period >= 1
+  )
+  SELECT
+    CASE WHEN GROUPING(device_category) = 1 THEN 'All devices' ELSE device_category END AS device_segment,
+    COUNT(DISTINCT CASE WHEN lifetime_order_count_at_period_end >= 2 THEN customer_key END) AS repeat_customers,
+    COUNT(DISTINCT CASE WHEN lifetime_order_count_at_period_end = 1 THEN customer_key END) AS new_customers,
+    COUNT(DISTINCT customer_key) AS purchasing_customers,
+    CAST(COUNT(DISTINCT CASE WHEN lifetime_order_count_at_period_end >= 2 THEN customer_key END) AS DOUBLE)
+      / NULLIF(COUNT(DISTINCT customer_key), 0) AS repeat_purchase_rate,
+    SUM(CASE WHEN lifetime_order_count_at_period_end >= 2 AND customer_type_collected = 'new' THEN 1 ELSE 0 END) AS data_layer_status_mismatches
+  FROM period_customers
+  GROUP BY ROLLUP(device_category)
+  ORDER BY GROUPING(device_category) DESC, repeat_customers DESC;
 
+Calculation Notes: |
+  1️⃣ Repeat status is driven by the lifetime order count, not the in-period count: a customer with one order in the period and one or more prior orders qualifies, and a first-time buyer who places a second order before the period closes also qualifies. Lifetime history must come from the order ledger (Shopify / Salesforce Commerce / Adobe Commerce order tables), because GA4 event retention (2 or 14 months) truncates history and understates repeat status.,2️⃣ Count only valid orders: exclude test orders, orders cancelled before fulfilment, fully refunded or charged-back orders, zero-value replacement and warranty orders, and internal/staff accounts. Partially refunded orders remain valid. Apply the same exclusions to the lifetime count so that a cancelled first order cannot turn a genuine first purchase into a repeat.,3️⃣ Customer identity is the stitched customer key (authenticated user_id mapped to the commerce customer_id), with guest checkouts resolved by normalised, SHA-256 hashed email; merged or deduplicated customer records must be collapsed to the surviving ID before counting. Never use GA4 user_pseudo_id or ECID alone, as cookie churn and cross-device purchasing inflate first-time buyers and deflate this count.,4️⃣ Period membership uses the order placement timestamp (not shipment or payment capture) converted to the store's reporting time zone; lifetime_order_count is cumulative up to and including the last valid order at the period end. Restated refunds or cancellations that land after period close must trigger a recompute of the closed period rather than a silent drift in trend lines.,5️⃣ The metric is a distinct count and is non-additive across time grains and segments: weekly values do not sum to the monthly figure, and a customer purchasing in two channels is counted once in the total. Always recompute from customer-level rows for each grain and breakdown.,6️⃣ Scope rules: B2B / wholesale accounts, marketplace orders fulfilled by third-party sellers and subscription auto-renewals are excluded by default or reported as a separate segment, since auto-renewals mechanically inflate repeat status without a discretionary purchase decision. Store/BOPIS orders are included only when the offline order is linked to the same customer key (omnichannel stitching).,7️⃣ Interpretation: Repeat Customers + New Customers = Purchasing Customers for the period, and this identity should reconcile to within 0.5% as a data-quality check. Repeat Purchase Rate divides this count by all purchasing customers in the period; Second-Purchase Conversion Rate uses the subset whose lifetime count moved from 1 to 2 within the window, divided by the eligible first-time buyer cohort.
 
+Business Use Case: |
+  1️⃣ The CRM & Lifecycle Marketing team reviews the monthly Repeat Customers count by acquisition cohort; when the share of the prior quarter's first-time buyers returning falls below target, they tighten the post-purchase email and SMS cadence (day 7, 21 and 45 replenishment and cross-sell triggers) for that cohort.,2️⃣ The Loyalty Program Manager compares Repeat Customers between members and non-members each quarter and, when the member uplift narrows, re-tiers point thresholds or adds a second-order incentive to restore the program's incremental return rate.,3️⃣ Finance uses the Repeat Customers trend and its purchase-count-band distribution as the retained-revenue volume driver in the quarterly forecast and Customer Lifetime Value model, adjusting the payback period allowed for paid acquisition when the repeat base grows or shrinks by more than 5% quarter on quarter.,4️⃣ The Merchandising team breaks Repeat Customers down by first-purchase category and, where a category produces high first-order volume but few repeat buyers, reviews product quality, return reasons and replenishment assortment for that category.
 
+Dependencies:
+  Events: [purchase, refund]
+  Metrics: [purchasing-customers, orders]
+  Dimensions: [customer-status, purchase-count-band]
 
+Source Data: Digital Analytics (GA4) + Commerce Order Ledger (Shopify / Salesforce Commerce) + CRM
 
+Report Attributes: |
+  customer-status; purchase-count-band; acquisition-cohort-month; first-purchase-category; loyalty-tier; acquisition-channel; device-category; country
 
+Dashboard Usage: [Customer Retention & Loyalty, Customer Lifetime Value Overview, CRM & Lifecycle Marketing Performance, Executive E-commerce Scorecard]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [new-customers, purchasing-customers, orders, orders-per-customer]
 
+Derived KPIs: [repeat-purchase-rate, second-purchase-conversion-rate, customer-lifetime-value]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +430,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T17:57:11.823+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T17:57:21.705+00:00
 
