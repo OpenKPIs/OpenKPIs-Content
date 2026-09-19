@@ -1,19 +1,19 @@
 # Metric: Subscription Renewal Rate
-# Generated: 2026-09-11T22:30:38.525Z
+# Generated: 2026-09-19T18:39:26.648Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Metric Name: Subscription Renewal Rate
-Formula: (Number of Renewed Subscriptions / Total Subscriptions Up for Renewal) * 100
+Formula: (Subscription Terms Renewed and Paid within the Grace Window / All Paid Subscription Terms Due for Renewal in the Period) × 100
 
 Description: |
-  Measures the percentage of existing subscribers who renew their subscriptions within a given period. It indicates customer retention and loyalty in e-commerce and SaaS industries.
+  Subscription Renewal Rate is the percentage of paid subscriptions that were due for renewal in a period and were successfully renewed and charged for the next billing term, including renewals recovered within the payment grace window. It is the core retention signal for subscription commerce (replenishment, subscribe-and-save and membership programmes): a falling rate points to voluntary cancellations or failed payments before it shows up in recurring revenue.
 
 Category: Retention
 
-Tags: [metric]
+Tags: [metric, E-commerce: Customer Retention, Loyalty & LTV, Subscription Commerce]
 
-Industry: E-commerce & SaaS
+Industry: E-commerce & SaaS, E-commerce
 
 Priority: High
 
@@ -21,9 +21,9 @@ Core Area: Monetization
 
 Scope: User
 
-Measure Type: percentage
+Measure Type: Percentage
 
-Aggregation Window: Time based - Monthly
+Aggregation Window: Time based - Monthly, Monthly, Quarterly, Yearly
 
 
 
@@ -35,54 +35,120 @@ Google Analytics SQL: |
   -- ==========================================
   -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
-  SELECT customer_id,
-         COUNT(CASE WHEN event_name = 'subscription_renewed' THEN 1 END) AS renewals,
-         COUNT(CASE WHEN event_name = 'subscription_started' THEN 1 END) AS total_subscriptions,
-         SAFE_DIVIDE(COUNT(CASE WHEN event_name = 'subscription_renewed' THEN 1 END),
-                     COUNT(CASE WHEN event_name = 'subscription_started' THEN 1 END)) AS renewal_rate
-  FROM `your-project.crm.subscription_events`
-  WHERE event_name IN ('subscription_started', 'subscription_renewed')
-  GROUP BY customer_id
+  -- Subscription Renewal Rate by renewal month from native billing tables.
+  -- Base: every paid term due in the month (cancelled-before-due terms stay in as non-renewals).
+  WITH due_terms AS (
+    SELECT
+      p.subscription_id,
+      p.period_end,
+      DATE_TRUNC(DATE(p.period_end), MONTH) AS renewal_month
+    FROM `your-project.billing.subscription_periods` AS p
+    JOIN `your-project.billing.subscriptions` AS s
+      ON s.subscription_id = p.subscription_id
+    WHERE p.is_trial = FALSE
+      AND s.is_test = FALSE
+      AND COALESCE(s.termination_reason, '') NOT IN ('fraud', 'merchant_terminated')
+      AND p.period_end >= TIMESTAMP(DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH), MONTH))
+      AND p.period_end < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)  -- grace window closed
+  ),
+  renewed_terms AS (
+    SELECT DISTINCT d.subscription_id, d.period_end
+    FROM due_terms AS d
+    JOIN `your-project.billing.invoices` AS i
+      ON i.subscription_id = d.subscription_id
+     AND i.billing_reason = 'subscription_cycle'
+     AND i.status = 'paid'
+     AND i.paid_at >= TIMESTAMP_SUB(d.period_end, INTERVAL 1 DAY)
+     AND i.paid_at < TIMESTAMP_ADD(d.period_end, INTERVAL 7 DAY)
+  )
+  SELECT
+    d.renewal_month,
+    COUNT(*) AS terms_due_for_renewal,
+    COUNT(r.subscription_id) AS terms_renewed,
+    ROUND(100 * SAFE_DIVIDE(COUNT(r.subscription_id), COUNT(*)), 2) AS subscription_renewal_rate_pct
+  FROM due_terms AS d
+  LEFT JOIN renewed_terms AS r
+    ON r.subscription_id = d.subscription_id
+   AND r.period_end = d.period_end
+  GROUP BY d.renewal_month
+  ORDER BY d.renewal_month;
 
 AEP Query Service SQL: |
   -- ==========================================
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
-  SELECT customer_id,
-         COUNT(CASE WHEN event_name = 'subscription_renewed' THEN 1 END) AS renewals,
-         COUNT(CASE WHEN event_name = 'subscription_started' THEN 1 END) AS total_subscriptions,
-         SAFE_DIVIDE(COUNT(CASE WHEN event_name = 'subscription_renewed' THEN 1 END),
-                     COUNT(CASE WHEN event_name = 'subscription_started' THEN 1 END)) AS renewal_rate
-  FROM crm.subscription_events
-  WHERE event_name IN ('subscription_started', 'subscription_renewed')
-  GROUP BY customer_id
+  -- Subscription Renewal Rate by renewal month from billing datasets ingested into AEP.
+  -- Base: every paid term due in the month (cancelled-before-due terms stay in as non-renewals).
+  WITH due_terms AS (
+    SELECT
+      p.subscription_id,
+      p.period_end,
+      DATE_TRUNC('month', p.period_end) AS renewal_month
+    FROM billing_subscription_periods AS p
+    JOIN billing_subscriptions AS s
+      ON s.subscription_id = p.subscription_id
+    WHERE p.is_trial = FALSE
+      AND s.is_test = FALSE
+      AND COALESCE(s.termination_reason, '') NOT IN ('fraud', 'merchant_terminated')
+      AND p.period_end >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '12' MONTH)
+      AND p.period_end < CURRENT_TIMESTAMP - INTERVAL '7' DAY  -- grace window closed
+  ),
+  renewed_terms AS (
+    SELECT DISTINCT d.subscription_id, d.period_end
+    FROM due_terms AS d
+    JOIN billing_invoices AS i
+      ON i.subscription_id = d.subscription_id
+     AND i.billing_reason = 'subscription_cycle'
+     AND i.status = 'paid'
+     AND i.paid_at >= d.period_end - INTERVAL '1' DAY
+     AND i.paid_at < d.period_end + INTERVAL '7' DAY
+  )
+  SELECT
+    d.renewal_month,
+    COUNT(*) AS terms_due_for_renewal,
+    COUNT(r.subscription_id) AS terms_renewed,
+    ROUND(100.0 * COUNT(r.subscription_id) / NULLIF(COUNT(*), 0), 2) AS subscription_renewal_rate_pct
+  FROM due_terms AS d
+  LEFT JOIN renewed_terms AS r
+    ON r.subscription_id = d.subscription_id
+   AND r.period_end = d.period_end
+  GROUP BY d.renewal_month
+  ORDER BY d.renewal_month;
 
 Calculation Notes: |
-  1️⃣ Exclude canceled subscriptions prior to renewal.  
-  2️⃣ Consider grace periods for late renewals.  
-  3️⃣ Assess renewal eligibility based on cancellation date.  
-  4️⃣ Track grace period duration for late renewals.  
-  5️⃣ Ensure accurate reporting of active subscriptions.
+  1️⃣ Denominator = every paid subscription term whose end (renewal due) date falls in the reporting period, including subscriptions the customer cancelled before the due date; those count as non-renewals and are never removed from the base.
+  2️⃣ Numerator = due terms with a paid renewal invoice (billing_reason = subscription_cycle) for the next term dated from 1 day before the due date up to the end of the 7-day payment grace (dunning) window.
+  3️⃣ Report a period only after its last due date plus the grace window has passed; otherwise late recoveries are missing and the rate is understated.
+  4️⃣ Exclude free-trial terms (trial-to-paid conversion is a separate metric), test subscriptions and merchant-initiated terminations (fraud, policy); keep paused subscriptions out of the base until they resume.
+  5️⃣ Plan upgrades, downgrades and billing-interval switches at renewal count as renewed; count each subscription term once, even when a customer holds several subscriptions.
+  6️⃣ Break out voluntary non-renewals (customer cancellation) and involuntary ones (payment failure after dunning) because they need different fixes.
 
 Business Use Case: |
-  Executives use this metric to assess the effectiveness of retention strategies and make decisions on customer engagement initiatives.
+  1️⃣ The Retention Marketing team reviews the monthly rate by plan and billing frequency and, when a cohort drops more than 3 points month over month, launches pre-renewal reminder and save-offer campaigns for the terms due in the next 30 days.
+  2️⃣ The Finance team applies the trailing 3-month rate to the terms due in the next quarter to forecast renewal revenue and recurring revenue in the budget.
+  3️⃣ The Payments / Revenue Operations team watches the involuntary non-renewal share and, when it rises, tunes dunning retry schedules and card-updater settings.
+  4️⃣ The Merchandising team compares the rate across subscription products and pack sizes and changes delivery cadence or default quantities for products with below-average renewal.
 
+Dependencies:
+  Events: [subscription-start, subscription-cancellation]
+  Metrics: [active-subscriber-count, subscription-cancellations]
+  Dimensions: [subscription-plan, billing-frequency, subscription-status]
 
-Source Data: CRM
+Source Data: Backend Billing (Stripe / Recharge subscription and invoice tables)
 
 Report Attributes: |
-  ["Geography","Subscription Type","Customer Segment"]
+  Subscription Plan; Billing Frequency; Renewal Cycle Number; Acquisition Cohort; Payment Method; Country
 
-Dashboard Usage: [Executive Overview, Customer Retention Dashboard]
+Dashboard Usage: [Subscription Performance Dashboard, Customer Retention Dashboard, Executive Overview]
 
 Segment Eligibility: |
   true
 
-Related Metrics: [Churn Rate, Customer Lifetime Value, Net Promoter Score]
+Related Metrics: [active-subscriber-count, subscription-cancellations, average-subscription-duration]
 
-Derived KPIs: [Annual Recurring Revenue, Customer Retention Rate]
+Derived KPIs: [subscriber-retention-rate, subscriber-churn-rate, customer-retention-rate, customer-churn-rate]
 
-Data Sensitivity: internal
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -90,8 +156,9 @@ Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-09-11T22:30:38.113509+00:00
+Created At: 2026-09-11T22:30:33.53222+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T18:39:26.32+00:00
 
