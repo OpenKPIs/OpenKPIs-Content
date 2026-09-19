@@ -1,5 +1,5 @@
 # Event: Loyalty Reward Redemption
-# Generated: 2026-09-17T23:36:39.467Z
+# Generated: 2026-09-19T03:23:11.673Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -28,7 +28,7 @@ GA4 Event: |
   spend_virtual_currency
 
 Adobe Event: |
-  Loyalty Reward Redemption
+  spend_virtual_currency
 
 W3 Data Layer: |
   {
@@ -54,7 +54,8 @@ W3 Data Layer: |
                 "profileID": "9f2c5b7e4a1d8c60b3e5f7a9d2c4b6e8f0a1c3d5e7b9f2a4c6d8e0b1f3a5c7d9",
                 "loyaltyMember": true,
                 "loyaltyTier": "Gold",
-                "loyaltyPointsBalanceAfter": 4250
+                "loyaltyPointsBalanceAfter": 4250,
+                "loyaltyAccountFlag": "member"
               },
               "attributes": {
                 "customerStatus": "returning",
@@ -111,14 +112,20 @@ GA4 Data Layer: |
     "redemption_channel": "web",
     "transaction_id": "ORD-10045872",
     "customer_id": "9f2c5b7e4a1d8c60b3e5f7a9d2c4b6e8f0a1c3d5e7b9f2a4c6d8e0b1f3a5c7d9",
-    "reward_value_excluded_from_revenue": true
+    "reward_value_excluded_from_revenue": true,
+    "user_properties": {
+      "loyalty_member_id": "9f2c5b7e4a1d8c60b3e5f7a9d2c4b6e8f0a1c3d5e7b9f2a4c6d8e0b1f3a5c7d9",
+      "loyalty_tier": "Gold",
+      "loyalty_account_flag": "member",
+      "customer_status": "returning"
+    }
   }
 
 Adobe Client Data Layer: |
   {
     "event": "spend_virtual_currency",
     "eventInfo": {
-      "trigger": "Loyalty Reward Redemption",
+      "trigger": "spend_virtual_currency",
       "path": "loyalty.redemption",
       "timestamp": "2026-09-17T14:32:10.000Z"
     },
@@ -138,7 +145,8 @@ Adobe Client Data Layer: |
       "member": {
         "memberID": "9f2c5b7e4a1d8c60b3e5f7a9d2c4b6e8f0a1c3d5e7b9f2a4c6d8e0b1f3a5c7d9",
         "loyaltyTier": "Gold",
-        "customerStatus": "returning"
+        "customerStatus": "returning",
+        "accountFlag": "member"
       }
     },
     "page": {
@@ -150,7 +158,7 @@ Adobe Client Data Layer: |
 
 XDM Mapping: |
   {
-    "eventType": "loyalty.rewardRedemption",
+    "eventType": "spend_virtual_currency",
     "timestamp": "2026-09-17T14:32:10.000Z",
     "identityMap": {
       "loyaltyId": [
@@ -173,7 +181,7 @@ XDM Mapping: |
             "eVar46": "ORD-10045872"
           },
           "props": {
-            "prop41": "loyalty:reward-redemption",
+            "prop41": "spend_virtual_currency",
             "prop42": "free_shipping"
           }
         },
@@ -192,7 +200,7 @@ XDM Mapping: |
           }
         },
         "customLinkDetails": {
-          "name": "Loyalty Reward Redemption",
+          "name": "spend_virtual_currency",
           "linkType": "other"
         }
       }
@@ -215,6 +223,7 @@ XDM Mapping: |
         },
         "member": {
           "loyaltyTier": "Gold",
+          "accountFlag": "member",
           "customerStatus": "returning"
         }
       }
@@ -235,14 +244,21 @@ Parameters: |
     "reward_type": "string - Reward family: discount, free_product, free_shipping, tier_benefit, partner_exchange or charity_donation.",
     "reward_value": "number - Fiat face value of the benefit granted, two decimal places, expressed in `currency`; a discount and liability measure that is never added to revenue, GMV or AOV.",
     "currency": "string - ISO-4217 code governing reward_value; mandatory whenever reward_value is populated, including zero-value rewards.",
-    "loyalty_tier": "string - Member tier at the moment of redemption (for example Base, Silver, Gold, Platinum), captured as-is rather than recomputed at report time.",
+    "loyalty_tier": "string - Member tier at the moment of redemption (for example Base, Silver, Gold, Platinum), captured as-is rather than recomputed at report time. Also set as the user-scoped GA4 user property loyalty_tier on every event so the member base can be segmented by tier.",
     "redemption_channel": "string - Channel where the redemption was confirmed: web, app, in_store_pos or call_center.",
     "transaction_id": "string - Order identifier when the reward is applied to an order, enabling the join to the separate `purchase` event; null for non-order redemptions.",
     "points_balance_after": "integer - Member points balance remaining after the debit, used for liability tracking and ledger reconciliation.",
-    "customer_id": "string - SHA-256 hashed loyalty member identifier; the raw member number and email are never emitted to the digital layer."
+    "customer_id": "string - SHA-256 hashed loyalty member identifier; the raw member number and email are never emitted to the digital layer.",
+    "loyalty_member_id": "string - GA4 user property (user-scoped, set on every event once the member is identified) holding the SHA-256 hashed loyalty member identifier, identical to customer_id; defines the full active-member base for penetration rates.",
+    "loyalty_account_flag": "string - GA4 user property (user-scoped, every event) / XDM _openkpis.loyalty.member.accountFlag / ACDL loyalty.member.accountFlag: member, employee, test or internal; employee, test and internal accounts are excluded from all reporting.",
+    "customer_status": "string - GA4 user property (user-scoped, every event) / XDM _openkpis.loyalty.member.customerStatus: new or returning customer status of the member."
   }
 
+Calculation Notes: |
+  1️⃣ Implemented as the GA4 recommended event `spend_virtual_currency`, fired on the loyalty platform's confirmation of the points debit or reward application — not on the reward-selection click and not on the confirmation page render; `loyalty_redeem` is retained as an alias only and must never be sent as the event name.,2️⃣ points_redeemed carries the virtual-currency debit (mapped to the GA4 `value` parameter alongside virtual_currency_name) and reward_value carries the fiat face value of the benefit paired with an ISO-4217 `currency`; the two are never interchangeable and are never summed together. reward_value is excluded from revenue, GMV and AOV because the matching `purchase` event already reports the discounted order value under the same transaction_id.,3️⃣ Serialization is `always`: a member may redeem several times per order (for example points plus a free-shipping offer), so one event fires per reward with a shared transaction_id. Deduplicate on reward_id + transaction_id when a member refreshes or re-enters the confirmation step, and apply the standard 30-minute inactivity session timeout — a redemption resumed after a lapse is attributed to the new session while transaction_id preserves the order-level join.,4️⃣ Excluded: reward previews and balance simulators, points expiring under programme rules with no member action, member pricing applied automatically without a reward object (measured as a member price benefit in promotion reporting), goodwill points issued by service agents, and employee, test and internal QA accounts identified by the loyalty account flag.,5️⃣ Cancellations and returns re-credit the points in the loyalty ledger — never delete or retro-edit the original event. Net redemption is derived by joining the re-credit to the original reward_id and transaction_id, and every report that publishes net figures must state the reversal window in force (typically the 30-day return window).,6️⃣ Non-order redemptions (partner point exchanges, charity donations, tier benefits) carry a null transaction_id and, where no monetary benefit exists, reward_value = 0 with currency still populated; these rows must be filtered out of any checkout-attach or basket-level analysis rather than being treated as zero-value orders.,7️⃣ Timing and reconciliation: client events land within normal digital-analytics intraday latency while the loyalty ledger remains the system of record for balances. Reconcile points_redeemed against ledger debits daily, use points_balance_after as the tie-breaker on disputes, and treat a variance above 2% as a tagging defect rather than a business movement.
 
+Business Use Case: |
+  1️⃣ The CRM & Loyalty Manager (Marketing) reviews the weekly redemption mix by loyalty_tier and reward_type; when free-shipping redemptions in a tier climb above plan while points burn stays flat, they re-price that reward in the catalogue and shift the tier's featured offer.,2️⃣ Revenue Accounting (Finance) uses points_redeemed and points_balance_after at month-end to release deferred loyalty liability, and cross-checks reward_value against the discount lines on the matching purchase transaction_ids so the benefit is recognised once rather than double-counted as revenue.,3️⃣ The Lifecycle Marketing lead builds a segment of enrolled members with zero redemptions in the last 90 days and a positive balance, and triggers the points-expiry reminder journey ahead of the programme's expiry run.,4️⃣ The Merchandising planner joins redemption transaction_ids to order contribution margin to identify which reward types dilute margin most by category, and caps the highest-dilution reward before the peak trading window.
 
 Dependencies:
   Events: [loyalty-program-enrollment, customer-login, purchase]
@@ -258,13 +274,13 @@ Source Data: Digital + Loyalty CRM (Salesforce Loyalty Management)
     Segment Eligibility: |
   true
 
-    Related Dimensions: [loyalty-membership-tier, customer-loyalty-tier, customer-status, coupon-code, checkout-type, device-category]
+    Related Dimensions: [loyalty-membership-tier, customer-status, coupon-code, checkout-type, device-category]
 
     Derived Dimensions: [promotion-type, transaction-channel]
 
     Derived Metrics: [discount-amount]
 
-    Derived KPIs: [coupon-redemption-rate, customer-lifetime-value]
+    Derived KPIs: [customer-lifetime-value]
 
     Data Sensitivity: Restricted
 
@@ -278,5 +294,5 @@ Source Data: Digital + Loyalty CRM (Salesforce Loyalty Management)
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-09-17T23:36:39.259+00:00
+    Last Modified At: 2026-09-19T03:23:10.36+00:00
 
