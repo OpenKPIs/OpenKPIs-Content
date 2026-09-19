@@ -1,7 +1,7 @@
 # KPI: Customer Churn Rate
-# Generated: 2026-09-19T18:20:37.937Z
+# Generated: 2026-09-19T18:20:47.406Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Customer Churn Rate
 Formula: (Customers with ≥ 1 qualifying order in base period B and zero qualifying orders within lapse window L after their last order in B ÷ Customers with ≥ 1 qualifying order in base period B) × 100
@@ -11,29 +11,432 @@ Description: |
 
 Category: Retention
 
+Tags: [kpi, E-commerce: Customer Retention, Loyalty & LTV]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Engagement
 
+Scope: User
 
+Measure Type: Percentage
 
+Aggregation Window: Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "ORD-100245",
+      "profile": {
+        "profileInfo": {
+          "profileID": "c_9f8e7d6c5b4a",
+          "returningStatus": "returning"
+        }
+      },
+      "total": {
+        "basePrice": 118.5,
+        "shipping": 6.95,
+        "priceWithTax": 134.21,
+        "transactionTotal": 134.21,
+        "currency": "USD"
+      },
+      "attributes": {
+        "orderType": "one_time",
+        "customerOrderNumber": 4,
+        "daysSinceLastPurchase": 142
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-44821",
+            "productName": "Daily Moisturiser 50ml"
+          },
+          "category": {
+            "primaryCategory": "Beauty",
+            "subCategory1": "Skincare"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 59.25,
+            "currency": "USD"
+          }
+        }
+      ]
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "c_9f8e7d6c5b4a",
+              "loyaltyTier": "gold"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "user_id": "c_9f8e7d6c5b4a",
+    "customer_type": "returning",
+    "order_type": "one_time",
+    "customer_order_number": 4,
+    "days_since_last_purchase": 142,
+    "loyalty_tier": "gold",
+    "ecommerce": {
+      "transaction_id": "ORD-100245",
+      "value": 118.5,
+      "tax": 8.76,
+      "shipping": 6.95,
+      "currency": "USD",
+      "customer_id": "c_9f8e7d6c5b4a",
+      "items": [
+        {
+          "item_id": "SKU-44821",
+          "item_name": "Daily Moisturiser 50ml",
+          "item_category": "Beauty",
+          "item_category2": "Skincare",
+          "price": 59.25,
+          "quantity": 2
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "user": {
+      "customerId": "c_9f8e7d6c5b4a",
+      "customerType": "returning",
+      "loyaltyTier": "gold",
+      "customerOrderNumber": 4,
+      "daysSinceLastPurchase": 142
+    },
+    "transaction": {
+      "transactionId": "ORD-100245",
+      "orderType": "one_time",
+      "value": 118.5,
+      "tax": 8.76,
+      "shipping": 6.95,
+      "currency": "USD",
+      "items": [
+        {
+          "sku": "SKU-44821",
+          "name": "Daily Moisturiser 50ml",
+          "category": "Beauty",
+          "subCategory": "Skincare",
+          "price": 59.25,
+          "quantity": 2
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "c_9f8e7d6c5b4a",
+          "authenticatedState": "authenticated",
+          "primary": true
+        }
+      ]
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD-100245",
+        "priceTotal": 118.5,
+        "currencyCode": "USD",
+        "taxAmount": 8.76
+      },
+      "shipping": {
+        "shippingAmount": 6.95
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-44821",
+        "name": "Daily Moisturiser 50ml",
+        "productCategories": [
+          {
+            "categoryName": "Beauty/Skincare"
+          }
+        ],
+        "priceTotal": 118.5,
+        "quantity": 2,
+        "currencyCode": "USD"
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "c_9f8e7d6c5b4a",
+            "eVar11": "returning",
+            "eVar12": "one_time",
+            "eVar13": "gold"
+          }
+        },
+        "event1to100": {
+          "event20": {
+            "value": 142
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Customer Churn Rate (non-contractual): base-period purchasers with no qualifying
+  -- order within the lapse window after their last base-period order, divided by ALL
+  -- evaluable base-period purchasers. Subscription / replenishment orders excluded.
+  DECLARE base_start DATE DEFAULT DATE '2025-01-01';
+  DECLARE base_end DATE DEFAULT DATE '2025-03-31';
+  DECLARE lapse_days INT64 DEFAULT 180;
+  DECLARE observation_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH purchase_events AS (
+    -- One row per purchase hit; event_params pivoted with UNNEST + MAX(IF())
+    SELECT
+      PARSE_DATE('%Y%m%d', e.event_date) AS order_date,
+      e.user_id,
+      e.ecommerce.transaction_id AS transaction_id,
+      e.ecommerce.purchase_revenue AS order_value,
+      MAX(IF(ep.key = 'customer_id', ep.value.string_value, NULL)) AS param_customer_id,
+      MAX(IF(ep.key = 'order_type', ep.value.string_value, NULL)) AS order_type
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.event_params) AS ep
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', base_start)
+                              AND FORMAT_DATE('%Y%m%d', LEAST(observation_date, DATE_ADD(base_end, INTERVAL lapse_days DAY)))
+      AND e.event_name = 'purchase'
+      AND e.ecommerce.transaction_id IS NOT NULL
+    GROUP BY e.event_date, e.event_timestamp, e.user_pseudo_id, e.user_id,
+             e.ecommerce.transaction_id, e.ecommerce.purchase_revenue
+  ),
+  orders AS (
+    -- Deduplicate re-fired purchase hits: one row per transaction_id
+    SELECT
+      transaction_id,
+      ANY_VALUE(COALESCE(user_id, param_customer_id)) AS customer_id,
+      MIN(order_date) AS order_date,
+      MAX(order_value) AS order_value,
+      MAX(LOWER(order_type)) AS order_type
+    FROM purchase_events
+    GROUP BY transaction_id
+  ),
+  refunds AS (
+    SELECT
+      e.ecommerce.transaction_id AS transaction_id,
+      SUM(COALESCE(e.ecommerce.refund_value, 0)) AS refund_value
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', base_start)
+                              AND FORMAT_DATE('%Y%m%d', observation_date)
+      AND e.event_name = 'refund'
+      AND e.ecommerce.transaction_id IS NOT NULL
+    GROUP BY transaction_id
+  ),
+  qualifying_orders AS (
+    -- Excludes contractual orders, zero-value orders and fully refunded orders;
+    -- partially refunded orders remain valid activity
+    SELECT o.customer_id, o.transaction_id, o.order_date
+    FROM orders AS o
+    LEFT JOIN refunds AS r USING (transaction_id)
+    WHERE o.customer_id IS NOT NULL
+      AND COALESCE(o.order_type, 'one_time') NOT IN ('subscription', 'replenishment', 'auto_renewal', 'recurring')
+      AND COALESCE(o.order_value, 0) > 0
+      AND COALESCE(r.refund_value, 0) < o.order_value
+  ),
+  base_customers AS (
+    -- Denominator population: every customer with >= 1 qualifying order in the base period
+    SELECT customer_id, MAX(order_date) AS last_base_order_date
+    FROM qualifying_orders
+    WHERE order_date BETWEEN base_start AND base_end
+    GROUP BY customer_id
+  ),
+  evaluable_customers AS (
+    -- Right-censoring: only customers whose full lapse window has elapsed
+    SELECT customer_id, last_base_order_date
+    FROM base_customers
+    WHERE DATE_ADD(last_base_order_date, INTERVAL lapse_days DAY) <= observation_date
+  ),
+  customer_status AS (
+    SELECT
+      b.customer_id,
+      COUNTIF(q.order_date > b.last_base_order_date
+              AND q.order_date <= DATE_ADD(b.last_base_order_date, INTERVAL lapse_days DAY)) AS orders_in_lapse_window
+    FROM evaluable_customers AS b
+    LEFT JOIN qualifying_orders AS q
+      ON q.customer_id = b.customer_id
+    GROUP BY b.customer_id
+  )
+  SELECT
+    base_start AS base_period_start,
+    base_end AS base_period_end,
+    lapse_days AS lapse_window_days,
+    COUNT(*) AS base_period_customers,
+    COUNTIF(orders_in_lapse_window = 0) AS churned_customers,
+    ROUND(SAFE_DIVIDE(COUNTIF(orders_in_lapse_window = 0), COUNT(*)) * 100, 2) AS customer_churn_rate_pct
+  FROM customer_status;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Customer Churn Rate (non-contractual) on the XDM ExperienceEvent dataset.
+  -- Denominator = ALL evaluable base-period purchasers; numerator = those with no
+  -- qualifying order within the lapse window after their last base-period order.
+  WITH params AS (
+    SELECT
+      CAST('2025-01-01' AS DATE) AS base_start,
+      CAST('2025-03-31' AS DATE) AS base_end,
+      180 AS lapse_days,
+      date_sub(current_date(), 1) AS observation_date
+  ),
+  purchase_events AS (
+    SELECT
+      to_date(from_utc_timestamp(e.timestamp, 'America/New_York')) AS order_date,
+      COALESCE(e.identityMap['CRMID'][0].id,
+               e._experience.analytics.customDimensions.eVars.eVar10) AS customer_id,
+      e.commerce.order.purchaseID AS transaction_id,
+      e.commerce.order.priceTotal AS order_value,
+      LOWER(e._experience.analytics.customDimensions.eVars.eVar12) AS order_type
+    FROM your_experience_event_dataset AS e
+    CROSS JOIN params AS p
+    WHERE e.eventType = 'commerce.purchases'
+      AND e.commerce.order.purchaseID IS NOT NULL
+      AND e.timestamp >= to_timestamp(p.base_start)
+      AND e.timestamp < to_timestamp(date_add(p.observation_date, 2))
+  ),
+  orders AS (
+    -- One row per purchaseID to remove duplicate hits
+    SELECT
+      transaction_id,
+      MAX(customer_id) AS customer_id,
+      MIN(order_date) AS order_date,
+      MAX(order_value) AS order_value,
+      MAX(order_type) AS order_type
+    FROM purchase_events
+    GROUP BY transaction_id
+  ),
+  refunds AS (
+    -- Credit memos and full cancellations from back-office commerce events
+    SELECT
+      e.commerce.order.purchaseID AS transaction_id,
+      SUM(CASE WHEN e.eventType = 'commerce.backofficeCreditMemoIssued'
+               THEN COALESCE(e.commerce.order.priceTotal, 0) ELSE 0 END) AS refund_value,
+      MAX(CASE WHEN e.eventType = 'commerce.backofficeOrderCancelled' THEN 1 ELSE 0 END) AS is_cancelled
+    FROM your_experience_event_dataset AS e
+    CROSS JOIN params AS p
+    WHERE e.eventType IN ('commerce.backofficeCreditMemoIssued', 'commerce.backofficeOrderCancelled')
+      AND e.commerce.order.purchaseID IS NOT NULL
+      AND e.timestamp >= to_timestamp(p.base_start)
+    GROUP BY e.commerce.order.purchaseID
+  ),
+  qualifying_orders AS (
+    SELECT o.customer_id, o.transaction_id, o.order_date
+    FROM orders AS o
+    LEFT JOIN refunds AS r
+      ON r.transaction_id = o.transaction_id
+    WHERE o.customer_id IS NOT NULL
+      AND COALESCE(o.order_type, 'one_time') NOT IN ('subscription', 'replenishment', 'auto_renewal', 'recurring')
+      AND COALESCE(o.order_value, 0) > 0
+      AND COALESCE(r.is_cancelled, 0) = 0
+      AND COALESCE(r.refund_value, 0) < o.order_value
+  ),
+  base_customers AS (
+    SELECT q.customer_id, MAX(q.order_date) AS last_base_order_date
+    FROM qualifying_orders AS q
+    CROSS JOIN params AS p
+    WHERE q.order_date BETWEEN p.base_start AND p.base_end
+    GROUP BY q.customer_id
+  ),
+  evaluable_customers AS (
+    -- Right-censoring: lapse window must have fully elapsed
+    SELECT b.customer_id, b.last_base_order_date
+    FROM base_customers AS b
+    CROSS JOIN params AS p
+    WHERE date_add(b.last_base_order_date, p.lapse_days) <= p.observation_date
+  ),
+  customer_status AS (
+    SELECT
+      b.customer_id,
+      SUM(CASE WHEN q.order_date > b.last_base_order_date
+                AND q.order_date <= date_add(b.last_base_order_date, p.lapse_days)
+               THEN 1 ELSE 0 END) AS orders_in_lapse_window
+    FROM evaluable_customers AS b
+    CROSS JOIN params AS p
+    LEFT JOIN qualifying_orders AS q
+      ON q.customer_id = b.customer_id
+    GROUP BY b.customer_id
+  )
+  SELECT
+    MAX(p.base_start) AS base_period_start,
+    MAX(p.base_end) AS base_period_end,
+    MAX(p.lapse_days) AS lapse_window_days,
+    COUNT(s.customer_id) AS base_period_customers,
+    SUM(CASE WHEN s.orders_in_lapse_window = 0 THEN 1 ELSE 0 END) AS churned_customers,
+    ROUND(100.0 * SUM(CASE WHEN s.orders_in_lapse_window = 0 THEN 1 ELSE 0 END)
+          / NULLIF(COUNT(s.customer_id), 0), 2) AS customer_churn_rate_pct
+  FROM customer_status AS s
+  CROSS JOIN params AS p;
 
+Calculation Notes: |
+  1️⃣ Lapse window L is set per category from the observed inter-purchase distribution, not by convention: take the P80–P90 of days between consecutive orders (consumables and beauty commonly 90–180 days, apparel and home 180–365, durables and electronics 365+). The window in force must be published with every reported value; changing L restates the series and is never mixed across periods.
+  2️⃣ Right-censoring: a base-period customer is only evaluated once last_order_date + L ≤ observation date. Customers whose window has not fully elapsed are excluded from both numerator and denominator, otherwise recent cohorts read artificially low and the trend is biased.
+  3️⃣ Qualifying orders exclude test, employee, fraud-flagged, fully cancelled and fully refunded orders, zero-value replacement and warranty shipments, and gift-card-only redemptions without merchandise. Partially refunded orders still count as activity. The same rules apply to the base period and the lapse window.
+  4️⃣ Identity: customers are counted on the resolved customer_id; guest checkouts are stitched on hashed email before counting. In omnichannel retail, store purchases matched through loyalty ID or e-receipt count as activity; unmatched store sales cannot be attributed, so digital-only scopes overstate churn for omnichannel buyers and must be labelled as such.
+  5️⃣ Activity means a purchase only. Sessions, logins, email opens, wishlist adds and returns do not reset the lapse clock, and session-timeout rules are irrelevant to this KPI. Order date is the order-placed timestamp in the reporting time zone, not ship or delivery date.
+  6️⃣ Contractual revenue is out of scope: auto-renewing subscription and replenishment orders are either excluded or reported separately under Subscriber Churn Rate, since their loss is observed through cancel_subscription rather than inferred from silence.
+  7️⃣ A churned customer who later buys again is counted in Customer Reactivation Rate for the period of return; the original churn value is not restated. Because churn is window-based and retention is period-based, Customer Churn Rate + Customer Retention Rate will not sum to 100% and the two must never be reconciled that way.
 
+Business Use Case: |
+  1️⃣ CRM & Lifecycle Marketing: when a customer's days since last order crosses the category P75 inter-purchase interval (before the full lapse window closes), the customer enters an automated win-back journey with an incentive tiered by historical AOV, and the team reads the quarterly churn rate of treated versus holdout cohorts to size incremental save.
+  2️⃣ Finance: each quarter, churn by acquisition cohort feeds the survival curve in the customer lifetime value forecast; a rise of more than two points in any cohort triggers a revision of LTV-based CAC ceilings shared with Performance Marketing.
+  3️⃣ Merchandising: churn broken down by first-purchase category and brand is reviewed monthly; categories with churn materially above the site average are flagged for assortment depth, replenishment reminders or subscribe-and-save eligibility.
+  4️⃣ Customer Service: churn among customers whose last order included a return, late delivery or support ticket is compared with the baseline monthly, and when the gap widens the team adjusts service recovery credits and escalation rules for the affected failure reasons.
 
+Dependencies:
+  Events: [purchase, refund]
+  Metrics: [active-customers, lapsed-customers]
+  Dimensions: [customer-id, last-purchase-date, first-purchase-date, product-category]
+  KPIs: [time-between-purchases]
 
+Source Data: Digital + Order History (Shopify / Salesforce Commerce Cloud) + CRM
 
+Report Attributes: |
+  Acquisition Cohort (First Purchase Month); First Purchase Category; Acquisition Channel; Customer Tier / Loyalty Status; Order Count in Base Period; Country / Region; Device Category of Last Order; Last Order Had Return
 
+Dashboard Usage: [Customer Retention & Lifecycle Overview, Customer Lifetime Value & Cohort Analysis, CRM Win-back Program Performance, Executive Commercial Scorecard]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [customer-retention-rate, subscriber-churn-rate, customer-reactivation-rate, time-between-purchases, repeat-purchase-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +446,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T18:20:37.618+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T18:20:46.483+00:00
 
