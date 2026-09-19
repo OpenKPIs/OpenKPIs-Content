@@ -1,7 +1,7 @@
 # KPI: Repeat Purchase Rate
-# Generated: 2026-09-19T18:21:28.416Z
+# Generated: 2026-09-19T18:21:37.521Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Repeat Purchase Rate
 Formula: (Distinct Customers with ≥ 2 Valid Orders in Period / Distinct Customers with ≥ 1 Valid Order in Period) × 100
@@ -11,29 +11,353 @@ Description: |
 
 Category: Retention
 
+Tags: [kpi, E-commerce: Customer Retention, Loyalty & LTV]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Monetization
 
+Scope: User
 
+Measure Type: Percentage
 
+Aggregation Window: Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "T-100482731",
+      "total": {
+        "basePrice": 132.5,
+        "shipping": 6.95,
+        "priceWithTax": 149.85,
+        "transactionTotal": 149.85,
+        "currency": "USD"
+      },
+      "profile": {
+        "profileInfo": {
+          "profileID": "c_9f3a7e21b4"
+        }
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-44210",
+            "productName": "Organic Cold Brew Coffee Pods 24ct"
+          },
+          "category": {
+            "primaryCategory": "Grocery",
+            "subCategory1": "Coffee"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 66.25,
+            "currency": "USD"
+          }
+        }
+      ],
+      "attributes": {
+        "orderSequence": 2,
+        "customerType": "returning",
+        "isSubscriptionRenewal": false,
+        "coupon": "WELCOME10"
+      }
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "c_9f3a7e21b4",
+              "loginStatus": "authenticated"
+            },
+            "segment": {
+              "loyaltyTier": "Silver"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "user_id": "c_9f3a7e21b4",
+    "ecommerce": {
+      "transaction_id": "T-100482731",
+      "value": 132.5,
+      "tax": 10.4,
+      "shipping": 6.95,
+      "currency": "USD",
+      "coupon": "WELCOME10",
+      "items": [
+        {
+          "item_id": "SKU-44210",
+          "item_name": "Organic Cold Brew Coffee Pods 24ct",
+          "item_category": "Grocery",
+          "item_category2": "Coffee",
+          "price": 66.25,
+          "quantity": 2
+        }
+      ]
+    },
+    "customer_id": "c_9f3a7e21b4",
+    "customer_type": "returning",
+    "customer_order_sequence": 2,
+    "is_subscription_renewal": false,
+    "loyalty_tier": "Silver"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "transaction": {
+      "purchaseID": "T-100482731",
+      "revenue": 132.5,
+      "tax": 10.4,
+      "shipping": 6.95,
+      "currencyCode": "USD",
+      "coupon": "WELCOME10",
+      "orderSequence": 2,
+      "customerType": "returning",
+      "isSubscriptionRenewal": false,
+      "products": [
+        {
+          "SKU": "SKU-44210",
+          "name": "Organic Cold Brew Coffee Pods 24ct",
+          "category": "Grocery/Coffee",
+          "quantity": 2,
+          "price": 66.25
+        }
+      ]
+    },
+    "user": {
+      "customerID": "c_9f3a7e21b4",
+      "loginStatus": "authenticated",
+      "loyaltyTier": "Silver"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "c_9f3a7e21b4",
+          "authenticatedState": "authenticated",
+          "primary": true
+        }
+      ]
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100482731",
+        "priceTotal": 132.5,
+        "currencyCode": "USD",
+        "taxAmount": 10.4,
+        "shippingAmount": 6.95
+      },
+      "promotionID": "WELCOME10"
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-44210",
+        "name": "Organic Cold Brew Coffee Pods 24ct",
+        "productCategories": [
+          {
+            "categoryID": "Grocery/Coffee"
+          }
+        ],
+        "quantity": 2,
+        "priceTotal": 132.5,
+        "currencyCode": "USD"
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "c_9f3a7e21b4",
+            "eVar11": "returning",
+            "eVar12": "2",
+            "eVar13": "false",
+            "eVar14": "Silver"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Repeat Purchase Rate by month: distinct customers with >= 2 valid discretionary orders / distinct customers with >= 1 valid order.
+  -- Orders are deduplicated on transaction_id, attributed to the store time zone, and fully refunded orders are removed.
+  WITH purchase_events AS (
+    SELECT
+      event_timestamp,
+      DATE(TIMESTAMP_MICROS(event_timestamp), 'America/New_York') AS order_date,
+      COALESCE(
+        NULLIF(user_id, ''),
+        (SELECT MAX(IF(ep.key = 'customer_id', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep),
+        user_pseudo_id
+      ) AS customer_key,
+      COALESCE(
+        NULLIF(ecommerce.transaction_id, ''),
+        (SELECT MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep)
+      ) AS transaction_id,
+      COALESCE(
+        ecommerce.purchase_revenue,
+        (SELECT MAX(IF(ep.key = 'value', COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64)), NULL)) FROM UNNEST(event_params) AS ep)
+      ) AS order_revenue,
+      (SELECT MAX(IF(ep.key = 'is_subscription_renewal', LOWER(COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING))), NULL)) FROM UNNEST(event_params) AS ep) AS is_subscription_renewal
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN '20251231' AND '20270101'
+      AND event_name = 'purchase'
+  ),
+  deduped_orders AS (
+    SELECT *
+    FROM purchase_events
+    WHERE transaction_id IS NOT NULL
+      AND customer_key IS NOT NULL
+      AND order_revenue > 0
+      AND order_date BETWEEN DATE '2026-01-01' AND DATE '2026-12-31'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1
+  ),
+  refunds AS (
+    SELECT
+      COALESCE(
+        NULLIF(ecommerce.transaction_id, ''),
+        (SELECT MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep)
+      ) AS transaction_id,
+      SUM(ecommerce.refund_value) AS refund_value
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN '20251231' AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND event_name = 'refund'
+    GROUP BY 1
+  ),
+  valid_orders AS (
+    SELECT o.*
+    FROM deduped_orders AS o
+    LEFT JOIN refunds AS r
+      ON o.transaction_id = r.transaction_id
+    WHERE r.transaction_id IS NULL
+      OR (r.refund_value > 0 AND r.refund_value < o.order_revenue)
+  ),
+  customer_period AS (
+    SELECT
+      DATE_TRUNC(order_date, MONTH) AS period_month,
+      customer_key,
+      COUNT(DISTINCT transaction_id) AS valid_orders,
+      COUNT(DISTINCT IF(COALESCE(is_subscription_renewal, 'false') NOT IN ('true', '1'), transaction_id, NULL)) AS discretionary_orders
+    FROM valid_orders
+    GROUP BY period_month, customer_key
+  )
+  SELECT
+    period_month,
+    COUNT(*) AS purchasing_customers,
+    COUNTIF(discretionary_orders >= 2) AS repeat_customers,
+    ROUND(SAFE_DIVIDE(COUNTIF(discretionary_orders >= 2), COUNT(*)) * 100, 2) AS repeat_purchase_rate_pct
+  FROM customer_period
+  GROUP BY period_month
+  ORDER BY period_month;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Repeat Purchase Rate by month: distinct customers with >= 2 valid discretionary orders / distinct customers with >= 1 valid order.
+  -- Orders are deduplicated on purchaseID and attributed to the store time zone.
+  WITH purchase_events AS (
+    SELECT
+      timestamp AS event_ts,
+      to_date(from_utc_timestamp(timestamp, 'America/New_York')) AS order_date,
+      COALESCE(
+        identityMap['CRMID'][0].id,
+        _experience.analytics.customDimensions.eVars.eVar10,
+        identityMap['ECID'][0].id
+      ) AS customer_key,
+      commerce.order.purchaseID AS transaction_id,
+      commerce.order.priceTotal AS order_revenue,
+      LOWER(_experience.analytics.customDimensions.eVars.eVar13) AS is_subscription_renewal
+    FROM aep_web_events_dataset
+    WHERE eventType = 'commerce.purchases'
+      AND timestamp >= to_timestamp('2025-12-31 00:00:00')
+      AND timestamp < to_timestamp('2027-01-02 00:00:00')
+  ),
+  deduped_orders AS (
+    SELECT event_ts, order_date, customer_key, transaction_id, order_revenue, is_subscription_renewal
+    FROM (
+      SELECT
+        p.*,
+        ROW_NUMBER() OVER (PARTITION BY p.transaction_id ORDER BY p.event_ts) AS rn
+      FROM purchase_events AS p
+      WHERE p.transaction_id IS NOT NULL
+        AND p.customer_key IS NOT NULL
+        AND p.order_revenue > 0
+        AND p.order_date BETWEEN to_date('2026-01-01') AND to_date('2026-12-31')
+    ) AS ranked
+    WHERE rn = 1
+  ),
+  customer_period AS (
+    SELECT
+      date_trunc('MONTH', order_date) AS period_month,
+      customer_key,
+      COUNT(DISTINCT transaction_id) AS valid_orders,
+      COUNT(DISTINCT CASE WHEN COALESCE(is_subscription_renewal, 'false') NOT IN ('true', '1') THEN transaction_id END) AS discretionary_orders
+    FROM deduped_orders
+    GROUP BY date_trunc('MONTH', order_date), customer_key
+  )
+  SELECT
+    period_month,
+    COUNT(*) AS purchasing_customers,
+    SUM(CASE WHEN discretionary_orders >= 2 THEN 1 ELSE 0 END) AS repeat_customers,
+    ROUND(100.0 * SUM(CASE WHEN discretionary_orders >= 2 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS repeat_purchase_rate_pct
+  FROM customer_period
+  GROUP BY period_month
+  ORDER BY period_month;
 
+Calculation Notes: |
+  1️⃣ Customer grain: count distinct resolved customers, not sessions or cookies — key on the authenticated customer_id / GA4 user_id, with guest checkouts stitched to a customer via hashed email from the order record; unmatched guest orders count as a single-order customer each, which biases the rate downward and must be disclosed when guest checkout share exceeds roughly 20% of orders.,2️⃣ Order validity: include only completed purchase transactions with order revenue > 0; exclude test orders, internal/employee accounts, fully cancelled or fully refunded orders, fraud-declined orders and $0 replacement or warranty shipments. Partial refunds keep the order in scope. Split shipments and multi-item baskets sharing one transaction_id count as one order.,3️⃣ Order deduplication: deduplicate purchase events on transaction_id before counting orders per customer, since GA4 purchase hits can fire again on confirmation-page reloads; two orders placed within 30 minutes by the same customer with identical line items should be reviewed as a duplicate submission, not a repeat purchase.,4️⃣ Period boundaries: attribute each order to the period of its order timestamp in the reporting time zone of the store, not the fulfilment or payment-capture date. The rate is period-bound and not additive — a quarterly value cannot be derived by averaging three monthly values, and short windows (Weekly) structurally depress the rate, so compare only like-for-like window lengths.,5️⃣ Business model filters: report subscription auto-renewal orders separately or exclude them from the numerator, because contractual replenishment inflates the rate without reflecting discretionary repeat intent; marketplace orders fulfilled by third-party sellers follow the storefront's reporting policy and must be stated in the dashboard footnote.,6️⃣ Variant — Second-Purchase Conversion Rate: a cohort view that takes customers whose first-ever order falls in the cohort period (lifetime order count = 1 at that date) and divides those placing a second valid order within N days of the first (commonly 30, 60, 90 or 180 days, chosen to match the category's replenishment cycle) by the full first-time-buyer cohort. Cohorts younger than N days are incomplete and must be suppressed or flagged; this variant isolates new-customer conversion and is not interchangeable with the period rate above.,7️⃣ Returning versus repeat: a customer whose only order in the period is their second lifetime order does not count in the period numerator; the numerator requires two or more orders inside the window. Where the business wants lifetime repeat status (any customer with ≥ 2 lifetime orders), report it as Repeat Customer Rate on a lifetime base and label it explicitly.
 
+Business Use Case: |
+  1️⃣ The CRM & Lifecycle Marketing team monitors the monthly rate by acquisition channel; when a channel's first-time buyers fall more than 5 points below the store average on the 60-day Second-Purchase Conversion Rate, they launch a targeted post-purchase replenishment and cross-sell email sequence for that cohort and hold its paid budget until the cohort recovers.,2️⃣ Performance Marketing uses the rate by first-order campaign and promo code to adjust target CPA bids, reducing bids on promotions that generate one-time discount buyers with repeat rates below the category benchmark and reallocating spend to campaigns whose cohorts repeat at above-average rates.,3️⃣ The Merchandising team reviews the rate by first-purchase category quarterly and, when an entry category shows a strong repeat rate, promotes it as a gateway product in homepage placements and new-visitor recommendations.,4️⃣ Finance feeds the quarterly rate and its trend into the customer lifetime value and contribution-margin forecast, and flags to leadership any two consecutive quarterly declines as a risk to revenue plans built on returning-customer volume.
 
+Dependencies:
+  Events: [purchase]
+  Metrics: [orders, unique-purchasers]
+  Dimensions: [customer-id, transaction-id, customer-type]
 
+Source Data: Digital Analytics (GA4) + Commerce Orders (Shopify / Order Management)
 
+Report Attributes: |
+  First-Order Acquisition Channel; First-Order Promo Code; First-Purchase Product Category; Customer Type (New / Returning); Device Category; Country / Region; Loyalty Tier; Acquisition Cohort Month
 
+Dashboard Usage: [Customer Retention & Loyalty Dashboard, Lifecycle Marketing Performance, Customer Lifetime Value & Cohort Analysis, Executive E-commerce Scorecard]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [customer-retention-rate, purchase-frequency, time-between-purchases, customer-lifetime-value]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +367,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T18:21:27.794+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T18:21:37.2+00:00
 
