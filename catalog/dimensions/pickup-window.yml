@@ -1,5 +1,5 @@
 # Dimension: Pickup Window
-# Generated: 2026-09-18T16:34:56.235Z
+# Generated: 2026-09-19T18:12:00.969Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -28,7 +28,7 @@ GA4 Event: |
   add_shipping_info
 
 Adobe Event: |
-  Checkout: Pickup Window Selected
+  commerce.checkoutShippingInfoAdded
 
 W3 Data Layer: |
   {
@@ -65,7 +65,7 @@ W3 Data Layer: |
         {
           "eventInfo": {
             "eventName": "add_shipping_info",
-            "eventAction": "Pickup Window Selected",
+            "eventAction": "Shipping Info Added",
             "type": "checkout",
             "timeStamp": "2026-09-17T14:03:12.000-05:00"
           },
@@ -112,7 +112,7 @@ Adobe Client Data Layer: |
   {
     "event": "commerce.checkoutShippingInfoAdded",
     "eventInfo": {
-      "trigger": "Checkout: Pickup Window Selected",
+      "trigger": "Checkout: Shipping Info Added",
       "path": "commerce.fulfillment",
       "timestamp": "2026-09-17T14:03:12.000-05:00"
     },
@@ -212,6 +212,7 @@ Google Analytics SQL: |
       evt.event_name                                                                    AS event_name,
       evt.user_pseudo_id                                                                AS user_pseudo_id,
       evt.event_timestamp                                                               AS event_timestamp,
+      evt.event_bundle_sequence_id                                                      AS event_bundle_sequence_id,
       evt.device.category                                                               AS device_category,
       MAX(IF(prm.key = 'ga_session_id',        prm.value.int_value,    NULL))           AS ga_session_id,
       MAX(IF(prm.key = 'transaction_id',       prm.value.string_value, NULL))           AS transaction_id,
@@ -219,7 +220,6 @@ Google Analytics SQL: |
       TRIM(MAX(IF(prm.key = 'pickup_window',   prm.value.string_value, NULL)))          AS pickup_window_raw,
       MAX(IF(prm.key = 'pickup_window_source', prm.value.string_value, NULL))           AS pickup_window_source,
       MAX(IF(prm.key = 'pickup_store_id',      prm.value.string_value, NULL))           AS pickup_store_id,
-      MAX(IF(prm.key = 'shipping_tier',        prm.value.string_value, NULL))           AS shipping_tier,
       MAX(IF(prm.key = 'value',
              COALESCE(prm.value.double_value, CAST(prm.value.int_value AS FLOAT64)),
              NULL))                                                                     AS event_value
@@ -228,7 +228,7 @@ Google Analytics SQL: |
     WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY))
                             AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
       AND evt.event_name IN ('add_shipping_info', 'purchase')
-    GROUP BY event_day, event_name, user_pseudo_id, event_timestamp, device_category
+    GROUP BY event_day, event_name, user_pseudo_id, event_timestamp, event_bundle_sequence_id, device_category
   ),
   
   pickup_base AS (
@@ -247,13 +247,14 @@ Google Analytics SQL: |
       COALESCE(NULLIF(pickup_window_raw, ''), 'Unspecified')           AS pickup_window,
       CASE
         WHEN TRIM(COALESCE(pickup_window_raw, '')) = ''                                               THEN 'Missing selection'
+        WHEN pickup_window_raw = 'Unspecified'                                                         THEN 'Missing selection'
         WHEN pickup_window_raw IN ('Within 2 hours', 'Same day', 'Next day', 'Scheduled slot')        THEN 'Governed value'
         ELSE 'Unmapped value'
       END                                                              AS value_governance
     FROM event_grain
+    -- Governed fulfillment_method values as emitted by the data layer (e.g. 'bopis').
     WHERE fulfillment_method IN (
-        'bopis', 'curbside', 'curbside_pickup', 'store_pickup',
-        'click_and_collect', 'locker_pickup', 'ship_to_store'
+        'bopis', 'curbside', 'click_and_collect', 'locker_pickup', 'ship_to_store'
       )
   )
   
@@ -330,13 +331,16 @@ AEP Query Service SQL: |
       coalesce(nullif(pickup_window_raw, ''), 'Unspecified')            AS pickup_window,
       CASE
         WHEN trim(coalesce(pickup_window_raw, '')) = ''                                         THEN 'Missing selection'
+        WHEN pickup_window_raw = 'Unspecified'                                                   THEN 'Missing selection'
         WHEN pickup_window_raw IN ('Within 2 hours', 'Same day', 'Next day', 'Scheduled slot')  THEN 'Governed value'
         ELSE 'Unmapped value'
       END                                                               AS value_governance
     FROM sessionised
+    -- Same governed fulfillment_method values as the BigQuery query; 'store-pickup' is the
+    -- extra match for the commerce.shipping.shippingMethod fallback.
     WHERE fulfillment_method IN (
-        'bopis', 'curbside', 'curbside-pickup', 'store-pickup',
-        'click-and-collect', 'locker-pickup', 'ship-to-store'
+        'bopis', 'curbside', 'click_and_collect', 'locker_pickup', 'ship_to_store',
+        'store-pickup'
       )
   )
   
@@ -360,13 +364,14 @@ AEP Query Service SQL: |
   ORDER BY event_type, events DESC;
 
 Calculation Notes: |
-  1️⃣ The value is always the promised slot LABEL or BAND as a string ("Within 2 hours", "Same day", "Next day", "Scheduled slot"), never a raw timestamp: an absolute ready-by or collect-by time belongs in a datetime field, and the gap between the promised and the actual collection time is a separate metric, not a value of this dimension.,2️⃣ The value is first set when the shopper confirms a pickup option at checkout (add_shipping_info) and is sealed on purchase; the value present on the purchase event is the promise of record for conversion, checkout-funnel and cohort reporting, so downstream restatement of that value is not permitted.,3️⃣ A customer-rescheduled window is treated as a new promise, not a correction: the purchase-time value is retained as the promised window for the order cohort, while the most recent confirmed slot is carried forward for operational and completion reporting — reporting must state which of the two is in use, and rescheduled orders are flagged so they are not read as first-promise misses.,4️⃣ An expired, missed or auto-cancelled window never overwrites the dimension with "Expired" or "Missed": the collection outcome lives in the order or pickup status, and this dimension continues to carry the window that was promised, so that not-collected volume can be attributed back to the slot that generated it.,5️⃣ Excluded: ship-to-home, ship-from-store and carrier-delivery orders (the dimension is set to "Not applicable" wherever Fulfillment Method is not a pickup variant), plus store staffing, picking-capacity, labour-hour and slot-inventory measures — this dimension is the customer-facing promise only and must not be reused as a capacity or workload attribute.,6️⃣ Values are normalised to the governed list at collection time: free-form or locale-specific slot strings from the commerce platform are mapped to the standard bands, slot windows are evaluated in the store's local time rather than the shopper's, cardinality is capped by banding scheduled slots rather than emitting every calendar slot, and any unmapped or missing selection is recorded as "Unspecified" instead of null.,7️⃣ Timing and stitching: the checkout selection is attributed within the standard 30-minute session-inactivity window, and split or multi-store pickup orders carry the window at line-item grain so each store fulfilment leg is counted once; order-level reporting then takes the longest promised band to avoid double counting.
+  1️⃣ The value is always the promised slot LABEL or BAND as a string ("Within 2 hours", "Same day", "Next day", "Scheduled slot"), never a raw timestamp: an absolute ready-by or collect-by time belongs in a datetime field, and the gap between the promised and the actual collection time is a separate metric, not a value of this dimension.,2️⃣ The value is first set when the shopper confirms a pickup option at checkout (add_shipping_info) and is sealed on purchase; the value present on the purchase event is the promise of record for conversion, checkout-funnel and cohort reporting, so downstream restatement of that value is not permitted.,3️⃣ Only the checkout-time promise is captured: if the customer later reschedules the window in order management, that change is not written back to this dimension, and the purchase-event value remains the promised window of record for the order.,4️⃣ An expired, missed or auto-cancelled window never overwrites the dimension with "Expired" or "Missed": the collection outcome lives in the order or pickup status, and this dimension continues to carry the window that was promised, so that not-collected volume can be attributed back to the slot that generated it.,5️⃣ Excluded: ship-to-home, ship-from-store and carrier-delivery orders (the dimension is populated only on events whose Fulfillment Method is a pickup variant; all other events carry no value and are excluded from the pickup base population rather than reported as missing), plus store staffing, picking-capacity, labour-hour and slot-inventory measures — this dimension is the customer-facing promise only and must not be reused as a capacity or workload attribute.,6️⃣ Values are normalised to the governed list at collection time: free-form or locale-specific slot strings from the commerce platform are mapped to the standard bands, slot windows are evaluated in the store's local time rather than the shopper's, cardinality is capped by banding scheduled slots rather than emitting every calendar slot, and any unmapped or missing selection is recorded as "Unspecified" instead of null.,7️⃣ Timing and stitching: the checkout selection is attributed within the standard 30-minute session-inactivity window, and the window is carried once per event at order (cart) level.
 
 Business Use Case: |
-  1️⃣ The Omnichannel Merchandising manager reviews Pickup Completion Rate by window each week and, where the "Within 2 hours" band falls materially below the same-day band at a store cluster, withdraws the two-hour promise from those stores in the checkout configuration until ready-to-collect performance recovers.,2️⃣ The Store Operations lead is alerted when not-collected orders concentrate in the "Next day" and "Scheduled slot" bands, and responds by tightening the reminder and hold-period cadence for those windows before the automatic cancellation and refund is triggered.,3️⃣ The Digital Product manager for checkout uses the window mix on add_shipping_info versus purchase to identify slots that are selected but abandoned, and re-orders or re-labels the pickup options on the delivery step to lead with the windows that convert.,4️⃣ The Customer Service planning team forecasts contact volume by window and staffing the store and contact-centre lines ahead of peak trading, using the share of orders promised into same-day and two-hour bands as the driver for "where is my order" and collection-support demand.
+  1️⃣ The Omnichannel Merchandising manager reviews Pickup Completion Rate by window each week and, where the "Within 2 hours" band falls materially below the same-day band at a store cluster, withdraws the two-hour promise from those stores in the checkout configuration until ready-to-collect performance recovers.,2️⃣ The Store Operations lead is alerted when not-collected orders concentrate in the "Next day" and "Scheduled slot" bands, and responds by tightening the reminder and hold-period cadence for those windows before the automatic cancellation and refund is triggered.,3️⃣ The Digital Product manager for checkout uses the window mix on add_shipping_info versus purchase to identify slots that are selected but abandoned, and re-orders or re-labels the pickup options on the delivery step to lead with the windows that convert.,4️⃣ The Customer Service planning team forecasts contact volume by window and staffs the store and contact-centre lines ahead of peak trading, using the share of orders promised into same-day and two-hour bands as the driver for "where is my order" and collection-support demand.
 
 Dependencies:
-  Events: [add-shipping-info, purchase]
+  Events: [purchase]
+  Metrics: [shipping-info-added]
   Dimensions: [fulfillment-method, store-id]
 
 Source Data: Digital + Order Management (Salesforce Commerce Cloud), stitched to in-store collection confirmations
@@ -395,5 +400,5 @@ Created At: 2026-09-18T16:34:47.097+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-18T16:34:55.694+00:00
+Last Modified At: 2026-09-19T18:12:00.584+00:00
 
