@@ -1,7 +1,7 @@
 # KPI: Purchase Frequency
-# Generated: 2026-09-19T18:21:09.582Z
+# Generated: 2026-09-19T18:21:21.094Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Purchase Frequency
 Formula: Purchase Frequency = Total Valid Orders in Period / Distinct Purchasing Customers in Period (customers with ≥ 1 valid order in the same period); used in CLV = Average Order Value × Purchase Frequency × Customer Lifespan, with Purchase Frequency expressed on an annual basis
@@ -11,29 +11,367 @@ Description: |
 
 Category: Retention
 
+Tags: [kpi, E-commerce: Customer Retention, Loyalty & LTV]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Monetization
 
+Scope: User
 
+Measure Type: Ratio
 
+Aggregation Window: Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "purchase",
+          "eventAction": "order_complete"
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "T-100045872",
+      "profile": {
+        "profileInfo": {
+          "profileID": "CUST-88213",
+          "returningStatus": "returning"
+        },
+        "attributes": {
+          "loyaltyTier": "gold",
+          "customerType": "returning",
+          "customerOrderCount": 4
+        }
+      },
+      "total": {
+        "basePrice": 118.5,
+        "shipping": 6.99,
+        "taxRate": 0.08,
+        "priceWithTax": 134.99,
+        "transactionTotal": 134.99,
+        "currency": "USD"
+      },
+      "attributes": {
+        "orderType": "one_time",
+        "checkoutType": "authenticated"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-20931",
+            "productName": "Organic Cotton Tee"
+          },
+          "category": {
+            "primaryCategory": "Apparel"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 29.25,
+            "currency": "USD"
+          }
+        },
+        {
+          "productInfo": {
+            "productID": "SKU-44102",
+            "productName": "Refill Pack Hand Soap"
+          },
+          "category": {
+            "primaryCategory": "Home Care"
+          },
+          "quantity": 3,
+          "price": {
+            "basePrice": 20,
+            "currency": "USD"
+          }
+        }
+      ]
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "CUST-88213",
+              "loginStatus": "authenticated"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "user_id": "CUST-88213",
+    "user_properties": {
+      "customer_type": "returning",
+      "loyalty_tier": "gold"
+    },
+    "ecommerce": {
+      "transaction_id": "T-100045872",
+      "value": 118.5,
+      "tax": 9.5,
+      "shipping": 6.99,
+      "currency": "USD",
+      "customer_type": "returning",
+      "order_type": "one_time",
+      "items": [
+        {
+          "item_id": "SKU-20931",
+          "item_name": "Organic Cotton Tee",
+          "item_category": "Apparel",
+          "price": 29.25,
+          "quantity": 2
+        },
+        {
+          "item_id": "SKU-44102",
+          "item_name": "Refill Pack Hand Soap",
+          "item_category": "Home Care",
+          "price": 20,
+          "quantity": 3
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "user": {
+      "customerId": "CUST-88213",
+      "loginStatus": "authenticated",
+      "customerType": "returning",
+      "loyaltyTier": "gold"
+    },
+    "transaction": {
+      "transactionId": "T-100045872",
+      "revenue": 118.5,
+      "tax": 9.5,
+      "shipping": 6.99,
+      "currency": "USD",
+      "orderType": "one_time",
+      "products": [
+        {
+          "sku": "SKU-20931",
+          "name": "Organic Cotton Tee",
+          "category": "Apparel",
+          "price": 29.25,
+          "quantity": 2
+        },
+        {
+          "sku": "SKU-44102",
+          "name": "Refill Pack Hand Soap",
+          "category": "Home Care",
+          "price": 20,
+          "quantity": 3
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "CUST-88213",
+          "authenticatedState": "authenticated",
+          "primary": true
+        }
+      ]
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100045872",
+        "priceTotal": 118.5,
+        "currencyCode": "USD",
+        "taxAmount": 9.5
+      },
+      "shipping": {
+        "shippingAmount": 6.99
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-20931",
+        "name": "Organic Cotton Tee",
+        "quantity": 2,
+        "priceTotal": 58.5,
+        "currencyCode": "USD"
+      },
+      {
+        "SKU": "SKU-44102",
+        "name": "Refill Pack Hand Soap",
+        "quantity": 3,
+        "priceTotal": 60,
+        "currencyCode": "USD"
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "CUST-88213",
+            "eVar11": "returning",
+            "eVar12": "gold",
+            "eVar13": "one_time"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Purchase Frequency = distinct valid orders / distinct purchasing customers, per calendar month
+  WITH purchase_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_dt,
+      event_timestamp,
+      user_id,
+      COALESCE(
+        NULLIF(ecommerce.transaction_id, '(not set)'),
+        MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL))
+      ) AS transaction_id,
+      COALESCE(
+        ecommerce.purchase_revenue,
+        MAX(IF(ep.key = 'value', COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64)), NULL))
+      ) AS order_revenue,
+      MAX(IF(ep.key = 'order_type', ep.value.string_value, NULL)) AS order_type
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN '20260101' AND '20261231'
+      AND event_name = 'purchase'
+    GROUP BY event_dt, event_timestamp, user_id, ecommerce.transaction_id, ecommerce.purchase_revenue
+  ),
+  refunded_orders AS (
+    SELECT DISTINCT
+      COALESCE(
+        NULLIF(ecommerce.transaction_id, '(not set)'),
+        (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'transaction_id')
+      ) AS transaction_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN '20260101' AND '20261231'
+      AND event_name = 'refund'
+      AND ARRAY_LENGTH(items) = 0
+  ),
+  valid_orders AS (
+    SELECT
+      transaction_id,
+      ANY_VALUE(user_id) AS customer_id,
+      DATE_TRUNC(MIN(event_dt), MONTH) AS order_month
+    FROM purchase_events
+    WHERE transaction_id IS NOT NULL
+      AND user_id IS NOT NULL
+      AND order_revenue > 0
+      AND COALESCE(order_type, 'one_time') != 'subscription_renewal'
+      AND transaction_id NOT IN (SELECT transaction_id FROM refunded_orders WHERE transaction_id IS NOT NULL)
+    GROUP BY transaction_id
+  )
+  SELECT
+    order_month,
+    COUNT(DISTINCT transaction_id) AS total_valid_orders,
+    COUNT(DISTINCT customer_id) AS purchasing_customers,
+    ROUND(SAFE_DIVIDE(COUNT(DISTINCT transaction_id), COUNT(DISTINCT customer_id)), 3) AS purchase_frequency
+  FROM valid_orders
+  GROUP BY order_month
+  ORDER BY order_month;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Purchase Frequency = distinct valid orders / distinct purchasing customers, per calendar month
+  WITH purchase_events AS (
+    SELECT
+      timestamp AS event_ts,
+      commerce.order.purchaseID AS transaction_id,
+      identityMap['CRMID'][0].id AS customer_id,
+      commerce.order.priceTotal AS order_revenue,
+      _experience.analytics.customDimensions.eVars.eVar13 AS order_type
+    FROM aep_web_events_dataset
+    WHERE eventType = 'commerce.purchases'
+      AND commerce.purchases.value > 0
+      AND timestamp >= TIMESTAMP '2026-01-01 00:00:00'
+      AND timestamp < TIMESTAMP '2027-01-01 00:00:00'
+  ),
+  refunded_orders AS (
+    SELECT DISTINCT commerce.order.purchaseID AS transaction_id
+    FROM aep_web_events_dataset
+    WHERE eventType = 'commerce.order.refund'
+      AND commerce.order.purchaseID IS NOT NULL
+      AND timestamp >= TIMESTAMP '2026-01-01 00:00:00'
+  ),
+  valid_orders AS (
+    SELECT
+      p.transaction_id,
+      MAX(p.customer_id) AS customer_id,
+      DATE_TRUNC('month', MIN(p.event_ts)) AS order_month
+    FROM purchase_events p
+    LEFT JOIN refunded_orders r
+      ON p.transaction_id = r.transaction_id
+    WHERE p.transaction_id IS NOT NULL
+      AND p.customer_id IS NOT NULL
+      AND p.order_revenue > 0
+      AND COALESCE(p.order_type, 'one_time') <> 'subscription_renewal'
+      AND r.transaction_id IS NULL
+    GROUP BY p.transaction_id
+  )
+  SELECT
+    order_month,
+    COUNT(DISTINCT transaction_id) AS total_valid_orders,
+    COUNT(DISTINCT customer_id) AS purchasing_customers,
+    ROUND(CAST(COUNT(DISTINCT transaction_id) AS DOUBLE) / NULLIF(COUNT(DISTINCT customer_id), 0), 3) AS purchase_frequency
+  FROM valid_orders
+  GROUP BY order_month
+  ORDER BY order_month;
 
+Calculation Notes: |
+  1️⃣ Denominator discipline: the denominator is distinct customers who purchased in the same window, not all registered accounts, active users or email subscribers, so the value can never fall below 1.0. Dividing by the full customer file produces a different metric (orders per customer on file) and must be labelled as such; mixing the two is the most common reason Purchase Frequency disagrees between the CRM and the analytics layer.,2️⃣ Customer resolution: count customers on the resolved identity (authenticated customer_id / GA4 user_id, with guest orders stitched to a customer via hashed email from the order record). Unstitched guest orders each become a one-order customer, which pulls the ratio toward 1.0; disclose the stitched share whenever guest checkout exceeds roughly 20% of orders, and never use client_id / cookie as the customer key.,3️⃣ Order validity and deduplication: count completed purchase transactions with order revenue > 0, deduplicated on transaction_id to absorb confirmation-page reloads. Exclude test orders, employee and internal accounts, fraud-declined orders, fully cancelled or fully refunded orders and $0 replacement or warranty shipments; partial refunds stay in scope, and split shipments or multi-seller baskets under one transaction_id count as one order.,4️⃣ Window dependence and non-additivity: the ratio scales with window length, so monthly values sit close to 1.0 while annual values carry the repeat signal. It is not additive — quarterly or annual values must be recomputed from order-level data, never averaged or summed from monthly values. For CLV inputs use a trailing 12-month window so lifespan (in years) and frequency share the same time unit.,5️⃣ Timing and time zone: attribute each order to the period of its order-placed timestamp in the store's reporting time zone, not fulfilment, shipment or payment-capture date. Orders later cancelled are removed on restatement; report the closed period only after the returns and cancellation window (commonly 30 days) has elapsed, and flag the current partial period as provisional.,6️⃣ Business model filters: report subscription auto-renewal orders separately (or exclude them), because contractual replenishment inflates frequency without reflecting discretionary repurchase. B2B or wholesale accounts, marketplace third-party seller orders and reseller accounts with extreme order counts should be excluded or capped (e.g. above the 99.9th percentile of orders per customer) so a handful of bulk buyers does not distort the mean.,7️⃣ Value action by industry: E-commerce and Retail count completed purchase orders (online, or omnichannel when POS transactions are tied to a loyalty ID); Travel and Hospitality count confirmed bookings net of cancellations; Food Delivery and QSR count delivered orders; Media and digital goods count paid transactions excluding recurring renewals; SaaS replaces the concept with expansion or add-on purchases per paying account, since contractual renewals are not discretionary orders.
 
+Business Use Case: |
+  1️⃣ The CRM & Lifecycle Marketing team reviews trailing 12-month Purchase Frequency by loyalty tier each month; when a tier falls more than 10% below its prior-year value, they trigger a replenishment and cross-sell email and SMS programme for that tier and measure the lift against a hold-out group before extending it.,2️⃣ Finance takes the trailing 12-month value by acquisition cohort as the frequency input to the Customer Lifetime Value model (AOV × Purchase Frequency × Lifespan) during the quarterly forecast, and resets the allowable customer acquisition cost for any channel whose cohorts fall below the store-wide frequency.,3️⃣ The Loyalty Programme team compares frequency for enrolled members versus non-members after each programme change (new earn rate, tier threshold or points promotion); if the member uplift does not cover the incremental reward cost within two quarters, they submit a redesign of the earn mechanics to Finance for approval.,4️⃣ Merchandising reviews frequency by first-purchase category every quarter and moves high-frequency entry categories (consumables, refills, basics) into new-visitor homepage placements and first-order promotions, while bundling low-frequency categories with replenishable accessories.
 
+Dependencies:
+  Events: [purchase]
+  Metrics: [unique-purchasers]
+  Dimensions: [customer-id, transaction-id]
+  KPIs: [orders]
 
+Source Data: Digital Analytics (GA4) + Commerce Orders (Shopify / Order Management)
 
+Report Attributes: |
+  Loyalty Tier; Acquisition Cohort Month; First-Order Acquisition Channel; First-Purchase Product Category; Customer Type (New / Returning); Country / Region; Device Category; Subscription vs. One-Time Order
 
+Dashboard Usage: [Customer Retention & Loyalty Dashboard, Customer Lifetime Value & Cohort Analysis, Lifecycle Marketing Performance, Executive E-commerce Scorecard]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [repeat-purchase-rate, time-between-purchases, customer-lifetime-value, average-order-value, customer-retention-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +381,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T18:21:09.215+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T18:21:20.844+00:00
 
