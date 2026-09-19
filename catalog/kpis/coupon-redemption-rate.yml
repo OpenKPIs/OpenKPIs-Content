@@ -1,5 +1,5 @@
 # KPI: Coupon Redemption Rate
-# Generated: 2026-09-17T23:16:18.804Z
+# Generated: 2026-09-19T01:23:44.397Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -7,7 +7,7 @@ KPI Name: Coupon Redemption Rate
 Formula: (Orders with ≥ 1 Coupon Code Applied / Total Completed Orders) × 100
 
 Description: |
-  Coupon Redemption Rate is the share of completed orders in which at least one coupon or promotion code was successfully applied at purchase, measured against every order placed in the period including full-price, zero-discount orders. It is deliberately order-based and is not the issuance-based variant (coupons redeemed / coupons issued), which is a promotion-management measure of code distribution, nor is it Loyalty Redemption Rate, which tracks loyalty points and rewards being burned rather than discount codes.
+  Coupon Redemption Rate is the share of completed orders in which at least one coupon or promotion code was successfully applied at purchase, measured against every order placed in the period including full-price, zero-discount orders. It is deliberately order-based and is not the issuance-based variant (coupons redeemed / coupons issued), which is a promotion-management measure of code distribution. It sits downstream of Promotion Click-Through Rate, which measures engagement with promotional placements before checkout rather than codes actually applied to completed orders.
 
 Category: Conversion
 
@@ -168,6 +168,10 @@ GA4 Data Layer: |
     "coupon_applied": true,
     "coupon_scope": "order",
     "coupon_count": 1,
+    "promotion_name": "Autumn Sitewide 20",
+    "order_status": "completed",
+    "test_order": false,
+    "internal_traffic": false,
     "checkout_type": "registered",
     "payment_type": "credit_card",
     "customer_type": "returning"
@@ -209,6 +213,11 @@ Adobe Client Data Layer: |
       "discountAmount": 42.8,
       "promotionName": "Autumn Sitewide 20"
     },
+    "orderAttributes": {
+      "orderStatus": "completed",
+      "testOrder": false,
+      "internalTraffic": false
+    },
     "productListItems": [
       {
         "SKU": "SKU-4421",
@@ -216,8 +225,7 @@ Adobe Client Data Layer: |
         "quantity": 1,
         "priceTotal": 129,
         "currencyCode": "USD",
-        "discountAmount": 25.8,
-        "promotionID": "SAVE20"
+        "discountAmount": 25.8
       },
       {
         "SKU": "SKU-7788",
@@ -225,8 +233,7 @@ Adobe Client Data Layer: |
         "quantity": 2,
         "priceTotal": 85,
         "currencyCode": "USD",
-        "discountAmount": 17,
-        "promotionID": "SAVE20"
+        "discountAmount": 17
       }
     ],
     "web": {
@@ -302,6 +309,21 @@ XDM Mapping: |
             "prop12": "Autumn Sitewide 20"
           }
         }
+      }
+    },
+    "_yourtenant": {
+      "coupon": {
+        "code": "SAVE20",
+        "applied": true,
+        "scope": "order",
+        "count": 1,
+        "discountAmount": 42.8,
+        "promotionName": "Autumn Sitewide 20"
+      },
+      "orderAttributes": {
+        "orderStatus": "completed",
+        "testOrder": false,
+        "internalTraffic": false
       }
     }
   }
@@ -408,7 +430,8 @@ Google Analytics SQL: |
       coupon_code,
       -- Only a customer-facing code qualifies an order. An automatic cart price
       -- rule that moves discount_amount without a code does NOT count.
-      (coupon_code IS NOT NULL OR coupon_applied_flag IN ('true', '1')) AS has_coupon,
+      -- The coupon_applied flag alone never qualifies an order: a non-empty code is required.
+      (coupon_code IS NOT NULL) AS has_coupon,
       discount_amount,
       CASE
         WHEN discount_amount IS NULL OR discount_amount <= 0 THEN '0 | no discount'
@@ -469,9 +492,11 @@ AEP Query Service SQL: |
   -- Formula: Orders with >= 1 coupon code applied / Total completed orders * 100
   -- Source: ExperienceEvent dataset, eventType = 'commerce.purchases'.
   -- Order identity: commerce.order.purchaseID. Order-level code: commerce.promotionID
-  -- (mirrored in eVar12); productListItems carry the per-line discountAmount only, so
-  -- line-level context can never multiply an order in the numerator.
+  -- (mirrored in _yourtenant.coupon.code and eVar12); productListItems carry the per-line
+  -- discountAmount only, so line-level context can never multiply an order in the numerator.
   -- Denominator: every completed order in the window, zero-discount orders included.
+  -- Completed status and test/internal exclusions come from _yourtenant.orderAttributes,
+  -- matching the order_status / test_order / internal_traffic filters in the GA4 query.
   
   WITH purchase_events AS (
     SELECT
@@ -485,6 +510,8 @@ AEP Query Service SQL: |
       commerce.order.discountAmount AS order_discount_amount,
       commerce.purchases.value AS purchase_units,
       trim(commerce.promotionID) AS order_promotion_id,
+      trim(_yourtenant.coupon.code) AS coupon_code_tenant,
+      lower(trim(_yourtenant.orderAttributes.orderStatus)) AS order_status,
       trim(_experience.analytics.customDimensions.eVars.eVar12) AS coupon_code_evar,
       lower(trim(_experience.analytics.customDimensions.eVars.eVar13)) AS coupon_applied_evar,
       _experience.analytics.customDimensions.eVars.eVar14 AS coupon_scope,
@@ -499,6 +526,10 @@ AEP Query Service SQL: |
       AND commerce.order.purchaseID IS NOT NULL
       AND trim(commerce.order.purchaseID) <> ''
       AND lower(commerce.order.purchaseID) NOT LIKE 'test%'
+      -- order_status is a string status, never a numeric metric
+      AND coalesce(lower(trim(_yourtenant.orderAttributes.orderStatus)), 'completed') IN ('completed', 'complete', 'paid', 'success')
+      AND coalesce(_yourtenant.orderAttributes.testOrder, false) = false
+      AND coalesce(_yourtenant.orderAttributes.internalTraffic, false) = false
   ),
   
   -- productListItems is exploded in its own branch and folded straight back to the
@@ -538,10 +569,10 @@ AEP Query Service SQL: |
     SELECT
       order_date,
       transaction_id,
-      coalesce(nullif(order_promotion_id, ''), nullif(coupon_code_evar, '')) AS coupon_code,
+      coalesce(nullif(order_promotion_id, ''), nullif(coupon_code_tenant, ''), nullif(coupon_code_evar, '')) AS coupon_code,
+      -- Only a non-empty customer-facing code qualifies; the applied flag (eVar13) alone never does.
       CASE
-        WHEN coalesce(nullif(order_promotion_id, ''), nullif(coupon_code_evar, '')) IS NOT NULL
-          OR coupon_applied_evar IN ('true', '1') THEN 1
+        WHEN coalesce(nullif(order_promotion_id, ''), nullif(coupon_code_tenant, ''), nullif(coupon_code_evar, '')) IS NOT NULL THEN 1
         ELSE 0
       END AS has_coupon,
       coalesce(order_discount_amount, item_discount_total, 0) AS discount_amount,
@@ -616,9 +647,10 @@ Business Use Case: |
   1️⃣ The Promotions Manager in Merchandising reviews redemption by Coupon Code in the weekly trading meeting; when a sitewide code passes its planned share of orders (for example more than 40% of orders carrying a code) they raise the minimum-spend threshold, cap the code to targeted audiences, or retire it early to protect margin.,2️⃣ The Finance margin controller pairs the rate with Discount Amount band and Average Order Value at month-end close to quantify discount leakage per order, reforecast gross margin, and escalate codes where the incremental revenue does not cover the discount cost.,3️⃣ The Lifecycle Marketing Manager compares redemption for campaign-sourced orders against organic orders after each email or SMS send, then decides whether to reissue the code, narrow the audience, or suppress segments that only convert with a discount.,4️⃣ The Checkout Product Manager monitors the rate against the coupon apply-to-purchase diagnostic after every checkout release; a drop in redemption with rising failed applies triggers a fix to code validation, error messaging or promo-field placement before the next promotional window.
 
 Dependencies:
-  Events: [purchase, coupon-apply]
-  Metrics: [transactions, purchases, discount-amount]
-  Dimensions: [coupon-code, transaction-id, order-status]
+  Events: [purchase]
+  Metrics: [discount-amount]
+  Dimensions: [coupon-code, order-status]
+  KPIs: [orders]
 
 Source Data: Digital Analytics (GA4)
 
@@ -630,7 +662,7 @@ Dashboard Usage: [Cart & Checkout Funnel Dashboard, Promotion Performance Dashbo
 Segment Eligibility: |
   true
 
-Related KPIs: [average-order-value, cart-conversion-rate, checkout-conversion-rate, guest-checkout-rate, loyalty-redemption-rate]
+Related KPIs: [average-order-value, cart-conversion-rate, checkout-conversion-rate, guest-checkout-rate, promotion-click-through-rate]
 
 Data Sensitivity: Internal
 
@@ -644,5 +676,5 @@ Created At: 2026-09-17T23:16:09.422+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-17T23:16:18.479+00:00
+Last Modified At: 2026-09-19T01:23:44.12+00:00
 
