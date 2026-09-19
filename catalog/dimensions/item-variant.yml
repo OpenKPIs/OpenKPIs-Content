@@ -1,7 +1,7 @@
 # Dimension: Item Variant
-# Generated: 2026-09-19T18:06:31.829Z
+# Generated: 2026-09-19T18:06:41.003Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Item Variant
 
@@ -10,31 +10,453 @@ Description: |
 
 Category: Engagement
 
+Tags: [dimension, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Daily, Weekly, Monthly
 
+GA4 Event: |
+  view_item
 
+Adobe Event: |
+  prodView
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "Product View",
+          "eventAction": "view_item"
+        },
+        "category": {
+          "primaryCategory": "Commerce"
+        }
+      }
+    ],
+    "product": [
+      {
+        "productInfo": {
+          "productID": "SKU-10482-NVY-M",
+          "productName": "Merino Crew Neck Sweater",
+          "sku": "SKU-10482-NVY-M",
+          "manufacturer": "Northfield",
+          "color": "Navy",
+          "size": "M"
+        },
+        "category": {
+          "primaryCategory": "Apparel",
+          "subCategory1": "Knitwear"
+        },
+        "attributes": {
+          "variant": "Navy / M",
+          "variantSource": "selected",
+          "parentProductID": "P-10482"
+        },
+        "price": {
+          "basePrice": 89,
+          "currency": "USD"
+        },
+        "quantity": 1
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "view_item",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 89,
+      "items": [
+        {
+          "item_id": "SKU-10482-NVY-M",
+          "item_name": "Merino Crew Neck Sweater",
+          "item_brand": "Northfield",
+          "item_category": "Apparel",
+          "item_category2": "Knitwear",
+          "item_variant": "Navy / M",
+          "item_list_name": "Knitwear PLP",
+          "price": 89,
+          "quantity": 1,
+          "item_variant_source": "selected"
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "prodView",
+    "eventInfo": {
+      "eventName": "prodView"
+    },
+    "commerce": {
+      "productViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-10482-NVY-M",
+        "name": "Merino Crew Neck Sweater",
+        "brand": "Northfield",
+        "category": "Apparel/Knitwear",
+        "variant": "Navy / M",
+        "variantSource": "selected",
+        "selectedOptions": [
+          {
+            "attribute": "Color",
+            "value": "Navy"
+          },
+          {
+            "attribute": "Size",
+            "value": "M"
+          }
+        ],
+        "priceTotal": 89,
+        "currencyCode": "USD",
+        "quantity": 1
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.productViews",
+    "commerce": {
+      "productViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-10482-NVY-M",
+        "name": "Merino Crew Neck Sweater",
+        "selectedOptions": [
+          {
+            "attribute": "Color",
+            "value": "Navy"
+          },
+          {
+            "attribute": "Size",
+            "value": "M"
+          }
+        ],
+        "priceTotal": 89,
+        "currencyCode": "USD",
+        "quantity": 1,
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "eVar30": "Navy / M"
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Item Variant performance: item-grain views, adds and purchases per product x variant (last 28 complete days)
+  WITH item_rows AS (
+    SELECT
+      e.event_name,
+      e.user_pseudo_id,
+      (SELECT ep.value.int_value FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'ga_session_id') AS ga_session_id,
+      e.ecommerce.transaction_id,
+      it.item_id,
+      it.item_name,
+      it.item_brand,
+      it.item_category,
+      COALESCE(NULLIF(TRIM(it.item_variant), ''), '(not set)') AS item_variant,
+      (SELECT ip.value.string_value FROM UNNEST(it.item_params) AS ip WHERE ip.key = 'item_variant_source') AS item_variant_source,
+      COALESCE(it.quantity, 0) AS quantity,
+      COALESCE(it.item_revenue, 0) AS item_revenue
+    FROM `your-project.analytics_123456789.events_*` AS e,
+      UNNEST(e.items) AS it
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY))
+                              AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND e.event_name IN ('view_item', 'add_to_cart', 'purchase')
+  ),
+  session_items AS (
+    -- one row per session x item_id x item_variant (dedupes swatch re-pushes of view_item)
+    SELECT
+      CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING), '.', item_id) AS session_item_key,
+      item_name,
+      item_variant,
+      ANY_VALUE(item_brand) AS item_brand,
+      ANY_VALUE(item_category) AS item_category,
+      MAX(IF(event_name = 'view_item', 1, 0)) AS viewed,
+      MAX(IF(event_name = 'view_item' AND item_variant_source = 'default', 1, 0)) AS viewed_default,
+      MAX(IF(event_name = 'view_item' AND item_variant_source = 'selected', 1, 0)) AS viewed_selected,
+      MAX(IF(event_name = 'add_to_cart', 1, 0)) AS added,
+      SUM(IF(event_name = 'add_to_cart', quantity, 0)) AS units_added
+    FROM item_rows
+    WHERE event_name IN ('view_item', 'add_to_cart')
+      AND ga_session_id IS NOT NULL
+    GROUP BY 1, 2, 3
+  ),
+  engagement AS (
+    SELECT
+      item_name,
+      item_variant,
+      ANY_VALUE(item_brand) AS item_brand,
+      ANY_VALUE(item_category) AS item_category,
+      SUM(viewed) AS view_sessions,
+      SUM(viewed_default) AS default_view_sessions,
+      SUM(viewed_selected) AS selected_view_sessions,
+      SUM(added) AS add_to_cart_sessions,
+      SUM(IF(viewed = 1 AND added = 1, 1, 0)) AS view_to_cart_sessions,
+      SUM(IF(viewed_default = 1 AND added = 1, 1, 0)) AS default_view_to_cart_sessions,
+      SUM(units_added) AS units_added
+    FROM session_items
+    GROUP BY 1, 2
+  ),
+  purchase_lines AS (
+    -- dedupe duplicated purchase hits per transaction x item x variant
+    SELECT
+      transaction_id,
+      item_id,
+      item_name,
+      item_variant,
+      ANY_VALUE(item_brand) AS item_brand,
+      ANY_VALUE(item_category) AS item_category,
+      MAX(quantity) AS units,
+      MAX(item_revenue) AS revenue
+    FROM item_rows
+    WHERE event_name = 'purchase'
+      AND transaction_id IS NOT NULL
+      AND transaction_id NOT IN ('', '(not set)')
+    GROUP BY 1, 2, 3, 4
+  ),
+  purchases AS (
+    SELECT
+      item_name,
+      item_variant,
+      ANY_VALUE(item_brand) AS item_brand,
+      ANY_VALUE(item_category) AS item_category,
+      COUNT(DISTINCT transaction_id) AS orders,
+      SUM(units) AS units_sold,
+      SUM(revenue) AS item_revenue
+    FROM purchase_lines
+    GROUP BY 1, 2
+  ),
+  combined AS (
+    SELECT
+      COALESCE(g.item_name, p.item_name) AS product_name,
+      COALESCE(g.item_variant, p.item_variant) AS item_variant,
+      COALESCE(g.item_brand, p.item_brand) AS item_brand,
+      COALESCE(g.item_category, p.item_category) AS item_category,
+      COALESCE(g.view_sessions, 0) AS view_sessions,
+      COALESCE(g.default_view_sessions, 0) AS default_view_sessions,
+      COALESCE(g.selected_view_sessions, 0) AS selected_view_sessions,
+      COALESCE(g.add_to_cart_sessions, 0) AS add_to_cart_sessions,
+      COALESCE(g.view_to_cart_sessions, 0) AS view_to_cart_sessions,
+      COALESCE(g.default_view_to_cart_sessions, 0) AS default_view_to_cart_sessions,
+      COALESCE(g.units_added, 0) AS units_added,
+      COALESCE(p.orders, 0) AS orders,
+      COALESCE(p.units_sold, 0) AS units_sold,
+      COALESCE(p.item_revenue, 0) AS item_revenue
+    FROM engagement AS g
+    FULL OUTER JOIN purchases AS p
+      ON g.item_name = p.item_name
+     AND g.item_variant = p.item_variant
+  )
+  SELECT
+    product_name,
+    item_variant,
+    item_brand,
+    item_category,
+    item_variant = '(not set)' AS is_variant_not_set,
+    view_sessions,
+    default_view_sessions,
+    selected_view_sessions,
+    add_to_cart_sessions,
+    units_added,
+    orders,
+    units_sold,
+    ROUND(item_revenue, 2) AS item_revenue,
+    -- denominator: every session that viewed this product x variant
+    SAFE_DIVIDE(view_to_cart_sessions, view_sessions) AS view_to_cart_rate,
+    SAFE_DIVIDE(default_view_to_cart_sessions, default_view_sessions) AS default_view_to_cart_rate,
+    -- denominator: all views / units / revenue of the parent product across every variant
+    SAFE_DIVIDE(view_sessions, SUM(view_sessions) OVER (PARTITION BY product_name)) AS variant_view_share_of_product,
+    SAFE_DIVIDE(units_sold, SUM(units_sold) OVER (PARTITION BY product_name)) AS variant_unit_share_of_product,
+    SAFE_DIVIDE(item_revenue, SUM(item_revenue) OVER (PARTITION BY product_name)) AS variant_revenue_share_of_product
+  FROM combined
+  ORDER BY item_revenue DESC, view_sessions DESC
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Item Variant performance from the web ExperienceEvent dataset: product x variant views, adds and purchases (last 28 complete days)
+  WITH events AS (
+    SELECT
+      timestamp,
+      eventType,
+      COALESCE(identityMap['ECID'][0].id, endUserIDs._experience.mcid.id) AS ecid,
+      commerce.`order`.purchaseID AS purchase_id,
+      productListItems
+    FROM aep_web_experience_events
+    WHERE timestamp >= date_sub(current_date(), 28)
+      AND timestamp < current_date()
+      AND eventType IN ('commerce.productViews', 'commerce.productListAdds', 'commerce.purchases')
+      AND productListItems IS NOT NULL
+  ),
+  sessionized AS (
+    SELECT
+      *,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY ecid ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM events
+    WHERE ecid IS NOT NULL
+  ),
+  item_rows AS (
+    SELECT
+      CONCAT(s.ecid, '.', CAST(s.session.num AS STRING)) AS session_key,
+      s.eventType,
+      s.purchase_id,
+      pli.SKU AS item_id,
+      pli.name AS item_name,
+      COALESCE(
+        NULLIF(TRIM(pli._experience.analytics.customDimensions.eVars.eVar30), ''),
+        NULLIF(array_join(transform(pli.selectedOptions, o -> o.value), ' / '), ''),
+        '(not set)'
+      ) AS item_variant,
+      COALESCE(pli.quantity, 0) AS quantity,
+      COALESCE(pli.priceTotal, 0) AS price_total
+    FROM sessionized AS s
+    LATERAL VIEW explode(s.productListItems) pl AS pli
+  ),
+  session_items AS (
+    -- one row per session x SKU x variant (dedupes repeated productViews on swatch changes)
+    SELECT
+      CONCAT(session_key, '.', item_id) AS session_item_key,
+      item_name,
+      item_variant,
+      MAX(CASE WHEN eventType = 'commerce.productViews' THEN 1 ELSE 0 END) AS viewed,
+      MAX(CASE WHEN eventType = 'commerce.productListAdds' THEN 1 ELSE 0 END) AS added,
+      SUM(CASE WHEN eventType = 'commerce.productListAdds' THEN quantity ELSE 0 END) AS units_added
+    FROM item_rows
+    WHERE eventType IN ('commerce.productViews', 'commerce.productListAdds')
+    GROUP BY 1, 2, 3
+  ),
+  engagement AS (
+    SELECT
+      item_name,
+      item_variant,
+      SUM(viewed) AS view_sessions,
+      SUM(added) AS add_to_cart_sessions,
+      SUM(CASE WHEN viewed = 1 AND added = 1 THEN 1 ELSE 0 END) AS view_to_cart_sessions,
+      SUM(units_added) AS units_added
+    FROM session_items
+    GROUP BY 1, 2
+  ),
+  purchase_lines AS (
+    -- dedupe replayed purchase hits per order x SKU x variant
+    SELECT
+      purchase_id,
+      item_id,
+      item_name,
+      item_variant,
+      MAX(quantity) AS units,
+      MAX(price_total) AS revenue
+    FROM item_rows
+    WHERE eventType = 'commerce.purchases'
+      AND purchase_id IS NOT NULL
+      AND purchase_id <> ''
+    GROUP BY 1, 2, 3, 4
+  ),
+  purchases AS (
+    SELECT
+      item_name,
+      item_variant,
+      COUNT(DISTINCT purchase_id) AS orders,
+      SUM(units) AS units_sold,
+      SUM(revenue) AS item_revenue
+    FROM purchase_lines
+    GROUP BY 1, 2
+  ),
+  combined AS (
+    SELECT
+      COALESCE(g.item_name, p.item_name) AS product_name,
+      COALESCE(g.item_variant, p.item_variant) AS item_variant,
+      COALESCE(g.view_sessions, 0) AS view_sessions,
+      COALESCE(g.add_to_cart_sessions, 0) AS add_to_cart_sessions,
+      COALESCE(g.view_to_cart_sessions, 0) AS view_to_cart_sessions,
+      COALESCE(g.units_added, 0) AS units_added,
+      COALESCE(p.orders, 0) AS orders,
+      COALESCE(p.units_sold, 0) AS units_sold,
+      COALESCE(p.item_revenue, 0) AS item_revenue
+    FROM engagement AS g
+    FULL OUTER JOIN purchases AS p
+      ON g.item_name = p.item_name
+     AND g.item_variant = p.item_variant
+  )
+  SELECT
+    product_name,
+    item_variant,
+    item_variant = '(not set)' AS is_variant_not_set,
+    view_sessions,
+    add_to_cart_sessions,
+    units_added,
+    orders,
+    units_sold,
+    ROUND(item_revenue, 2) AS item_revenue,
+    -- denominator: every session that viewed this product x variant
+    CASE WHEN view_sessions > 0 THEN view_to_cart_sessions / CAST(view_sessions AS DOUBLE) END AS view_to_cart_rate,
+    -- denominator: all views / units / revenue of the parent product across every variant
+    view_sessions / CAST(NULLIF(SUM(view_sessions) OVER (PARTITION BY product_name), 0) AS DOUBLE) AS variant_view_share_of_product,
+    units_sold / CAST(NULLIF(SUM(units_sold) OVER (PARTITION BY product_name), 0) AS DOUBLE) AS variant_unit_share_of_product,
+    item_revenue / CAST(NULLIF(SUM(item_revenue) OVER (PARTITION BY product_name), 0) AS DOUBLE) AS variant_revenue_share_of_product
+  FROM combined
+  ORDER BY item_revenue DESC, view_sessions DESC
 
+Calculation Notes: |
+  1️⃣ Grain and source: the value is read per item row from items[].item_variant (BigQuery: UNNEST(items) AS it, it.item_variant), never from an event-level parameter; one purchase containing the same product in two sizes produces two item rows with two distinct variant values, so variant-level quantity and item_revenue must be summed at item grain before any rollup to transaction or session.,2️⃣ Canonical value format: variant strings are emitted as the PIM option values in fixed option-position order joined by ' / ' (e.g. 'Navy / M'), trimmed and title-cased, with a 100-character ceiling; the order must match Shopify option1/option2/option3 or the Salesforce Commerce variation-attribute sequence so that 'M / Navy' and 'Navy / M' never split the same SKU into two rows.,3️⃣ Null and default-value handling: GA4 returns '(not set)' when the parameter is absent; single-variant products (no selectable options) are reported as 'Default' rather than '(not set)', and residual '(not set)' share on add_to_cart and purchase above 2% of item rows is treated as a tagging defect and excluded from variant-mix reporting until fixed, while remaining in parent-product totals.,4️⃣ PDP default-selection bias: view_item fires on page load with the pre-selected default variant; a customer switching swatches re-pushes view_item with the new variant, so variant-level view counts are deduplicated to one view per session × item_id × item_variant, and the load-time default is flagged (item_variant_source = 'default' vs 'selected') to prevent the default configuration from absorbing inflated view share.,5️⃣ Join key discipline: item_variant is a descriptive label, not a key; variant-level joins to inventory, cost and returns data use the variant SKU in item_id (see item-id), with item_variant used only for display and grouping, because the same label ('Black / 10') recurs across hundreds of parent products.,6️⃣ Exclusions and timing: refund events reverse revenue at the variant originally purchased, not a size exchanged in-store; exchanges recorded in OMS are attributed to the replacement variant only when the backend order line is stitched back to the digital transaction_id; test orders, internal traffic and bot-filtered sessions are excluded, and daily tables are finalised on the GA4 export's intraday-to-daily cutover (reporting time zone, typically T+1).,7️⃣ Cardinality control: apparel and footwear catalogs routinely exceed 50,000 distinct variant values, so GA4 UI reports will bucket into '(other)'; variant analysis at full cardinality runs on the BigQuery export or AEP dataset, and UI explorations are filtered to a category or item_brand first.
 
+Business Use Case: |
+  1️⃣ Merchandising planners review variant share of units sold against variant share of stock each week; when a size or color sells through at more than 1.5× its inventory share, they raise the reorder quantity for that configuration and cut depth on lagging variants before the next buy.,2️⃣ The e-commerce product team compares add-to-cart rate by item_variant for the default versus customer-selected configuration; when the default variant under-converts the best-selling variant by more than 20% on a PDP, they change the pre-selected swatch or size to the top converter.,3️⃣ Inventory and fulfilment planners (Merchandising) monitor PDP views on variants that are out of stock; when high-demand sizes show sustained views with zero add-to-cart, they trigger back-in-stock notifications and reallocate store stock to the e-commerce DC.,4️⃣ Customer Service and returns analysts join purchase variant to return reason codes; when a specific size of a product carries a return rate well above its sibling sizes with 'fit' as the reason, they update the PDP size guidance and flag the fit issue to the buying team.
 
+Dependencies:
+  Events: [view-item, add-to-cart, purchase]
+  Dimensions: [item-id, product-name]
 
+Source Data: Digital Analytics (GA4) + Product Catalog (PIM)
 
+Report Attributes: |
+  item-id; product-name; item-brand; item-category; item-list-name; promotion-name; device-category
 
+Dashboard Usage: [Variant Performance & Size Curve, PDP Merchandising Performance, Product Sell-Through & Inventory Demand, Returns by Product Variant]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [product-name, item-id, item-brand, item-list-name, promotion-name, item-category]
 
+Derived Dimensions: [item-variant-size, item-variant-color]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +464,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T18:06:31.47+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T18:06:40.72+00:00
 
