@@ -1,7 +1,7 @@
 # Metric: Loyalty Members
-# Generated: 2026-09-19T17:56:40.068Z
+# Generated: 2026-09-19T17:56:49.476Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Loyalty Members
 Formula: COUNT(DISTINCT customer_id) WHERE membership_status = 'active' AND enrolled_at <= period_end AND (cancelled_at IS NULL OR cancelled_at > period_end); New Loyalty Members (flow) = COUNT(DISTINCT customer_id) of first loyalty_program_enrollment events WHERE event_timestamp BETWEEN period_start AND period_end
@@ -11,30 +11,419 @@ Description: |
 
 Category: Retention
 
+Tags: [metric, E-commerce: Customer Retention, Loyalty & LTV, loyalty, customer base, point-in-time stock]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Engagement
 
+Scope: User
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  sign_up
 
+Adobe Event: |
+  loyalty_program_enrollment
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "loyalty_program_enrollment",
+          "eventAction": "sign_up",
+          "timeStamp": "2026-09-19T12:49:00Z"
+        },
+        "category": {
+          "primaryCategory": "loyalty"
+        },
+        "attributes": {
+          "method": "checkout_opt_in",
+          "programName": "rewards",
+          "enrollmentChannel": "web",
+          "loyaltyTier": "silver",
+          "membershipType": "free",
+          "enrollmentStatus": "pending_verification"
+        }
+      }
+    ],
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "hashed_customer_id",
+              "loyaltyMember": true,
+              "loyaltyTier": "silver"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "sign_up",
+    "method": "checkout_opt_in",
+    "program_type": "loyalty",
+    "program_name": "rewards",
+    "enrollment_channel": "web",
+    "customer_loyalty_tier": "silver",
+    "membership_type": "free",
+    "enrollment_status": "pending_verification",
+    "user_id": "hashed_customer_id",
+    "user_properties": {
+      "loyalty_member": "true",
+      "customer_loyalty_tier": "silver"
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "loyalty_program_enrollment",
+    "eventInfo": {
+      "method": "checkout_opt_in",
+      "programName": "rewards"
+    },
+    "user": {
+      "id": "hashed_customer_id",
+      "loyalty": {
+        "enrollmentChannel": "web",
+        "tier": "silver",
+        "membershipType": "free",
+        "status": "pending_verification"
+      }
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "userAccount.createProfile",
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "hashed_customer_id",
+          "primary": true
+        }
+      ]
+    },
+    "loyalty": {
+      "program": "rewards",
+      "tier": "silver",
+      "status": "pending_verification",
+      "joinDate": "2026-09-19T12:49:00Z"
+    },
+    "_experience": {
+      "analytics": {
+        "event1to100": {
+          "event10": {
+            "value": 1
+          }
+        },
+        "customDimensions": {
+          "eVars": {
+            "eVar20": "checkout_opt_in",
+            "eVar21": "rewards",
+            "eVar22": "silver",
+            "eVar23": "free"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Loyalty Members: closing active-member stock at period end (loyalty membership table = source of truth)
+  -- plus New Loyalty Members in the period (first GA4 sign_up with program_type = 'loyalty', confirmed by the membership record).
+  WITH params AS (
+    SELECT
+      DATE '2026-08-01' AS period_start,
+      DATE '2026-08-31' AS period_end,
+      'America/New_York' AS reporting_tz
+  ),
+  bounds AS (
+    SELECT
+      period_start,
+      period_end,
+      TIMESTAMP(DATETIME(period_start, TIME '00:00:00'), reporting_tz) AS period_start_ts,
+      TIMESTAMP(DATETIME(period_end, TIME '23:59:59.999999'), reporting_tz) AS period_end_ts
+    FROM params
+  ),
+  eligible_members AS (
+    SELECT
+      m.customer_id,
+      m.customer_id_hashed,
+      m.membership_status,
+      COALESCE(m.customer_loyalty_tier, '(not set)') AS customer_loyalty_tier,
+      COALESCE(m.membership_type, 'free') AS membership_type,
+      m.enrolled_at,
+      COALESCE(m.verified_at, m.enrolled_at) AS countable_from_ts,
+      m.cancelled_at,
+      m.paid_through_at,
+      m.renewal_grace_until
+    FROM `your-project.crm.loyalty_membership` AS m
+    WHERE m.merged_into_customer_id IS NULL
+      AND m.erased_at IS NULL
+      AND COALESCE(m.is_test_account, FALSE) = FALSE
+      AND COALESCE(m.is_employee, FALSE) = FALSE
+      AND COALESCE(m.account_type, 'consumer') NOT IN ('b2b', 'wholesale', 'marketplace_seller', 'qa')
+      AND NOT (COALESCE(m.enrollment_source, '') = 'partner_bulk_import' AND m.claimed_at IS NULL)
+  ),
+  closing_members AS (
+    SELECT
+      e.customer_loyalty_tier,
+      e.membership_type,
+      COUNT(DISTINCT e.customer_id) AS loyalty_members
+    FROM eligible_members AS e
+    CROSS JOIN bounds AS b
+    WHERE e.membership_status = 'active'
+      AND e.countable_from_ts <= b.period_end_ts
+      AND (e.cancelled_at IS NULL OR e.cancelled_at > b.period_end_ts)
+      AND (
+        e.membership_type = 'free'
+        OR e.paid_through_at >= b.period_end_ts
+        OR e.renewal_grace_until >= b.period_end_ts
+      )
+    GROUP BY 1, 2
+  ),
+  table_new_enrollments AS (
+    SELECT
+      e.customer_loyalty_tier,
+      e.membership_type,
+      COUNT(DISTINCT e.customer_id) AS new_enrollments_table
+    FROM eligible_members AS e
+    CROSS JOIN bounds AS b
+    WHERE e.enrolled_at BETWEEN b.period_start_ts AND b.period_end_ts
+      AND e.countable_from_ts <= b.period_end_ts
+    GROUP BY 1, 2
+  ),
+  ga4_loyalty_signups AS (
+    SELECT
+      ev.user_id,
+      TIMESTAMP_MICROS(ev.event_timestamp) AS event_ts,
+      MAX(IF(ep.key = 'program_type', ep.value.string_value, NULL)) AS program_type,
+      MAX(IF(ep.key = 'enrollment_channel', ep.value.string_value, NULL)) AS enrollment_channel,
+      MAX(IF(ep.key = 'enrollment_status', ep.value.string_value, NULL)) AS enrollment_status
+    FROM `your-project.analytics_123456789.events_*` AS ev,
+      UNNEST(ev.event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN '20240101' AND '20260901'
+      AND ev.event_name = 'sign_up'
+      AND ev.user_id IS NOT NULL
+    GROUP BY ev.user_id, ev.user_pseudo_id, ev.event_timestamp, ev.event_bundle_sequence_id
+    HAVING program_type = 'loyalty'
+  ),
+  ga4_first_enrollments AS (
+    SELECT
+      em.customer_id,
+      em.customer_loyalty_tier,
+      em.membership_type,
+      s.event_ts
+    FROM ga4_loyalty_signups AS s
+    JOIN eligible_members AS em
+      ON em.customer_id_hashed = s.user_id
+    WHERE em.countable_from_ts IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY em.customer_id ORDER BY s.event_ts) = 1
+  ),
+  ga4_new_enrollments AS (
+    SELECT
+      f.customer_loyalty_tier,
+      f.membership_type,
+      COUNT(DISTINCT f.customer_id) AS new_loyalty_members
+    FROM ga4_first_enrollments AS f
+    CROSS JOIN bounds AS b
+    WHERE f.event_ts BETWEEN b.period_start_ts AND b.period_end_ts
+    GROUP BY 1, 2
+  ),
+  dims AS (
+    SELECT customer_loyalty_tier, membership_type FROM closing_members
+    UNION DISTINCT
+    SELECT customer_loyalty_tier, membership_type FROM table_new_enrollments
+    UNION DISTINCT
+    SELECT customer_loyalty_tier, membership_type FROM ga4_new_enrollments
+  )
+  SELECT
+    b.period_end AS snapshot_date,
+    d.customer_loyalty_tier,
+    d.membership_type,
+    COALESCE(c.loyalty_members, 0) AS loyalty_members,
+    COALESCE(g.new_loyalty_members, 0) AS new_loyalty_members,
+    COALESCE(t.new_enrollments_table, 0) AS new_enrollments_membership_table,
+    SUM(COALESCE(c.loyalty_members, 0)) OVER () AS total_loyalty_members,
+    SUM(COALESCE(g.new_loyalty_members, 0)) OVER () AS total_new_loyalty_members,
+    SAFE_DIVIDE(
+      SUM(COALESCE(g.new_loyalty_members, 0)) OVER () - SUM(COALESCE(t.new_enrollments_table, 0)) OVER (),
+      SUM(COALESCE(t.new_enrollments_table, 0)) OVER ()
+    ) AS enrollment_source_variance_pct
+  FROM dims AS d
+  CROSS JOIN bounds AS b
+  LEFT JOIN closing_members AS c
+    ON c.customer_loyalty_tier = d.customer_loyalty_tier AND c.membership_type = d.membership_type
+  LEFT JOIN ga4_new_enrollments AS g
+    ON g.customer_loyalty_tier = d.customer_loyalty_tier AND g.membership_type = d.membership_type
+  LEFT JOIN table_new_enrollments AS t
+    ON t.customer_loyalty_tier = d.customer_loyalty_tier AND t.membership_type = d.membership_type
+  ORDER BY loyalty_members DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Loyalty Members: closing active-member stock at period end (loyalty membership dataset = source of truth)
+  -- plus New Loyalty Members in the period (first loyalty enrollment ExperienceEvent, event10, confirmed by the membership record).
+  WITH params AS (
+    SELECT
+      DATE '2026-08-31' AS period_end,
+      to_utc_timestamp(TIMESTAMP '2026-08-01 00:00:00', 'America/New_York') AS period_start_ts,
+      to_utc_timestamp(TIMESTAMP '2026-08-31 23:59:59.999', 'America/New_York') AS period_end_ts
+  ),
+  eligible_members AS (
+    SELECT
+      m.customer_id,
+      m.customer_id_hashed,
+      m.membership_status,
+      COALESCE(m.customer_loyalty_tier, '(not set)') AS customer_loyalty_tier,
+      COALESCE(m.membership_type, 'free') AS membership_type,
+      m.enrolled_at,
+      COALESCE(m.verified_at, m.enrolled_at) AS countable_from_ts,
+      m.cancelled_at,
+      m.paid_through_at,
+      m.renewal_grace_until
+    FROM loyalty_membership_dataset AS m
+    WHERE m.merged_into_customer_id IS NULL
+      AND m.erased_at IS NULL
+      AND COALESCE(m.is_test_account, FALSE) = FALSE
+      AND COALESCE(m.is_employee, FALSE) = FALSE
+      AND COALESCE(m.account_type, 'consumer') NOT IN ('b2b', 'wholesale', 'marketplace_seller', 'qa')
+      AND NOT (COALESCE(m.enrollment_source, '') = 'partner_bulk_import' AND m.claimed_at IS NULL)
+  ),
+  closing_members AS (
+    SELECT
+      e.customer_loyalty_tier,
+      e.membership_type,
+      COUNT(DISTINCT e.customer_id) AS loyalty_members
+    FROM eligible_members AS e
+    CROSS JOIN params AS p
+    WHERE e.membership_status = 'active'
+      AND e.countable_from_ts <= p.period_end_ts
+      AND (e.cancelled_at IS NULL OR e.cancelled_at > p.period_end_ts)
+      AND (
+        e.membership_type = 'free'
+        OR e.paid_through_at >= p.period_end_ts
+        OR e.renewal_grace_until >= p.period_end_ts
+      )
+    GROUP BY e.customer_loyalty_tier, e.membership_type
+  ),
+  table_new_enrollments AS (
+    SELECT
+      e.customer_loyalty_tier,
+      e.membership_type,
+      COUNT(DISTINCT e.customer_id) AS new_enrollments_table
+    FROM eligible_members AS e
+    CROSS JOIN params AS p
+    WHERE e.enrolled_at BETWEEN p.period_start_ts AND p.period_end_ts
+      AND e.countable_from_ts <= p.period_end_ts
+    GROUP BY e.customer_loyalty_tier, e.membership_type
+  ),
+  loyalty_enrollment_events AS (
+    SELECT
+      identityMap['CRMID'][0].id AS crm_id,
+      timestamp AS event_ts
+    FROM web_events_dataset
+    WHERE timestamp >= TIMESTAMP '2024-01-01 00:00:00'
+      AND eventType = 'userAccount.createProfile'
+      AND _experience.analytics.event1to100.event10.value > 0
+      AND loyalty.program IS NOT NULL
+      AND identityMap['CRMID'][0].id IS NOT NULL
+  ),
+  ranked_enrollments AS (
+    SELECT
+      em.customer_id,
+      em.customer_loyalty_tier,
+      em.membership_type,
+      ev.event_ts,
+      ROW_NUMBER() OVER (PARTITION BY em.customer_id ORDER BY ev.event_ts) AS enrollment_rank
+    FROM loyalty_enrollment_events AS ev
+    JOIN eligible_members AS em
+      ON em.customer_id_hashed = ev.crm_id
+    WHERE em.countable_from_ts IS NOT NULL
+  ),
+  event_new_enrollments AS (
+    SELECT
+      r.customer_loyalty_tier,
+      r.membership_type,
+      COUNT(DISTINCT r.customer_id) AS new_loyalty_members
+    FROM ranked_enrollments AS r
+    CROSS JOIN params AS p
+    WHERE r.enrollment_rank = 1
+      AND r.event_ts BETWEEN p.period_start_ts AND p.period_end_ts
+    GROUP BY r.customer_loyalty_tier, r.membership_type
+  ),
+  dims AS (
+    SELECT customer_loyalty_tier, membership_type FROM closing_members
+    UNION
+    SELECT customer_loyalty_tier, membership_type FROM table_new_enrollments
+    UNION
+    SELECT customer_loyalty_tier, membership_type FROM event_new_enrollments
+  )
+  SELECT
+    p.period_end AS snapshot_date,
+    d.customer_loyalty_tier,
+    d.membership_type,
+    COALESCE(c.loyalty_members, 0) AS loyalty_members,
+    COALESCE(g.new_loyalty_members, 0) AS new_loyalty_members,
+    COALESCE(t.new_enrollments_table, 0) AS new_enrollments_membership_table,
+    SUM(COALESCE(c.loyalty_members, 0)) OVER () AS total_loyalty_members,
+    SUM(COALESCE(g.new_loyalty_members, 0)) OVER () AS total_new_loyalty_members,
+    CASE
+      WHEN SUM(COALESCE(t.new_enrollments_table, 0)) OVER () > 0
+      THEN CAST(SUM(COALESCE(g.new_loyalty_members, 0)) OVER () - SUM(COALESCE(t.new_enrollments_table, 0)) OVER () AS DOUBLE)
+           / SUM(COALESCE(t.new_enrollments_table, 0)) OVER ()
+    END AS enrollment_source_variance_pct
+  FROM dims AS d
+  CROSS JOIN params AS p
+  LEFT JOIN closing_members AS c
+    ON c.customer_loyalty_tier = d.customer_loyalty_tier AND c.membership_type = d.membership_type
+  LEFT JOIN event_new_enrollments AS g
+    ON g.customer_loyalty_tier = d.customer_loyalty_tier AND g.membership_type = d.membership_type
+  LEFT JOIN table_new_enrollments AS t
+    ON t.customer_loyalty_tier = d.customer_loyalty_tier AND t.membership_type = d.membership_type
+  ORDER BY loyalty_members DESC;
 
+Calculation Notes: |
+  1️⃣ Snapshot, not a sum: the membership count is a stock measured at period end (23:59:59 in the reporting timezone of the store's primary market); weekly, monthly and quarterly values take the closing snapshot of the window and must never be summed across days. Reconciliation identity: closing members = opening members + new enrollments + reactivations - cancellations - expirations - merges.,2️⃣ Status filter: include only membership_status = 'active' at the snapshot timestamp. Exclude cancelled, expired (inactivity-based point or status expiry per program terms), suspended for fraud or abuse, and pending records awaiting double opt-in or email verification; a pending member becomes countable on the verification timestamp, not the form submission timestamp.,3️⃣ Identity resolution: count on the golden customer_id after CRM merge. Duplicate enrollments from guest-to-account conversion, multiple emails or household accounts collapse to one member; members whose records are merged count once under the surviving id, and the absorbed id is removed from the prior-period baseline to avoid phantom churn.,4️⃣ Exclusions: remove employee, test, QA, marketplace-seller and B2B/wholesale accounts, bulk-imported partner enrollments not yet claimed by the customer, and records flagged for GDPR/CCPA erasure (deleted members leave the count from the erasure date; historical snapshots are not restated).,5️⃣ Enrollment flow timing: new enrollments come from the first loyalty_program_enrollment event per customer_id (web, app, POS and checkout opt-in all count once, deduplicated across channels within the same 24-hour window). Client-side events arriving without an authenticated customer_id are held until the backend membership record confirms them; the membership table is authoritative when the two disagree, and a variance above 2% between event-based enrollments and table-based net adds is investigated as a tagging or sync defect.,6️⃣ Re-enrollment: a customer who cancels and re-joins within the program's reinstatement window (typically 30-90 days) is a reactivation, not a new enrollment, and keeps the original enrolled_at for tenure analysis; after the window lapses the re-join counts as a new enrollment with a fresh tenure clock.,7️⃣ Paid and free tiers: paid memberships (e.g., annual subscription tiers) count as active only while the fee is settled or within the documented grace period for failed renewals; report free and paid members separately by customer_loyalty_tier so that tier migration is not misread as net growth.
 
+Business Use Case: |
+  1️⃣ The Loyalty Program Manager reviews month-end Loyalty Members against the annual enrollment plan and, when net adds fall more than 10% behind target for two consecutive months, launches a checkout opt-in bonus-points offer and a post-purchase enrollment email for non-member repeat buyers.,2️⃣ Finance uses the closing member count by tier to size the points liability accrual and the breakage assumption each quarter, restating the reserve when paid-tier membership moves by more than 5% quarter over quarter.,3️⃣ CRM Marketing builds suppression and targeting audiences from the active member list before every campaign, routing members to tier-specific points messaging and non-members to enrollment creative, and re-sizes send volumes when the member base shifts week over week.,4️⃣ The Customer Retention lead compares cancellations and expirations against new enrollments in the monthly program review and, when attrition exceeds 3% of the opening base, commissions a points-expiry reminder journey for members approaching the inactivity threshold.
 
+Dependencies:
+  Events: [loyalty-program-enrollment]
+  Dimensions: [customer-loyalty-tier]
 
+Source Data: Digital Analytics (GA4) + Loyalty Platform/CRM (membership table)
 
+Report Attributes: |
+  customer-loyalty-tier; Enrollment Channel; Enrollment Cohort Month; Membership Type (Free / Paid); Country; Store / Region
 
+Dashboard Usage: [Loyalty Program Performance, Customer Retention & LTV Overview, Executive Customer Health Scorecard, Points Liability & Breakage Review]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [loyalty-points-redeemed, active-customers, repeat-customers]
 
+Derived KPIs: [loyalty-redemption-rate, loyalty-program-enrollment-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +433,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T17:56:39.688+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T17:56:49.159+00:00
 
