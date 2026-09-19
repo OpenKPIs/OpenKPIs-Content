@@ -1,0 +1,250 @@
+# Dimension: Fulfillment Strategy
+# Generated: 2026-09-19T19:42:18.310Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Fulfillment Strategy
+
+Description: |
+  Fulfillment Strategy classifies how each order line or split fulfillment unit is sourced and handed to the customer (Ship from DC, Ship from Store, Same-Day Delivery from Store, BOPIS, Curbside Pickup, Ship to Store, Drop Ship or Third-Party Fulfillment), as assigned by the order management system. It is the retailer-side execution path behind the shopper-selected Fulfillment Method and the standard breakdown for comparing omnichannel fulfillment cost, speed, cancellations and on-time performance.
+
+Category: Operations
+
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment, Logistics & Supply Chain, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Fulfillment Strategy per fulfillment unit (order line or split portion of a line),
+  -- sourced from the order management / orchestration backend and the ERP location master.
+  WITH order_lines AS (
+    SELECT
+      CAST(ol.order_id AS STRING) AS order_id,
+      CAST(ol.order_line_id AS STRING) AS order_line_id,
+      ol.sales_channel,
+      ol.order_created_timestamp,
+      UPPER(ol.line_status) AS line_status
+    FROM `your-project.oms.order_lines` AS ol
+    WHERE DATE(ol.order_created_timestamp) >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY ol.order_id, ol.order_line_id ORDER BY ol.updated_timestamp DESC) = 1
+  ),
+  locations AS (
+    SELECT
+      loc.location_id,
+      UPPER(loc.location_type) AS location_type
+    FROM `your-project.erp.locations` AS loc
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY loc.location_id ORDER BY loc.updated_timestamp DESC) = 1
+  ),
+  assignments AS (
+    -- one row per allocation / reallocation of a fulfillment unit
+    SELECT
+      CAST(fa.order_id AS STRING) AS order_id,
+      CAST(fa.order_line_id AS STRING) AS order_line_id,
+      CAST(fa.fulfillment_unit_id AS STRING) AS fulfillment_unit_id,
+      fa.assigned_node_id,
+      fa.assignment_timestamp,
+      CASE
+        WHEN UPPER(fa.delivery_method) IN ('CURBSIDE', 'CURBSIDE_PICKUP') THEN 'Curbside Pickup'
+        WHEN UPPER(fa.delivery_method) IN ('PICKUP', 'STORE_PICKUP', 'BOPIS') AND l.location_type = 'STORE' THEN 'BOPIS'
+        WHEN UPPER(fa.delivery_method) IN ('PICKUP', 'STORE_PICKUP', 'SHIP_TO_STORE', 'BOSS')
+          AND l.location_type IN ('DC', 'DISTRIBUTION_CENTER', 'WAREHOUSE', 'FULFILLMENT_CENTER') THEN 'Ship to Store'
+        WHEN UPPER(fa.fulfillment_provider_type) IN ('DROP_SHIP', 'DROPSHIP', 'VENDOR') THEN 'Drop Ship'
+        WHEN UPPER(fa.fulfillment_provider_type) IN ('3PL', 'THIRD_PARTY', 'MARKETPLACE') THEN 'Third-Party Fulfillment'
+        WHEN UPPER(fa.delivery_method) IN ('SAME_DAY_DELIVERY', 'LOCAL_DELIVERY') AND l.location_type = 'STORE' THEN 'Same-Day Delivery from Store'
+        WHEN l.location_type = 'STORE' THEN 'Ship from Store'
+        WHEN l.location_type IN ('DC', 'DISTRIBUTION_CENTER', 'WAREHOUSE', 'FULFILLMENT_CENTER') THEN 'Ship from DC'
+        ELSE 'Other'
+      END AS fulfillment_strategy,
+      ROW_NUMBER() OVER (PARTITION BY fa.fulfillment_unit_id ORDER BY fa.assignment_timestamp ASC) AS first_rank,
+      ROW_NUMBER() OVER (PARTITION BY fa.fulfillment_unit_id ORDER BY fa.assignment_timestamp DESC) AS last_rank
+    FROM `your-project.oms.fulfillment_assignments` AS fa
+    LEFT JOIN locations AS l
+      ON l.location_id = fa.assigned_node_id
+  ),
+  units AS (
+    SELECT
+      order_id,
+      order_line_id,
+      fulfillment_unit_id,
+      COUNT(*) AS assignment_count,
+      MAX(IF(first_rank = 1, fulfillment_strategy, NULL)) AS initial_fulfillment_strategy,
+      MAX(IF(last_rank = 1, fulfillment_strategy, NULL)) AS current_fulfillment_strategy,
+      MAX(IF(last_rank = 1, assigned_node_id, NULL)) AS fulfillment_node_id,
+      MAX(IF(last_rank = 1, assignment_timestamp, NULL)) AS strategy_effective_timestamp
+    FROM assignments
+    GROUP BY order_id, order_line_id, fulfillment_unit_id
+  )
+  SELECT
+    ol.order_id,
+    ol.order_line_id,
+    COALESCE(u.fulfillment_unit_id, CONCAT(ol.order_id, '-', ol.order_line_id)) AS fulfillment_unit_id,
+    DATE(ol.order_created_timestamp) AS order_date,
+    ol.sales_channel,
+    COALESCE(u.initial_fulfillment_strategy, 'Unassigned') AS initial_fulfillment_strategy,
+    COALESCE(u.current_fulfillment_strategy, 'Unassigned') AS fulfillment_strategy,
+    u.fulfillment_node_id,
+    u.strategy_effective_timestamp,
+    COALESCE(u.initial_fulfillment_strategy != u.current_fulfillment_strategy, FALSE) AS is_strategy_changed,
+    COALESCE(u.assignment_count, 0) > 1 AS is_rerouted,
+    COUNT(u.fulfillment_unit_id) OVER (PARTITION BY ol.order_id, ol.order_line_id) > 1 AS is_split_line,
+    ol.line_status IN ('CANCELLED', 'CANCELED') AS is_cancelled
+  FROM order_lines AS ol
+  LEFT JOIN units AS u
+    ON u.order_id = ol.order_id
+   AND u.order_line_id = ol.order_line_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Fulfillment Strategy per fulfillment unit from the order management backend datasets
+  -- (oms_order_lines, oms_fulfillment_assignments) and the ERP location master (erp_locations) ingested into AEP.
+  WITH order_lines AS (
+    SELECT order_id, order_line_id, sales_channel, order_created_timestamp, line_status
+    FROM (
+      SELECT
+        CAST(ol.order_id AS STRING) AS order_id,
+        CAST(ol.order_line_id AS STRING) AS order_line_id,
+        ol.sales_channel,
+        ol.order_created_timestamp,
+        UPPER(ol.line_status) AS line_status,
+        ROW_NUMBER() OVER (PARTITION BY ol.order_id, ol.order_line_id ORDER BY ol.updated_timestamp DESC) AS rn
+      FROM oms_order_lines AS ol
+      WHERE CAST(ol.order_created_timestamp AS DATE) >= DATE_SUB(CURRENT_DATE, 90)
+    ) AS x
+    WHERE rn = 1
+  ),
+  locations AS (
+    SELECT location_id, location_type
+    FROM (
+      SELECT
+        loc.location_id,
+        UPPER(loc.location_type) AS location_type,
+        ROW_NUMBER() OVER (PARTITION BY loc.location_id ORDER BY loc.updated_timestamp DESC) AS rn
+      FROM erp_locations AS loc
+    ) AS y
+    WHERE rn = 1
+  ),
+  assignments AS (
+    SELECT
+      CAST(fa.order_id AS STRING) AS order_id,
+      CAST(fa.order_line_id AS STRING) AS order_line_id,
+      CAST(fa.fulfillment_unit_id AS STRING) AS fulfillment_unit_id,
+      fa.assigned_node_id,
+      fa.assignment_timestamp,
+      CASE
+        WHEN UPPER(fa.delivery_method) IN ('CURBSIDE', 'CURBSIDE_PICKUP') THEN 'Curbside Pickup'
+        WHEN UPPER(fa.delivery_method) IN ('PICKUP', 'STORE_PICKUP', 'BOPIS') AND l.location_type = 'STORE' THEN 'BOPIS'
+        WHEN UPPER(fa.delivery_method) IN ('PICKUP', 'STORE_PICKUP', 'SHIP_TO_STORE', 'BOSS')
+          AND l.location_type IN ('DC', 'DISTRIBUTION_CENTER', 'WAREHOUSE', 'FULFILLMENT_CENTER') THEN 'Ship to Store'
+        WHEN UPPER(fa.fulfillment_provider_type) IN ('DROP_SHIP', 'DROPSHIP', 'VENDOR') THEN 'Drop Ship'
+        WHEN UPPER(fa.fulfillment_provider_type) IN ('3PL', 'THIRD_PARTY', 'MARKETPLACE') THEN 'Third-Party Fulfillment'
+        WHEN UPPER(fa.delivery_method) IN ('SAME_DAY_DELIVERY', 'LOCAL_DELIVERY') AND l.location_type = 'STORE' THEN 'Same-Day Delivery from Store'
+        WHEN l.location_type = 'STORE' THEN 'Ship from Store'
+        WHEN l.location_type IN ('DC', 'DISTRIBUTION_CENTER', 'WAREHOUSE', 'FULFILLMENT_CENTER') THEN 'Ship from DC'
+        ELSE 'Other'
+      END AS fulfillment_strategy,
+      ROW_NUMBER() OVER (PARTITION BY fa.fulfillment_unit_id ORDER BY fa.assignment_timestamp ASC) AS first_rank,
+      ROW_NUMBER() OVER (PARTITION BY fa.fulfillment_unit_id ORDER BY fa.assignment_timestamp DESC) AS last_rank
+    FROM oms_fulfillment_assignments AS fa
+    LEFT JOIN locations AS l
+      ON l.location_id = fa.assigned_node_id
+  ),
+  units AS (
+    SELECT
+      order_id,
+      order_line_id,
+      fulfillment_unit_id,
+      COUNT(*) AS assignment_count,
+      MAX(CASE WHEN first_rank = 1 THEN fulfillment_strategy END) AS initial_fulfillment_strategy,
+      MAX(CASE WHEN last_rank = 1 THEN fulfillment_strategy END) AS current_fulfillment_strategy,
+      MAX(CASE WHEN last_rank = 1 THEN assigned_node_id END) AS fulfillment_node_id,
+      MAX(CASE WHEN last_rank = 1 THEN assignment_timestamp END) AS strategy_effective_timestamp
+    FROM assignments
+    GROUP BY order_id, order_line_id, fulfillment_unit_id
+  )
+  SELECT
+    ol.order_id,
+    ol.order_line_id,
+    COALESCE(u.fulfillment_unit_id, CONCAT(ol.order_id, '-', ol.order_line_id)) AS fulfillment_unit_id,
+    CAST(ol.order_created_timestamp AS DATE) AS order_date,
+    ol.sales_channel,
+    COALESCE(u.initial_fulfillment_strategy, 'Unassigned') AS initial_fulfillment_strategy,
+    COALESCE(u.current_fulfillment_strategy, 'Unassigned') AS fulfillment_strategy,
+    u.fulfillment_node_id,
+    u.strategy_effective_timestamp,
+    COALESCE(u.initial_fulfillment_strategy <> u.current_fulfillment_strategy, FALSE) AS is_strategy_changed,
+    COALESCE(u.assignment_count, 0) > 1 AS is_rerouted,
+    COUNT(u.fulfillment_unit_id) OVER (PARTITION BY ol.order_id, ol.order_line_id) > 1 AS is_split_line,
+    ol.line_status IN ('CANCELLED', 'CANCELED') AS is_cancelled
+  FROM order_lines AS ol
+  LEFT JOIN units AS u
+    ON u.order_id = ol.order_id
+   AND u.order_line_id = ol.order_line_id;
+
+Calculation Notes: |
+  1️⃣ Grain is the fulfillment unit (an order line, or each portion of a line split across nodes), never the order; order-level views label orders with more than one strategy as "Mixed".  
+  2️⃣ Allowed values: Ship from DC, Ship from Store, Same-Day Delivery from Store, BOPIS, Curbside Pickup, Ship to Store, Drop Ship, Third-Party Fulfillment, Other, and Unassigned for lines not yet allocated. Classify by customer handoff method first, then fulfillment provider type, then the location type of the assigned node.  
+  3️⃣ Every reallocation writes a new assignment record: use the initial strategy for booked-demand and delivery-promise reporting, and the current (last assigned) strategy for operational and completed-fulfillment reporting; flag units whose strategy changed.  
+  4️⃣ Canceled units keep their last assigned strategy and are excluded through line status, not by recoding; lines canceled before allocation stay Unassigned.  
+  5️⃣ Shares and rates by strategy (unit mix, cancellation rate, on-time rate) use all fulfillment units in the period as the denominator, including Unassigned.  
+  6️⃣ Not the same as Fulfillment Method: the method is the delivery or pickup option the shopper chooses at checkout, while the strategy is the execution path the orchestration engine selects, so one method (home delivery) can be served by several strategies (Ship from DC, Ship from Store, Drop Ship).  
+  7️⃣ Date demand-mix views by order creation date and operational views by the strategy effective timestamp; the location master is read as its latest snapshot.
+
+Business Use Case: |
+  1️⃣ The Omnichannel Fulfillment team reviews weekly cancellation rate and cost per unit by Fulfillment Strategy; when Ship from Store cancellations in a region exceed Ship from DC, it tightens store eligibility and safety-stock thresholds in the order routing rules.  
+  2️⃣ Store Operations leaders track BOPIS and Curbside Pickup volume and pickup completion by store; when a store's pickup volume outgrows its staffing, they adjust pickup-window capacity and labor schedules.  
+  3️⃣ Supply Chain Planning monitors the share of units whose strategy changed after the first allocation; a rising reroute share on Ship from DC triggers an inventory rebalancing review between distribution centers and stores.  
+  4️⃣ Vendor Management compares on-time delivery for Drop Ship units by vendor against Ship from DC; vendors below the agreed service level are put on a corrective plan or lose drop-ship eligibility for fast-moving items.
+
+Dependencies:
+  Events: [purchase]
+  Dimensions: [fulfillment-method, store-id, order-status]
+
+Source Data: Backend OMS / order orchestration (fulfillment assignments) + ERP location master
+
+Report Attributes: |
+  Order Date; Fulfillment Date; Sales Channel; Fulfillment Method; Fulfillment Node; Store ID; Delivery Region; Shipping Tier; Shipping Carrier; Product Category; Order Status; Shipment Status
+
+Dashboard Usage: [Omnichannel Fulfillment Mix, Fulfillment Cost and Productivity, Delivery Promise and On-Time Fulfillment, BOPIS and Curbside Operations, Order Orchestration Effectiveness, Executive Supply Chain Scorecard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [fulfillment-method, store-id, shipping-tier, shipment-mode, shipment-status, order-status, delivery-region, number-of-shipments, delivery-promise-date, pickup-window, store-inventory-status]
+
+Derived Dimensions: [omnichannel-order-type, split-shipment-flag]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-11T20:30:34.483767+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-19T19:42:17.816+00:00
+
