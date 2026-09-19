@@ -1,0 +1,216 @@
+# Event: Store Inventory Check
+# Generated: 2026-09-19T18:28:42.133Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Store Inventory Check
+Event Serialization: always
+
+Description: |
+  Captures each explicit shopper request to see whether a specific item is available for pickup at a specific physical store, emitted as the unified view_item event with check_type='store_availability' plus the store, item and customer-facing inventory status returned. It is the top-of-funnel signal for BOPIS demand, showing which items and stores draw pickup intent and how often that intent meets a limited or out-of-stock answer before an order is ever placed.
+
+Category: Engagement
+
+Tags: [event, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: Retail
+
+Priority: High
+
+Core Area: Discovery
+
+
+Event Type: standard
+
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  store_availability_check
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "view_item",
+          "eventAction": "store_availability",
+          "type": "interaction",
+          "timeStamp": "2026-09-19T17:53:12.000Z"
+        },
+        "attributes": {
+          "checkType": "store_availability",
+          "checkID": "chk_8f3a2c71",
+          "storeID": "0457",
+          "inventoryStatus": "limited",
+          "fulfillmentMethod": "pickup",
+          "storeDistanceKm": 4.2,
+          "resultPosition": 1
+        }
+      }
+    ],
+    "product": [
+      {
+        "productInfo": {
+          "productID": "SKU-100234-BLK-M",
+          "productName": "Men's Insulated Jacket - Black / M"
+        },
+        "category": {
+          "primaryCategory": "Outerwear"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "view_item",
+    "check_type": "store_availability",
+    "check_id": "chk_8f3a2c71",
+    "store_id": "0457",
+    "item_id": "SKU-100234-BLK-M",
+    "inventory_status": "limited",
+    "fulfillment_method": "pickup",
+    "store_distance_km": 4.2,
+    "result_position": 1,
+    "ecommerce": {
+      "currency": "USD",
+      "value": 129.99,
+      "items": [
+        {
+          "item_id": "SKU-100234-BLK-M",
+          "item_name": "Men's Insulated Jacket - Black / M",
+          "item_category": "Outerwear",
+          "location_id": "0457",
+          "price": 129.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "view_item",
+    "eventInfo": {
+      "checkType": "store_availability",
+      "checkId": "chk_8f3a2c71",
+      "linkName": "store_availability_check"
+    },
+    "store": {
+      "storeId": "0457",
+      "inventoryStatus": "limited",
+      "fulfillmentMethod": "pickup",
+      "distanceKm": 4.2,
+      "resultPosition": 1
+    },
+    "product": {
+      "productId": "SKU-100234-BLK-M",
+      "productName": "Men's Insulated Jacket - Black / M",
+      "productCategory": "Outerwear",
+      "price": 129.99,
+      "currency": "USD"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "web": {
+      "webInteraction": {
+        "name": "store_availability_check",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-100234-BLK-M",
+        "name": "Men's Insulated Jacket - Black / M",
+        "priceTotal": 129.99,
+        "quantity": 1,
+        "currencyCode": "USD"
+      }
+    ],
+    "placeContext": {
+      "POIinteraction": {
+        "POIDetail": {
+          "POIID": "0457"
+        }
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "store_availability",
+            "eVar41": "0457",
+            "eVar42": "limited",
+            "eVar43": "chk_8f3a2c71",
+            "eVar44": "pickup"
+          }
+        },
+        "event1to100": {
+          "event40": {
+            "value": 1
+          }
+        }
+      }
+    }
+  }
+
+Parameters: |
+  {
+    "check_type": "string - Fixed value 'store_availability'; distinguishes the store lookup from a standard Product Detail View on view_item",
+    "check_id": "string - Identifier shared by all store results rendered from one lookup, used to count distinct availability interactions",
+    "store_id": "string - Retailer store number of the location whose availability was returned",
+    "item_id": "string - SKU or variant ID checked; must match the item_id used on view_item and purchase",
+    "item_name": "string - Product name of the checked item",
+    "item_category": "string - Top-level merchandise category of the checked item",
+    "inventory_status": "string - Customer-facing status shown: in_stock | limited | out_of_stock",
+    "fulfillment_method": "string - Fulfillment option the shopper was evaluating: pickup | curbside | ship_to_store",
+    "store_distance_km": "number - Distance from the shopper's resolved location to the store, when location is available",
+    "result_position": "number - 1-based rank of the store within the returned result list"
+  }
+
+
+
+Dependencies:
+  Events: [store-selection, store-locator-search]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  Store ID; Store Region; Item ID; Item Category; Inventory Status; Device Category; Traffic Source / Medium; Date
+
+    Dashboard Usage: [BOPIS Demand & Availability Dashboard, Omnichannel Fulfillment Performance, Store Inventory Accuracy Review]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [store-id, fulfillment-method, item-category]
+
+    Derived Dimensions: [store-inventory-status]
+
+    Derived Metrics: [store-inventory-checks]
+
+    Derived KPIs: [bopis-adoption-rate]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: draft
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-19T18:28:33.385+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-19T18:28:41.862+00:00
+
