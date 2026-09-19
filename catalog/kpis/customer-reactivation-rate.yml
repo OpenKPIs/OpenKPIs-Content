@@ -1,7 +1,7 @@
 # KPI: Customer Reactivation Rate
-# Generated: 2026-09-19T18:20:54.450Z
+# Generated: 2026-09-19T18:21:02.937Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Customer Reactivation Rate
 Formula: (Lapsed Customers at Period Start Who Place ≥ 1 Valid Order During the Period / Total Lapsed Customers at Period Start) × 100
@@ -11,29 +11,376 @@ Description: |
 
 Category: Retention
 
+Tags: [kpi, E-commerce: Customer Retention, Loyalty & LTV, win-back, lifecycle-marketing, customer-reactivation]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Monetization
 
+Scope: User
 
+Measure Type: Percentage
 
+Aggregation Window: Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "purchase",
+            "eventAction": "transaction_complete"
+          },
+          "category": {
+            "primaryCategory": "ecommerce"
+          }
+        }
+      ],
+      "transaction": {
+        "transactionID": "ORD-100245",
+        "total": {
+          "basePrice": 118.5,
+          "transactionTotal": 129.9,
+          "shipping": 6.5,
+          "taxRate": 0.08,
+          "currency": "USD"
+        },
+        "profile": {
+          "profileInfo": {
+            "profileID": "c9f1e2a7b4d8"
+          }
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU-4471",
+              "productName": "Hydrating Face Serum 30ml"
+            },
+            "category": {
+              "primaryCategory": "Beauty"
+            },
+            "quantity": 1,
+            "price": {
+              "basePrice": 118.5
+            }
+          }
+        ]
+      },
+      "user": [
+        {
+          "profile": [
+            {
+              "profileInfo": {
+                "profileID": "c9f1e2a7b4d8",
+                "customerLifecycleStatus": "lapsed",
+                "daysSinceLastPurchase": 214,
+                "lapseTenureBand": "181-365"
+              }
+            }
+          ],
+          "segment": {
+            "customerValueTier": "RFM-Champions-Lapsed",
+            "winbackCampaign": "winback_q3_serum_15off",
+            "experimentGroup": "treatment"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "user_id": "c9f1e2a7b4d8",
+    "customer_lifecycle_status": "lapsed",
+    "days_since_last_purchase": 214,
+    "lapse_tenure_band": "181-365",
+    "winback_campaign": "winback_q3_serum_15off",
+    "experiment_group": "treatment",
+    "ecommerce": {
+      "transaction_id": "ORD-100245",
+      "value": 118.5,
+      "tax": 9.48,
+      "shipping": 6.5,
+      "currency": "USD",
+      "coupon": "WINBACK15",
+      "items": [
+        {
+          "item_id": "SKU-4471",
+          "item_name": "Hydrating Face Serum 30ml",
+          "item_category": "Beauty",
+          "price": 118.5,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "user": {
+      "customerId": "c9f1e2a7b4d8",
+      "lifecycleStatus": "lapsed",
+      "daysSinceLastPurchase": 214,
+      "lapseTenureBand": "181-365",
+      "experimentGroup": "treatment"
+    },
+    "campaign": {
+      "winbackCampaign": "winback_q3_serum_15off"
+    },
+    "transaction": {
+      "transactionId": "ORD-100245",
+      "revenue": 118.5,
+      "tax": 9.48,
+      "shipping": 6.5,
+      "currency": "USD",
+      "coupon": "WINBACK15",
+      "products": [
+        {
+          "sku": "SKU-4471",
+          "name": "Hydrating Face Serum 30ml",
+          "category": "Beauty",
+          "quantity": 1,
+          "price": 118.5
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD-100245",
+        "priceTotal": 118.5,
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-4471",
+        "name": "Hydrating Face Serum 30ml",
+        "quantity": 1,
+        "priceTotal": 118.5
+      }
+    ],
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "c9f1e2a7b4d8",
+          "authenticatedState": "authenticated",
+          "primary": true
+        }
+      ]
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "c9f1e2a7b4d8",
+            "eVar20": "lapsed",
+            "eVar21": "181-365",
+            "eVar22": "winback_q3_serum_15off",
+            "eVar23": "treatment"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Customer Reactivation Rate = lapsed customers at period start who place >= 1 valid order in the period / ALL lapsed customers at period start
+  -- Lapsed = >= 1 valid order before period start AND no valid order within the lapse window before period start
+  WITH params AS (
+    SELECT
+      DATE '2026-07-01' AS period_start,
+      DATE '2026-09-30' AS period_end,
+      90 AS lapse_days
+  ),
+  purchase_events AS (
+    SELECT
+      e.user_id AS customer_id,
+      PARSE_DATE('%Y%m%d', e.event_date) AS order_date,
+      COALESCE(
+        e.ecommerce.transaction_id,
+        (SELECT MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep)
+      ) AS transaction_id,
+      COALESCE(
+        e.ecommerce.purchase_revenue,
+        (SELECT MAX(IF(ep.key = 'value', COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64)), NULL)) FROM UNNEST(e.event_params) AS ep)
+      ) AS order_value,
+      (SELECT MAX(IF(ep.key = 'debug_mode', ep.value.int_value, NULL)) FROM UNNEST(e.event_params) AS ep) AS debug_mode
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE e.event_name = 'purchase'
+      AND e.user_id IS NOT NULL
+      AND _TABLE_SUFFIX BETWEEN '20150101' AND '20260930'
+  ),
+  refunds AS (
+    SELECT
+      COALESCE(
+        e.ecommerce.transaction_id,
+        (SELECT MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) FROM UNNEST(e.event_params) AS ep)
+      ) AS transaction_id,
+      SUM(COALESCE(
+        e.ecommerce.refund_value,
+        (SELECT MAX(IF(ep.key = 'value', COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64)), NULL)) FROM UNNEST(e.event_params) AS ep)
+      )) AS refund_value
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE e.event_name = 'refund'
+      AND _TABLE_SUFFIX BETWEEN '20150101' AND '20260930'
+    GROUP BY transaction_id
+  ),
+  valid_orders AS (
+    SELECT
+      pe.customer_id,
+      pe.transaction_id,
+      MIN(pe.order_date) AS order_date
+    FROM purchase_events AS pe
+    LEFT JOIN refunds AS r
+      ON r.transaction_id = pe.transaction_id
+    WHERE pe.transaction_id IS NOT NULL
+      AND COALESCE(pe.debug_mode, 0) = 0
+      AND (r.refund_value IS NULL OR r.refund_value < pe.order_value)
+    GROUP BY pe.customer_id, pe.transaction_id
+  ),
+  lapsed_base AS (
+    SELECT vo.customer_id
+    FROM valid_orders AS vo
+    CROSS JOIN params AS p
+    WHERE vo.order_date < p.period_start
+    GROUP BY vo.customer_id, p.period_start, p.lapse_days
+    HAVING MAX(vo.order_date) < DATE_SUB(p.period_start, INTERVAL p.lapse_days DAY)
+  ),
+  period_buyers AS (
+    SELECT
+      vo.customer_id,
+      MIN(vo.order_date) AS first_order_in_period
+    FROM valid_orders AS vo
+    CROSS JOIN params AS p
+    WHERE vo.order_date BETWEEN p.period_start AND p.period_end
+    GROUP BY vo.customer_id
+  )
+  SELECT
+    p.period_start,
+    p.period_end,
+    p.lapse_days,
+    COUNT(DISTINCT lb.customer_id) AS lapsed_customers_at_period_start,
+    COUNT(DISTINCT pb.customer_id) AS reactivated_customers,
+    ROUND(SAFE_DIVIDE(COUNT(DISTINCT pb.customer_id), COUNT(DISTINCT lb.customer_id)) * 100, 2) AS customer_reactivation_rate_pct
+  FROM lapsed_base AS lb
+  LEFT JOIN period_buyers AS pb
+    ON pb.customer_id = lb.customer_id
+  CROSS JOIN params AS p
+  GROUP BY p.period_start, p.period_end, p.lapse_days;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Customer Reactivation Rate = lapsed customers at period start who place >= 1 valid order in the period / ALL lapsed customers at period start
+  -- Lapsed = >= 1 valid order before period start AND no valid order within the lapse window before period start
+  WITH params AS (
+    SELECT
+      CAST('2026-07-01' AS DATE) AS period_start,
+      CAST('2026-09-30' AS DATE) AS period_end,
+      90 AS lapse_days
+  ),
+  purchase_events AS (
+    SELECT
+      COALESCE(
+        identityMap['CRMID'][0].id,
+        _experience.analytics.customDimensions.eVars.eVar1
+      ) AS customer_id,
+      commerce.order.purchaseID AS transaction_id,
+      TO_DATE(timestamp) AS order_date
+    FROM aep_web_experience_events_dataset
+    WHERE eventType = 'commerce.purchases'
+      AND commerce.purchases.value > 0
+      AND timestamp < CAST('2026-10-01' AS TIMESTAMP)
+  ),
+  valid_orders AS (
+    SELECT
+      customer_id,
+      transaction_id,
+      MIN(order_date) AS order_date
+    FROM purchase_events
+    WHERE customer_id IS NOT NULL
+      AND transaction_id IS NOT NULL
+    GROUP BY customer_id, transaction_id
+  ),
+  lapsed_base AS (
+    SELECT vo.customer_id
+    FROM valid_orders AS vo
+    CROSS JOIN params AS p
+    WHERE vo.order_date < p.period_start
+    GROUP BY vo.customer_id, p.period_start, p.lapse_days
+    HAVING MAX(vo.order_date) < DATE_SUB(p.period_start, p.lapse_days)
+  ),
+  period_buyers AS (
+    SELECT
+      vo.customer_id,
+      MIN(vo.order_date) AS first_order_in_period
+    FROM valid_orders AS vo
+    CROSS JOIN params AS p
+    WHERE vo.order_date BETWEEN p.period_start AND p.period_end
+    GROUP BY vo.customer_id
+  )
+  SELECT
+    p.period_start,
+    p.period_end,
+    p.lapse_days,
+    COUNT(DISTINCT lb.customer_id) AS lapsed_customers_at_period_start,
+    COUNT(DISTINCT pb.customer_id) AS reactivated_customers,
+    ROUND(COUNT(DISTINCT pb.customer_id) * 100.0 / NULLIF(COUNT(DISTINCT lb.customer_id), 0), 2) AS customer_reactivation_rate_pct
+  FROM lapsed_base AS lb
+  LEFT JOIN period_buyers AS pb
+    ON pb.customer_id = lb.customer_id
+  CROSS JOIN params AS p
+  GROUP BY p.period_start, p.period_end, p.lapse_days;
 
+Calculation Notes: |
+  1️⃣ Lapsed cohort definition: a customer is lapsed at period start when they have at least one lifetime valid order and their most recent order date is earlier than (period start − lapse window). Set the lapse window from the category's purchase cycle, typically 2–3× the median Time Between Purchases (commonly 90 days for consumables and beauty, 180 days for apparel, 365 days for durables and furniture), and hold it fixed across periods so trends stay comparable.,2️⃣ Denominator is the full lapsed base frozen at 00:00 on the first day of the period in the reporting time zone. Customers who lapse during the period are excluded from both numerator and denominator, and never-purchased registrants or leads are excluded because they cannot be reactivated, only converted.,3️⃣ Numerator counts each lapsed customer once, on the timestamp of their first valid order in the period, however many orders they place. Only orders with a completed payment status count; fully cancelled, fraud-declined and test orders are excluded, and orders fully refunded within the return window are excluded in the final (restated) view, which is published once the return window closes.,4️⃣ Identity resolution is at the customer level, not the cookie or session level: web and app purchase events are stitched on the hashed customer ID (logged-in user_id or the email match in the order record) to the order management history. Guest checkouts are matched to an existing customer record by hashed email before evaluation, and merged duplicate accounts are counted once using the surviving master customer ID.,5️⃣ Channel scope: digital orders (web, app) are the primary measure. Where store POS transactions are linked to the same customer ID, report the omnichannel variant separately and label it, because a customer who returns in-store but not online would otherwise be misread as still lapsed.,6️⃣ Exclusions: B2B and wholesale accounts, internal and staff accounts, marketplace orders without a shared customer ID, and customers who have requested erasure under GDPR or CCPA are removed from both numerator and denominator. Subscription auto-renewal orders do not count as reactivation, since no active re-purchase decision was made.,7️⃣ Timing and comparability: report on calendar months or quarters rather than rolling 7-day windows, because the lapsed base moves slowly and weekly rates are noisy. Attribution to a win-back campaign is a separate cut: compare the rate for a treated segment with a randomly held-out control segment of the same lapsed cohort to isolate incremental reactivation from organic return.
 
+Business Use Case: |
+  1️⃣ The CRM and Lifecycle Marketing team reviews the monthly rate by lapse-tenure band (e.g. 90–180, 181–365, 365+ days). When the 181–365-day band falls below its trailing two-quarter average, they bring forward the second win-back email and SMS touch and test a higher incentive tier on that band only.,2️⃣ The Retention Marketing Manager compares the reactivation rate of each win-back campaign's treated segment against its holdout control. Any campaign whose incremental lift is below the discount cost per reactivated customer is paused and its budget moved to the best-performing offer variant.,3️⃣ Finance and FP&A use the quarterly rate, multiplied by the lapsed-base size and the average order value of reactivated customers, to forecast recovered revenue in the retention line of the revenue plan, and revise the forecast whenever the rate moves more than two percentage points quarter on quarter.,4️⃣ Merchandising reviews reactivation rate by the category of the customer's last pre-lapse order. Categories with persistently low recovery are passed to the category managers to review range depth, replenishment gaps and price position against competitors.
 
+Dependencies:
+  Events: [purchase]
+  KPIs: [time-between-purchases]
 
+Source Data: Digital Analytics (GA4) + Order Management / CRM (Shopify, Salesforce Commerce Cloud)
 
+Report Attributes: |
+  Lapse Tenure Band; Acquisition Channel; Last Pre-Lapse Product Category; Customer Value Tier (RFM Segment); Win-Back Campaign; Treatment vs Holdout Group; Reactivation Channel (Web / App / Store); Country / Market; Device Category
 
+Dashboard Usage: [Customer Retention & Lifecycle Dashboard, Win-Back Campaign Performance, CRM Programme Scorecard, Customer Lifetime Value & Cohort Analysis]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [viewer-reactivation-rate, customer-churn-rate, time-between-purchases, customer-retention-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +390,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T18:20:53.809+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T18:21:02.488+00:00
 
