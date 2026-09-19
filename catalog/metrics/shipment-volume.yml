@@ -1,19 +1,19 @@
 # Metric: Shipment Volume
-# Generated: 2026-09-10T23:30:25.286Z
+# Generated: 2026-09-19T18:39:41.106Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Metric Name: Shipment Volume
-Formula: COUNT(DISTINCT CASE WHEN first_valid_shipped_at >= window_start AND first_valid_shipped_at < window_end AND is_test_shipment = FALSE THEN shipment_id END)
+Formula: COUNT(DISTINCT shipment_id) WHERE first_shipped_at >= window_start AND first_shipped_at < window_end AND is_test = FALSE AND shipment_type IN ('CUSTOMER_ORDER', 'REPLACEMENT', 'RESHIP')
 
 Description: |
-  Counts unique customer-order shipments handed to a carrier or confirmed as dispatched during the reporting period, with split shipments counted separately and duplicate status events removed. It connects acquisition and conversion demand to post-purchase engagement, billing, retention, and customer lifetime value by showing how many fulfillment commitments entered the delivery journey.
+  Shipment Volume is the number of unique customer-order shipments handed to a carrier or confirmed as dispatched in the reporting period, with each split shipment counted separately and duplicate status events removed. It shows how many fulfillment commitments entered the delivery journey, which lets teams size carrier capacity, compare shipments against orders placed and track on-time and split-shipment performance.
 
-Category: Performance
+Category: Operations
 
-Tags: [metric]
+Tags: [metric, E-commerce: Post-Purchase Logistics & Fulfillment]
 
-Industry: Logistics & Supply Chain
+Industry: Logistics & Supply Chain, E-commerce
 
 Priority: High
 
@@ -21,46 +21,137 @@ Core Area: Generic
 
 Scope: Event
 
-Measure Type: count
+Measure Type: Counter
 
-Aggregation Window: Time based - Hourly/Daily/Monthly/Yearly
-
-
+Aggregation Window: Time based - Hourly/Daily/Monthly/Yearly, Daily, Weekly, Monthly
 
 
 
 
 
 
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Shipment Volume from the backend OMS shipment tables (no web events involved).
+  DECLARE window_start TIMESTAMP DEFAULT TIMESTAMP('2026-09-01 00:00:00');
+  DECLARE window_end   TIMESTAMP DEFAULT TIMESTAMP('2026-10-01 00:00:00');
+  
+  WITH first_dispatch AS (
+    -- earliest shipped / carrier-accepted status ever recorded per shipment
+    SELECT
+      e.shipment_id,
+      MIN(e.status_timestamp) AS first_shipped_at
+    FROM `project.oms.shipment_status_events` AS e
+    WHERE e.canonical_status IN ('SHIPPED', 'CARRIER_ACCEPTED')
+    GROUP BY e.shipment_id
+  ),
+  customer_shipments AS (
+    SELECT
+      s.shipment_id,
+      s.order_id,
+      s.shipment_type,
+      s.carrier,
+      s.service_level,
+      f.first_shipped_at
+    FROM first_dispatch AS f
+    JOIN `project.oms.shipments` AS s
+      ON s.shipment_id = f.shipment_id
+    WHERE COALESCE(s.is_test, FALSE) = FALSE
+      AND COALESCE(s.fraud_status, '') <> 'REJECTED'
+      AND COALESCE(s.voided_before_dispatch, FALSE) = FALSE
+      AND s.shipment_type IN ('CUSTOMER_ORDER', 'REPLACEMENT', 'RESHIP')
+  )
+  SELECT
+    DATE(first_shipped_at) AS shipment_date,
+    carrier,
+    service_level,
+    COUNT(DISTINCT shipment_id) AS shipment_volume,
+    COUNT(DISTINCT order_id) AS orders_shipped,
+    SAFE_DIVIDE(COUNT(DISTINCT shipment_id), COUNT(DISTINCT order_id)) AS shipments_per_order
+  FROM customer_shipments
+  WHERE first_shipped_at >= window_start
+    AND first_shipped_at < window_end
+  GROUP BY shipment_date, carrier, service_level
+  ORDER BY shipment_date, carrier, service_level;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Shipment Volume from the OMS shipment datasets ingested into AEP (backend records, not web events).
+  WITH first_dispatch AS (
+    SELECT
+      e.shipment_id,
+      MIN(e.status_timestamp) AS first_shipped_at
+    FROM oms_shipment_status_events e
+    WHERE e.canonical_status IN ('SHIPPED', 'CARRIER_ACCEPTED')
+    GROUP BY e.shipment_id
+  ),
+  customer_shipments AS (
+    SELECT
+      s.shipment_id,
+      s.order_id,
+      s.shipment_type,
+      s.carrier,
+      s.service_level,
+      f.first_shipped_at
+    FROM first_dispatch f
+    JOIN oms_shipments s
+      ON s.shipment_id = f.shipment_id
+    WHERE COALESCE(s.is_test, FALSE) = FALSE
+      AND COALESCE(s.fraud_status, '') <> 'REJECTED'
+      AND COALESCE(s.voided_before_dispatch, FALSE) = FALSE
+      AND s.shipment_type IN ('CUSTOMER_ORDER', 'REPLACEMENT', 'RESHIP')
+  )
+  SELECT
+    CAST(first_shipped_at AS DATE) AS shipment_date,
+    carrier,
+    service_level,
+    COUNT(DISTINCT shipment_id) AS shipment_volume,
+    COUNT(DISTINCT order_id) AS orders_shipped,
+    CAST(COUNT(DISTINCT shipment_id) AS DOUBLE) / NULLIF(COUNT(DISTINCT order_id), 0) AS shipments_per_order
+  FROM customer_shipments
+  WHERE first_shipped_at >= TIMESTAMP '2026-09-01 00:00:00'
+    AND first_shipped_at < TIMESTAMP '2026-10-01 00:00:00'
+  GROUP BY CAST(first_shipped_at AS DATE), carrier, service_level
+  ORDER BY shipment_date, carrier, service_level;
 
 Calculation Notes: |
-  1️⃣ Use the earliest qualifying shipped or carrier-accepted timestamp for each shipment_id.  
-  2️⃣ Count each physical outbound shipment once; multiple packages with one shipment_id count as one.  
-  3️⃣ Exclude test, fraud-rejected, voided-before-dispatch, internal transfer, supplier replenishment, and non-customer shipments.  
-  4️⃣ Do not subtract later cancellations, returns, delivery failures, or refunds from historical volume.  
-  5️⃣ Include replacement and reshipment records only if they have a new shipment_id and are identifiable through shipment_type.  
-  6️⃣ Apply half-open reporting intervals and recalculate late events within the controlled lookback window.  
-  7️⃣ Session timeout rules do not affect shipment count; digital session and acquisition attributes are inherited from the stitched originating order.
+  1️⃣ Count each shipment_id once, dated by its earliest shipped or carrier-accepted status ever recorded; a shipment that first shipped before the window is not counted again because of a later status event.  
+  2️⃣ Multiple packages under one shipment_id count as one shipment; an order split into several shipments contributes one per shipment_id (this is what separates Shipment Volume from Orders Shipped).  
+  3️⃣ Exclude test, fraud-rejected, voided-before-dispatch, internal transfer, supplier replenishment and other non-customer shipments.  
+  4️⃣ Replacement and reshipment records count only when they carry a new shipment_id and a shipment_type of REPLACEMENT or RESHIP, so they can be reported separately.  
+  5️⃣ Never subtract later cancellations, returns, delivery failures or refunds from historical volume.  
+  6️⃣ Use half-open intervals [window_start, window_end) in the reporting time zone and restate the last 7 days to absorb late carrier scans.  
+  7️⃣ Session timeout rules do not apply; acquisition channel and device attributes are inherited from the originating order.
 
 Business Use Case: |
-  A Chief Customer Officer reviews Shipment Volume by acquisition channel, promised service level, customer tenure, and region before a promotional campaign. If paid-social orders create shipment growth but also elevated split-shipment and late-delivery rates, the team can change delivery promises, suppress affected offers, rebalance campaign spend, and send proactive post-purchase communications to protect conversion, retention, and lifetime value.
+  1️⃣ The Fulfillment Operations lead compares daily Shipment Volume against the carrier capacity plan before a promotion and books extra pickups or shifts volume to a second carrier when forecast volume exceeds 90% of contracted capacity.  
+  2️⃣ The E-commerce Merchandising manager reviews Shipment Volume per order by product category and fulfillment node; when split shipments push shipments per order above target, the team rebalances inventory across nodes to consolidate orders.  
+  3️⃣ The Customer Experience team watches Shipment Volume by service level and destination region alongside On-Time Delivery Rate and sends proactive delay notifications when a volume spike coincides with late carrier scans.
 
+Dependencies:
+  Metrics: [orders-shipped]
+  Dimensions: [shipment-status, number-of-shipments, carrier, fulfillment-method, shipping-tier, delivery-region, order-status]
 
-Source Data: E-commerce order and shipment events from the Order Management System and carrier event platform, stitched with Digital Analytics (GA4 or Adobe Analytics), CRM customer profiles, customer service interactions, and billing or payment data.
+Source Data: Backend Order Management (OMS) shipment and carrier status tables, joined to order and CRM customer records
 
 Report Attributes: |
-  ["Shipment Date","Shipment Hour","Order Date","Acquisition Channel","Campaign","Customer Type","Customer Tenure Band","Loyalty Tier","Order Channel","Fulfillment Method","Shipment Type","Carrier","Service Level","Promised Delivery Band","Destination Region","Origin Region","Product Category","Device Category","Payment Method","Subscription Status"]
+  Shipment Date; Order Date; Shipping Carrier; Shipping Method / Service Level; Shipment Type; Fulfillment Method; Warehouse / Fulfillment Node; Origin Region; Delivery Region; Delivery Promise Band; Product Category; Order Channel; Acquisition Channel; Customer Type
 
-Dashboard Usage: [Executive Customer Journey Performance, Order-to-Delivery Journey, Omnichannel Conversion and Fulfillment, Post-Purchase Customer Experience, Retention and LTV Drivers, Shipping Demand and Service-Level Performance, Campaign Demand-to-Delivery]
+Dashboard Usage: [Order-to-Delivery Journey, Shipping Demand and Service-Level Performance, Post-Purchase Customer Experience, Omnichannel Conversion and Fulfillment, Campaign Demand-to-Delivery]
 
 Segment Eligibility: |
   true
 
-Related Metrics: [Order Volume, Delivered Shipment Volume, Canceled Shipment Volume, Return Shipment Volume, Replacement Shipment Volume, On-Time Shipment Rate, On-Time Delivery Rate, Average Ship Time, Shipping Revenue, Shipping Cost, Customer Order Volume, Repeat Purchase Rate]
+Related Metrics: [orders-shipped, orders-delivered, orders-cancelled, late-deliveries, average-delivery-time, damaged-shipment-count, order-tracking-page-views]
 
-Derived KPIs: [Shipments per Order, Order-to-Shipment Conversion Rate, Shipment Growth Rate, Delivered-to-Shipped Ratio, Shipping Revenue per Shipment, Shipping Cost per Shipment, Replacement Shipment Rate, Split Shipment Rate, Repeat Customer Shipment Share, Shipments per Active Customer]
+Derived KPIs: [split-shipment-rate, shipment-on-time-delivery-rate, failed-delivery-rate, delivery-accuracy-rate]
 
-Data Sensitivity: confidential
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -68,8 +159,9 @@ Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-09-10T23:30:24.744329+00:00
+Created At: 2026-09-10T22:30:36.563251+00:00
 
 Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T18:39:40.861+00:00
 
