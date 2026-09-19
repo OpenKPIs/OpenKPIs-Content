@@ -1,7 +1,7 @@
 # Dimension: Promotion Name
-# Generated: 2026-09-19T18:06:47.146Z
+# Generated: 2026-09-19T18:06:56.323Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Promotion Name
 
@@ -10,31 +10,523 @@ Description: |
 
 Category: Engagement
 
+Tags: [dimension, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
 
+GA4 Event: |
+  select_promotion
 
+Adobe Event: |
+  internal_promotion_click
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "select_promotion",
+            "eventAction": "promotion_click",
+            "type": "internal_promotion"
+          },
+          "attributes": {
+            "promotion": {
+              "promotionID": "PROMO_SUMMER25_HERO",
+              "promotionName": "summer_sale_25_off",
+              "creativeName": "hero_banner_variant_b",
+              "creativeSlot": "homepage_hero_1"
+            }
+          }
+        }
+      ],
+      "page": {
+        "pageInfo": {
+          "pageName": "home",
+          "pageType": "homepage"
+        }
+      },
+      "product": [
+        {
+          "productInfo": {
+            "productID": "SKU_12345",
+            "productName": "Linen Short Sleeve Shirt",
+            "brand": "Northwind"
+          },
+          "category": {
+            "primaryCategory": "Apparel",
+            "subCategory1": "Shirts"
+          },
+          "attributes": {
+            "promotionName": "summer_sale_25_off"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "select_promotion",
+    "ecommerce": {
+      "creative_name": "hero_banner_variant_b",
+      "creative_slot": "homepage_hero_1",
+      "promotion_id": "PROMO_SUMMER25_HERO",
+      "promotion_name": "summer_sale_25_off",
+      "items": [
+        {
+          "item_id": "SKU_12345",
+          "item_name": "Linen Short Sleeve Shirt",
+          "item_brand": "Northwind",
+          "item_category": "Apparel",
+          "item_category2": "Shirts",
+          "price": 39.99,
+          "quantity": 1,
+          "creative_name": "hero_banner_variant_b",
+          "creative_slot": "homepage_hero_1",
+          "promotion_id": "PROMO_SUMMER25_HERO",
+          "promotion_name": "summer_sale_25_off"
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "internal_promotion_click",
+    "eventInfo": {
+      "path": "promotion.PROMO_SUMMER25_HERO"
+    },
+    "promotion": {
+      "PROMO_SUMMER25_HERO": {
+        "promotionId": "PROMO_SUMMER25_HERO",
+        "promotionName": "summer_sale_25_off",
+        "creativeName": "hero_banner_variant_b",
+        "creativeSlot": "homepage_hero_1",
+        "interactionType": "click"
+      }
+    },
+    "product": {
+      "SKU_12345": {
+        "productId": "SKU_12345",
+        "productName": "Linen Short Sleeve Shirt",
+        "brand": "Northwind",
+        "category": "Apparel/Shirts",
+        "promotionName": "summer_sale_25_off"
+      }
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "web": {
+      "webInteraction": {
+        "name": "internal_promotion_click",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "summer_sale_25_off",
+            "eVar11": "PROMO_SUMMER25_HERO",
+            "eVar12": "homepage_hero_1"
+          }
+        }
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU_12345",
+        "name": "Linen Short Sleeve Shirt",
+        "quantity": 1,
+        "priceTotal": 39.99,
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "eVar10": "summer_sale_25_off"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "impression_event": {
+      "eventType": "web.webinteraction.linkClicks",
+      "web": {
+        "webInteraction": {
+          "name": "internal_promotion_view",
+          "type": "other",
+          "linkClicks": {
+            "value": 1
+          }
+        }
+      },
+      "_experience": {
+        "analytics": {
+          "customDimensions": {
+            "eVars": {
+              "eVar10": "summer_sale_25_off",
+              "eVar11": "PROMO_SUMMER25_HERO",
+              "eVar12": "homepage_hero_1"
+            }
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Promotion Name: daily impressions, clicks, CTR and same-session attributed purchases per promotion and slot
+  WITH events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      event_timestamp,
+      event_name,
+      user_pseudo_id,
+      CONCAT(user_pseudo_id, '.', CAST((SELECT ep.value.int_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'ga_session_id') AS STRING)) AS session_key,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'page_location') AS page_location,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'promotion_id') AS ev_promotion_id,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'promotion_name') AS ev_promotion_name,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'creative_slot') AS ev_creative_slot,
+      ecommerce.transaction_id,
+      items
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+      AND event_name IN ('view_promotion', 'select_promotion', 'purchase')
+      AND NOT REGEXP_CONTAINS(IFNULL(device.web_info.hostname, ''), r'(staging|preview|localhost)')
+  ),
+  item_rows AS (
+    -- item-level value takes precedence over the event-level parameter; blanks and '(not set)' become NULL
+    SELECT
+      e.event_date, e.event_timestamp, e.event_name, e.user_pseudo_id, e.session_key, e.page_location, e.transaction_id,
+      it.item_id, it.item_revenue, it.quantity, item_index,
+      CASE WHEN TRIM(IFNULL(it.promotion_id, '')) IN ('', '(not set)') THEN NULL ELSE TRIM(it.promotion_id) END AS item_promotion_id,
+      CASE WHEN TRIM(IFNULL(it.promotion_name, '')) IN ('', '(not set)') THEN NULL ELSE TRIM(it.promotion_name) END AS item_promotion_name,
+      CASE WHEN TRIM(IFNULL(it.creative_slot, '')) IN ('', '(not set)') THEN NULL ELSE TRIM(it.creative_slot) END AS item_creative_slot,
+      CASE WHEN TRIM(IFNULL(e.ev_promotion_id, '')) IN ('', '(not set)') THEN NULL ELSE TRIM(e.ev_promotion_id) END AS ev_promotion_id,
+      CASE WHEN TRIM(IFNULL(e.ev_promotion_name, '')) IN ('', '(not set)') THEN NULL ELSE TRIM(e.ev_promotion_name) END AS ev_promotion_name,
+      CASE WHEN TRIM(IFNULL(e.ev_creative_slot, '')) IN ('', '(not set)') THEN NULL ELSE TRIM(e.ev_creative_slot) END AS ev_creative_slot
+    FROM events AS e
+    LEFT JOIN UNNEST(e.items) AS it WITH OFFSET AS item_index
+  ),
+  calendar AS (
+    -- CMS promotion calendar: latest governed name and scheduled window per promotion_id
+    SELECT promotion_id, promotion_name AS calendar_name, start_ts, end_ts
+    FROM `your-project.cms.promotion_calendar`
+    WHERE TRUE
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY promotion_id ORDER BY updated_at DESC) = 1
+  ),
+  name_lookup AS (
+    -- fallback when the calendar has no row: latest observed name per promotion_id, so renames never split a placement
+    SELECT
+      COALESCE(item_promotion_id, ev_promotion_id) AS promotion_id,
+      ARRAY_AGG(COALESCE(item_promotion_name, ev_promotion_name) ORDER BY event_timestamp DESC LIMIT 1)[OFFSET(0)] AS latest_seen_name
+    FROM item_rows
+    WHERE COALESCE(item_promotion_id, ev_promotion_id) IS NOT NULL
+      AND COALESCE(item_promotion_name, ev_promotion_name) IS NOT NULL
+    GROUP BY 1
+  ),
+  promo_events AS (
+    SELECT
+      r.event_date, r.event_name, r.event_timestamp, r.user_pseudo_id, r.session_key, r.page_location, r.item_id,
+      IFNULL(COALESCE(r.item_promotion_id, r.ev_promotion_id), '(not set)') AS promotion_id,
+      COALESCE(cal.calendar_name, nl.latest_seen_name, r.item_promotion_name, r.ev_promotion_name, '(not set)') AS promotion_name,
+      COALESCE(r.item_creative_slot, r.ev_creative_slot, '(not set)') AS creative_slot
+    FROM item_rows AS r
+    LEFT JOIN calendar AS cal ON cal.promotion_id = COALESCE(r.item_promotion_id, r.ev_promotion_id)
+    LEFT JOIN name_lookup AS nl ON nl.promotion_id = COALESCE(r.item_promotion_id, r.ev_promotion_id)
+    WHERE r.event_name IN ('view_promotion', 'select_promotion')
+      -- hits outside the scheduled window are stale cache and excluded
+      AND (cal.promotion_id IS NULL OR TIMESTAMP_MICROS(r.event_timestamp) BETWEEN cal.start_ts AND cal.end_ts)
+  ),
+  exposure_metrics AS (
+    SELECT
+      event_date, promotion_id, promotion_name, creative_slot,
+      -- one impression per promotion_id per creative_slot per page view; items[] fan-out does not inflate counts
+      COUNT(DISTINCT IF(event_name = 'view_promotion', CONCAT(session_key, '|', IFNULL(page_location, ''), '|', promotion_id, '|', creative_slot), NULL)) AS promotion_views,
+      COUNT(DISTINCT IF(event_name = 'select_promotion', CONCAT(user_pseudo_id, '|', CAST(event_timestamp AS STRING), '|', promotion_id, '|', creative_slot), NULL)) AS promotion_clicks,
+      COUNT(DISTINCT IF(event_name = 'select_promotion', user_pseudo_id, NULL)) AS clicking_users
+    FROM promo_events
+    GROUP BY 1, 2, 3, 4
+  ),
+  purchase_attributed AS (
+    -- item-level promotion on the purchase wins; otherwise the last select_promotion for the same item_id earlier in the same session
+    SELECT
+      p.event_date, p.transaction_id, p.item_id, p.item_revenue, p.quantity,
+      COALESCE(p.item_promotion_id, c.promotion_id) AS promotion_id,
+      COALESCE(p.item_promotion_name, c.promotion_name) AS attributed_name,
+      COALESCE(p.item_creative_slot, c.creative_slot, '(not set)') AS creative_slot
+    FROM item_rows AS p
+    LEFT JOIN promo_events AS c
+      ON c.event_name = 'select_promotion'
+     AND c.session_key = p.session_key
+     AND c.item_id = p.item_id
+     AND c.event_timestamp < p.event_timestamp
+    WHERE p.event_name = 'purchase'
+      AND p.item_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY p.session_key, p.event_timestamp, p.item_index ORDER BY c.event_timestamp DESC) = 1
+  ),
+  purchase_metrics AS (
+    SELECT
+      a.event_date,
+      IFNULL(a.promotion_id, '(not set)') AS promotion_id,
+      COALESCE(cal.calendar_name, nl.latest_seen_name, a.attributed_name, '(not set)') AS promotion_name,
+      a.creative_slot,
+      COUNT(DISTINCT a.transaction_id) AS attributed_purchases,
+      SUM(IFNULL(a.quantity, 0)) AS attributed_units,
+      SUM(IFNULL(a.item_revenue, 0)) AS attributed_revenue
+    FROM purchase_attributed AS a
+    LEFT JOIN calendar AS cal ON cal.promotion_id = a.promotion_id
+    LEFT JOIN name_lookup AS nl ON nl.promotion_id = a.promotion_id
+    WHERE a.promotion_id IS NOT NULL OR a.attributed_name IS NOT NULL
+    GROUP BY 1, 2, 3, 4
+  )
+  SELECT
+    event_date,
+    promotion_name,
+    promotion_id,
+    creative_slot,
+    IFNULL(x.promotion_views, 0) AS promotion_views,
+    IFNULL(x.promotion_clicks, 0) AS promotion_clicks,
+    -- denominator is every viewable impression served, not only clicked ones
+    SAFE_DIVIDE(x.promotion_clicks, x.promotion_views) AS promotion_click_through_rate,
+    IFNULL(x.clicking_users, 0) AS clicking_users,
+    IFNULL(pm.attributed_purchases, 0) AS attributed_purchases,
+    IFNULL(pm.attributed_units, 0) AS attributed_units,
+    ROUND(IFNULL(pm.attributed_revenue, 0), 2) AS attributed_revenue,
+    ROUND(SAFE_DIVIDE(pm.attributed_revenue, x.promotion_clicks), 2) AS revenue_per_click
+  FROM exposure_metrics AS x
+  FULL OUTER JOIN purchase_metrics AS pm
+    USING (event_date, promotion_id, promotion_name, creative_slot)
+  ORDER BY event_date DESC, promotion_views DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Promotion Name: daily impressions, clicks, CTR and same-session attributed purchases per promotion and slot
+  WITH sessionized AS (
+    SELECT
+      timestamp,
+      identityMap['ECID'][0].id AS ecid,
+      eventType,
+      web.webInteraction.name AS interaction_name,
+      web.webPageDetails.URL AS page_url,
+      commerce.order.purchaseID AS purchase_id,
+      _experience.analytics.customDimensions.eVars.eVar10 AS ev_promotion_name,
+      _experience.analytics.customDimensions.eVars.eVar11 AS ev_promotion_id,
+      _experience.analytics.customDimensions.eVars.eVar12 AS ev_creative_slot,
+      productListItems,
+      -- 30-minute inactivity timeout, new session at midnight
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY identityMap['ECID'][0].id, TO_DATE(timestamp)
+        ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM web_events_dataset
+    WHERE timestamp >= DATE_SUB(CURRENT_DATE(), 28)
+      AND timestamp < CURRENT_DATE()
+      AND identityMap['ECID'][0].id IS NOT NULL
+      AND NOT (COALESCE(web.webPageDetails.URL, '') RLIKE '(staging|preview|localhost)')
+  ),
+  events AS (
+    SELECT
+      TO_DATE(timestamp) AS event_date,
+      timestamp,
+      CASE
+        WHEN interaction_name = 'internal_promotion_view' THEN 'view_promotion'
+        WHEN interaction_name = 'internal_promotion_click' THEN 'select_promotion'
+        WHEN eventType = 'commerce.purchases' THEN 'purchase'
+      END AS event_name,
+      ecid,
+      CONCAT(ecid, '.', CAST(TO_DATE(timestamp) AS STRING), '.', CAST(session.num AS STRING)) AS session_key,
+      page_url,
+      purchase_id,
+      CASE WHEN TRIM(COALESCE(ev_promotion_id, '')) IN ('', '(not set)') THEN NULL ELSE TRIM(ev_promotion_id) END AS ev_promotion_id,
+      CASE WHEN TRIM(COALESCE(ev_promotion_name, '')) IN ('', '(not set)') THEN NULL ELSE TRIM(ev_promotion_name) END AS ev_promotion_name,
+      CASE WHEN TRIM(COALESCE(ev_creative_slot, '')) IN ('', '(not set)') THEN NULL ELSE TRIM(ev_creative_slot) END AS ev_creative_slot,
+      productListItems
+    FROM sessionized
+    WHERE interaction_name IN ('internal_promotion_view', 'internal_promotion_click')
+       OR eventType = 'commerce.purchases'
+  ),
+  item_rows AS (
+    -- product-level merchandising eVar takes precedence over the event-level eVar
+    SELECT
+      e.event_date, e.timestamp, e.event_name, e.ecid, e.session_key, e.page_url, e.purchase_id,
+      e.ev_promotion_id, e.ev_promotion_name, e.ev_creative_slot,
+      item_index,
+      pli.SKU AS item_id,
+      pli.priceTotal AS item_revenue,
+      pli.quantity AS quantity,
+      CASE WHEN TRIM(COALESCE(pli._experience.analytics.customDimensions.eVars.eVar10, '')) IN ('', '(not set)') THEN NULL
+           ELSE TRIM(pli._experience.analytics.customDimensions.eVars.eVar10) END AS item_promotion_name
+    FROM events AS e
+    LATERAL VIEW OUTER POSEXPLODE(e.productListItems) exploded AS item_index, pli
+  ),
+  calendar AS (
+    -- CMS promotion calendar: latest governed name and scheduled window per promotion_id
+    SELECT promotion_id, calendar_name, start_ts, end_ts
+    FROM (
+      SELECT
+        promotion_id,
+        promotion_name AS calendar_name,
+        start_ts,
+        end_ts,
+        ROW_NUMBER() OVER (PARTITION BY promotion_id ORDER BY updated_at DESC) AS rn
+      FROM cms_promotion_calendar
+    ) AS c
+    WHERE rn = 1
+  ),
+  name_lookup AS (
+    -- fallback when the calendar has no row: latest observed name per promotion_id
+    SELECT promotion_id, latest_seen_name
+    FROM (
+      SELECT
+        ev_promotion_id AS promotion_id,
+        COALESCE(item_promotion_name, ev_promotion_name) AS latest_seen_name,
+        ROW_NUMBER() OVER (PARTITION BY ev_promotion_id ORDER BY timestamp DESC) AS rn
+      FROM item_rows
+      WHERE ev_promotion_id IS NOT NULL
+        AND COALESCE(item_promotion_name, ev_promotion_name) IS NOT NULL
+    ) AS n
+    WHERE rn = 1
+  ),
+  promo_events AS (
+    SELECT
+      r.event_date, r.event_name, r.timestamp, r.ecid, r.session_key, r.page_url, r.item_id,
+      COALESCE(r.ev_promotion_id, '(not set)') AS promotion_id,
+      COALESCE(cal.calendar_name, nl.latest_seen_name, r.item_promotion_name, r.ev_promotion_name, '(not set)') AS promotion_name,
+      COALESCE(r.ev_creative_slot, '(not set)') AS creative_slot
+    FROM item_rows AS r
+    LEFT JOIN calendar AS cal ON cal.promotion_id = r.ev_promotion_id
+    LEFT JOIN name_lookup AS nl ON nl.promotion_id = r.ev_promotion_id
+    WHERE r.event_name IN ('view_promotion', 'select_promotion')
+      -- hits outside the scheduled window are stale cache and excluded
+      AND (cal.promotion_id IS NULL OR r.timestamp BETWEEN cal.start_ts AND cal.end_ts)
+  ),
+  exposure_metrics AS (
+    SELECT
+      event_date, promotion_id, promotion_name, creative_slot,
+      -- one impression per promotion_id per creative_slot per page view; product fan-out does not inflate counts
+      COUNT(DISTINCT CASE WHEN event_name = 'view_promotion' THEN CONCAT(session_key, '|', COALESCE(page_url, ''), '|', promotion_id, '|', creative_slot) END) AS promotion_views,
+      COUNT(DISTINCT CASE WHEN event_name = 'select_promotion' THEN CONCAT(ecid, '|', CAST(timestamp AS STRING), '|', promotion_id, '|', creative_slot) END) AS promotion_clicks,
+      COUNT(DISTINCT CASE WHEN event_name = 'select_promotion' THEN ecid END) AS clicking_users
+    FROM promo_events
+    GROUP BY event_date, promotion_id, promotion_name, creative_slot
+  ),
+  purchase_candidates AS (
+    -- product-level promotion on the order wins; otherwise the last promotion click for the same SKU earlier in the same session
+    SELECT
+      p.event_date, p.purchase_id, p.item_id, p.item_revenue, p.quantity,
+      c.promotion_id AS click_promotion_id,
+      COALESCE(p.item_promotion_name, c.promotion_name) AS attributed_name,
+      COALESCE(c.creative_slot, '(not set)') AS creative_slot,
+      ROW_NUMBER() OVER (PARTITION BY p.session_key, p.timestamp, p.item_index ORDER BY c.timestamp DESC) AS rn
+    FROM item_rows AS p
+    LEFT JOIN promo_events AS c
+      ON c.event_name = 'select_promotion'
+     AND c.session_key = p.session_key
+     AND c.item_id = p.item_id
+     AND c.timestamp < p.timestamp
+    WHERE p.event_name = 'purchase'
+      AND p.item_id IS NOT NULL
+  ),
+  purchase_metrics AS (
+    SELECT
+      a.event_date,
+      COALESCE(a.click_promotion_id, '(not set)') AS promotion_id,
+      COALESCE(cal.calendar_name, nl.latest_seen_name, a.attributed_name, '(not set)') AS promotion_name,
+      a.creative_slot,
+      COUNT(DISTINCT a.purchase_id) AS attributed_purchases,
+      SUM(COALESCE(a.quantity, 0)) AS attributed_units,
+      SUM(COALESCE(a.item_revenue, 0)) AS attributed_revenue
+    FROM purchase_candidates AS a
+    LEFT JOIN calendar AS cal ON cal.promotion_id = a.click_promotion_id
+    LEFT JOIN name_lookup AS nl ON nl.promotion_id = a.click_promotion_id
+    WHERE a.rn = 1
+      AND a.attributed_name IS NOT NULL
+    GROUP BY a.event_date, COALESCE(a.click_promotion_id, '(not set)'),
+             COALESCE(cal.calendar_name, nl.latest_seen_name, a.attributed_name, '(not set)'), a.creative_slot
+  )
+  SELECT
+    COALESCE(x.event_date, pm.event_date) AS event_date,
+    COALESCE(x.promotion_name, pm.promotion_name) AS promotion_name,
+    COALESCE(x.promotion_id, pm.promotion_id) AS promotion_id,
+    COALESCE(x.creative_slot, pm.creative_slot) AS creative_slot,
+    COALESCE(x.promotion_views, 0) AS promotion_views,
+    COALESCE(x.promotion_clicks, 0) AS promotion_clicks,
+    -- denominator is every viewable impression served, not only clicked ones
+    CASE WHEN x.promotion_views > 0 THEN CAST(x.promotion_clicks AS DOUBLE) / x.promotion_views END AS promotion_click_through_rate,
+    COALESCE(x.clicking_users, 0) AS clicking_users,
+    COALESCE(pm.attributed_purchases, 0) AS attributed_purchases,
+    COALESCE(pm.attributed_units, 0) AS attributed_units,
+    ROUND(COALESCE(pm.attributed_revenue, 0), 2) AS attributed_revenue,
+    CASE WHEN x.promotion_clicks > 0 THEN ROUND(pm.attributed_revenue / x.promotion_clicks, 2) END AS revenue_per_click
+  FROM exposure_metrics AS x
+  FULL OUTER JOIN purchase_metrics AS pm
+    ON  x.event_date = pm.event_date
+    AND x.promotion_id = pm.promotion_id
+    AND x.promotion_name = pm.promotion_name
+    AND x.creative_slot = pm.creative_slot
+  ORDER BY event_date DESC, promotion_views DESC;
 
+Calculation Notes: |
+  1️⃣ Value resolution: read promotion_name from the items[] array first and fall back to the event-level parameter, i.e. COALESCE(items.promotion_name, event_params.promotion_name); GA4 gives the item-level value precedence when both are sent, and blank strings, whitespace-only values and '(not set)' are bucketed as '(not set)' rather than dropped so impression and click denominators stay complete.
+  2️⃣ Identity vs label: promotion_id is the join key and promotion_name is the business label; when a creative is renamed mid-flight, report on promotion_id and resolve the display name from the CMS / promotion calendar lookup (latest name wins) so one placement never splits into two rows. Test variants belong in creative_name and placement in creative_slot; neither may be concatenated into promotion_name.
+  3️⃣ Impression integrity: view_promotion counts only viewable impressions (at least 50% of the creative in viewport for at least 1 continuous second) and is deduplicated to one impression per promotion_id per creative_slot per page view, so auto-rotating carousels and re-renders on scroll do not inflate exposure for the first slide.
+  4️⃣ Downstream attribution: add_to_cart, begin_checkout and purchase inherit promotion_name only when it is passed on the items[] of those events or when the last select_promotion for the same item_id occurred earlier in the same session; attribution never crosses a session boundary (30-minute inactivity timeout, new session at midnight in the property timezone) and is not carried across devices without a stitched user_id.
+  5️⃣ Exclusions: remove internal and QA traffic (internal IP filter, CMS preview and staging hostnames), known bots, and hits fired outside the promotion's scheduled start/end window in the store timezone, which indicate stale CDN cache and are logged to a data-quality exception table instead of the report.
+  6️⃣ Scope boundary: internal onsite promotions only; external campaign labels (utm_campaign, paid media campaign names, email subject lines) are acquisition dimensions and must never be written to promotion_name, and the same promotion shown in several slots keeps one name and is separated by creative_slot.
+  7️⃣ Cardinality and latency: a governed naming convention (season_theme_offer, lowercase, underscores, no dates beyond the season key) keeps distinct values per day well below the GA4 high-cardinality '(other)' threshold; daily BigQuery export lands roughly 24 hours after the event, so intraday trading decisions use the streaming export or GA4 realtime rather than the daily tables.
 
+Business Use Case: |
+  1️⃣ Site Merchandising Manager: at the Monday trading review, any promotion_name whose Promotion Click-Through Rate (promotion-click-through-rate) sits below the median of its creative_slot for seven consecutive days is swapped for the next creative in the promotion calendar or its homepage slot is reassigned to a better-performing promotion.
+  2️⃣ E-commerce Trading Lead with Finance: at each promotion's mid-flight checkpoint, promotion-attributed revenue and units per promotion_name are set against markdown cost from the promotion calendar, and promotions returning less gross margin than their discount cost are ended early rather than run to the scheduled end date.
+  3️⃣ CRM and Lifecycle Marketing: when a user fires select_promotion for a named promotion but records no purchase within 72 hours, the user enters a promotion-specific remarketing audience that receives the matching offer by email or push while the promotion is still live.
+  4️⃣ Creative and Content team: before renewing a seasonal promotion, the team compares creative_name variants within the same promotion_name on click-through rate and downstream add-to-cart rate and retires the weaker creative from the next season's asset brief.
 
+Dependencies:
+  Events: [view-promotion, select-promotion]
 
+Source Data: Digital Analytics (GA4) + Promotion Calendar (CMS)
 
+Report Attributes: |
+  promotion_id; creative_name; creative_slot; Promotion Type; Item List Name; Item ID; Page Type; Device Category; Session Default Channel Group
 
+Dashboard Usage: [Internal Promotion Performance, Onsite Merchandising and Slot Performance, Weekly Trading Review, Promotion Profitability (Revenue vs Markdown Cost)]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [promotion-type, item-id, item-list-name, item-brand, item-variant]
 
+Derived Dimensions: [creative-name, creative-slot]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +534,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-19T18:06:46.863+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-19T18:06:56.042+00:00
 
