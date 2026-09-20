@@ -1,5 +1,5 @@
 # Event: In-Store Return
-# Generated: 2026-09-19T18:28:13.144Z
+# Generated: 2026-09-20T00:24:29.204Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -53,7 +53,11 @@ Parameters: |
     "customer_id": "string - Hashed customer or loyalty identifier carried from the original order; never the raw email or card number"
   }
 
+Calculation Notes: |
+  ["1️⃣ Scope is online-purchased orders only: the event fires when channel_of_purchase = 'online' and channel_of_return = 'store'. Store-purchased returns, returns sent back by mail or carrier and third-party marketplace seller orders that the store cannot refund are excluded, and returns dropped at a carrier kiosk inside the store count as mail returns because the POS does not post the refund.","2️⃣ One event per posted return_id. A multi-line return is a single event with an items array; partial returns of the same order made on different visits are separate events that share a transaction_id. A return voided at the register on the same business day removes the event, and a later reversal is recorded as a negative adjustment against the original return_id, not a deletion.","3️⃣ Timing: the event is dated to return_timestamp (POS posting time), not the order date, and business-day reporting uses the store's local time zone. Order-to-return lag is return_timestamp minus order_timestamp; returns outside the policy window are flagged with within_policy_window = false and kept in the data, not dropped.","4️⃣ Not a return: BOPIS orders the customer never collected, orders refused at the pickup counter before handover, and pre-fulfilment cancellations are cancellations or unclaimed orders and must not fire this event. Only merchandise the customer has already received counts.","5️⃣ refund_value is net merchandise value excluding tax and original shipping, less restocking fees, converted to the reporting currency at the return-date FX rate. Even exchanges post with refund_value = 0 and refund_method = 'exchange'; they count toward return volume but add nothing to refunded value.","6️⃣ Order linkage: the transaction_id comes from a receipt barcode scan, OMS order lookup or tender lookup. Receipt-less returns that cannot be matched carry order_match_status = 'unmatched' and are excluded from online-order return rates, but they are kept for loss-prevention review and match-rate monitoring (target above 95%).","7️⃣ Late-arriving data: POS returns trickle in from stores that sync overnight or were offline, so daily figures stay provisional for 72 hours and the prior 3 days are reprocessed on each load. The return_reason is taken from the line level when captured; otherwise the header reason applies to every line."]
 
+Business Use Case: |
+  ["1️⃣ Merchandising reviews in-store returns weekly by SKU and store. When returned units of an online-only SKU at one store pass the store's weekly sell-through, the team either sends the stock back to the fulfilment centre or approves a local markdown, which prevents dead stock building up in the back room.","2️⃣ Finance runs the month-end close. It reallocates refund_value from store P&L to the e-commerce P&L using transaction_id, so store managers are not charged for online-order refunds and online net revenue reflects returns processed in stores.","3️⃣ Product and Customer Service watch return_reason daily. When 'size_fit' or 'not_as_described' goes above 30% of in-store returns for a product family over 14 days, they update the size guide and product page copy and brief store associates on the known issue.","4️⃣ Store Operations compares return counter volume by hour and store with staffing. Stores where BORIS volume peaks (for example the two weeks after the holidays) get dedicated return-desk staffing and targeted exchange offers to recover the refunded revenue."]
 
 Dependencies:
   Events: [purchase, return-initiated]
@@ -89,5 +93,5 @@ Source Data: Store POS + OMS Returns Ledger (Backend)
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-09-19T18:28:12.892+00:00
+    Last Modified At: 2026-09-20T00:24:28.99+00:00
 
