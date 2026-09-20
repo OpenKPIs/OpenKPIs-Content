@@ -1,7 +1,7 @@
 # Metric: Refund Amount
-# Generated: 2026-09-20T19:41:04.740Z
+# Generated: 2026-09-20T19:41:14.689Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Refund Amount
 Formula: SUM(refund_value) across all refund transactions with a refund date in the reporting period, where refund_value = refunded item value + refunded shipping + refunded tax per the finance revenue rule, converted to the reporting currency
@@ -11,30 +11,569 @@ Description: |
 
 Category: Monetization
 
+Tags: [metric, E-commerce: Returns, Refunds & Customer Support]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Monetization
 
+Scope: Event
 
+Measure Type: Currency
 
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
 
+GA4 Event: |
+  refund
 
+Adobe Event: |
+  Refund Completed
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "pageInstanceID": "returns-refund-confirmation-prod",
+      "page": {
+        "pageInfo": {
+          "pageID": "returns-refund-confirmation",
+          "pageName": "Returns: Refund Confirmation",
+          "destinationURL": "https://www.example.com/account/returns/confirmation",
+          "language": "en-US"
+        },
+        "category": {
+          "primaryCategory": "account",
+          "subCategory1": "returns"
+        }
+      },
+      "transaction": {
+        "transactionID": "TXN-10029384",
+        "total": {
+          "basePrice": 79.98,
+          "shipping": 4.99,
+          "tax": 6.6,
+          "currency": "USD",
+          "transactionTotal": 91.57
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU-8842",
+              "productName": "Merino Wool Crew Jumper",
+              "sku": "SKU-8842",
+              "manufacturer": "Northfell"
+            },
+            "category": {
+              "primaryCategory": "Apparel",
+              "subCategory1": "Knitwear"
+            },
+            "quantity": 2,
+            "price": {
+              "basePrice": 39.99,
+              "priceWithTax": 43.29,
+              "currency": "USD"
+            },
+            "attributes": {
+              "itemVariant": "Charcoal / M",
+              "returnReason": "size_too_small",
+              "refundedValue": 79.98
+            }
+          }
+        ],
+        "attributes": {
+          "refundID": "REF-55021",
+          "refundType": "partial",
+          "refundScope": "line_items",
+          "returnMethod": "carrier_dropoff",
+          "paymentType": "credit_card",
+          "originalOrderDate": "2026-09-02",
+          "refundDate": "2026-09-20",
+          "customerSegment": "returning",
+          "taxTreatment": "gross_of_tax"
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "refund",
+            "eventAction": "refund",
+            "type": "transaction",
+            "timeStamp": "2026-09-20T14:32:10.000Z",
+            "effect": "refund_issued"
+          },
+          "attributes": {
+            "transactionID": "TXN-10029384",
+            "refundID": "REF-55021",
+            "refundValue": 91.57,
+            "currency": "USD",
+            "refundType": "partial"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "refund",
+    "ecommerce": {
+      "transaction_id": "TXN-10029384",
+      "refund_id": "REF-55021",
+      "value": 91.57,
+      "currency": "USD",
+      "tax": 6.6,
+      "shipping": 4.99,
+      "refund_type": "partial",
+      "return_reason": "size_too_small",
+      "return_method": "carrier_dropoff",
+      "payment_type": "credit_card",
+      "refund_date": "2026-09-20",
+      "original_purchase_date": "2026-09-02",
+      "items": [
+        {
+          "item_id": "SKU-8842",
+          "item_name": "Merino Wool Crew Jumper",
+          "item_brand": "Northfell",
+          "item_category": "Apparel",
+          "item_category2": "Knitwear",
+          "item_variant": "Charcoal / M",
+          "price": 39.99,
+          "quantity": 2,
+          "currency": "USD",
+          "item_refund_reason": "size_too_small"
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "refund",
+    "eventInfo": {
+      "eventName": "Refund Completed",
+      "eventAction": "refund",
+      "path": "commerce.order",
+      "timeStamp": "2026-09-20T14:32:10.000Z"
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "TXN-10029384",
+        "purchaseOrderNumber": "TXN-10029384",
+        "currencyCode": "USD",
+        "priceTotal": 91.57,
+        "taxAmount": 6.6,
+        "shippingAmount": 4.99,
+        "payments": [
+          {
+            "transactionID": "REF-55021",
+            "paymentAmount": 91.57,
+            "paymentType": "credit_card",
+            "currencyCode": "USD"
+          }
+        ]
+      },
+      "refundType": "partial",
+      "returnReason": "size_too_small",
+      "returnMethod": "carrier_dropoff",
+      "refundDate": "2026-09-20",
+      "originalOrderDate": "2026-09-02"
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-8842",
+        "name": "Merino Wool Crew Jumper",
+        "quantity": 2,
+        "priceTotal": 79.98,
+        "currencyCode": "USD",
+        "selectedOptions": [
+          {
+            "attribute": "variant",
+            "value": "Charcoal / M"
+          }
+        ],
+        "productCategories": [
+          {
+            "categoryID": "apparel",
+            "categoryName": "Apparel"
+          },
+          {
+            "categoryID": "apparel-knitwear",
+            "categoryName": "Knitwear"
+          }
+        ]
+      }
+    ],
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "79162370923108136758377949432387",
+          "primary": true,
+          "authenticatedState": "authenticated"
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.backofficeCreditMemoIssued",
+    "timestamp": "2026-09-20T14:32:10.000Z",
+    "commerce": {
+      "order": {
+        "purchaseID": "TXN-10029384",
+        "purchaseOrderNumber": "TXN-10029384",
+        "currencyCode": "USD",
+        "priceTotal": 91.57,
+        "payments": [
+          {
+            "transactionID": "REF-55021",
+            "paymentAmount": 91.57,
+            "paymentType": "credit_card",
+            "currencyCode": "USD"
+          }
+        ]
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-8842",
+        "name": "Merino Wool Crew Jumper",
+        "quantity": 2,
+        "priceTotal": 79.98,
+        "currencyCode": "USD",
+        "productCategories": [
+          {
+            "categoryID": "apparel-knitwear",
+            "categoryName": "Knitwear"
+          }
+        ]
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar41": "partial",
+            "eVar42": "size_too_small",
+            "eVar43": "carrier_dropoff",
+            "eVar44": "REF-55021"
+          },
+          "props": {
+            "prop41": "refund|partial|size_too_small"
+          }
+        }
+      }
+    },
+    "_openkpis": {
+      "refund": {
+        "refundID": "REF-55021",
+        "refundType": "partial",
+        "refundValue": 91.57,
+        "refundTaxAmount": 6.6,
+        "refundShippingAmount": 4.99,
+        "refundDate": "2026-09-20",
+        "originalOrderDate": "2026-09-02",
+        "taxTreatment": "gross_of_tax"
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Refund Amount: value refunded in the period on a refund-date basis, as a positive magnitude in the reporting currency.
+  -- The order-cohort view (same refunds re-attributed to the purchase date) is a separate query and is not mixed in here.
+  DECLARE end_date DATE DEFAULT CURRENT_DATE();
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  -- Earlier refunds on the same order are read back so the cumulative cap per order is correct.
+  DECLARE history_days INT64 DEFAULT 365;
+  DECLARE reporting_currency STRING DEFAULT 'USD';
+  -- Tax and shipping composition mirrors the Revenue metric; set both from the finance revenue rule.
+  DECLARE revenue_includes_tax BOOL DEFAULT TRUE;
+  DECLARE revenue_includes_shipping BOOL DEFAULT TRUE;
+  -- FX policy: 'refund_date' matches the cash movement, 'order_date' preserves the order's reported margin.
+  DECLARE fx_basis STRING DEFAULT 'refund_date';
+  -- Refunds settle days after the request, so the trailing window is reported as provisional until close.
+  DECLARE restatement_window_days INT64 DEFAULT 45;
+  
+  WITH refund_events AS (
+    -- Pivots one row per refund event: identifiers, money parts and the context the exclusion list needs
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS refund_date,
+      event_timestamp,
+      MAX(IF(p.key = 'transaction_id', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING)), NULL)) AS transaction_id,
+      MAX(IF(p.key = 'refund_id', p.value.string_value, NULL)) AS refund_id,
+      MAX(IF(p.key = 'currency', p.value.string_value, NULL)) AS currency,
+      MAX(IF(p.key = 'refund_type', p.value.string_value, NULL)) AS refund_type,
+      MAX(IF(p.key = 'payment_type', p.value.string_value, NULL)) AS payment_type,
+      SAFE.PARSE_DATE('%Y-%m-%d', MAX(IF(p.key = 'original_purchase_date', p.value.string_value, NULL))) AS order_date,
+      MAX(IF(p.key = 'value', COALESCE(p.value.double_value, p.value.float_value, CAST(p.value.int_value AS FLOAT64)), NULL)) AS refund_value,
+      MAX(IF(p.key = 'tax', COALESCE(p.value.double_value, p.value.float_value, CAST(p.value.int_value AS FLOAT64)), NULL)) AS refund_tax,
+      MAX(IF(p.key = 'shipping', COALESCE(p.value.double_value, p.value.float_value, CAST(p.value.int_value AS FLOAT64)), NULL)) AS refund_shipping
+    FROM `your-project.analytics_123456789.events_*`, UNNEST(event_params) AS p
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL history_days DAY))
+                            AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'refund'
+    GROUP BY event_date, event_timestamp, user_pseudo_id
+  ),
+  deduped AS (
+    -- Keeps one row per transaction_id + refund_id: the on-screen send and the server-side send are the same refund
+    SELECT * EXCEPT (dedupe_rank)
+    FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY transaction_id, refund_id ORDER BY event_timestamp) AS dedupe_rank
+      FROM refund_events
+      WHERE transaction_id IS NOT NULL AND refund_id IS NOT NULL
+    )
+    WHERE dedupe_rank = 1
+  ),
+  reconciled AS (
+    -- The order/refund record wins wherever it disagrees with the tag, and supplies the amount originally captured
+    SELECT
+      d.refund_date,
+      d.event_timestamp,
+      d.transaction_id,
+      d.refund_id,
+      COALESCE(r.currency, d.currency) AS currency,
+      COALESCE(r.order_date, d.order_date) AS order_date,
+      COALESCE(r.refund_kind, d.refund_type) AS refund_kind,
+      COALESCE(r.payment_type, d.payment_type) AS payment_type,
+      ABS(COALESCE(r.refund_value, d.refund_value)) AS refund_value,
+      ABS(COALESCE(r.tax_amount, d.refund_tax, 0)) AS refund_tax,
+      ABS(COALESCE(r.shipping_amount, d.refund_shipping, 0)) AS refund_shipping,
+      ABS(r.order_captured_amount) AS order_captured_amount
+    FROM deduped AS d
+    LEFT JOIN `your-project.commerce.refunds` AS r
+      ON r.transaction_id = d.transaction_id AND r.refund_id = d.refund_id
+  ),
+  in_scope AS (
+    -- Excludes pre-capture cancellations and authorisation voids, chargebacks and disputes, and non-cash goodwill settlements
+    SELECT *
+    FROM reconciled
+    WHERE COALESCE(refund_kind, '') NOT IN ('cancellation', 'pre_capture_cancellation', 'authorisation_void', 'void', 'chargeback', 'dispute', 'store_credit', 'gift_card_reissue', 'loyalty_compensation')
+      AND COALESCE(payment_type, '') NOT IN ('store_credit', 'gift_card', 'loyalty_points')
+  ),
+  composed AS (
+    -- Builds the refunded value with the same tax and shipping composition the Revenue metric uses
+    SELECT
+      *,
+      refund_value
+        - IF(revenue_includes_tax, 0, refund_tax)
+        - IF(revenue_includes_shipping, 0, refund_shipping) AS refund_component
+    FROM in_scope
+  ),
+  sequenced AS (
+    -- Running refunded value per order across its sequential partial refunds, earlier refunds included
+    SELECT
+      *,
+      SUM(refund_component) OVER (
+        PARTITION BY transaction_id
+        ORDER BY event_timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS cumulative_refunded
+    FROM composed
+  ),
+  capped AS (
+    -- Caps the cumulative refunded value of an order at the amount originally captured
+    SELECT
+      * EXCEPT (refund_component, cumulative_refunded),
+      IF(
+        order_captured_amount IS NULL,
+        refund_component,
+        GREATEST(
+          LEAST(cumulative_refunded, order_captured_amount)
+            - LEAST(cumulative_refunded - refund_component, order_captured_amount),
+          0
+        )
+      ) AS refund_amount
+    FROM sequenced
+  ),
+  converted AS (
+    -- Converts each refund to the reporting currency on the documented FX basis and keeps the reporting window
+    SELECT
+      c.refund_date,
+      c.refund_amount * IF(c.currency = reporting_currency, 1, fx.rate) AS refund_amount_reporting,
+      c.refund_date > DATE_SUB(end_date, INTERVAL restatement_window_days DAY) AS is_provisional
+    FROM capped AS c
+    LEFT JOIN `your-project.finance.fx_daily_rates` AS fx
+      ON fx.from_currency = c.currency
+     AND fx.to_currency = reporting_currency
+     AND fx.rate_date = IF(fx_basis = 'order_date', c.order_date, c.refund_date)
+    WHERE c.refund_date BETWEEN start_date AND end_date
+  )
+  -- Refund Amount per refund date
+  SELECT
+    refund_date,
+    reporting_currency AS currency,
+    ROUND(SUM(refund_amount_reporting), 2) AS refund_amount,
+    is_provisional
+  FROM converted
+  GROUP BY refund_date, is_provisional
+  ORDER BY refund_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Refund Amount: value refunded in the period on a refund-date basis, as a positive magnitude in the reporting currency.
+  -- The order-cohort view (same refunds re-attributed to the purchase date) is a separate query and is not mixed in here.
+  WITH params AS (
+    -- Reporting window, composition, FX policy and restatement window; history_days reads earlier refunds on the same order
+    SELECT
+      CAST(CURRENT_DATE - INTERVAL '90' DAY AS DATE) AS start_date,
+      CAST(CURRENT_DATE AS DATE) AS end_date,
+      365 AS history_days,
+      'USD' AS reporting_currency,
+      true AS revenue_includes_tax,
+      true AS revenue_includes_shipping,
+      'refund_date' AS fx_basis,
+      45 AS restatement_window_days
+  ),
+  refund_events AS (
+    -- One row per credit-memo event: identifiers, money parts and the context the exclusion list needs
+    SELECT
+      CAST(e.timestamp AS DATE) AS refund_date,
+      e.timestamp AS event_timestamp,
+      e.commerce.order.purchaseID AS transaction_id,
+      e._openkpis.refund.refundID AS refund_id,
+      e.commerce.order.currencyCode AS currency,
+      CAST(e._openkpis.refund.originalOrderDate AS DATE) AS order_date,
+      e._openkpis.refund.refundType AS refund_type,
+      e.commerce.order.payments[0].paymentType AS payment_type,
+      e._openkpis.refund.refundValue AS refund_value,
+      e._openkpis.refund.refundTaxAmount AS refund_tax,
+      e._openkpis.refund.refundShippingAmount AS refund_shipping
+    FROM experience_events AS e
+    CROSS JOIN params AS p
+    WHERE e.eventType = 'commerce.backofficeCreditMemoIssued'
+      AND CAST(e.timestamp AS DATE) BETWEEN p.start_date - MAKE_INTERVAL(0, 0, 0, p.history_days) AND p.end_date
+      AND e.commerce.order.purchaseID IS NOT NULL
+      AND e._openkpis.refund.refundID IS NOT NULL
+  ),
+  deduped AS (
+    -- Keeps one row per transaction_id + refund_id: the on-screen send and the server-side send are the same refund
+    SELECT
+      refund_date, event_timestamp, transaction_id, refund_id, currency, order_date,
+      refund_type, payment_type, refund_value, refund_tax, refund_shipping
+    FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY transaction_id, refund_id ORDER BY event_timestamp) AS dedupe_rank
+      FROM refund_events
+    )
+    WHERE dedupe_rank = 1
+  ),
+  reconciled AS (
+    -- The order/refund record wins wherever it disagrees with the tag, and supplies the amount originally captured
+    SELECT
+      d.refund_date,
+      d.event_timestamp,
+      d.transaction_id,
+      d.refund_id,
+      COALESCE(r.currency, d.currency) AS currency,
+      COALESCE(r.order_date, d.order_date) AS order_date,
+      COALESCE(r.refund_kind, d.refund_type) AS refund_kind,
+      COALESCE(r.payment_type, d.payment_type) AS payment_type,
+      ABS(COALESCE(r.refund_value, d.refund_value)) AS refund_value,
+      ABS(COALESCE(r.tax_amount, d.refund_tax, 0)) AS refund_tax,
+      ABS(COALESCE(r.shipping_amount, d.refund_shipping, 0)) AS refund_shipping,
+      ABS(r.order_captured_amount) AS order_captured_amount
+    FROM deduped AS d
+    LEFT JOIN commerce_refund_records AS r
+      ON r.transaction_id = d.transaction_id AND r.refund_id = d.refund_id
+  ),
+  in_scope AS (
+    -- Excludes pre-capture cancellations and authorisation voids, chargebacks and disputes, and non-cash goodwill settlements
+    SELECT *
+    FROM reconciled
+    WHERE COALESCE(refund_kind, '') NOT IN ('cancellation', 'pre_capture_cancellation', 'authorisation_void', 'void', 'chargeback', 'dispute', 'store_credit', 'gift_card_reissue', 'loyalty_compensation')
+      AND COALESCE(payment_type, '') NOT IN ('store_credit', 'gift_card', 'loyalty_points')
+  ),
+  composed AS (
+    -- Builds the refunded value with the same tax and shipping composition the Revenue metric uses
+    SELECT
+      s.*,
+      s.refund_value
+        - CASE WHEN p.revenue_includes_tax THEN 0 ELSE s.refund_tax END
+        - CASE WHEN p.revenue_includes_shipping THEN 0 ELSE s.refund_shipping END AS refund_component
+    FROM in_scope AS s
+    CROSS JOIN params AS p
+  ),
+  sequenced AS (
+    -- Running refunded value per order across its sequential partial refunds, earlier refunds included
+    SELECT
+      *,
+      SUM(refund_component) OVER (
+        PARTITION BY transaction_id
+        ORDER BY event_timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS cumulative_refunded
+    FROM composed
+  ),
+  capped AS (
+    -- Caps the cumulative refunded value of an order at the amount originally captured
+    SELECT
+      refund_date, event_timestamp, transaction_id, refund_id, currency, order_date,
+      CASE
+        WHEN order_captured_amount IS NULL THEN refund_component
+        ELSE GREATEST(
+          LEAST(cumulative_refunded, order_captured_amount)
+            - LEAST(cumulative_refunded - refund_component, order_captured_amount),
+          0
+        )
+      END AS refund_amount
+    FROM sequenced
+  ),
+  converted AS (
+    -- Converts each refund to the reporting currency on the documented FX basis and keeps the reporting window
+    SELECT
+      c.refund_date,
+      c.refund_amount * CASE WHEN c.currency = p.reporting_currency THEN 1 ELSE fx.rate END AS refund_amount_reporting,
+      c.refund_date > p.end_date - MAKE_INTERVAL(0, 0, 0, p.restatement_window_days) AS is_provisional,
+      p.reporting_currency
+    FROM capped AS c
+    CROSS JOIN params AS p
+    LEFT JOIN finance_fx_daily_rates AS fx
+      ON fx.from_currency = c.currency
+     AND fx.to_currency = p.reporting_currency
+     AND fx.rate_date = CASE WHEN p.fx_basis = 'order_date' THEN c.order_date ELSE c.refund_date END
+    WHERE c.refund_date BETWEEN p.start_date AND p.end_date
+  )
+  -- Refund Amount per refund date
+  SELECT
+    refund_date,
+    reporting_currency AS currency,
+    ROUND(SUM(refund_amount_reporting), 2) AS refund_amount,
+    is_provisional
+  FROM converted
+  GROUP BY refund_date, reporting_currency, is_provisional
+  ORDER BY refund_date;
 
+Calculation Notes: |
+  1️⃣ The metric is refund-date based, not order-date based: a refund issued this month against an order placed two months ago lands in this month. Order-cohort refund analysis (used for margin and CLV work) requires the same refund records re-attributed to the original purchase date and must be labelled as a separate cohort view so the two never get compared against the same revenue denominator.,2️⃣ Partial refunds are summed at their actual refunded value, never at the order value. A single transaction_id can carry several sequential refunds (line return, then a shipping credit, then a goodwill price adjustment); each is counted once and the cumulative refunded value for that order is capped at the originally captured amount.,3️⃣ Tax and shipping follow the finance revenue rule and must mirror the composition of the Revenue metric: if Revenue is reported net of tax, the GA4 refund event's `value` and the refund record must also exclude tax, otherwise Refund Rate is structurally overstated. Publish the chosen treatment as part of the definition — gross-of-tax refunds against net-of-tax revenue is the single most common error in this measure.,4️⃣ Refunds are captured in the order's transaction currency; mixed-currency sums are invalid until converted. Apply one documented policy — conversion at the original order rate (preserves the order's reported margin) or at the refund-date rate (matches the cash movement) — and keep it consistent with how Revenue is converted, since FX drift between the two dates otherwise shows up as phantom refund value.,5️⃣ Exclusions: order cancellations and authorisation voids before payment capture (no funds moved, so they belong to Orders Cancelled, not here), chargebacks and payment disputes (settled through the processor and tracked separately as a fraud/loss measure), store credit, gift-card reissues and loyalty-point compensation (non-cash goodwill). Each of these is reported alongside Refund Amount, never inside it.,6️⃣ Deduplicate before summing: GA4 `refund` events can fire on both the confirmation screen and a server-side send, so dedupe on transaction_id plus refund identifier and treat the order/refund record as the system of record whenever the two disagree. The metric is always stored as a positive magnitude; the negative sign is applied only where it is subtracted from gross revenue, so double-negation is avoided in downstream net-revenue logic.,7️⃣ Refunds settle days after the customer request, so the most recent periods are systematically understated. Keep a rolling restatement window of roughly 30–45 days — aligned to the published returns window — before locking a period for close, and flag any dashboard view of the trailing two weeks as provisional.
 
+Business Use Case: |
+  1️⃣ The Finance controller, during monthly close, reconciles Refund Amount against payment-processor settlement files and posts the reconciled figure as the deduction from gross revenue, escalating any variance above the materiality threshold to the payments team before the ledger is locked.,2️⃣ The Merchandising manager reviews Refund Amount broken down by SKU, category and variant each week and pulls, re-sizes or re-photographs the items whose refunded value exceeds the category norm, protecting margin on the lines that sell well but return badly.,3️⃣ The Customer Service lead monitors the daily value trend and, when a spike breaks the control band, drills into return reason and support channel to isolate the defect — damaged-in-transit lot, misleading PDP copy, a sizing change — and updates agent macros and the returns policy accordingly.,4️⃣ The Revenue Management team subtracts campaign- and cohort-level Refund Amount from gross revenue before recalculating ROAS and lifetime value, so that paid media budgets are set on net contribution rather than on gross orders that are later refunded.
 
+Dependencies:
+  Events: [refund, purchase]
+  Metrics: [revenue]
+  Dimensions: [refund-type, currency, transaction-id, return-reason]
 
+Source Data: Digital Analytics (GA4) + Order & Refund Records (Shopify, Adobe Commerce)
 
+Report Attributes: |
+  Item ID / SKU; Item Category; Item Brand; Refund Type; Return Reason; Return Method; Payment Type; Currency; Default Channel Grouping; Device Category; Customer Segment
 
+Dashboard Usage: [Returns & Refunds Overview, Net Revenue & Finance Close Pack, Merchandising Quality Scorecard, Customer Service Performance Dashboard, Executive Trading Summary]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [revenue, returns-completed, returns-initiated, exchanges, discount-amount, tax-amount]
 
+Derived KPIs: [refund-rate, return-rate, average-order-value]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +583,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-20T19:41:03.747+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-20T19:41:14.06+00:00
 
