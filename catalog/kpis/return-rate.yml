@@ -1,7 +1,7 @@
 # KPI: Return Rate
-# Generated: 2026-09-20T19:59:59.789Z
+# Generated: 2026-09-20T20:00:08.013Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Return Rate
 Formula: (Units Returned from Orders Placed in the Cohort Period / Units Sold in the Same Cohort Period) × 100
@@ -11,29 +11,379 @@ Description: |
 
 Category: Operations
 
+Tags: [kpi, E-commerce: Returns, Refunds & Customer Support]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Generic
 
+Scope: Global
 
+Measure Type: Percentage
 
+Aggregation Window: Weekly, Monthly, Quarterly
 
+GA4 Event: |
+  refund
 
+Adobe Event: |
+  Return Request Submitted
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "refund",
+            "eventAction": "return_request_submitted",
+            "timeStamp": "2026-09-20T14:22:31Z"
+          },
+          "category": {
+            "primaryCategory": "returns"
+          },
+          "attributes": {
+            "returnStage": "initiated",
+            "returnReason": "size_fit",
+            "returnMethod": "carrier_dropoff",
+            "refundType": "original_payment_method",
+            "returnWindowDays": 30,
+            "originalOrderDate": "2026-08-28",
+            "unitsRequested": 1,
+            "fulfillmentStatus": "delivered"
+          }
+        }
+      ],
+      "transaction": {
+        "transactionID": "ORD-10045872",
+        "profile": {
+          "profileInfo": {
+            "profileID": "u-88213"
+          }
+        },
+        "total": {
+          "currency": "USD",
+          "transactionTotal": 84
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU-44821",
+              "productName": "Merino Crew Sweater",
+              "manufacturer": "Northbound"
+            },
+            "category": {
+              "primaryCategory": "Apparel/Knitwear"
+            },
+            "quantity": 1,
+            "price": {
+              "basePrice": 84,
+              "currency": "USD"
+            }
+          }
+        ]
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "refund",
+    "ecommerce": {
+      "transaction_id": "ORD-10045872",
+      "currency": "USD",
+      "value": 84,
+      "items": [
+        {
+          "item_id": "SKU-44821",
+          "item_name": "Merino Crew Sweater",
+          "item_brand": "Northbound",
+          "item_category": "Apparel",
+          "item_category2": "Knitwear",
+          "price": 84,
+          "quantity": 1
+        }
+      ]
+    },
+    "return_stage": "initiated",
+    "return_reason": "size_fit",
+    "return_method": "carrier_dropoff",
+    "refund_type": "original_payment_method",
+    "return_window_days": 30,
+    "original_order_date": "2026-08-28",
+    "fulfillment_status": "delivered"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "refund",
+    "eventInfo": {
+      "path": "commerce.returns"
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-10045872",
+        "currencyCode": "USD",
+        "priceTotal": 84,
+        "purchaseDate": "2026-08-28"
+      },
+      "returns": {
+        "returnStage": "initiated",
+        "returnReason": "size_fit",
+        "returnMethod": "carrier_dropoff",
+        "refundType": "original_payment_method",
+        "returnWindowDays": 30,
+        "unitsRequested": 1,
+        "fulfillmentStatus": "delivered"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-44821",
+        "name": "Merino Crew Sweater",
+        "brand": "Northbound",
+        "category": "Apparel/Knitwear",
+        "quantity": 1,
+        "priceTotal": 84
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.order.refunded",
+    "timestamp": "2026-09-20T14:22:31Z",
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-10045872",
+        "currencyCode": "USD",
+        "priceTotal": 84
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-44821",
+        "name": "Merino Crew Sweater",
+        "quantity": 1,
+        "priceTotal": 84
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar41": "size_fit",
+            "eVar42": "carrier_dropoff",
+            "eVar43": "original_payment_method",
+            "eVar44": "initiated"
+          },
+          "props": {
+            "prop41": "ORD-10045872"
+          }
+        }
+      }
+    },
+    "_openkpis": {
+      "returns": {
+        "originalOrderDate": "2026-08-28",
+        "returnWindowDays": 30,
+        "unitsRequested": 1,
+        "returnStage": "initiated",
+        "fulfillmentStatus": "delivered"
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Units-based Return Rate from the commerce order and returns tables replicated into
+  -- BigQuery. The clickstream events_* tables capture return initiation only and are never
+  -- used for this number; the order-based variant is reported separately, never mixed in.
+  -- Counter returns with no stitched originating order id carry no order cohort and cannot
+  -- be attributed here; they are reported separately.
+  
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 365 DAY);
+  DECLARE end_date DATE DEFAULT CURRENT_DATE();
+  DECLARE return_window_days INT64 DEFAULT 30;
+  DECLARE inspection_lag_days INT64 DEFAULT 14;
+  
+  -- Denominator base: units sold and delivered, at order-line grain, keyed to the order date
+  WITH delivered_lines AS (
+    SELECT
+      o.order_id,
+      ol.order_line_id,
+      DATE(o.order_datetime) AS order_date,
+      MAX(DATE(f.delivered_at)) AS delivered_date,
+      SUM(f.quantity_delivered) AS units_delivered
+    FROM `your-project.commerce.orders` AS o
+    JOIN `your-project.commerce.order_line_items` AS ol
+      ON ol.order_id = o.order_id
+    JOIN `your-project.commerce.fulfillment_line_items` AS f
+      ON f.order_id = ol.order_id AND f.order_line_id = ol.order_line_id
+    WHERE DATE(o.order_datetime) BETWEEN start_date AND end_date
+      AND o.order_status NOT IN ('cancelled', 'voided')
+      AND f.fulfillment_status = 'delivered'  -- drops never-shipped, undelivered, lost-in-transit and refused shipments
+    GROUP BY o.order_id, ol.order_line_id, order_date
+    HAVING SUM(f.quantity_delivered) > 0
+  ),
+  
+  -- Numerator base: RMA units received and dispositioned, attributed back to the originating order line
+  returned_lines AS (
+    SELECT
+      d.order_id,
+      d.order_line_id,
+      SUM(rl.quantity_received) AS units_returned
+    FROM `your-project.commerce.return_line_items` AS rl
+    JOIN `your-project.commerce.returns` AS r
+      ON r.return_id = rl.return_id
+    JOIN delivered_lines AS d
+      ON d.order_id = r.order_id AND d.order_line_id = rl.order_line_id
+    WHERE r.received_at IS NOT NULL                                  -- initiations never received are excluded
+      AND r.return_status NOT IN ('expired', 'cancelled', 'rejected') -- expired or rejected RMAs are excluded
+      AND rl.inspection_result = 'accepted'                           -- lines failing inspection are excluded
+      AND rl.disposition IS NOT NULL                                  -- received and dispositioned lines only
+      AND r.return_type NOT IN ('goodwill_credit', 'appeasement', 'no_return_refund', 'price_adjustment', 'chargeback')
+      AND DATE_DIFF(DATE(r.requested_at), d.delivered_date, DAY) <= return_window_days
+      AND rl.quantity_received > 0
+    GROUP BY d.order_id, d.order_line_id
+  ),
+  
+  -- Cohort roll-up: returned units against the full delivered-unit base of the same order cohort
+  cohort AS (
+    SELECT
+      DATE_TRUNC(d.order_date, MONTH) AS cohort_month,
+      SUM(d.units_delivered) AS units_delivered,
+      SUM(COALESCE(rt.units_returned, 0)) AS units_returned
+    FROM delivered_lines AS d
+    LEFT JOIN returned_lines AS rt
+      ON rt.order_id = d.order_id AND rt.order_line_id = d.order_line_id
+    GROUP BY cohort_month
+  )
+  
+  -- Return Rate per order cohort, immature cohorts flagged rather than dropped
+  SELECT
+    cohort_month,
+    units_delivered,
+    units_returned,
+    ROUND(SAFE_DIVIDE(units_returned, units_delivered) * 100, 2) AS return_rate_pct,
+    DATE_ADD(LAST_DAY(cohort_month), INTERVAL return_window_days + inspection_lag_days DAY) <= CURRENT_DATE() AS is_mature_cohort
+  FROM cohort
+  ORDER BY cohort_month;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Units-based Return Rate from the commerce order and returns datasets ingested into AEP.
+  -- The ExperienceEvent clickstream dataset captures return initiation only and is never used
+  -- for this number; the order-based variant is reported separately, never mixed in.
+  -- Counter returns with no stitched originating order id carry no order cohort and cannot
+  -- be attributed here; they are reported separately.
+  
+  -- Relative reporting window, return window and transit/inspection lag
+  WITH params AS (
+    SELECT
+      current_date - interval '365' day AS start_date,
+      current_date AS end_date,
+      30 AS return_window_days,
+      14 AS inspection_lag_days
+  ),
+  
+  -- Denominator base: units sold and delivered, at order-line grain, keyed to the order date
+  delivered_lines AS (
+    SELECT
+      o.order_id,
+      ol.order_line_id,
+      date(o.order_datetime) AS order_date,
+      max(date(f.delivered_at)) AS delivered_date,
+      sum(f.quantity_delivered) AS units_delivered
+    FROM commerce_orders_dataset o
+    JOIN commerce_order_line_items_dataset ol
+      ON ol.order_id = o.order_id
+    JOIN commerce_fulfillment_line_items_dataset f
+      ON f.order_id = ol.order_id AND f.order_line_id = ol.order_line_id
+    CROSS JOIN params p
+    WHERE date(o.order_datetime) BETWEEN p.start_date AND p.end_date
+      AND o.order_status NOT IN ('cancelled', 'voided')
+      AND f.fulfillment_status = 'delivered'  -- drops never-shipped, undelivered, lost-in-transit and refused shipments
+    GROUP BY o.order_id, ol.order_line_id, date(o.order_datetime)
+    HAVING sum(f.quantity_delivered) > 0
+  ),
+  
+  -- Numerator base: RMA units received and dispositioned, attributed back to the originating order line
+  returned_lines AS (
+    SELECT
+      d.order_id,
+      d.order_line_id,
+      sum(rl.quantity_received) AS units_returned
+    FROM commerce_return_line_items_dataset rl
+    JOIN commerce_returns_dataset r
+      ON r.return_id = rl.return_id
+    JOIN delivered_lines d
+      ON d.order_id = r.order_id AND d.order_line_id = rl.order_line_id
+    CROSS JOIN params p
+    WHERE r.received_at IS NOT NULL                                   -- initiations never received are excluded
+      AND r.return_status NOT IN ('expired', 'cancelled', 'rejected') -- expired or rejected RMAs are excluded
+      AND rl.inspection_result = 'accepted'                           -- lines failing inspection are excluded
+      AND rl.disposition IS NOT NULL                                  -- received and dispositioned lines only
+      AND r.return_type NOT IN ('goodwill_credit', 'appeasement', 'no_return_refund', 'price_adjustment', 'chargeback')
+      AND datediff(date(r.requested_at), d.delivered_date) <= p.return_window_days
+      AND rl.quantity_received > 0
+    GROUP BY d.order_id, d.order_line_id
+  ),
+  
+  -- Cohort roll-up: returned units against the full delivered-unit base of the same order cohort
+  cohort AS (
+    SELECT
+      date_trunc('month', d.order_date) AS cohort_month,
+      sum(d.units_delivered) AS units_delivered,
+      sum(coalesce(rt.units_returned, 0)) AS units_returned
+    FROM delivered_lines d
+    LEFT JOIN returned_lines rt
+      ON rt.order_id = d.order_id AND rt.order_line_id = d.order_line_id
+    GROUP BY date_trunc('month', d.order_date)
+  )
+  
+  -- Return Rate per order cohort, immature cohorts flagged rather than dropped
+  SELECT
+    c.cohort_month,
+    c.units_delivered,
+    c.units_returned,
+    round(c.units_returned * 100.0 / nullif(c.units_delivered, 0), 2) AS return_rate_pct,
+    date_add(last_day(c.cohort_month), p.return_window_days + p.inspection_lag_days) <= current_date AS is_mature_cohort
+  FROM cohort c
+  CROSS JOIN params p
+  ORDER BY c.cohort_month;
 
+Calculation Notes: |
+  1️⃣ Units-based is the primary variant and the one reported here: every returned unit is counted against the unit that was sold, so multi-unit lines contribute the returned quantity, not the whole line. The order-based variant (orders with at least one returned line ÷ orders placed) is kept as a secondary read for logistics and support capacity planning; the two are never mixed in the same trend or benchmark.,2️⃣ Cohort alignment is mandatory: returns are attributed back to the order date of the originating order, never to the date the return was received. Reporting a calendar-period numerator over a calendar-period denominator understates the rate whenever volume is growing, because the return-window lag places today's returns against last period's sales.,3️⃣ A cohort is immature until the full return window plus the average transit-and-inspection lag has elapsed (commonly 30 days plus 7–14 days). Immature cohorts are flagged, not hidden, and the series is restated as they age; only matured cohorts are used for supplier scorecards, benchmarks and targets.,4️⃣ The denominator is the full base population of sold and delivered units in the cohort — not units with a return request, not units flagged returnable. Cancelled orders, orders that were never shipped, undelivered or lost-in-transit shipments and refused deliveries are removed from both numerator and denominator so the rate measures post-delivery customer rejection only.,5️⃣ Refunds issued without a physical return (goodwill credits, appeasements, price adjustments, chargebacks) are excluded from the numerator; they belong to Refund Rate. Exchanges count once as a returned unit and separately as a new sold unit in the cohort in which the replacement order was placed.,6️⃣ Return completion is sourced from the commerce order and returns tables (RMA received and dispositioned), not from clickstream. Return initiations that are never received, expire or are rejected at inspection are excluded from the numerator and are tracked through Return Initiation Rate instead.,7️⃣ In-store returns of online orders are included when the original order identifier is captured at the counter and stitched back to the digital order; unstitched counter returns are reported separately so the online rate is neither inflated nor silently under-counted.
 
+Business Use Case: |
+  1️⃣ The Merchandising category manager reviews matured-cohort Return Rate by Item Category and Item Brand each month and, when a style breaches the category threshold, opens a supplier quality case, corrects the size chart and PDP imagery, or pulls the style from promotional placements.,2️⃣ The Site Merchandising team pairs Return Rate with Return Reason on the top 200 revenue SKUs and, when fit or 'not as described' dominates, prioritises enriched PDP content, fit guidance and additional imagery for the next content sprint.,3️⃣ Finance uses matured cohort rates by category to set the returns reserve and to re-forecast net revenue and reverse-logistics cost, replacing flat historical assumptions in the quarterly plan.,4️⃣ The Customer Service lead monitors Return Rate by Return Method against contact volume and shifts staffing and self-service content toward the methods and reasons that generate the most agent-assisted returns.
 
+Dependencies:
+  Events: [return-initiated, refund-issued, in-store-return]
+  Metrics: [units-sold, returns-initiated, refund-amount, exchanges]
+  Dimensions: [return-reason, return-method, refund-type]
+  KPIs: [refund-rate]
 
+Source Data: Digital Analytics (GA4) + Commerce Order & Returns Tables (Shopify / Adobe Commerce)
 
+Report Attributes: |
+  Return Reason; Return Method; Item Category; Item Brand; Refund Type
 
+Dashboard Usage: [Returns & Refunds Performance, Merchandising Quality Scorecard, Post-Purchase Experience Dashboard]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [refund-rate, customer-satisfaction-score, first-contact-resolution-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +393,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-20T19:59:59.54+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-20T20:00:07.665+00:00
 
