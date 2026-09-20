@@ -1,12 +1,12 @@
 # Dimension: Store Inventory Status
-# Generated: 2026-09-20T00:32:07.392Z
+# Generated: 2026-09-20T01:33:39.419Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Store Inventory Status
 
 Description: |
-  Retail store-level specialisation of the generic item-level Stock Status concept: it records the availability state — In Stock, Low Stock or Out of Stock — that was displayed to the shopper for the requested item at the store they selected, at the moment of the check. The implementation differs in substance from the catalog-wide concept because the value is resolved per store rather than per item, is keyed by store_id on the store inventory check, is sourced from store-level salable quantity rather than the global catalog, and gates whether a BOPIS order can be placed at all.
+  Retail store-level availability state — In Stock, Low Stock or Out of Stock — that was displayed to the shopper for the requested item at the store they selected, at the moment of the check. The value is resolved per store rather than per item: it is keyed by store_id on the store inventory check, is sourced from store-level salable quantity rather than the global catalog, and gates whether a BOPIS order can be placed at all. A store-context event that arrives without a resolved availability label is reported as (not set), the single unknown bucket, so the complete value set is In Stock, Low Stock, Out of Stock or (not set).
 
 Category: Conversion
 
@@ -203,10 +203,11 @@ Google Analytics SQL: |
   -- event payload at the moment the store inventory check resolved. No join to a live or
   -- current inventory position is performed anywhere below, so replenishment after the fact
   -- can never restate an Out of Stock experience.
-  -- Reference tables (store master, product catalog) are used for LABELS ONLY.
+  -- Store and item labels are read from the event payload itself; no reference joins are used.
+  -- Window: the 28 complete days ending yesterday, matching the AEP script exactly.
   
-  DECLARE start_date STRING DEFAULT FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 27 DAY));
-  DECLARE end_date   STRING DEFAULT FORMAT_DATE('%Y%m%d', CURRENT_DATE());
+  DECLARE start_date STRING DEFAULT FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 28 DAY));
+  DECLARE end_date   STRING DEFAULT FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY));
   
   WITH
   -- 1) Base population: every candidate event, with event-scoped parameters pivoted.
@@ -284,9 +285,10 @@ Google Analytics SQL: |
     LEFT JOIN UNNEST(b.items) AS it
   ),
   
-  -- 3) Normalise to the three shopper-visible values. Events that carry store context but no
-  --    status keep the '(not set)' label and stay in the population, so every share below is
-  --    measured against the full base of store-context events.
+  -- 3) Normalise to the documented value set: the three shopper-visible states plus the
+  --    '(not set)' unknown bucket for a store-context event that carried no resolved label.
+  --    Any other raw string also resolves to '(not set)' — free-text labels are rejected at
+  --    collection and are never passed through as dimension values.
   typed AS (
     SELECT
       g.*,
@@ -294,12 +296,24 @@ Google Analytics SQL: |
         WHEN 'in stock'     THEN 'In Stock'
         WHEN 'low stock'    THEN 'Low Stock'
         WHEN 'out of stock' THEN 'Out of Stock'
-        WHEN ''             THEN '(not set)'
-        ELSE IFNULL(g.store_inventory_status_raw, '(not set)')
+        ELSE '(not set)'
       END                                                                   AS store_inventory_status,
       SAFE_CAST(g.status_checked_at_raw AS TIMESTAMP)                       AS status_checked_at,
       (g.store_id IS NOT NULL AND g.store_id <> '')                         AS has_store_context
     FROM item_grain g
+  ),
+  
+  -- 4) Session resolution: a session takes the status of the LAST check per item-store pair
+  --    inside the 30-minute session window, so one session is never counted under every
+  --    status it encountered for the same item at the same store.
+  resolved AS (
+    SELECT
+      t.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY t.session_key, t.item_id, t.store_id
+        ORDER BY COALESCE(t.status_checked_at, t.event_ts) DESC, t.event_ts DESC
+      ) = 1                                                                 AS is_last_check_in_session
+    FROM typed t
   )
   
   -- ============================================================
@@ -311,7 +325,7 @@ Google Analytics SQL: |
     t.store_inventory_status,
     t.unified_event_name,
     COUNT(*)                                                                AS event_occurrences,
-    COUNT(DISTINCT t.session_key)                                           AS sessions,
+    COUNT(DISTINCT IF(t.is_last_check_in_session, t.session_key, NULL))     AS sessions,
     COUNT(DISTINCT t.user_pseudo_id)                                        AS users,
     COUNT(DISTINCT t.item_id)                                               AS distinct_items,
     COUNT(DISTINCT t.store_id)                                              AS distinct_stores,
@@ -320,22 +334,21 @@ Google Analytics SQL: |
                                                                             AS pct_of_event_population,
     MIN(t.status_checked_at)                                                AS first_status_checked_at,
     MAX(t.status_checked_at)                                                AS last_status_checked_at
-  FROM typed t
+  FROM resolved t
   WHERE t.has_store_context
   GROUP BY t.store_inventory_status, t.unified_event_name
   ORDER BY event_occurrences DESC;
   
   -- ============================================================
   -- B. Item x store exposure: which item-store pairs shoppers are most often shown as
-  --    unavailable. Labels come from reference tables; the status itself is never re-derived.
+  --    unavailable. Store and item labels are taken from the event payload itself; the status
+  --    is never re-derived.
   -- ============================================================
   SELECT
     t.store_id,
-    COALESCE(s.store_name, MAX(t.store_name_evt))                           AS store_name,
-    s.store_format,
-    s.region                                                                AS store_region,
+    MAX(t.store_name_evt)                                                   AS store_name,
     t.item_id,
-    COALESCE(p.item_display_name, ANY_VALUE(t.item_name))                   AS item_name,
+    ANY_VALUE(t.item_name)                                                  AS item_name,
     ANY_VALUE(t.item_category)                                              AS item_category,
     COUNT(*)                                                                AS store_context_events,
     COUNTIF(t.store_inventory_status = 'In Stock')                          AS in_stock_events,
@@ -345,23 +358,18 @@ Google Analytics SQL: |
     ROUND(100 * COUNTIF(t.store_inventory_status = 'Out of Stock') / COUNT(*), 2)
                                                                             AS pct_out_of_stock_exposure,
     ROUND(100 * COUNTIF(t.store_inventory_status IN ('Low Stock', 'Out of Stock')) / COUNT(*), 2)
-                                                                            AS pct_constrained_exposure,
-    ROUND(100 * COUNTIF(t.unified_event_name = 'add_to_cart') / COUNT(*), 2)
-                                                                            AS pct_events_reaching_add_to_cart
+                                                                            AS pct_constrained_exposure
   FROM typed t
-  LEFT JOIN `your-project.reference.store_master` s   -- labels only (name, format, region)
-    ON s.store_id = t.store_id
-  LEFT JOIN `your-project.reference.product_catalog` p -- labels only (display name)
-    ON p.item_id = t.item_id
   WHERE t.has_store_context
-  GROUP BY t.store_id, s.store_name, s.store_format, s.region, t.item_id, p.item_display_name
-  HAVING store_context_events >= 50
-  ORDER BY out_of_stock_events DESC, store_context_events DESC
-  LIMIT 500;
+  GROUP BY t.store_id, t.item_id
+  ORDER BY out_of_stock_events DESC, store_context_events DESC;
   
   -- ============================================================
-  -- C. Daily trend and collection coverage. The denominator is every candidate event in the
-  --    window, store context present or not, so gaps in the tagging stay visible.
+  -- C. Daily trend and collection coverage. The coverage columns keep every candidate event
+  --    in the window as their denominator, store context present or not, so gaps in the
+  --    tagging stay visible. The availability shares use the store-context population as
+  --    their denominator: events with no store context are filtered out of availability
+  --    reporting rather than bucketed.
   -- ============================================================
   SELECT
     t.event_day,
@@ -373,9 +381,12 @@ Google Analytics SQL: |
     COUNTIF(t.has_store_context AND t.store_inventory_status <> '(not set)') AS events_with_status,
     ROUND(100 * COUNTIF(t.has_store_context AND t.store_inventory_status <> '(not set)') / COUNT(*), 2)
                                                                             AS pct_status_coverage_of_all_events,
-    ROUND(100 * COUNTIF(t.store_inventory_status = 'In Stock')     / COUNT(*), 2) AS pct_in_stock_of_all_events,
-    ROUND(100 * COUNTIF(t.store_inventory_status = 'Low Stock')    / COUNT(*), 2) AS pct_low_stock_of_all_events,
-    ROUND(100 * COUNTIF(t.store_inventory_status = 'Out of Stock') / COUNT(*), 2) AS pct_out_of_stock_of_all_events
+    ROUND(100 * COUNTIF(t.has_store_context AND t.store_inventory_status = 'In Stock')     / NULLIF(COUNTIF(t.has_store_context), 0), 2)
+                                                                            AS pct_in_stock_of_store_context_events,
+    ROUND(100 * COUNTIF(t.has_store_context AND t.store_inventory_status = 'Low Stock')    / NULLIF(COUNTIF(t.has_store_context), 0), 2)
+                                                                            AS pct_low_stock_of_store_context_events,
+    ROUND(100 * COUNTIF(t.has_store_context AND t.store_inventory_status = 'Out of Stock') / NULLIF(COUNTIF(t.has_store_context), 0), 2)
+                                                                            AS pct_out_of_stock_of_store_context_events
   FROM typed t
   GROUP BY t.event_day, t.store_selection_method, t.fulfillment_method, t.device_category
   ORDER BY t.event_day DESC, candidate_events DESC;
@@ -403,7 +414,8 @@ AEP Query Service SQL: |
   -- item_category column BigQuery reports (productListItems carries no category in this mapping).
   -- Point-in-time rule: the label is read as captured on the event. No join to a current
   -- inventory dataset is made, so a later replenishment cannot restate past exposure.
-  -- Reference datasets are used for LABELS ONLY, never to re-derive the status.
+  -- Store and item labels are read from the event payload itself; no reference joins are used.
+  -- Window: the 28 complete days ending yesterday, matching the BigQuery script exactly.
   
   WITH base_events AS (
     SELECT
@@ -457,8 +469,9 @@ AEP Query Service SQL: |
     LATERAL VIEW OUTER explode(b.productListItems) exploded AS pli
   ),
   
-  -- Normalise to the three shopper-visible values; occurrences with store context but no
-  -- status stay in the population as '(not set)'.
+  -- Normalise to the documented value set: the three shopper-visible states plus the
+  -- '(not set)' unknown bucket for a store-context occurrence with no resolved label. Any
+  -- other raw string also resolves to '(not set)'; free-text labels are never passed through.
   typed AS (
     SELECT
       g.*,
@@ -466,12 +479,24 @@ AEP Query Service SQL: |
         WHEN 'in stock'     THEN 'In Stock'
         WHEN 'low stock'    THEN 'Low Stock'
         WHEN 'out of stock' THEN 'Out of Stock'
-        WHEN ''             THEN '(not set)'
-        ELSE coalesce(g.store_inventory_status_raw, '(not set)')
+        ELSE '(not set)'
       END                                                                   AS store_inventory_status,
       cast(g.status_checked_at_raw AS timestamp)                            AS status_checked_at,
       (g.store_id IS NOT NULL AND g.store_id <> '')                         AS has_store_context
     FROM item_grain g
+  ),
+  
+  -- Session resolution: a session takes the status of the LAST check per item-store pair
+  -- inside the session window, so one session is never counted under every status it
+  -- encountered for the same item at the same store.
+  resolved AS (
+    SELECT
+      t.*,
+      row_number() OVER (
+        PARTITION BY t.session_key, t.item_id, t.store_id
+        ORDER BY coalesce(t.status_checked_at, t.event_ts) DESC, t.event_ts DESC
+      ) = 1                                                                 AS is_last_check_in_session
+    FROM typed t
   )
   
   -- ============================================================
@@ -482,7 +507,8 @@ AEP Query Service SQL: |
     t.store_inventory_status,
     t.unified_event_name,
     count(*)                                                                AS event_occurrences,
-    count(DISTINCT t.session_key)                                           AS sessions,
+    count(DISTINCT CASE WHEN t.is_last_check_in_session THEN t.session_key END)
+                                                                            AS sessions,
     count(DISTINCT t.visitor_id)                                            AS visitors,
     count(DISTINCT t.item_id)                                               AS distinct_items,
     count(DISTINCT t.store_id)                                              AS distinct_stores,
@@ -491,21 +517,19 @@ AEP Query Service SQL: |
                                                                             AS pct_of_event_population,
     min(t.status_checked_at)                                                AS first_status_checked_at,
     max(t.status_checked_at)                                                AS last_status_checked_at
-  FROM typed t
+  FROM resolved t
   WHERE t.has_store_context
   GROUP BY t.store_inventory_status, t.unified_event_name
   ORDER BY event_occurrences DESC;
   
   -- ============================================================
-  -- B. Item x store exposure. Store and product datasets supply labels only.
+  -- B. Item x store exposure. Store and item labels come from the event payload itself.
   -- ============================================================
   SELECT
     t.store_id,
-    coalesce(max(s.store_name), max(t.store_name_evt))                      AS store_name,
-    max(s.store_format)                                                     AS store_format,
-    max(s.region)                                                           AS store_region,
+    max(t.store_name_evt)                                                   AS store_name,
     t.item_id,
-    coalesce(max(p.item_display_name), max(t.item_name))                    AS item_name,
+    max(t.item_name)                                                        AS item_name,
     count(*)                                                                AS store_context_events,
     count(CASE WHEN t.store_inventory_status = 'In Stock'     THEN 1 END)   AS in_stock_events,
     count(CASE WHEN t.store_inventory_status = 'Low Stock'    THEN 1 END)   AS low_stock_events,
@@ -514,20 +538,17 @@ AEP Query Service SQL: |
     round(100.0 * count(CASE WHEN t.store_inventory_status = 'Out of Stock' THEN 1 END) / count(*), 2)
                                                                             AS pct_out_of_stock_exposure,
     round(100.0 * count(CASE WHEN t.store_inventory_status IN ('Low Stock', 'Out of Stock') THEN 1 END) / count(*), 2)
-                                                                            AS pct_constrained_exposure,
-    round(100.0 * count(CASE WHEN t.unified_event_name = 'add_to_cart' THEN 1 END) / count(*), 2)
-                                                                            AS pct_events_reaching_add_to_cart
+                                                                            AS pct_constrained_exposure
   FROM typed t
-  LEFT JOIN store_master s    ON s.store_id = t.store_id
-  LEFT JOIN product_catalog p ON p.item_id = t.item_id
   WHERE t.has_store_context
   GROUP BY t.store_id, t.item_id
-  HAVING count(*) >= 50
-  ORDER BY out_of_stock_events DESC, store_context_events DESC
-  LIMIT 500;
+  ORDER BY out_of_stock_events DESC, store_context_events DESC;
   
   -- ============================================================
-  -- C. Daily trend and collection coverage against every candidate occurrence.
+  -- C. Daily trend and collection coverage. Coverage columns are measured against every
+  --    candidate occurrence; the availability shares use the store-context population as
+  --    their denominator, because occurrences with no store context are filtered out of
+  --    availability reporting rather than bucketed.
   -- ============================================================
   SELECT
     t.event_day,
@@ -540,36 +561,39 @@ AEP Query Service SQL: |
                                                                             AS events_with_status,
     round(100.0 * count(CASE WHEN t.has_store_context AND t.store_inventory_status <> '(not set)' THEN 1 END) / count(*), 2)
                                                                             AS pct_status_coverage_of_all_events,
-    round(100.0 * count(CASE WHEN t.store_inventory_status = 'In Stock'     THEN 1 END) / count(*), 2) AS pct_in_stock_of_all_events,
-    round(100.0 * count(CASE WHEN t.store_inventory_status = 'Low Stock'    THEN 1 END) / count(*), 2) AS pct_low_stock_of_all_events,
-    round(100.0 * count(CASE WHEN t.store_inventory_status = 'Out of Stock' THEN 1 END) / count(*), 2) AS pct_out_of_stock_of_all_events
+    round(100.0 * count(CASE WHEN t.has_store_context AND t.store_inventory_status = 'In Stock'     THEN 1 END) / nullif(count(CASE WHEN t.has_store_context THEN 1 END), 0), 2)
+                                                                            AS pct_in_stock_of_store_context_events,
+    round(100.0 * count(CASE WHEN t.has_store_context AND t.store_inventory_status = 'Low Stock'    THEN 1 END) / nullif(count(CASE WHEN t.has_store_context THEN 1 END), 0), 2)
+                                                                            AS pct_low_stock_of_store_context_events,
+    round(100.0 * count(CASE WHEN t.has_store_context AND t.store_inventory_status = 'Out of Stock' THEN 1 END) / nullif(count(CASE WHEN t.has_store_context THEN 1 END), 0), 2)
+                                                                            AS pct_out_of_stock_of_store_context_events
   FROM typed t
   GROUP BY t.event_day, t.unified_event_name, t.fulfillment_method, t.device_category
   ORDER BY t.event_day DESC, candidate_events DESC;
 
 Calculation Notes: |
-  1️⃣ Point-in-time semantics: the value is the availability label as shown to the shopper when the store inventory check resolved, stamped onto the event payload. Reporting must read the stamped value and never re-derive or restate it from current inventory position, otherwise a store that has since been replenished will retrospectively erase the out-of-stock experiences that suppressed demand.,2️⃣ Allowed values are restricted to the shopper-visible set — In Stock, Low Stock, Out of Stock — matching the availability attribute published to local inventory listings. Any store or locale rendering a different label (for example Limited Availability) maps to the nearest of the three before the event is dispatched; free-text passthrough is rejected at collection.,3️⃣ Exclusion: on-hand unit counts, reserved and safety-stock quantities, incoming replenishment dates and store transfer positions are backend values and are explicitly out of scope. Only the displayed availability state is carried, so the dimension can never be used to reconstruct stock depth.,4️⃣ Carried on the unified standard events view_item, select_item and add_to_cart, and only when a store has actually been selected or defaulted from the shopper's saved or geolocated store. Events with no store context are not assigned a value and must be filtered out of availability reporting rather than bucketed as Out of Stock.,5️⃣ Low Stock is a threshold state defined by the merchandising availability rules, not a distinct physical condition; because thresholds differ by category and store format, trend comparisons that treat Low Stock as a single homogeneous band must be qualified by category and store format.,6️⃣ Multi-line and multi-store journeys resolve per item and per store, so a single session can legitimately contain several different values. Session-level rollups take the status of the last check per item-store pair within the 30-minute GA4 session window, and cross-session analysis must not carry the value forward — availability is re-checked on every new session.,7️⃣ Not related to the published logistics dimension Inventory Class, which classifies items by ABC value contribution for stocking policy. The two are never interchangeable and must not be joined as synonyms in reporting.
+  1️⃣ Point-in-time semantics: the value is the availability label as shown to the shopper when the store inventory check resolved, stamped onto the event payload. Reporting must read the stamped value and never re-derive or restate it from current inventory position, otherwise a store that has since been replenished will retrospectively erase the out-of-stock experiences that suppressed demand.,2️⃣ Allowed values are restricted to the shopper-visible set — In Stock, Low Stock, Out of Stock — matching the availability attribute published to local inventory listings. Any store or locale rendering a different label (for example Limited Availability) maps to the nearest of the three before the event is dispatched; free-text passthrough is rejected at collection. A store-context event that arrives with no resolved label is reported as (not set), the one unknown value, so the complete reported value set is In Stock, Low Stock, Out of Stock or (not set).,3️⃣ Exclusion: on-hand unit counts, reserved and safety-stock quantities, incoming replenishment dates and store transfer positions are backend values and are explicitly out of scope. Only the displayed availability state is carried, so the dimension can never be used to reconstruct stock depth.,4️⃣ Carried on the unified standard events view_item, select_item and add_to_cart — the collection points specified by the Product View, Add to Cart, Store Inventory Check and Store Selection event specs — and only when a store has actually been selected or defaulted from the shopper's saved or geolocated store. Events with no store context are not assigned a value and must be filtered out of availability reporting rather than bucketed as Out of Stock.,5️⃣ Low Stock is a threshold state defined by the merchandising availability rules, not a distinct physical condition; because thresholds differ by category and store format, trend comparisons that treat Low Stock as a single homogeneous band must be qualified by category and store format.,6️⃣ Multi-line and multi-store journeys resolve per item and per store, so a single session can legitimately contain several different values. Session-level rollups take the status of the last check per item-store pair within the 30-minute GA4 session window, and cross-session analysis must not carry the value forward — availability is re-checked on every new session.,7️⃣ Not related to the published logistics dimension Inventory Class, which classifies items by ABC value contribution for stocking policy. The two are never interchangeable and must not be joined as synonyms in reporting.
 
 Business Use Case: |
   1️⃣ The Merchandising team reviews the weekly availability mix by store and category; when Out of Stock exposure on a top-selling item exceeds its threshold at a cluster of stores, they reallocate assortment depth and raise the store replenishment minimum for that item so BOPIS demand stops being turned away at the product page.,2️⃣ The Store Operations team monitors the gap between displayed availability and picked orders; when a store shows In Stock but its BOPIS pick failure rate rises, they trigger a cycle count and a shelf audit at that location to correct the position feeding the storefront.,3️⃣ The Marketing team suppresses paid local inventory listings and store-targeted campaigns for item-store pairs that have been shown as Out of Stock over a sustained period, redirecting budget to stores with confirmed availability and cutting spend on clicks that cannot convert to a pickup order.,4️⃣ The Product team quantifies lost conversion by comparing add-to-cart and BOPIS order rates across the three availability states; when Low Stock underperforms In Stock beyond the expected margin, they test alternative messaging and nearby-store substitution on the product page.
 
 Dependencies:
-  Events: [product-view, store-inventory-check, add-to-cart]
+  Events: [product-view, add-to-cart, store-inventory-check, store-selection]
   Dimensions: [store-id, fulfillment-method]
 
 Source Data: Digital Analytics (GA4) + Storefront-Stamped Store Availability Label (Adobe Commerce MSI)
 
 Report Attributes: |
-  store-id; fulfillment-method; item-category; device-category; region; traffic-source
+  store-id; fulfillment-method; item-category; device-category; delivery-region; traffic-source
 
 Dashboard Usage: [BOPIS Availability & Fulfillment Dashboard, Store Inventory Exposure Monitor, Omnichannel Conversion Funnel, Merchandising Assortment Review]
 
 Segment Eligibility: |
   true
 
-Related Dimensions: [store-id, fulfillment-method]
+Related Dimensions: [store-id, order-status, delivery-promise-date, fulfillment-method, pickup-window]
 
-Derived Dimensions: [fulfillment-method]
+Derived Dimensions: [fulfillment-strategy]
 
 Data Sensitivity: Internal
 
@@ -583,5 +607,5 @@ Created At: 2026-09-18T16:35:37.41+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-20T00:32:06.898+00:00
+Last Modified At: 2026-09-20T01:33:39.017+00:00
 
