@@ -1,7 +1,7 @@
 # KPI: First Contact Resolution Rate
-# Generated: 2026-09-20T19:59:29.250Z
+# Generated: 2026-09-20T19:59:37.781Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: First Contact Resolution Rate
 Formula: (Contacts Resolved With No Re-Contact Within 7 Days / Total Contacts Resolved In Period) × 100
@@ -11,6 +11,19 @@ Description: |
 
 Category: Experience
 
+Tags: [kpi, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: Percentage
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
 
 
 
@@ -18,22 +31,257 @@ Category: Experience
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Offline KPI: the source is the backend ticket lifecycle (Zendesk service platform + Salesforce
+  -- Service Cloud), so the query runs against the native service tables, not the GA4 export.
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  DECLARE recontact_window_days INT64 DEFAULT 7;
+  
+  -- Base population: agent-handled contacts cohorted on the resolution timestamp, with the excluded
+  -- ticket types (abandoned, duplicate/merged, spam, auto-closed on inactivity, customer-withdrawn,
+  -- self-service deflection with no agent touch, proactive outbound, mass-incident bulk) removed
+  WITH resolved_contacts AS (
+    SELECT
+      CONCAT('zendesk:', CAST(t.ticket_id AS STRING)) AS contact_id,
+      COALESCE(LOWER(t.requester_email), CONCAT('zendesk_user:', CAST(t.requester_id AS STRING))) AS customer_key,
+      LOWER(t.category) AS contact_reason,
+      t.via_channel AS support_channel,
+      t.category AS ticket_category,
+      m.solved_at AS resolved_at,
+      m.reopens AS reopen_count
+    FROM `your-project.zendesk.tickets` t
+    JOIN `your-project.zendesk.ticket_metrics` m USING (ticket_id)
+    WHERE DATE(m.solved_at) BETWEEN start_date AND end_date
+      AND t.agent_touch_count > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM UNNEST(t.tags) tag
+        WHERE tag IN ('spam', 'duplicate', 'merged', 'auto_closed_inactivity',
+                      'customer_withdrawn', 'self_service_deflection',
+                      'proactive_outbound', 'mass_incident_bulk')
+      )
+    UNION ALL
+    SELECT
+      CONCAT('salesforce:', c.Id),
+      COALESCE(LOWER(c.ContactEmail), CONCAT('sfdc_party:', COALESCE(c.ContactId, c.AccountId))),
+      LOWER(c.Reason),
+      c.Origin,
+      c.Reason,
+      c.ClosedDate,
+      c.Reopen_Count__c
+    FROM `your-project.salesforce_service_cloud.Case` c
+    WHERE c.IsClosed
+      AND DATE(c.ClosedDate) BETWEEN start_date AND end_date
+      AND c.IsDeleted = FALSE
+      AND c.Agent_Touch_Count__c > 0
+      AND c.Status NOT IN ('Duplicate', 'Merged', 'Spam', 'Auto-Closed Inactivity', 'Withdrawn by Customer')
+      AND c.Case_Disposition__c NOT IN ('Self-Service Deflection', 'Proactive Outbound', 'Mass Incident Bulk Response')
+  ),
+  
+  -- Every inbound customer-initiated thread from both platforms, read up to the window days beyond
+  -- the cohort so a late re-contact is still visible; transfers and escalations stay inside one thread
+  inbound_threads AS (
+    SELECT
+      CONCAT('zendesk:', CAST(t.ticket_id AS STRING)) AS contact_id,
+      COALESCE(LOWER(t.requester_email), CONCAT('zendesk_user:', CAST(t.requester_id AS STRING))) AS customer_key,
+      LOWER(t.category) AS contact_reason,
+      CONCAT('zendesk:', CAST(t.via_followup_source_id AS STRING)) AS parent_contact_id,
+      t.created_at
+    FROM `your-project.zendesk.tickets` t
+    WHERE DATE(t.created_at) BETWEEN start_date AND DATE_ADD(end_date, INTERVAL recontact_window_days DAY)
+      AND NOT EXISTS (
+        SELECT 1 FROM UNNEST(t.tags) tag
+        WHERE tag IN ('spam', 'proactive_outbound', 'mass_incident_bulk')
+      )
+    UNION ALL
+    SELECT
+      CONCAT('salesforce:', c.Id),
+      COALESCE(LOWER(c.ContactEmail), CONCAT('sfdc_party:', COALESCE(c.ContactId, c.AccountId))),
+      LOWER(c.Reason),
+      CONCAT('salesforce:', c.ParentId),
+      c.CreatedDate
+    FROM `your-project.salesforce_service_cloud.Case` c
+    WHERE DATE(c.CreatedDate) BETWEEN start_date AND DATE_ADD(end_date, INTERVAL recontact_window_days DAY)
+      AND c.IsDeleted = FALSE
+      AND c.Status <> 'Spam'
+      AND c.Case_Disposition__c NOT IN ('Proactive Outbound', 'Mass Incident Bulk Response')
+  ),
+  
+  -- Re-contacted subset: a reopen of the base ticket, a linked child / follow-up thread, or any new
+  -- inbound thread by the same verified customer on the same reason within the benchmark window
+  recontacted AS (
+    SELECT DISTINCT b.contact_id
+    FROM resolved_contacts b
+    JOIN inbound_threads r
+      ON r.contact_id <> b.contact_id
+     AND r.created_at > b.resolved_at
+     AND r.created_at <= TIMESTAMP_ADD(b.resolved_at, INTERVAL recontact_window_days DAY)
+     AND (
+           (r.customer_key = b.customer_key AND r.contact_reason = b.contact_reason)
+           OR r.parent_contact_id = b.contact_id
+         )
+    UNION DISTINCT
+    SELECT contact_id
+    FROM resolved_contacts
+    WHERE reopen_count > 0
+  )
+  
+  -- Rate over the full resolved-contact base, split by support channel and ticket category, with the
+  -- trailing days whose re-contact window has not matured flagged as provisional
+  SELECT
+    DATE(b.resolved_at) AS resolution_date,
+    b.support_channel,
+    b.ticket_category,
+    COUNT(*) AS resolved_contacts,
+    COUNTIF(r.contact_id IS NULL) AS first_contact_resolutions,
+    ROUND(COUNTIF(r.contact_id IS NULL) * 100 / COUNT(*), 2) AS first_contact_resolution_rate_pct,
+    IF(DATE(b.resolved_at) > DATE_SUB(CURRENT_DATE(), INTERVAL recontact_window_days DAY),
+       'provisional', 'final') AS cohort_status
+  FROM resolved_contacts b
+  LEFT JOIN recontacted r USING (contact_id)
+  GROUP BY resolution_date, support_channel, ticket_category, cohort_status
+  ORDER BY resolution_date, support_channel, ticket_category;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Offline KPI: the source is the backend ticket lifecycle, so the query runs against the ingested
+  -- service-platform datasets (Zendesk, Salesforce Service Cloud), not a web/XDM ExperienceEvent schema.
+  SET @start_date = CURRENT_DATE - INTERVAL '90' DAY;
+  SET @end_date = CURRENT_DATE - INTERVAL '1' DAY;
+  SET @recontact_window_days = 7;
+  
+  -- Base population: agent-handled contacts cohorted on the resolution timestamp, with the excluded
+  -- ticket types (abandoned, duplicate/merged, spam, auto-closed on inactivity, customer-withdrawn,
+  -- self-service deflection with no agent touch, proactive outbound, mass-incident bulk) removed
+  WITH resolved_contacts AS (
+    SELECT
+      CONCAT('zendesk:', CAST(t.ticket_id AS STRING)) AS contact_id,
+      COALESCE(LOWER(t.requester_email), CONCAT('zendesk_user:', CAST(t.requester_id AS STRING))) AS customer_key,
+      LOWER(t.category) AS contact_reason,
+      t.via_channel AS support_channel,
+      t.category AS ticket_category,
+      m.solved_at AS resolved_at,
+      m.reopens AS reopen_count
+    FROM zendesk_tickets_dataset t
+    JOIN zendesk_ticket_metrics_dataset m ON m.ticket_id = t.ticket_id
+    WHERE TO_DATE(m.solved_at) BETWEEN $start_date AND $end_date
+      AND t.agent_touch_count > 0
+      AND SIZE(ARRAY_INTERSECT(t.tags, ARRAY('spam', 'duplicate', 'merged', 'auto_closed_inactivity',
+                                             'customer_withdrawn', 'self_service_deflection',
+                                             'proactive_outbound', 'mass_incident_bulk'))) = 0
+    UNION ALL
+    SELECT
+      CONCAT('salesforce:', c.Id),
+      COALESCE(LOWER(c.ContactEmail), CONCAT('sfdc_party:', COALESCE(c.ContactId, c.AccountId))),
+      LOWER(c.Reason),
+      c.Origin,
+      c.Reason,
+      c.ClosedDate,
+      c.Reopen_Count__c
+    FROM salesforce_service_cloud_case_dataset c
+    WHERE c.IsClosed
+      AND TO_DATE(c.ClosedDate) BETWEEN $start_date AND $end_date
+      AND c.IsDeleted = FALSE
+      AND c.Agent_Touch_Count__c > 0
+      AND c.Status NOT IN ('Duplicate', 'Merged', 'Spam', 'Auto-Closed Inactivity', 'Withdrawn by Customer')
+      AND c.Case_Disposition__c NOT IN ('Self-Service Deflection', 'Proactive Outbound', 'Mass Incident Bulk Response')
+  ),
+  
+  -- Every inbound customer-initiated thread from both platforms, read up to the window days beyond
+  -- the cohort so a late re-contact is still visible; transfers and escalations stay inside one thread
+  inbound_threads AS (
+    SELECT
+      CONCAT('zendesk:', CAST(t.ticket_id AS STRING)) AS contact_id,
+      COALESCE(LOWER(t.requester_email), CONCAT('zendesk_user:', CAST(t.requester_id AS STRING))) AS customer_key,
+      LOWER(t.category) AS contact_reason,
+      CONCAT('zendesk:', CAST(t.via_followup_source_id AS STRING)) AS parent_contact_id,
+      t.created_at
+    FROM zendesk_tickets_dataset t
+    WHERE TO_DATE(t.created_at) BETWEEN $start_date AND ($end_date + $recontact_window_days * INTERVAL '1' DAY)
+      AND SIZE(ARRAY_INTERSECT(t.tags, ARRAY('spam', 'proactive_outbound', 'mass_incident_bulk'))) = 0
+    UNION ALL
+    SELECT
+      CONCAT('salesforce:', c.Id),
+      COALESCE(LOWER(c.ContactEmail), CONCAT('sfdc_party:', COALESCE(c.ContactId, c.AccountId))),
+      LOWER(c.Reason),
+      CONCAT('salesforce:', c.ParentId),
+      c.CreatedDate
+    FROM salesforce_service_cloud_case_dataset c
+    WHERE TO_DATE(c.CreatedDate) BETWEEN $start_date AND ($end_date + $recontact_window_days * INTERVAL '1' DAY)
+      AND c.IsDeleted = FALSE
+      AND c.Status <> 'Spam'
+      AND c.Case_Disposition__c NOT IN ('Proactive Outbound', 'Mass Incident Bulk Response')
+  ),
+  
+  -- Re-contacted subset: a reopen of the base ticket, a linked child / follow-up thread, or any new
+  -- inbound thread by the same verified customer on the same reason within the benchmark window
+  recontacted AS (
+    SELECT DISTINCT b.contact_id AS contact_id
+    FROM resolved_contacts b
+    JOIN inbound_threads r
+      ON r.contact_id <> b.contact_id
+     AND r.created_at > b.resolved_at
+     AND r.created_at <= b.resolved_at + $recontact_window_days * INTERVAL '1' DAY
+     AND (
+           (r.customer_key = b.customer_key AND r.contact_reason = b.contact_reason)
+           OR r.parent_contact_id = b.contact_id
+         )
+    UNION
+    SELECT contact_id
+    FROM resolved_contacts
+    WHERE reopen_count > 0
+  )
+  
+  -- Rate over the full resolved-contact base, split by support channel and ticket category, with the
+  -- trailing days whose re-contact window has not matured flagged as provisional
+  SELECT
+    TO_DATE(b.resolved_at) AS resolution_date,
+    b.support_channel,
+    b.ticket_category,
+    COUNT(*) AS resolved_contacts,
+    SUM(CASE WHEN r.contact_id IS NULL THEN 1 ELSE 0 END) AS first_contact_resolutions,
+    ROUND(SUM(CASE WHEN r.contact_id IS NULL THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS first_contact_resolution_rate_pct,
+    CASE WHEN TO_DATE(b.resolved_at) > CURRENT_DATE - $recontact_window_days * INTERVAL '1' DAY
+         THEN 'provisional' ELSE 'final' END AS cohort_status
+  FROM resolved_contacts b
+  LEFT JOIN recontacted r ON r.contact_id = b.contact_id
+  GROUP BY
+    TO_DATE(b.resolved_at),
+    b.support_channel,
+    b.ticket_category,
+    CASE WHEN TO_DATE(b.resolved_at) > CURRENT_DATE - $recontact_window_days * INTERVAL '1' DAY
+         THEN 'provisional' ELSE 'final' END
+  ORDER BY resolution_date, support_channel, ticket_category;
 
+Calculation Notes: |
+  1️⃣ Denominator is the full base population of contacts whose resolution timestamp falls inside the reporting window, irrespective of when they were opened; abandoned contacts (no agent handling), duplicate or merged tickets, spam, auto-closed-on-inactivity tickets and customer-withdrawn tickets are excluded from both numerator and denominator so the base reflects genuine, agent-handled demand only.,2️⃣ Resolved on the first interaction is operationalised as no re-contact by the same customer on the same issue within 7 calendar days of the resolution timestamp — the re-contact window used as the prevailing benchmark convention by SQM and COPC and mirrored in Zendesk and Salesforce Service Cloud reporting. Re-contact matching keys on verified customer identifier plus contact reason or ticket category, and a re-opened or linked child ticket always counts as a re-contact.,3️⃣ The KPI is measured on a resolution cohort, so a window cannot be final until its last day has aged a full 7 days; publish the trailing period as provisional and restate once the re-contact window matures to avoid the systematic upward bias of an immature cohort.,4️⃣ One contact equals one inbound interaction thread: IVR-to-agent handoffs, chat-to-agent transfers, tier escalations and internal reassignments inside the same thread do not create a second contact, while any new inbound thread on the same issue does.,5️⃣ Further exclusions: self-service deflections closed with no agent touch, proactive outbound notifications, and bulk responses issued during a declared mass incident, all of which resolve without a genuine one-to-one service interaction.,6️⃣ Value action by industry: E-commerce — an order, return or refund issue closed at the first contact; Hospitality — a guest complaint closed at the first contact during the stay; Education — a learner support request closed at the first contact; SaaS — a product or entitlement issue closed without escalation to tier 2.,7️⃣ Always read alongside Customer Satisfaction Score and reopen rate: premature closure inflates this KPI, so a rise in First Contact Resolution Rate accompanied by falling satisfaction or rising reopens indicates closure gaming rather than service improvement.
 
+Business Use Case: |
+  1️⃣ The Customer Service operations manager reviews the weekly rate by Support Channel and Ticket Category and, when a category falls more than five points below its trailing twelve-week baseline, commissions a macro, knowledge-base article or agent-entitlement change for that category.,2️⃣ The Support workforce lead uses agent-team and tier splits at the monthly quality review to reassign coaching capacity and to adjust routing rules so high-complexity categories skip tier 1 and reach a qualified agent on the first contact.,3️⃣ The Returns and Refunds team lead pairs the rate for return, refund and WISMO categories with re-contact reasons to fix the upstream policy or tracking gap that forces customers back, then tracks recovery over the following two resolution cohorts.,4️⃣ The Customer Service director reports the rate against the contact-centre benchmark in the quarterly business review and uses a sustained shortfall to justify headcount, tooling or self-service investment for the channels driving repeat contacts.
 
+Dependencies:
+  Events: [chat-start]
+  Metrics: [support-tickets, chat-sessions]
+  Dimensions: [support-channel, ticket-category]
 
+Source Data: Customer Service Platform (Zendesk) + CRM (Salesforce Service Cloud)
 
+Report Attributes: |
+  Support Channel; Ticket Category; Resolution Type; Contact Reason; Agent Team / Support Tier; Customer Segment; Region
 
+Dashboard Usage: [Customer Service Performance Dashboard, Returns & Refunds Operations Dashboard, Voice of Customer & CSAT Dashboard, Executive Customer Experience Scorecard]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [guest-complaint-resolution-rate, learner-support-resolution-rate, customer-satisfaction-score, wismo-rate, refund-rate, return-rate]
 
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +291,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-20T19:59:28.841+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-20T19:59:37.461+00:00
 
