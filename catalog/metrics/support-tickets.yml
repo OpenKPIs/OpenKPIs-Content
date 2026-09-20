@@ -1,7 +1,7 @@
 # Metric: Support Tickets
-# Generated: 2026-09-20T19:41:36.616Z
+# Generated: 2026-09-20T19:41:44.850Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Support Tickets
 Formula: COUNT(DISTINCT ticket_id) WHERE ticket_created_at BETWEEN period_start AND period_end AND is_merged_duplicate = FALSE AND ticket_class NOT IN ('spam', 'automated')
@@ -11,6 +11,19 @@ Description: |
 
 Category: Operations
 
+Tags: [metric, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: User
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
 
 
 
@@ -18,23 +31,175 @@ Category: Operations
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Offline metric: the support CRM warehouse (Zendesk / Service Cloud export) is the system of record, not the web clickstream.
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT CURRENT_DATE();
+  
+  -- Step 1: one row per case pinned to its original creation, so reopen and update revisions never move a ticket into a later period
+  WITH ticket_revisions AS (
+    SELECT
+      t.ticket_id,
+      t.merged_into_ticket_id,
+      t.ticket_class,
+      t.origin_type,
+      t.created_by_role,
+      t.crm_customer_id,
+      t.requester_email_hash,
+      DATE(t.created_at) AS ticket_created_date,
+      ROW_NUMBER() OVER (PARTITION BY t.ticket_id ORDER BY t.created_at ASC, t.record_updated_at DESC) AS revision_rank
+    FROM `your-project.crm.support_tickets` AS t
+  ),
+  ticket_base AS (
+    SELECT * EXCEPT (revision_rank)
+    FROM ticket_revisions
+    WHERE revision_rank = 1
+  ),
+  
+  -- Step 2: keep only genuine customer demand created in the period - merged-away children collapse into the surviving case
+  eligible_tickets AS (
+    SELECT *
+    FROM ticket_base
+    WHERE ticket_created_date BETWEEN start_date AND end_date
+      AND merged_into_ticket_id IS NULL
+      AND ticket_class NOT IN ('spam', 'phishing', 'bounce_back', 'marketing_auto_reply', 'automated', 'system_generated')
+      AND origin_type != 'internal_side_conversation'
+  ),
+  
+  -- Step 3: originating channel is the first inbound touch on the case, so a chat escalated to email stays chat
+  first_inbound_touch AS (
+    SELECT ticket_id, channel AS first_touch_channel
+    FROM (
+      SELECT
+        c.ticket_id,
+        c.channel,
+        ROW_NUMBER() OVER (PARTITION BY c.ticket_id ORDER BY c.touch_at ASC) AS touch_rank
+      FROM `your-project.crm.support_ticket_touches` AS c
+      WHERE c.direction = 'inbound'
+    )
+    WHERE touch_rank = 1
+  )
+  
+  -- Step 4: ticket volume by creation date, originating channel and agent-originated flag; unstitched cases stay in the volume but drop out of the per-customer cut
+  SELECT
+    e.ticket_created_date,
+    COALESCE(f.first_touch_channel, 'unknown') AS first_touch_channel,
+    (e.created_by_role = 'agent') AS is_agent_originated,
+    COUNT(DISTINCT e.ticket_id) AS support_tickets,
+    COUNT(DISTINCT COALESCE(e.crm_customer_id, e.requester_email_hash)) AS stitched_customers
+  FROM eligible_tickets AS e
+  LEFT JOIN first_inbound_touch AS f
+    ON f.ticket_id = e.ticket_id
+  GROUP BY ticket_created_date, first_touch_channel, is_agent_originated
+  ORDER BY ticket_created_date, first_touch_channel, is_agent_originated;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Offline metric: sourced from the support CRM dataset ingested into AEP, not from a web experience event schema.
+  -- Step 0: relative reporting window
+  WITH params AS (
+    SELECT
+      CURRENT_DATE - INTERVAL '90' DAY AS start_date,
+      CURRENT_DATE AS end_date
+  ),
+  
+  -- Step 1: one row per case pinned to its original creation, so reopen and update revisions never move a ticket into a later period
+  ticket_revisions AS (
+    SELECT
+      t.ticket_id,
+      t.merged_into_ticket_id,
+      t.ticket_class,
+      t.origin_type,
+      t.created_by_role,
+      t.crm_customer_id,
+      t.requester_email_hash,
+      CAST(t.created_at AS DATE) AS ticket_created_date,
+      ROW_NUMBER() OVER (PARTITION BY t.ticket_id ORDER BY t.created_at ASC, t.record_updated_at DESC) AS revision_rank
+    FROM support_tickets_dataset AS t
+  ),
+  ticket_base AS (
+    SELECT *
+    FROM ticket_revisions
+    WHERE revision_rank = 1
+  ),
+  
+  -- Step 2: keep only genuine customer demand created in the period - merged-away children collapse into the surviving case
+  eligible_tickets AS (
+    SELECT b.*
+    FROM ticket_base AS b
+    CROSS JOIN params AS p
+    WHERE b.ticket_created_date BETWEEN p.start_date AND p.end_date
+      AND b.merged_into_ticket_id IS NULL
+      AND b.ticket_class NOT IN ('spam', 'phishing', 'bounce_back', 'marketing_auto_reply', 'automated', 'system_generated')
+      AND b.origin_type != 'internal_side_conversation'
+  ),
+  
+  -- Step 3: originating channel is the first inbound touch on the case, so a chat escalated to email stays chat
+  first_inbound_touch AS (
+    SELECT ticket_id, channel AS first_touch_channel
+    FROM (
+      SELECT
+        c.ticket_id,
+        c.channel,
+        ROW_NUMBER() OVER (PARTITION BY c.ticket_id ORDER BY c.touch_at ASC) AS touch_rank
+      FROM support_ticket_touches_dataset AS c
+      WHERE c.direction = 'inbound'
+    ) ranked_touches
+    WHERE touch_rank = 1
+  )
+  
+  -- Step 4: ticket volume by creation date, originating channel and agent-originated flag; unstitched cases stay in the volume but drop out of the per-customer cut
+  SELECT
+    e.ticket_created_date,
+    COALESCE(f.first_touch_channel, 'unknown') AS first_touch_channel,
+    (e.created_by_role = 'agent') AS is_agent_originated,
+    COUNT(DISTINCT e.ticket_id) AS support_tickets,
+    COUNT(DISTINCT COALESCE(e.crm_customer_id, e.requester_email_hash)) AS stitched_customers
+  FROM eligible_tickets AS e
+  LEFT JOIN first_inbound_touch AS f
+    ON f.ticket_id = e.ticket_id
+  GROUP BY e.ticket_created_date, COALESCE(f.first_touch_channel, 'unknown'), (e.created_by_role = 'agent')
+  ORDER BY 1, 2, 3;
 
+Calculation Notes: |
+  1️⃣ Count distinct ticket (case) identifiers by creation timestamp in the CRM, never by resolution or closure timestamp, so a period's volume is fixed the moment it is reported and does not restate as the backlog is worked down.
+  2️⃣ Merged and linked duplicates collapse to the surviving ticket identifier and are counted once; the merged-away child cases are excluded so a single customer issue reported twice does not inflate contact volume.
+  3️⃣ Exclude spam, phishing, bounce-back and marketing auto-replies, system-generated monitoring or integration-error cases, and internal agent-to-agent side conversations — only cases representing genuine customer demand are in scope.
+  4️⃣ A reopened ticket is not recounted: it retains its original creation date and stays in its original period. A customer who raises a genuinely new issue after closure generates a new ticket and is counted again in the later period.
+  5️⃣ Tickets an agent logs on the customer's behalf (phone call notes, retail store escalations, proactive outreach on a failed delivery) are included, flagged by the channel and created-by attributes so agent-originated demand can be isolated from customer-initiated demand.
+  6️⃣ Channel is attributed from the first inbound touch on the case; a chat that escalates to email keeps chat as the originating channel so channel mix reflects where customers actually choose to start.
+  7️⃣ Customer stitching is done on the CRM customer identifier, falling back to verified email hash when a guest contact has no account; unstitched cases remain in the total volume but are suppressed from per-customer and contacts-per-order cuts, and ticket bodies and requester contact details stay in the service platform.
 
+Business Use Case: |
+  1️⃣ The Customer Service workforce planning lead reads daily and hourly ticket volume by channel against the forecast; when the seven-day trend runs more than 10% above plan they extend agent shift coverage and open overflow queues before the backlog breaches the response SLA.
+  2️⃣ The Customer Service contact-driver analyst reviews weekly volume split by contact reason and joins it to order volume; when a reason such as "Where is my order" spikes, they file a defect with Operations or Merchandising to fix the root cause rather than staffing the symptom.
+  3️⃣ The Merchandising category manager reviews tickets attributed to a product or category each month and pulls or re-lists items whose contact rate per order exceeds the category benchmark, correcting sizing guidance, imagery or description defects that drive contacts and returns.
+  4️⃣ The Finance cost-to-serve partner multiplies monthly ticket volume by blended cost per contact to reforecast service spend and to validate the savings case for self-service, order-tracking and returns-portal investments.
 
+Dependencies:
+  Metrics: [orders]
+  Dimensions: [support-channel, customer-id]
 
+Source Data: Customer Service CRM (Zendesk) + Salesforce Service Cloud
 
+Report Attributes: |
+  Support Channel; Contact Reason / Driver; Ticket Priority; Agent Group / Queue; Associated Order; Product Category; Region / Market; Customer Tier; Creation Date
 
+Dashboard Usage: [Customer Service Operations Dashboard, Contact Driver & Root Cause Review, Returns & Refunds Performance Dashboard, Cost-to-Serve Executive Summary, Peak Season Readiness Dashboard]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [return-requests, average-resolution-time, first-response-time, orders]
 
+Derived KPIs: [first-contact-resolution-rate, contacts-per-order, customer-satisfaction-score]
 
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +209,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-20T19:41:36.254+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-20T19:41:44.593+00:00
 
