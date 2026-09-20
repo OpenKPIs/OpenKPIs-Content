@@ -1,5 +1,5 @@
 # KPI: Split Shipment Rate
-# Generated: 2026-09-18T16:44:15.357Z
+# Generated: 2026-09-20T01:27:00.609Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -265,8 +265,13 @@ Google Analytics SQL: |
   -- ==========================================
   -- 1. GOOGLE BIGQUERY SQL
   -- ==========================================
-  -- Split Shipment Rate = orders with >= 2 distinct original-fulfillment shipments / all orders with >= 1 carrier shipment
-  -- Base and numerator come from the OMS shipment table; GA4 purchase is joined on transaction_id for attribution only.
+  -- Split Shipment Rate = orders with >= 2 distinct original-fulfillment shipments / all orders with >= 1 ship-confirmed carrier shipment
+  -- Base and numerator come from the OMS shipment table; the GA4 purchase is joined on transaction_id for attribution only.
+  DECLARE end_date DATE DEFAULT CURRENT_DATE('America/New_York');
+  DECLARE start_date DATE DEFAULT DATE_SUB(end_date, INTERVAL 29 DAY);
+  DECLARE purchase_lookback_days INT64 DEFAULT 60;
+  
+  -- Orders left after the OMS order-type exclusions: test, employee, fraud-cancelled and cancelled-before-ship
   WITH eligible_orders AS (
     SELECT o.order_id
     FROM `your-project.oms.orders` AS o
@@ -274,13 +279,13 @@ Google Analytics SQL: |
       AND o.is_employee_order = FALSE
       AND o.order_status NOT IN ('fraud_cancelled', 'cancelled_before_ship')
   ),
+  -- Ship-confirmed carrier shipments that belong to original fulfillment: drops BOPIS, curbside, ship-to-store and digital, plus reships, exchanges, return labels and warranty sends
   original_shipments AS (
     SELECT
       s.order_id,
       COALESCE(s.shipment_id, s.tracking_number) AS shipment_key,
       s.ship_confirm_ts,
-      s.split_reason,
-      s.distribution_center
+      s.split_reason
     FROM `your-project.oms.shipments` AS s
     JOIN eligible_orders AS e
       ON e.order_id = s.order_id
@@ -288,6 +293,7 @@ Google Analytics SQL: |
       AND s.delivery_mode = 'carrier'
       AND s.shipment_reason_code = 'original_fulfillment'
   ),
+  -- One row per order: deduplicated shipment count, first ship-confirm timestamp and the customer-requested split flag
   order_shipments AS (
     SELECT
       order_id,
@@ -297,6 +303,7 @@ Google Analytics SQL: |
     FROM original_shipments
     GROUP BY order_id
   ),
+  -- Orders assigned to the reporting period by their first ship-confirm date in the store reporting time zone
   shipped_order_cohort AS (
     SELECT
       order_id,
@@ -304,29 +311,30 @@ Google Analytics SQL: |
       is_customer_requested_split,
       DATE(first_ship_confirm_ts, 'America/New_York') AS first_ship_date
     FROM order_shipments
-    WHERE DATE(first_ship_confirm_ts, 'America/New_York') BETWEEN DATE '2026-08-01' AND DATE '2026-08-31'
+    WHERE DATE(first_ship_confirm_ts, 'America/New_York') BETWEEN start_date AND end_date
   ),
+  -- First purchase per transaction_id, scanned from before the cohort starts because an order can be placed well before it ships
   ga4_purchases AS (
     SELECT
       transaction_id,
       device_category,
-      traffic_source,
-      planned_split_reason
+      traffic_source
     FROM (
       SELECT
         ecommerce.transaction_id AS transaction_id,
         device.category AS device_category,
         CONCAT(IFNULL(traffic_source.source, '(direct)'), ' / ', IFNULL(traffic_source.medium, '(none)')) AS traffic_source,
-        (SELECT MAX(IF(ep.key = 'split_reason', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS planned_split_reason,
         ROW_NUMBER() OVER (PARTITION BY ecommerce.transaction_id ORDER BY event_timestamp) AS purchase_rank
       FROM `your-project.analytics_123456789.events_*`
-      WHERE _TABLE_SUFFIX BETWEEN '20260601' AND '20260831'
+      WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL purchase_lookback_days DAY))
+                              AND FORMAT_DATE('%Y%m%d', end_date)
         AND event_name = 'purchase'
         AND ecommerce.transaction_id IS NOT NULL
         AND ecommerce.transaction_id NOT IN ('', '(not set)')
     )
     WHERE purchase_rank = 1
   )
+  -- Headline rate, the controllable rate that excludes customer-requested splits, and the GA4 match rate the digital cuts must be read against
   SELECT
     c.first_ship_date,
     COALESCE(g.device_category, '(no digital match)') AS device_category,
@@ -334,11 +342,9 @@ Google Analytics SQL: |
     COUNT(*) AS shipped_orders,
     COUNTIF(c.shipment_count >= 2) AS split_orders,
     COUNTIF(c.shipment_count >= 2 AND NOT c.is_customer_requested_split) AS controllable_split_orders,
-    SUM(c.shipment_count) AS original_shipments,
     ROUND(SAFE_DIVIDE(COUNTIF(c.shipment_count >= 2), COUNT(*)) * 100, 2) AS split_shipment_rate_pct,
     ROUND(SAFE_DIVIDE(COUNTIF(c.shipment_count >= 2 AND NOT c.is_customer_requested_split), COUNT(*)) * 100, 2) AS controllable_split_rate_pct,
-    ROUND(SAFE_DIVIDE(COUNTIF(g.planned_split_reason IS NOT NULL AND c.shipment_count >= 2), COUNTIF(c.shipment_count >= 2)) * 100, 2) AS split_disclosed_at_checkout_pct,
-    ROUND(SAFE_DIVIDE(COUNTIF(g.transaction_id IS NOT NULL), COUNT(*)) * 100, 2) AS ga4_match_rate_pct
+    ROUND(SAFE_DIVIDE(SUM(COUNTIF(g.transaction_id IS NOT NULL)) OVER (PARTITION BY c.first_ship_date), SUM(COUNT(*)) OVER (PARTITION BY c.first_ship_date)) * 100, 2) AS ga4_match_rate_pct
   FROM shipped_order_cohort AS c
   LEFT JOIN ga4_purchases AS g
     ON g.transaction_id = c.order_id
@@ -349,8 +355,10 @@ AEP Query Service SQL: |
   -- ==========================================
   -- 2. ADOBE AEP QUERY SERVICE SQL
   -- ==========================================
-  -- Split Shipment Rate = orders with >= 2 distinct original-fulfillment shipments / all orders with >= 1 carrier shipment
+  -- Split Shipment Rate = orders with >= 2 distinct original-fulfillment shipments / all orders with >= 1 ship-confirmed carrier shipment
   -- OMS order and shipment records are ingested as backend datasets; the web purchase (XDM commerce.purchases) is joined on purchaseID for attribution only.
+  -- Reporting window: the last 30 days of first ship-confirms; the purchase scan reaches 60 days further back because an order can be placed well before it ships.
+  -- Orders left after the OMS order-type exclusions: test, employee, fraud-cancelled and cancelled-before-ship
   WITH eligible_orders AS (
     SELECT o.order_id
     FROM oms_orders_backend_dataset AS o
@@ -358,6 +366,7 @@ AEP Query Service SQL: |
       AND o.is_employee_order = false
       AND o.order_status NOT IN ('fraud_cancelled', 'cancelled_before_ship')
   ),
+  -- Ship-confirmed carrier shipments that belong to original fulfillment: drops BOPIS, curbside, ship-to-store and digital, plus reships, exchanges, return labels and warranty sends
   original_shipments AS (
     SELECT
       s.order_id,
@@ -371,6 +380,7 @@ AEP Query Service SQL: |
       AND s.delivery_mode = 'carrier'
       AND s.shipment_reason_code = 'original_fulfillment'
   ),
+  -- One row per order: deduplicated shipment count, first ship-confirm timestamp and the customer-requested split flag
   order_shipments AS (
     SELECT
       order_id,
@@ -380,6 +390,7 @@ AEP Query Service SQL: |
     FROM original_shipments
     GROUP BY order_id
   ),
+  -- Orders assigned to the reporting period by their first ship-confirm date in the store reporting time zone
   shipped_order_cohort AS (
     SELECT
       order_id,
@@ -387,24 +398,24 @@ AEP Query Service SQL: |
       is_customer_requested_split,
       to_date(from_utc_timestamp(first_ship_confirm_ts, 'America/New_York')) AS first_ship_date
     FROM order_shipments
-    WHERE to_date(from_utc_timestamp(first_ship_confirm_ts, 'America/New_York')) BETWEEN DATE '2026-08-01' AND DATE '2026-08-31'
+    WHERE to_date(from_utc_timestamp(first_ship_confirm_ts, 'America/New_York'))
+          BETWEEN date_sub(current_date(), 29) AND current_date()
   ),
+  -- First purchase per purchaseID, scanned from before the cohort starts because an order can be placed well before it ships
   web_purchases AS (
     SELECT
       purchase_id,
       device_type,
-      tracking_code,
-      planned_split_reason
+      tracking_code
     FROM (
       SELECT
         commerce.order.purchaseID AS purchase_id,
         device.type AS device_type,
         COALESCE(marketing.trackingCode, '(direct)') AS tracking_code,
-        _experience.analytics.customDimensions.eVars.eVar40 AS planned_split_reason,
         ROW_NUMBER() OVER (PARTITION BY commerce.order.purchaseID ORDER BY timestamp) AS purchase_rank
       FROM web_events_dataset
-      WHERE timestamp >= TIMESTAMP '2026-06-01 00:00:00'
-        AND timestamp < TIMESTAMP '2026-09-01 00:00:00'
+      WHERE timestamp >= CAST(date_sub(current_date(), 89) AS timestamp)
+        AND timestamp < CAST(date_add(current_date(), 1) AS timestamp)
         AND eventType = 'commerce.purchases'
         AND commerce.purchases.value = 1
         AND commerce.order.purchaseID IS NOT NULL
@@ -412,6 +423,7 @@ AEP Query Service SQL: |
     ) AS ranked
     WHERE purchase_rank = 1
   )
+  -- Headline rate, the controllable rate that excludes customer-requested splits, and the digital match rate the digital cuts must be read against
   SELECT
     c.first_ship_date,
     COALESCE(w.device_type, '(no digital match)') AS device_type,
@@ -419,11 +431,9 @@ AEP Query Service SQL: |
     COUNT(*) AS shipped_orders,
     SUM(CASE WHEN c.shipment_count >= 2 THEN 1 ELSE 0 END) AS split_orders,
     SUM(CASE WHEN c.shipment_count >= 2 AND c.is_customer_requested_split = 0 THEN 1 ELSE 0 END) AS controllable_split_orders,
-    SUM(c.shipment_count) AS original_shipments,
     ROUND(100.0 * SUM(CASE WHEN c.shipment_count >= 2 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS split_shipment_rate_pct,
     ROUND(100.0 * SUM(CASE WHEN c.shipment_count >= 2 AND c.is_customer_requested_split = 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS controllable_split_rate_pct,
-    ROUND(100.0 * SUM(CASE WHEN c.shipment_count >= 2 AND w.planned_split_reason IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN c.shipment_count >= 2 THEN 1 ELSE 0 END), 0), 2) AS split_disclosed_at_checkout_pct,
-    ROUND(100.0 * SUM(CASE WHEN w.purchase_id IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS digital_match_rate_pct
+    ROUND(100.0 * SUM(SUM(CASE WHEN w.purchase_id IS NOT NULL THEN 1 ELSE 0 END)) OVER (PARTITION BY c.first_ship_date) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY c.first_ship_date), 0), 2) AS digital_match_rate_pct
   FROM shipped_order_cohort AS c
   LEFT JOIN web_purchases AS w
     ON w.purchase_id = c.order_id
@@ -466,5 +476,5 @@ Created At: 2026-09-18T16:44:03.323+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-18T16:44:14.018+00:00
+Last Modified At: 2026-09-20T01:27:00.203+00:00
 
