@@ -1,29 +1,29 @@
 # Event: purchase
-# Generated: 2026-06-14T00:45:17.386Z
+# Generated: 2026-09-20T01:26:00.326Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Event Name: purchase
-Event Serialization: JSON event payload with a unique event_id, timestamp, event name, transaction object, and item array. Recommended serialization: one order-level purchase event containing all purchased items, plus optional downstream item-level exploded records in the warehouse. Deduplicate by transaction_id and event_id, and preserve original event timestamp and ingestion timestamp.
+Event Serialization: always
 
 Description: |
-  Represents a completed transaction or order. This event fires once after payment or order confirmation is successfully completed, typically on the order confirmation page or immediately after the backend confirms the order was accepted. It should not fire on checkout start, payment attempt, or failed payment.
+  Records a completed, payment-confirmed order together with its monetary value, currency and full line-item detail, making it the terminal conversion event of the e-commerce funnel and the transactional grain on which revenue, attribution and merchandising reporting are built. It fires only once the order has been accepted by the commerce platform — never at checkout start, at payment submission or on a declined authorization — so purchase counts equal orders booked rather than purchase attempts.
 
-Category: Revenue
+Category: Conversion
 
-Tags: [purchase, transaction, order, conversion, revenue, ecommerce, checkout]
+Tags: [event, E-commerce: Cart & Checkout Funnel Analytics, purchase, transaction, order, conversion]
 
-Industry: ["Retail","E-commerce","SaaS","Media","Technology","Other"]
+Industry: ["Retail", "E-commerce", "SaaS", "Media", "Technology", "Other"], Retail
 
 Priority: High
 
-Core Area: Digital Analytics
+Core Area: Checkout
 
 Scope: Event
 
 Event Type: standard
 
-Aggregation Window: Event, Session, User
+Aggregation Window: Event, Session, User, Daily, Weekly, Monthly
 
 GA4 Event: |
   purchase
@@ -32,33 +32,322 @@ Adobe Event: |
   purchase
 
 W3 Data Layer: |
-  {"event":"purchase","event_id":"evt_123456789","timestamp":"2026-06-14T12:00:00Z","transaction":{"transaction_id":"ORD12345","affiliation":"Online Store","value":99.99,"tax":8.25,"shipping":5.99,"currency":"USD","coupon":"SUMMER10","payment_type":"credit_card"},"items":[{"item_id":"SKU123","item_name":"Example Product","item_brand":"Example Brand","item_category":"Apparel","item_variant":"Blue / M","price":49.99,"quantity":2,"coupon":"SUMMER10","discount":5}]}
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "order confirmation",
+        "pageType": "purchase_confirmation"
+      }
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "u_8f24c1"
+            },
+            "attributes": {
+              "loginStatus": "logged_in",
+              "customerType": "returning"
+            }
+          }
+        ]
+      }
+    ],
+    "transaction": {
+      "transactionID": "ORD12345",
+      "profile": {
+        "profileInfo": {
+          "profileID": "u_8f24c1"
+        }
+      },
+      "total": {
+        "basePrice": 99.98,
+        "voucherCode": "SUMMER10",
+        "voucherDiscount": 10,
+        "currency": "USD",
+        "taxRate": 0.0825,
+        "shipping": 5.99,
+        "shippingMethod": "Ground",
+        "priceWithTax": 97.4,
+        "transactionTotal": 103.39
+      },
+      "attributes": {
+        "affiliation": "Online Store",
+        "paymentType": "credit_card",
+        "taxAmount": 7.42
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU123",
+            "sku": "SKU123",
+            "productName": "Example Product",
+            "manufacturer": "Example Brand",
+            "variant": "Blue / M"
+          },
+          "category": {
+            "primaryCategory": "Apparel",
+            "subCategory1": "Tops"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 49.99,
+            "currency": "USD"
+          },
+          "attributes": {
+            "discount": 5,
+            "coupon": "SUMMER10",
+            "lineTotal": 89.98
+          }
+        }
+      ]
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "purchase",
+          "eventAction": "purchase",
+          "type": "transaction",
+          "eventID": "evt_123456789",
+          "timeStamp": "2026-06-14T12:00:00Z"
+        }
+      }
+    ]
+  }
 
 GA4 Data Layer: |
-  {"event":"purchase","ecommerce":{"transaction_id":"ORD12345","affiliation":"Online Store","value":99.99,"tax":8.25,"shipping":5.99,"currency":"USD","coupon":"SUMMER10","items":[{"item_id":"SKU123","item_name":"Example Product","affiliation":"Online Store","coupon":"SUMMER10","discount":5,"item_brand":"Example Brand","item_category":"Apparel","item_variant":"Blue / M","price":49.99,"quantity":2}]}}
+  {
+    "event": "purchase",
+    "event_id": "evt_123456789",
+    "user_id": "u_8f24c1",
+    "payment_type": "credit_card",
+    "shipping_tier": "Ground",
+    "ecommerce": {
+      "transaction_id": "ORD12345",
+      "affiliation": "Online Store",
+      "value": 103.39,
+      "tax": 7.42,
+      "shipping": 5.99,
+      "currency": "USD",
+      "coupon": "SUMMER10",
+      "items": [
+        {
+          "item_id": "SKU123",
+          "item_name": "Example Product",
+          "affiliation": "Online Store",
+          "coupon": "SUMMER10",
+          "discount": 5,
+          "index": 1,
+          "item_brand": "Example Brand",
+          "item_category": "Apparel",
+          "item_category2": "Tops",
+          "item_list_id": "search_results",
+          "item_list_name": "Search Results",
+          "item_variant": "Blue / M",
+          "location_id": "ChIJIQBpAG2ahYAR_6128GcTUEo",
+          "price": 49.99,
+          "quantity": 2
+        }
+      ]
+    }
+  }
 
 Adobe Client Data Layer: |
-  {"event":"purchase","eventInfo":{"eventName":"purchase","eventId":"evt_123456789","timestamp":"2026-06-14T12:00:00Z"},"commerce":{"purchase":{"value":1},"order":{"purchaseID":"ORD12345","currencyCode":"USD","priceTotal":99.99,"taxAmount":8.25,"shippingAmount":5.99,"couponCode":"SUMMER10"}},"productListItems":[{"SKU":"SKU123","name":"Example Product","quantity":2,"priceTotal":99.98,"discountAmount":5,"productCategories":[{"categoryID":"Apparel"}],"attributes":{"brand":"Example Brand","variant":"Blue / M"}}]}
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase",
+      "eventId": "evt_123456789",
+      "timestamp": "2026-06-14T12:00:00Z",
+      "path": "commerce.order"
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD12345",
+        "currencyCode": "USD",
+        "priceTotal": 103.39,
+        "discountAmount": 10,
+        "taxAmount": 7.42,
+        "shippingAmount": 5.99,
+        "couponCode": "SUMMER10",
+        "affiliation": "Online Store",
+        "shippingMethod": "Ground",
+        "payments": [
+          {
+            "transactionID": "ORD12345",
+            "paymentAmount": 103.39,
+            "paymentType": "credit_card",
+            "currencyCode": "USD"
+          }
+        ]
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU123",
+        "name": "Example Product",
+        "quantity": 2,
+        "priceTotal": 89.98,
+        "discountAmount": 10,
+        "currencyCode": "USD",
+        "productCategories": [
+          {
+            "categoryID": "Apparel"
+          },
+          {
+            "categoryID": "Tops"
+          }
+        ],
+        "attributes": {
+          "unitPrice": 49.99,
+          "brand": "Example Brand",
+          "variant": "Blue / M",
+          "coupon": "SUMMER10"
+        }
+      }
+    ],
+    "userAccount": {
+      "id": "u_8f24c1",
+      "loginStatus": "logged_in",
+      "customerType": "returning"
+    }
+  }
 
 XDM Mapping: |
-  {"eventType":"commerce.purchases","commerce":{"purchases":{"value":1},"order":{"purchaseID":"ORD12345","currencyCode":"USD","priceTotal":99.99,"taxAmount":8.25,"shippingAmount":5.99,"payments":[{"paymentAmount":99.99,"paymentType":"credit_card"}]}},"productListItems":[{"SKU":"SKU123","name":"Example Product","quantity":2,"priceTotal":99.98,"discountAmount":5,"currencyCode":"USD","productCategories":[{"categoryID":"Apparel"}],"_tenant":{"brand":"Example Brand","variant":"Blue / M","coupon":"SUMMER10"}}],"_id":"evt_123456789","timestamp":"2026-06-14T12:00:00Z"}
+  {
+    "_id": "evt_123456789",
+    "timestamp": "2026-06-14T12:00:00Z",
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD12345",
+        "currencyCode": "USD",
+        "priceTotal": 103.39,
+        "discountAmount": 10,
+        "payments": [
+          {
+            "transactionID": "ORD12345",
+            "paymentAmount": 103.39,
+            "paymentType": "credit_card",
+            "currencyCode": "USD"
+          }
+        ]
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU123",
+        "name": "Example Product",
+        "quantity": 2,
+        "priceTotal": 89.98,
+        "discountAmount": 10,
+        "currencyCode": "USD",
+        "productCategories": [
+          {
+            "categoryID": "Apparel"
+          },
+          {
+            "categoryID": "Tops"
+          }
+        ],
+        "_tenant": {
+          "unitPrice": 49.99,
+          "brand": "Example Brand",
+          "variant": "Blue / M",
+          "coupon": "SUMMER10"
+        }
+      }
+    ],
+    "web": {
+      "webPageDetails": {
+        "name": "order confirmation",
+        "siteSection": "purchase_confirmation"
+      }
+    },
+    "_tenant": {
+      "order": {
+        "taxAmount": 7.42,
+        "shippingAmount": 5.99,
+        "shippingTier": "Ground",
+        "couponCode": "SUMMER10",
+        "affiliation": "Online Store"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "ORD12345",
+            "eVar11": "credit_card",
+            "eVar12": "Ground",
+            "eVar13": "SUMMER10",
+            "eVar14": "Online Store",
+            "eVar15": "returning"
+          }
+        }
+      }
+    }
+  }
 
 Parameters: |
-  transaction_id: unique order or transaction identifier; value: monetary order value; currency: ISO 4217 currency code; tax: tax amount; shipping: shipping amount; coupon: order-level coupon code; affiliation: store, marketplace, or sales channel; payment_type: payment method category; shipping_tier: selected shipping method; items: array of purchased products; item_id: product SKU or identifier; item_name: product name; item_brand: product brand; item_category: primary product category; item_category2: secondary category; item_variant: variant such as size or color; price: unit price; quantity: units purchased; discount: item-level discount; event_id: unique event identifier for deduplication; user_id: authenticated user identifier if consented and allowed; session_id: analytics session identifier
+  {
+    "transaction_id": "string - Required. The commerce platform's own order ID for the accepted order (ORD12345), read from the confirmation payload and never generated in the browser. This is the serialization and dedupe key: it must be byte-identical to the order id used by order management, finance and the later refund event, so every purchase row joins one-to-one to a booked order and repeat fires from refresh, back-navigation or a bookmarked confirmation URL collapse to a single transaction.",
+    "value": "number - Required. Total monetary value of the order in the currency given by currency, under one documented revenue convention applied identically across web, app and server-side collection. Convention used here: sum over items of (price - discount) x quantity, plus tax and shipping (99.98 - 10.00 + 7.42 + 5.99 = 103.39). Two decimals, no currency symbol, no thousands separator, never a string.",
+    "currency": "string - Required whenever value is set. ISO 4217 three-letter alphabetic code in upper case (USD, EUR, GBP, JPY) for the currency the customer was actually charged, not the reporting currency. GA4 discards or mis-converts the revenue when this is missing, lower-case, a symbol or a three-digit numeric code.",
+    "tax": "number - Optional; populate wherever checkout captures it. Total tax charged on the order, in the currency given by currency. Include it in value only when the documented revenue convention is gross of tax, and apply that choice to every collection path.",
+    "shipping": "number - Optional; populate wherever checkout captures it. Total shipping and handling charged on the order, net of any shipping promotion (0 for free shipping), in the currency given by currency. Included in value under the convention used here.",
+    "coupon": "string - Optional. Order-level promotion or voucher code applied at checkout, normalised to the case the promotions engine stores (SUMMER10). Omit the key entirely rather than sending an empty string when no coupon was used; line-level codes belong on items[].coupon.",
+    "affiliation": "string - Optional. Store, marketplace or selling channel that booked the order, from one controlled vocabulary shared with the Revenue Channel dimension: Online Store, Amazon Marketplace, eBay, Store 142 Endless Aisle, Call Center Assisted.",
+    "payment_type": "string - Optional. Payment method category selected at checkout, from a controlled list: credit_card, debit_card, paypal, apple_pay, google_pay, gift_card, bnpl, bank_transfer, cash_on_delivery. Category only; never a card number, last four digits, token or any other payment credential.",
+    "shipping_tier": "string - Optional. Delivery option the customer chose, using the same values sent on add_shipping_info so the two events reconcile: Ground, Two-Day, Overnight, Store Pickup, Curbside, Ship from Store.",
+    "items": "array - Required. Array of item-level objects, one object per order line, whose fields are documented below as items[].*. Every purchased line must be present and the lines must reconcile to value under the same revenue convention; unreconciled arrays silently corrupt product-level revenue, margin and attribution. GA4 accepts at most 200 items per event: when a basket exceeds that, send the highest-revenue lines and keep the order-level totals correct.",
+    "items[].item_id": "string - Required on every item (item_id or item_name must be present; send both). Product SKU or catalogue identifier at the same grain as inventory and merchandising, identical to the id sent on view_item and add_to_cart so the funnel joins at product level.",
+    "items[].item_name": "string - Required on every item (item_id or item_name must be present; send both). Human-readable product title as merchandised, without price, promotion or availability text appended.",
+    "items[].item_brand": "string - Optional. Brand or manufacturer of the product, from the product catalogue rather than free text.",
+    "items[].item_category": "string - Optional. Primary (top-level) merchandising category for the product, e.g. Apparel. Deeper levels go in item_category2 through item_category5, top-down; never concatenate the hierarchy into one string.",
+    "items[].item_category2": "string - Optional. Second level of the merchandising hierarchy beneath item_category, e.g. Tops. Same rule applies to item_category3, item_category4 and item_category5 where the taxonomy is deeper.",
+    "items[].item_variant": "string - Optional. Variant of the product actually purchased, such as size, colour or configuration (Blue / M), matching the variant sent on add_to_cart.",
+    "items[].price": "number - Optional but expected. Unit price of one item before any item discount is applied, in the currency given by currency; item revenue is computed as (price - discount) x quantity.",
+    "items[].quantity": "integer - Optional but expected. Whole number of units of this item in the order; must be 1 or greater, and the sum across items must equal the units on the booked order.",
+    "items[].discount": "number - Optional. Per-unit monetary discount applied to this item (5 here means 5 off each of the 2 units, 10 off the line), in the currency given by currency; order-level promotions must be allocated to the lines they reduce so the items reconcile to value.",
+    "items[].coupon": "string - Optional. Promotion or voucher code that applied to this specific line; repeat the order-level coupon here only when it genuinely discounted the line.",
+    "items[].affiliation": "string - Optional. Selling entity for this line when an order can span sellers (marketplace, third-party fulfiller, ship-from-store location); defaults to the order-level affiliation.",
+    "items[].index": "integer - Optional. One-based position of the item in the line-item list, used to preserve line order between the confirmation payload and the analytics event.",
+    "items[].item_list_id": "string - Optional. Identifier of the list the item was originally selected from (search_results, category_apparel, recommended_for_you), carried through from view_item_list so merchandising can attribute revenue to discovery surfaces.",
+    "items[].item_list_name": "string - Optional. Display name of that list (Search Results), paired one-to-one with items[].item_list_id.",
+    "items[].location_id": "string - Optional. Google Place ID (or the internal store id mapped to it) of the physical location fulfilling the line, used for ship-from-store and buy-online-pick-up-in-store reporting.",
+    "event_id": "string - Optional but strongly recommended. Unique identifier for this specific occurrence of the purchase event, stable across the browser and the server-side copy of the same order, so the warehouse and the conversions API collapse both copies to one row. Generated once with the order confirmation, not per page render; transaction_id dedupes orders, event_id dedupes transmissions.",
+    "user_id": "string - Optional; send only with consent. Pseudonymous, non-reversible customer identifier from the identity service, identical to the id used in CRM joins and lifetime-value reporting. Never an email address, phone number or any other direct identifier; hashed identifiers travel only through the dedicated user-provided-data channel.",
+    "session_id": "string - Optional. Analytics session identifier (GA4 ga_session_id, the Adobe visit id), collected automatically by the tag and not pushed by hand; document it here because session-grain reporting such as revenue per session joins purchases on it."
+  }
 
 Calculation Notes: |
-  Fire exactly once per completed order using a stable transaction_id or order_id for deduplication. Prefer server-confirmed order success over client-only payment completion. Exclude failed, pending, canceled, test, fraud, and duplicate orders unless explicitly reporting gross order attempts. The value parameter should represent order revenue according to the organization’s reporting standard, commonly excluding tax and shipping for merchandise revenue or including them for gross transaction value; document the chosen convention. Currency must be populated using ISO 4217 codes. Item-level arrays should reconcile to the order-level value where possible. Use event_id and transaction_id to deduplicate across web, app, server-side, and tag manager implementations.
+  1️⃣ Fire once per completed order using stable transaction_id or order_id for deduplication.  
+  2️⃣ Prefer server-confirmed order success over client-only payment completion.  
+  3️⃣ Exclude failed, pending, canceled, test, fraud, and duplicate orders unless reporting gross order attempts.  
+  4️⃣ Value parameter should represent order revenue per organization’s reporting standard; document chosen convention.  
+  5️⃣ Currency must use ISO 4217 codes.  
+  6️⃣ Item-level arrays should reconcile to the order-level value where possible.  
+  7️⃣ Use event_id and transaction_id for deduplication across all implementations.
 
 Business Use Case: |
   Used by marketing, ecommerce, product, finance, and executive teams to measure revenue, conversion performance, campaign return, merchandising effectiveness, checkout funnel completion, customer acquisition quality, and customer lifetime value inputs. It supports revenue attribution, ROAS analysis, A/B test evaluation, product performance reporting, retention segmentation, and forecasting.
 
-Dependencies: |
-  view_item; add_to_cart; begin_checkout; add_shipping_info; add_payment_info; transaction_id; item_id; currency; value; consent state; order confirmation source of truth
+Dependencies:
+  Events: [view-item, add-to-cart, begin-checkout, add-shipping-info, add-payment-info]
+  Dimensions: [transaction-id, item-id, currency, payment-type, consent-status]
 
-Source Data: Digital Analytics; Ecommerce Platform; Order Management System; Payment Processor; CRM; Data Warehouse
+Source Data: Digital Analytics (GA4, Adobe Analytics) + Commerce Platform order confirmation + Payment Gateway authorization status
 
     Report Attributes: |
-  transaction_id, event_id, currency, value, tax, shipping, coupon, affiliation, payment_type, shipping_tier, item_id, item_name, item_brand, item_category, item_variant, price, quantity, discount, user_id or anonymous_id, session_id, page_location, traffic_source, campaign, device_category, geo_country, consent_status
+  Transaction ID; Currency; Order Value Band; Coupon; Affiliation; Payment Type; Shipping Tier; Item ID; Item Name; Item Brand; Item Category; Item Variant; Customer Type; Traffic Source; Campaign; Device Category; Country; Consent Status
 
     Dashboard Usage: [Executive Revenue Dashboard, E-commerce Performance Dashboard, Marketing Attribution Dashboard, Checkout Funnel Dashboard, Product Merchandising Dashboard, Customer Retention Dashboard, Experimentation Dashboard]
 
@@ -73,7 +362,7 @@ Source Data: Digital Analytics; Ecommerce Platform; Order Management System; Pay
 
     Derived KPIs: [Total Revenue, E-commerce Conversion Rate, Average Order Value, Customer Lifetime Value, Return on Ad Spend, Revenue per Visitor, Checkout Completion Rate, Repeat Purchase Rate]
 
-    Data Sensitivity: confidential
+    Data Sensitivity: Restricted
 
     Contains PII: No
 
@@ -85,4 +374,5 @@ Source Data: Digital Analytics; Ecommerce Platform; Order Management System; Pay
 
     Last Modified By: devyendarm
 
-    
+    Last Modified At: 2026-09-20T01:25:59.822+00:00
+
