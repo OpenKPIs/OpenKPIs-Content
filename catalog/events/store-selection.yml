@@ -1,5 +1,5 @@
 # Event: Store Selection
-# Generated: 2026-09-19T18:29:10.828Z
+# Generated: 2026-09-20T00:21:11.493Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -150,7 +150,11 @@ Parameters: |
     "previous_store_id": "string - store bound to the session or profile before this selection; null on first selection, used to separate first-time sets from store changes"
   }
 
+Calculation Notes: |
+  ["1️⃣ Fire only on a committed state change: the shopper clicks 'Set as my store', 'Pick up here' or an equivalent control and the application persists the new store to the session, profile or cart. Store detail page views, map pin hovers, locator result renders and store-card expansions do not fire the event; those belong to store-locator-search and page_view.","2️⃣ Suppress no-op selections: if the chosen store_id equals the store already bound to the session or profile, do not fire. A re-selection of the same store after a session timeout (30 minutes of inactivity in GA4, the Adobe visit default) fires once in the new session only when the shopper explicitly confirms it; silent restoration of a stored preference from a cookie or the loyalty profile on page load is excluded.","3️⃣ store_distance is a numeric value in miles for US properties or kilometres elsewhere, rounded to one decimal, measured from the shopper's resolved location (GPS permission, entered ZIP/postcode, or IP geolocation in that order of precedence) to the store. Send null when no shopper location is resolved; never send a pre-bucketed value, because the Store Distance Band dimension is derived downstream from the raw number and a mixed unit or band string breaks that derivation.","4️⃣ selection_context is constrained to locator | pdp | cart | checkout | header. Selections made inside the checkout fulfilment step are still Store Selection when they change the pickup store, but the fulfilment method choice itself (ship vs pick up) is add_shipping_info and must not be inferred from this event; a single click that both switches to pickup and picks a store fires both events.","5️⃣ Exclude internal traffic (store associate devices on the in-store network, kiosk mode, QA and staging hostnames) and known bot user agents. Endless-aisle kiosk selections made on behalf of a customer are excluded from digital store-adoption reporting and analysed separately.","6️⃣ Count at event grain for volume, and deduplicate to the last selection per session when attributing orders to a store: the last store_id before purchase is the pickup store of record, reconciled against the order management system's fulfilment location, which wins when the two disagree (for example after a customer-service reassignment).","7️⃣ Timing: event_timestamp is the client click time; for store-level daily reporting convert to the store's local timezone, not the property timezone, so late-evening selections that drive next-morning pickups land on the correct trading day."]
 
+Business Use Case: |
+  ["1️⃣ The Omnichannel Product Manager reviews Store Selection rate by selection_context weekly; when the pdp share falls below the checkout share, the team moves the 'Choose your store' control above the fold on product pages so shoppers see local availability before adding to cart rather than discovering it at checkout.","2️⃣ Store Operations leadership monitors selections per store alongside BOPIS order volume each morning; when a store's selections rise more than 25% week over week without a matching rise in pickup orders, they audit that store's inventory feed accuracy and pickup slot capacity.","3️⃣ The Merchandising team uses the distribution of store_distance for selections that end in purchase to set the radius for 'available near you' messaging, narrowing it in dense metros where shoppers rarely choose stores beyond the nearest two locations.","4️⃣ The CRM and Loyalty team triggers a 'your store has changed' confirmation and refreshes local-offer eligibility whenever a logged-in member's Store Selection sets a store different from their profile home store, keeping store-specific promotions aligned with where the customer actually shops."]
 
 Dependencies:
   Events: [store-locator-search]
@@ -185,5 +189,5 @@ Source Data: Digital Analytics (GA4 / Adobe Analytics) + Order Management (fulfi
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-09-19T18:29:10.517+00:00
+    Last Modified At: 2026-09-20T00:21:11.248+00:00
 
