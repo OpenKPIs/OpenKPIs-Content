@@ -1,0 +1,214 @@
+# Event: Contact Form Submission
+# Generated: 2026-09-20T20:01:28.762Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Contact Form Submission
+Event Serialization: always
+
+Description: |
+  Records each server-acknowledged submission of the storefront contact or help form, captured as the unified submit_form event with form_type='contact' and classified by contact_reason and ticket_category, with transaction_id attached when the enquiry concerns a specific order. It is the digital numerator for Contact Rate and Contacts per Order, so Customer Service can separate order-driven demand (WISMO, returns, refunds, damaged items) from pre-purchase questions and measure how well self-service deflects each one.
+
+Category: Experience
+
+Tags: [event, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Engagement
+
+
+Event Type: standard
+
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  submit_form
+
+Adobe Event: |
+  contact_form_submit
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "help:contact-us",
+        "destinationURL": "https://www.example-store.com/help/contact-us"
+      },
+      "category": {
+        "primaryCategory": "help",
+        "subCategory1": "contact"
+      }
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "submit_form",
+          "eventAction": "contact",
+          "type": "form",
+          "timeStamp": "2026-09-18T14:32:05Z"
+        },
+        "category": {
+          "primaryCategory": "customer_service"
+        },
+        "attributes": {
+          "formType": "contact",
+          "formId": "contact_us_main",
+          "contactReason": "order_status",
+          "ticketCategory": "fulfilment",
+          "ticketId": "ZD-4829173",
+          "transactionId": "T-100245871",
+          "supportChannel": "web_form"
+        }
+      }
+    ],
+    "user": [
+      {
+        "segment": {
+          "customerType": "registered"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_type": "contact",
+    "form_id": "contact_us_main",
+    "contact_reason": "order_status",
+    "ticket_category": "fulfilment",
+    "ticket_id": "ZD-4829173",
+    "transaction_id": "T-100245871",
+    "support_channel": "web_form",
+    "customer_type": "registered"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "form:submit",
+    "eventInfo": {
+      "path": "component.contact-us-main",
+      "name": "contact_form_submit"
+    },
+    "form": {
+      "formType": "contact",
+      "formId": "contact_us_main",
+      "contactReason": "order_status",
+      "ticketCategory": "fulfilment",
+      "ticketId": "ZD-4829173",
+      "supportChannel": "web_form"
+    },
+    "transaction": {
+      "transactionId": "T-100245871"
+    },
+    "user": {
+      "customerType": "registered"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "web": {
+      "webPageDetails": {
+        "name": "help:contact-us",
+        "URL": "https://www.example-store.com/help/contact-us"
+      },
+      "webInteraction": {
+        "name": "contact_form_submit",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "contact",
+            "eVar41": "contact_us_main",
+            "eVar42": "order_status",
+            "eVar43": "fulfilment",
+            "eVar44": "ZD-4829173",
+            "eVar45": "T-100245871",
+            "eVar46": "web_form",
+            "eVar47": "registered"
+          }
+        },
+        "event1to100": {
+          "event40": {
+            "value": 1,
+            "id": "ZD-4829173"
+          }
+        }
+      }
+    }
+  }
+
+Parameters: |
+  {
+    "form_type": "string - Form classification; constant 'contact' for this event, used to separate it from other submit_form uses",
+    "form_id": "string - Stable identifier of the form instance (e.g. 'contact_us_main', 'order_help_modal') for comparing placements",
+    "contact_reason": "string - Customer-selected reason from the controlled picklist (order_status, return_request, refund_status, damaged_item, product_question, payment_issue, account_access, other)",
+    "ticket_category": "string - Help-desk taxonomy category the reason maps to (pre_purchase, fulfilment, returns_refunds, billing, account, other); aligns with the ticket-category dimension",
+    "ticket_id": "string - Help-desk ticket identifier returned on successful submission; used for deduplication and reconciliation",
+    "transaction_id": "string - Optional. Validated order id when the contact concerns a specific order; enables Contacts per Order and order-cohort joins",
+    "support_channel": "string - Constant 'web_form' for this event; aligns with the support-channel dimension so digital and help-desk contacts share one taxonomy",
+    "customer_type": "string - 'guest' or 'registered' at time of submission"
+  }
+
+Calculation Notes: |
+  1️⃣ Fire timing: push submit_form only after the help-desk API acknowledges the ticket and returns a ticket_id, never on button click or client-side validation pass. Validation errors, timeouts and 4xx/5xx responses must not fire the event, otherwise contact volume is overstated against the Zendesk / Service Cloud ticket count.
+  2️⃣ Serialization and dedupe: event_serialization is 'always', so every acknowledged submission counts, including repeat enquiries from the same user in one session. Deduplicate on ticket_id, which is unique per ticket; suppress a second push for the same ticket_id caused by thank-you page reloads, back-navigation or SPA re-renders. In Adobe, send event40 with ticket_id as the serialization ID so retries are ignored.
+  3️⃣ Required parameters: form_type ('contact'), form_id, contact_reason, ticket_category, ticket_id, support_channel ('web_form') and customer_type ('guest' or 'registered') must be present on every push. contact_reason must come from the controlled picklist, and ticket_category is always sent but is derived from contact_reason through the single reason-to-category mapping held in the form config, so neither value is typed by the user or taken from free text.
+  4️⃣ Optional parameter: transaction_id is sent only when the enquiry concerns a specific order and the id has been validated against the order system; leave it absent rather than empty or filled with a dummy value. Order-linked reporting (Contacts per Order) depends on it, and order-table attributes such as days since order and order status are not fields on this event but are obtained by joining transaction_id to the order table (see the days-since-order-at-contact derived dimension), so an unvalidated value corrupts the order-cohort join and must never be guessed from the last purchase in the session.
+  5️⃣ Consent and PII: pii_flag is false because the payload carries only picklist values and pseudonymous identifiers. Never place the message body, subject, name, email, phone or address in any parameter or in Adobe eVars. Respect the consent state: when analytics_storage is denied, GA4 sends cookieless pings only, so browser-side counts undercount and the help-desk ticket table remains the system of record for reconciliation.
+  6️⃣ Cross-platform mapping: the GA4 event is submit_form, the Adobe ACDL trigger is form:submit with the name contact_form_submit, and the XDM eventType is web.formFilledOut. Register contact_reason, ticket_category, support_channel and form_id as event-scoped custom dimensions in GA4, and confirm the Adobe eVar40 to eVar47 mapping is bound to the same parameters, or reports will show them as (not set).
+  7️⃣ Common instrumentation mistakes: reusing submit_form for newsletter, lead or checkout forms without filtering on form_type='contact'; double counting with the GA4 enhanced-measurement form_submit auto-event or a second tag firing on the same success state; sending free-text or unmapped contact_reason values that split the picklist; letting ticket_category be chosen or typed independently instead of deriving it from contact_reason through the form-config mapping (it is still sent on every push); and omitting customer_type for guests, which drops them from registered-versus-guest contact-rate comparisons.
+
+Business Use Case: |
+  1️⃣ Customer Service operations leads review contact_reason by ticket_category weekly on the Customer Service Contact Drivers dashboard and, when order_status (WISMO) volume rises above its trailing baseline, staff the fulfilment queue and add proactive delivery-tracking messaging.
+  2️⃣ The Ecommerce Experience team compares submissions by form_id and contact_reason on the Help Centre Self-Service Deflection dashboard and, when a form placement keeps receiving reasons that self-service content should resolve (order_status, refund_status), rewrites the related help content or moves the self-service entry point ahead of that form.
+  3️⃣ Returns and Refunds Operations managers filter contact_reason to return_request, refund_status and damaged_item with transaction_id present, joining transaction_id to the order table for order attributes such as order status, then adjust the returns portal status messaging or refund SLA communication where contacts cluster after the promised refund date.
+  4️⃣ Merchandising and Product teams track the pre_purchase ticket_category and product_question contact_reason trend on the Post-Purchase Experience Monitor and, when that volume rises above its baseline after a catalogue or policy change, review size guides, specification content and delivery information across the storefront.
+
+Dependencies:
+  Events: [purchase]
+  Dimensions: [support-channel, ticket-category]
+
+Source Data: Digital Analytics (GA4) + Help Desk (Zendesk / Salesforce Service Cloud)
+
+    Report Attributes: |
+  contact_reason; ticket_category; support-channel; device_category; page_location; customer_type; days_since_order; order_status
+
+    Dashboard Usage: [Customer Service Contact Drivers, Post-Purchase Experience Monitor, Returns & Refunds Operations, Help Centre Self-Service Deflection]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [support-channel, ticket-category]
+
+    Derived Dimensions: [contact-reason, days-since-order-at-contact]
+
+    Derived Metrics: [contact-form-submissions, order-linked-contacts]
+
+    Derived KPIs: [contact-rate, contacts-per-order]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-18T16:51:49.57+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-20T20:01:28.433+00:00
+
