@@ -1,0 +1,273 @@
+# Event: Refund Issued
+# Generated: 2026-09-20T20:01:53.549Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Refund Issued
+Event Serialization: always
+
+Description: |
+  Records each full or partial refund posted against a completed order, keyed to the original purchase transaction_id so that refunded value, currency and line items reconcile to the revenue originally recognised. It is the authoritative input for refund rate, refunded revenue and net revenue reporting, and it separates post-purchase value leakage from gross demand across channels, products and cohorts.
+
+Category: Monetization
+
+Tags: [event, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Monetization
+
+
+Event Type: standard
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  refund
+
+Adobe Event: |
+  refund
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "account:orders:refund-confirmation",
+        "pageID": "refund-confirmation"
+      },
+      "category": {
+        "primaryCategory": "account",
+        "subCategory1": "orders"
+      }
+    },
+    "transaction": {
+      "transactionID": "ORD-10045872",
+      "total": {
+        "basePrice": 59.98,
+        "currency": "USD",
+        "shipping": 4.99,
+        "taxRate": 0.0825,
+        "transactionTotal": 59.98
+      },
+      "attributes": {
+        "refundID": "re_3PqK8L2eZvKYlo2C1a9",
+        "refundType": "partial",
+        "refundMethod": "original_payment",
+        "returnReason": "wrong_size",
+        "returnMethod": "mail",
+        "refundChannel": "self_service_portal",
+        "originalOrderDate": "2026-09-02",
+        "tax": 4.95
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-88213-BLU-M",
+            "productName": "Organic Cotton Crew Tee"
+          },
+          "category": {
+            "primaryCategory": "Apparel",
+            "subCategory1": "Tops"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 29.99,
+            "currency": "USD"
+          }
+        }
+      ]
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "refund",
+          "eventAction": "refund_issued",
+          "type": "commerce"
+        },
+        "category": {
+          "primaryCategory": "post-purchase"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "refund",
+    "ecommerce": {
+      "transaction_id": "ORD-10045872",
+      "value": 59.98,
+      "currency": "USD",
+      "shipping": 4.99,
+      "tax": 4.95,
+      "refund_id": "re_3PqK8L2eZvKYlo2C1a9",
+      "refund_type": "partial",
+      "refund_method": "original_payment",
+      "return_reason": "wrong_size",
+      "return_method": "mail",
+      "refund_channel": "self_service_portal",
+      "original_order_date": "2026-09-02",
+      "items": [
+        {
+          "item_id": "SKU-88213-BLU-M",
+          "item_name": "Organic Cotton Crew Tee",
+          "item_category": "Apparel",
+          "item_category2": "Tops",
+          "price": 29.99,
+          "quantity": 2
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "refund",
+    "eventInfo": {
+      "eventName": "refund",
+      "linkName": "refund",
+      "linkType": "o"
+    },
+    "transaction": {
+      "transactionID": "ORD-10045872",
+      "refundID": "re_3PqK8L2eZvKYlo2C1a9",
+      "refundAmount": 59.98,
+      "currencyCode": "USD",
+      "shippingRefunded": 4.99,
+      "taxRefunded": 4.95,
+      "refundType": "partial",
+      "refundMethod": "original_payment",
+      "returnReason": "wrong_size",
+      "returnMethod": "mail",
+      "refundChannel": "self_service_portal",
+      "originalOrderDate": "2026-09-02"
+    },
+    "product": [
+      {
+        "productID": "SKU-88213-BLU-M",
+        "productName": "Organic Cotton Crew Tee",
+        "category": "Apparel",
+        "subCategory": "Tops",
+        "price": 29.99,
+        "quantity": 2
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.refund",
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-10045872",
+        "currencyCode": "USD",
+        "refunds": [
+          {
+            "refundTransactionID": "re_3PqK8L2eZvKYlo2C1a9",
+            "refundAmount": 59.98,
+            "refundPaymentType": "original_payment",
+            "currencyCode": "USD"
+          }
+        ],
+        "taxAmount": 4.95
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-88213-BLU-M",
+        "name": "Organic Cotton Crew Tee",
+        "productCategories": [
+          {
+            "categoryName": "Apparel"
+          }
+        ],
+        "quantity": 2,
+        "priceTotal": 59.98,
+        "currencyCode": "USD"
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "partial",
+            "eVar41": "wrong_size",
+            "eVar42": "mail",
+            "eVar43": "original_payment",
+            "eVar44": "self_service_portal",
+            "eVar45": "2026-09-02"
+          }
+        }
+      }
+    }
+  }
+
+Parameters: |
+  {
+    "transaction_id": "string - Order identifier of the original purchase; join key back to the purchase event (required)",
+    "value": "number - Refunded amount in the original transaction currency, excluding refunded tax and shipping (required)",
+    "currency": "string - ISO 4217 code of the original transaction (required when value is set)",
+    "items": "array - Refunded line items with item_id, item_name, item_category, price and refunded quantity; omit for a full-order refund",
+    "refund_id": "string - Payment gateway or OMS refund reference used for deduplication",
+    "refund_type": "string - full, partial, store_credit, exchange_difference or goodwill",
+    "refund_method": "string - original_payment, store_credit, gift_card or bank_transfer",
+    "return_reason": "string - Standardised reason code captured on the return (e.g. wrong_size, damaged, not_as_described, changed_mind)",
+    "return_method": "string - How the goods came back: mail, in_store, courier_pickup or returnless",
+    "shipping": "number - Shipping amount refunded, in the transaction currency",
+    "tax": "number - Tax amount refunded, in the transaction currency",
+    "original_order_date": "string - ISO 8601 date of the original purchase, used for cohort and refund-lag analysis",
+    "refund_channel": "string - Where the refund was initiated: self_service_portal, customer_service, store_pos or marketplace"
+  }
+
+Calculation Notes: |
+  1️⃣ Firing condition: emit once per refund posted by the payment gateway or OMS (Stripe refund succeeded, Shopify refund created), at the moment the refund is confirmed, not when the return is requested, approved or received. Refund requests, RMA creation and pending or failed refunds must not fire this event.
+  2️⃣ Serialization and dedupe: serialization is always, so one order can legitimately carry several refund events (partial refunds, goodwill after a return). Deduplicate on refund_id, never on transaction_id alone; gateway webhook retries and OMS re-syncs replay the same refund_id and must be dropped downstream, while a second refund with a new refund_id on the same order must be kept.
+  3️⃣ Required parameters: transaction_id (must match the original purchase event exactly), value, and currency whenever value is set. Optional but strongly recommended: refund_id (without it dedupe is impossible), refund_type, refund_method, return_reason, return_method, refund_channel, original_order_date, shipping, tax and items. Omit items for a full-order refund; for partial refunds send only the refunded lines with the refunded quantity, not the original order quantity.
+  4️⃣ Value semantics: value is the refunded merchandise amount in the original transaction currency, excluding refunded tax and shipping, which travel in tax and shipping. Never convert to a reporting currency at the source and never send negative numbers; the event direction is implied by the event name. Refunded revenue is then value, optionally plus shipping and tax per the Finance definition, applied consistently across GA4 and Adobe.
+  5️⃣ Consent and PII: the payload carries no direct identifiers, so pii_flag stays false and sensitivity stays Internal. Do not add customer email, name, address, card or bank details, or free-text agent notes to any parameter; return_reason must be a standardised code, never the customer comment. Where the event is sent server-side from the OMS or gateway, keep it within the consent scope granted at purchase, and where it is sent from the account refund-confirmation page honour the user consent state before the tag fires.
+  6️⃣ Attribution and timing: refunds usually post days or weeks after purchase and often server-side, so there is no live browser session. Send the event through the Measurement Protocol or Adobe server-side collection with the original client or visitor identifier stored at purchase, otherwise session_source_medium, device_category and country cannot be resolved for the refund. Report refunded revenue on the refund date for cash reporting and use original_order_date for cohort and refund-lag views; do not back-date the event timestamp to the purchase.
+  7️⃣ Common instrumentation mistakes: firing on the return request instead of the confirmed refund; sending transaction_id in a different format than the purchase event so the join fails; sending the full original items array on a partial refund and overstating refunded units; reporting tax-inclusive value while also sending tax, which double counts; emitting the event from both the storefront confirmation page and the gateway webhook without a shared refund_id; and mixing refund_type values outside the allowed list of full, partial, store_credit, exchange_difference and goodwill.
+
+Business Use Case: |
+  1️⃣ Finance controllers reconcile refunded value by transaction_id and currency against recognised revenue at each month-end close, investigating any refund_id in the gateway ledger that has no matching event before net revenue is reported.
+  2️⃣ Customer Service and Returns Operations leads trigger a review when refunds for a return_reason such as damaged or not_as_described rise above the trailing baseline, and use return_method and refund_channel to redirect volume from agent-handled to self-service refunds.
+  3️⃣ Merchandising and Product Quality managers filter refunds by item_id and item_category when a SKU exceeds its expected refund share, then escalate to the supplier, correct size guides or product content, or delist the variant.
+  4️⃣ Performance Marketing analysts join refund events back to the originating session_source_medium to restate campaign ROAS net of refunds, and cut budget or bids on channels whose acquired orders refund at a materially higher rate.
+
+Dependencies:
+  Events: [purchase]
+
+Source Data: Digital + OMS/Payments (Shopify, Stripe)
+
+    Report Attributes: |
+  transaction_id; refund_type; return_reason; return_method; refund_method; item_id; item_category; currency; original_order_date; session_source_medium; device_category; country
+
+    Dashboard Usage: [Net Revenue & Refund Reconciliation, Returns & Refunds Performance, Product Quality & Return Drivers, Refund-Adjusted Marketing ROAS]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [refund-type, return-reason, return-method]
+
+    Derived Dimensions: [refund-type, return-reason, return-method]
+
+    Derived Metrics: [refunded-revenue, refund-count, refunded-units, net-revenue]
+
+    Derived KPIs: [refund-rate, return-rate, net-revenue-per-order]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-18T16:52:18.782+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-20T20:01:53.146+00:00
+
