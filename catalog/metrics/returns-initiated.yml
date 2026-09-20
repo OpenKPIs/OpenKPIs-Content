@@ -1,7 +1,7 @@
 # Metric: Returns Initiated
-# Generated: 2026-09-20T19:41:21.413Z
+# Generated: 2026-09-20T19:41:30.113Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Returns Initiated
 Formula: COUNT(DISTINCT order_return_id) WHERE return_initiation_event IS present AND initiation_timestamp WITHIN reporting_period
@@ -11,30 +11,385 @@ Description: |
 
 Category: Operations
 
+Tags: [metric, E-commerce: Returns, Refunds & Customer Support]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Generic
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
 
+GA4 Event: |
+  submit_form
 
+Adobe Event: |
+  Return Request Submitted
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "pageInstanceID": "returns-portal-confirmation-prod",
+      "page": {
+        "pageInfo": {
+          "pageID": "returns-request-confirmation",
+          "pageName": "Returns Portal: Request Submitted",
+          "destinationURL": "https://www.example.com/account/returns/confirmation",
+          "sysEnv": "web"
+        },
+        "category": {
+          "primaryCategory": "Account",
+          "subCategory1": "Returns Portal"
+        },
+        "attributes": {
+          "funnelName": "Returns Portal",
+          "funnelStep": "Request Submitted"
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "submit_form",
+            "eventAction": "Return Request Submitted",
+            "eventPoints": 1,
+            "type": "returns",
+            "timeStamp": "2026-09-20T15:41:07Z"
+          },
+          "attributes": {
+            "formId": "returns_portal_request",
+            "formName": "Returns Portal RMA Request",
+            "orderReturnId": "RMA-88231",
+            "orderId": "ORD-10045782",
+            "returnAuthorizationIssued": true,
+            "returnReason": "Item too small",
+            "returnMethod": "Prepaid drop-off label",
+            "returnResolutionType": "Refund",
+            "returnOriginationChannel": "self_service_portal",
+            "returnLineItemCount": 2,
+            "returnValue": 89.98,
+            "currency": "USD"
+          }
+        }
+      ],
+      "transaction": {
+        "transactionID": "ORD-10045782",
+        "total": {
+          "currency": "USD",
+          "transactionTotal": 89.98
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU-4471",
+              "productName": "Merino Crew Sweater",
+              "sku": "SKU-4471-NVY-M"
+            },
+            "category": {
+              "primaryCategory": "Apparel"
+            },
+            "quantity": 2,
+            "price": {
+              "basePrice": 44.99,
+              "currency": "USD"
+            },
+            "attributes": {
+              "returnReason": "Item too small"
+            }
+          }
+        ]
+      },
+      "user": [
+        {
+          "segment": {
+            "customerSegment": "Returning Customer",
+            "loyaltyTier": "Silver"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_id": "returns_portal_request",
+    "form_name": "Returns Portal RMA Request",
+    "form_destination": "https://www.example.com/account/returns/confirmation",
+    "form_submit_text": "Submit return request",
+    "order_return_id": "RMA-88231",
+    "transaction_id": "ORD-10045782",
+    "return_authorization_issued": true,
+    "return_reason": "Item too small",
+    "return_method": "Prepaid drop-off label",
+    "return_resolution_type": "Refund",
+    "return_origination_channel": "self_service_portal",
+    "return_item_count": 2,
+    "currency": "USD",
+    "value": 89.98,
+    "items": [
+      {
+        "item_id": "SKU-4471",
+        "item_name": "Merino Crew Sweater",
+        "item_brand": "Northbound",
+        "item_category": "Apparel",
+        "item_variant": "Navy / M",
+        "price": 44.99,
+        "quantity": 2,
+        "item_return_reason": "Item too small"
+      }
+    ]
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "submitForm",
+    "eventInfo": {
+      "eventName": "Return Request Submitted",
+      "eventType": "returns",
+      "path": "returnRequest",
+      "timestamp": "2026-09-20T15:41:07Z"
+    },
+    "returnRequest": {
+      "orderReturnId": "RMA-88231",
+      "orderId": "ORD-10045782",
+      "returnAuthorizationIssued": true,
+      "returnReason": "Item too small",
+      "returnMethod": "Prepaid drop-off label",
+      "returnResolutionType": "Refund",
+      "originationChannel": "self_service_portal",
+      "lineItemCount": 2,
+      "returnValue": 89.98,
+      "currency": "USD",
+      "items": [
+        {
+          "sku": "SKU-4471",
+          "name": "Merino Crew Sweater",
+          "category": "Apparel",
+          "variant": "Navy / M",
+          "quantity": 2,
+          "price": 44.99,
+          "returnReason": "Item too small"
+        }
+      ]
+    },
+    "form": {
+      "formId": "returns_portal_request",
+      "formName": "Returns Portal RMA Request",
+      "formStep": "Request Submitted"
+    },
+    "page": {
+      "pageName": "Returns Portal: Request Submitted",
+      "siteSection": "Account",
+      "subSection": "Returns Portal",
+      "deviceCategory": "mobile"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "timestamp": "2026-09-20T15:41:07Z",
+    "web": {
+      "webPageDetails": {
+        "name": "Returns Portal: Request Submitted",
+        "URL": "https://www.example.com/account/returns/confirmation",
+        "siteSection": "Account:Returns Portal"
+      },
+      "webInteraction": {
+        "name": "Return Request Submitted",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-10045782",
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-4471",
+        "name": "Merino Crew Sweater",
+        "quantity": 2,
+        "priceTotal": 89.98,
+        "productCategories": [
+          {
+            "categoryID": "Apparel"
+          }
+        ]
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "RMA-88231",
+            "eVar41": "ORD-10045782",
+            "eVar42": "Item too small",
+            "eVar43": "Prepaid drop-off label",
+            "eVar44": "self_service_portal"
+          },
+          "props": {
+            "prop40": "Returns Portal: Request Submitted"
+          }
+        }
+      }
+    },
+    "_openkpis": {
+      "returns": {
+        "orderReturnId": "RMA-88231",
+        "orderId": "ORD-10045782",
+        "returnAuthorizationIssued": true,
+        "returnReason": "Item too small",
+        "returnMethod": "Prepaid drop-off label",
+        "returnResolutionType": "Refund",
+        "originationChannel": "self_service_portal",
+        "lineItemCount": 2,
+        "returnValue": 89.98,
+        "currencyCode": "USD"
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Relative reporting window; every return is dated on its own initiation timestamp, never on the original order or delivery date, so no closed period is restated.
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date   DATE DEFAULT CURRENT_DATE();
+  
+  -- Pivot the submit_form event_params into one row per hit carrying the returns-request payload
+  WITH form_hits AS (
+    SELECT
+      event_timestamp,
+      MAX(IF(p.key = 'form_id', p.value.string_value, NULL)) AS form_id,
+      MAX(IF(p.key = 'order_return_id', p.value.string_value, NULL)) AS order_return_id,
+      MAX(IF(p.key = 'transaction_id', p.value.string_value, NULL)) AS transaction_id,
+      MAX(IF(p.key = 'return_authorization_issued', COALESCE(p.value.string_value, CAST(p.value.int_value AS STRING)), NULL)) AS return_authorization_issued,
+      MAX(IF(p.key = 'return_resolution_type', p.value.string_value, NULL)) AS return_resolution_type,
+      MAX(IF(p.key = 'return_origination_channel', p.value.string_value, NULL)) AS return_origination_channel,
+      MAX(IF(p.key = 'traffic_type', p.value.string_value, NULL)) AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`,
+    UNNEST(event_params) AS p
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'submit_form'
+    GROUP BY event_timestamp, user_pseudo_id, stream_id
+  ),
+  
+  -- Keep only submitted returns-portal requests that received an RMA, drop claims, pre-shipment cancellations and internal or test orders (requests withdrawn after submission stay counted), then collapse restarts and post-timeout resumptions of the same order-return ID to a single row dated on its first submission
+  -- Duplicate RMAs that the returns platform auto-merges are collapsed onto a surviving return ID after submission; the clickstream stores only the ID sent at submission, so that merge cannot be reproduced from events_* and is handled in the returns platform extract.
+  return_requests AS (
+    SELECT
+      order_return_id,
+      DATE(TIMESTAMP_MICROS(MIN(event_timestamp))) AS initiation_date,
+      ARRAY_AGG(return_origination_channel ORDER BY event_timestamp LIMIT 1)[OFFSET(0)] AS origination_channel
+    FROM form_hits
+    WHERE form_id = 'returns_portal_request'
+      AND order_return_id IS NOT NULL
+      AND LOWER(IFNULL(return_authorization_issued, '')) IN ('true', '1')
+      AND LOWER(REPLACE(IFNULL(return_resolution_type, ''), ' ', '_')) NOT IN ('order_cancellation', 'warranty_claim', 'service_claim', 'shipping_claim', 'carrier_damage_claim')
+      AND LOWER(IFNULL(traffic_type, '')) <> 'internal'
+      AND NOT STARTS_WITH(UPPER(IFNULL(transaction_id, '')), 'TEST')
+    GROUP BY order_return_id
+  )
+  
+  -- Returns initiated per day at request grain, so a multi-item return counts once; agent-assisted requests stay in scope while the self-service column is the default digital view
+  SELECT
+    initiation_date,
+    COUNT(DISTINCT order_return_id) AS returns_initiated,
+    COUNT(DISTINCT IF(origination_channel = 'self_service_portal', order_return_id, NULL)) AS self_service_returns_initiated,
+    COUNT(DISTINCT IF(origination_channel <> 'self_service_portal', order_return_id, NULL)) AS agent_assisted_returns_initiated
+  FROM return_requests
+  GROUP BY initiation_date
+  ORDER BY initiation_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window; every return is dated on its own initiation timestamp, never on the original order or delivery date, so no closed period is restated.
+  $$
+  BEGIN
+    SET @end_date = SELECT CURRENT_DATE;
+    SET @start_date = SELECT DATE_SUB(CURRENT_DATE, 90);
+  
+  -- Read the returns-portal form submissions from the ExperienceEvent dataset with their returns payload
+  WITH form_hits AS (
+    SELECT
+      timestamp,
+      _openkpis.returns.orderReturnId       AS order_return_id,
+      _openkpis.returns.orderId             AS transaction_id,
+      _openkpis.returns.returnAuthorizationIssued AS return_authorization_issued,
+      _openkpis.returns.returnResolutionType      AS return_resolution_type,
+      _openkpis.returns.originationChannel        AS origination_channel
+    FROM your_analytics_dataset
+    WHERE TO_DATE(timestamp) BETWEEN @start_date AND @end_date
+      AND eventType = 'web.formFilledOut'
+      AND web.webInteraction.name = 'Return Request Submitted'
+      AND LOWER(COALESCE(web.webPageDetails.server, '')) NOT LIKE '%internal%'
+  ),
+  
+  -- Keep only submitted requests that received an RMA, drop claims, pre-shipment cancellations and test orders (requests withdrawn after submission stay counted), then collapse restarts and post-timeout resumptions of the same order-return ID to a single row dated on its first submission
+  -- Duplicate RMAs that the returns platform auto-merges are collapsed onto a surviving return ID after submission; the ExperienceEvent stores only the ID sent at submission, so that merge cannot be reproduced here and is handled in the returns platform extract.
+  return_requests AS (
+    SELECT
+      order_return_id,
+      TO_DATE(MIN(timestamp)) AS initiation_date,
+      MIN_BY(origination_channel, timestamp) AS origination_channel
+    FROM form_hits
+    WHERE order_return_id IS NOT NULL
+      AND return_authorization_issued = true
+      AND LOWER(REPLACE(COALESCE(return_resolution_type, ''), ' ', '_')) NOT IN ('order_cancellation', 'warranty_claim', 'service_claim', 'shipping_claim', 'carrier_damage_claim')
+      AND UPPER(COALESCE(transaction_id, '')) NOT LIKE 'TEST%'
+    GROUP BY order_return_id
+  )
+  
+  -- Returns initiated per day at request grain, so a multi-item return counts once; agent-assisted requests stay in scope while the self-service column is the default digital view
+  SELECT
+    initiation_date,
+    COUNT(DISTINCT order_return_id) AS returns_initiated,
+    COUNT(DISTINCT CASE WHEN origination_channel = 'self_service_portal' THEN order_return_id END) AS self_service_returns_initiated,
+    COUNT(DISTINCT CASE WHEN origination_channel <> 'self_service_portal' THEN order_return_id END) AS agent_assisted_returns_initiated
+  FROM return_requests
+  GROUP BY initiation_date
+  ORDER BY initiation_date;
+  END
+  $$;
 
+Calculation Notes: |
+  1️⃣ Grain is the order-return ID, not the clickstream hit: the return_initiated events emitted by the portal are collapsed with a distinct count, so a customer who abandons the wizard and restarts it against the same order still contributes exactly one return.,2️⃣ Multi-item and multi-line returns count once at request level; unit-level volume belongs to Units Returned and item-level reason analysis to the Return Reason dimension, never to this metric.,3️⃣ A return counts only when the request is submitted and an RMA / return authorization identifier is issued; portal landings, eligibility lookups, reason-selection steps and abandoned wizards are excluded and are measured as returns-portal funnel steps instead.,4️⃣ The metric is dated on the initiation timestamp, never on the original order or delivery date, so returns against orders placed in earlier periods land in the current period and no closed period is ever restated.,5️⃣ Agent-created returns raised through chat, phone or the service console are in scope but carry an origination channel of agent-assisted; the default digital view filters to self-service portal initiations so that portal adoption and deflection are not overstated.,6️⃣ Excluded: orders cancelled before shipment (order cancellations), warranty and service claims, carrier damage claims filed as shipping claims, internal and test orders, and duplicate RMAs that the returns platform auto-merges into a surviving return ID.,7️⃣ Portal sessions use the standard 30-minute inactivity timeout; a request resumed after the timeout opens a new session but does not create a new return, and returns cancelled or withdrawn by the customer after submission remain counted as initiated.
 
+Business Use Case: |
+  1️⃣ The Customer Service returns manager reviews daily initiation volume against staffing plans and, when volume exceeds the rolling four-week average by more than 20%, opens additional RMA processing capacity and pre-approves auto-refund thresholds to protect resolution time.,2️⃣ Merchandising planners break initiations down by item category and SKU each week and pull or re-photograph the products whose return initiations per hundred units sold sit in the worst decile, addressing sizing and description defects at source.,3️⃣ Finance uses the initiation count with average refund amount to accrue refund liability in the period the request is raised rather than when it is settled, tightening the monthly close and the returns reserve.,4️⃣ The Product team monitors initiations sourced from the self-service portal versus agent-assisted channels after each portal release and prioritises UX fixes when the self-service share falls, since every deflected request removes a support contact.
 
+Dependencies:
+  Events: [return-initiated, purchase]
+  Dimensions: [return-reason, return-method, order-status]
 
+Source Data: Digital Analytics (GA4) + Returns Portal records (Shopify Returns / Loop / Narvar, Salesforce Commerce returns)
 
+Report Attributes: |
+  Return Reason; Return Method; Item Category; Item ID / SKU; Order Status; Channel of Return; Device Category; Customer Segment
 
+Dashboard Usage: [Returns & Refunds Performance Dashboard, Post-Purchase Experience Dashboard, Merchandising Return Quality Review, Customer Service Operations Dashboard]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [returns-completed, refund-amount, exchanges, return-processing-time, support-tickets, purchases]
 
+Derived KPIs: [return-initiation-rate, return-rate, refund-rate, self-service-resolution-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +399,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-20T19:41:21.129+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-20T19:41:29.78+00:00
 
