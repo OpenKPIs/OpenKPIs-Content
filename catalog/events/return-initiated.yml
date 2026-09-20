@@ -1,5 +1,5 @@
 # Event: Return Initiated
-# Generated: 2026-09-20T00:27:52.388Z
+# Generated: 2026-09-20T04:13:08.930Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -260,7 +260,20 @@ Parameters: |
     "currency": "string - ISO 4217 currency code of value"
   }
 
+Calculation Notes: |
+  1️⃣ Fire only on the server-confirmed success state of the returns portal, after the platform has issued the RMA and returned a return_id; never on the submit button click or on a validation failure, otherwise abandoned and rejected attempts inflate the return-rate numerator.
+  2️⃣ Serialization is 'always': every distinct return request emits one event, so a customer raising two requests against the same order emits two events with different return_id values. Deduplicate on return_id and suppress the push on confirmation-page reloads, back-navigation and portal status refreshes.
+  3️⃣ Because the GA4 event is the shared submit_form, always send form_type = 'return_request' and filter every downstream report on it; without the filter, contact, newsletter and warranty form submissions leak into return counts.
+  4️⃣ Required parameters are form_type, return_id, transaction_id, items, value and currency, since they carry the join to the purchase event and to Refund Issued. The coded fields return_reason, return_method and resolution_type must come from the controlled lists behind the Return Reason, Return Method and Refund Type dimensions, and item-level return_reason must be populated per line when the reason differs between items.
+  5️⃣ Report value as the merchandise value of the returned lines only, at the price paid and excluding shipping and tax, and populate items with only the lines being returned; for a partial return, sending the full order value or full order line list overstates revenue at risk and breaks unit return rate.
+  6️⃣ Consent and PII: the payload is limited to pseudonymous order and RMA identifiers and coded values, consistent with pii_flag false. Never push the customer's free-text comment, name, email, phone or address into the data layer, and honour the analytics consent state before the push; where consent is denied, the returns platform record remains the system of record for operational handling.
+  7️⃣ Common instrumentation mistakes: reusing the purchase transaction_id as return_id, emitting free-form reason strings that fragment the Return Reason dimension, omitting item_category so category-level return rates cannot be produced, and sending events from the client only, which loses portal-originated requests when the confirmation page is blocked by consent, ad blockers or a closed tab before the tag fires; reconcile daily counts against RMAs created through the self-service returns portal only.
 
+Business Use Case: |
+  1️⃣ The Customer Service operations lead monitors daily Return Initiated volume by Return Method and staffs the returns desk and carrier-pickup capacity when initiations spike above normal daily volumes.
+  2️⃣ The Merchandising and product quality team reviews weekly Return Initiated by Return Reason and Item ID (SKU) to flag SKUs with high size_too_small or not_as_described shares, then corrects size guides, product copy or vendor quality issues.
+  3️⃣ The Finance controller uses initiation-date returned merchandise value to size the returns reserve and revenue at risk ahead of the Refund Issued event, adjusting net revenue forecasts at month close.
+  4️⃣ The E-commerce optimisation team compares exchange, store credit and refund shares of Resolution Type by Customer Type and tests portal messaging that steers eligible refund requests toward exchange or store credit to retain revenue.
 
 Dependencies:
   Events: [purchase]
@@ -296,5 +309,5 @@ Source Data: Digital Analytics (GA4) + Returns Portal (Shopify / Loop / Narvar)
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-09-20T00:27:52.154+00:00
+    Last Modified At: 2026-09-20T04:13:07.856+00:00
 
