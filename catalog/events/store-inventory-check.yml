@@ -1,5 +1,5 @@
 # Event: Store Inventory Check
-# Generated: 2026-09-19T18:28:42.133Z
+# Generated: 2026-09-20T00:20:46.576Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -177,7 +177,20 @@ Parameters: |
     "result_position": "number - 1-based rank of the store within the returned result list"
   }
 
+Calculation Notes: |
+  1️⃣ Fires only on the explicit "check availability in store" interaction (PDP store-availability link, store picker inside the fulfillment selector, or the "change store" modal once results render); it never fires on PDP load, on cached store badges rendered server-side, or on background stock refreshes.
+  2️⃣ Product Detail View queries on view_item must exclude check_type='store_availability' (filter check_type IS NULL OR check_type != 'store_availability'); without this filter PDP views are inflated by every store lookup on the same page.
+  3️⃣ One event per store returned in the response: a single lookup that renders five nearby stores emits five events sharing one check_id, so count DISTINCT check_id for interaction volume and raw events for store-item exposure.
+  4️⃣ inventory_status carries the customer-facing label shown to the shopper (in_stock, limited, out_of_stock) after safety-stock and pickup-eligibility rules are applied; it is not backend on-hand quantity and must not be reconciled unit-for-unit against the store inventory ledger.
+  5️⃣ Repeat checks for the same item_id and store_id within a 30-minute session window are retained as events but collapsed to one for de-duplicated demand reporting; sessions follow the standard 30-minute inactivity timeout and do not reset at midnight for the de-duplication rule.
+  6️⃣ Exclude internal traffic (store associate devices, clienteling tablets, QA environments) and known bots; associate-assisted lookups from store devices are tracked under a separate channel and never counted as customer demand.
+  7️⃣ Timestamp is the client render time of the availability result, not the click time; lookups that time out or return an error emit no view_item and are captured instead through the site error event so failed checks do not appear as out_of_stock.
 
+Business Use Case: |
+  1️⃣ Merchandising reviews the weekly share of checks returning out_of_stock or limited by item and store; when an item exceeds 20% out_of_stock across a region, the planner raises its store allocation or safety stock in the next replenishment cycle.
+  2️⃣ Store Operations compares daily inventory checks per store against BOPIS orders placed for the same store; stores with high check volume and low pickup orders are audited for inventory accuracy and pickup-eligibility rule settings.
+  3️⃣ Digital Product managers monitor the ratio of checks to PDP views after a store-picker release; a drop of more than 15% week over week triggers a UX review of the availability entry point on mobile.
+  4️⃣ CRM Marketing builds an audience of shoppers whose checks returned out_of_stock at their preferred store and, when the item is restocked there, sends a back-in-stock pickup notification.
 
 Dependencies:
   Events: [store-selection, store-locator-search]
@@ -212,5 +225,5 @@ Source Data: Digital Analytics (GA4)
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-09-19T18:28:41.862+00:00
+    Last Modified At: 2026-09-20T00:20:45.325+00:00
 
