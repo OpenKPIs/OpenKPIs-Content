@@ -1,5 +1,5 @@
 # Event: Pickup Ready Notification
-# Generated: 2026-09-19T18:28:27.536Z
+# Generated: 2026-09-20T00:24:40.132Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -44,7 +44,20 @@ Parameters: |
     "pickup_hold_expiry": "timestamp - Date and time after which the uncollected order is returned to stock and refunded"
   }
 
+Calculation Notes: |
+  1️⃣ Source of truth is the ESP/CRM send log (e.g. Salesforce Marketing Cloud, Braze, Twilio) filtered to the pickup-ready transactional template and joined to the OMS status change to READY_FOR_PICKUP; a send with no matching OMS ready status (test sends, seed lists, orders cancelled before staging) is excluded.
+  2️⃣ One logical event per transaction_id × notification_channel × notification_sequence: provider retries and duplicate webhook callbacks with the same message_id inside a 15-minute window are collapsed to the first sent_timestamp. Reminder sends (sequence ≥ 2) are kept, but only sequence = 1 counts as the ready moment.
+  3️⃣ Order-to-ready time is measured from the online purchase timestamp to the earliest sequence = 1 sent_timestamp for that transaction_id across all channels. Store-local time (store_id → store timezone) is used for SLA bucketing against the promised-ready window (e.g. 'ready in 2 hours'); UTC is used for cross-store rollups.
+  4️⃣ Split shipments and multi-store orders emit one notification per store_id fulfillment group. Order-level readiness is reached only when the last group's notification is sent; partial-ready sends are kept for store-level analysis and flagged with fulfillment_group_id.
+  5️⃣ Only accepted sends (status sent/delivered) count. Hard bounces, carrier-rejected SMS, invalid push tokens and suppressed or opted-out recipients are logged separately as delivery failures and excluded from notification reach. SMS and push opt-out state is read at send time, not at order time.
+  6️⃣ Exclude ship-to-home, ship-from-store and same-day delivery orders (fulfillment_method not in BOPIS, curbside, locker), staff and test accounts, and orders fully cancelled or refunded before the ready status. Curbside and locker pickups remain in scope but are segmented by pickup_location_type.
+  7️⃣ Events arriving more than 72 hours after the OMS ready status (late backfills from the ESP export) are loaded into the partition of the original sent_timestamp, not the load date, so daily store readiness trends stay stable after restatement.
 
+Business Use Case: |
+  1️⃣ Store Operations leadership reviews the daily order-to-ready distribution per store_id; when a store's median time from purchase to its first pickup-ready notification runs past the promised ready window for three consecutive days, the district manager adds picking labor to peak BOPIS hours or temporarily lengthens that store's promised pickup time on the PDP.
+  2️⃣ The CRM and Lifecycle Marketing team monitors pickup completion by notification_channel; when orders notified by email alone show lower pickup completion within 48 hours than SMS or push, they move SMS opt-in into the BOPIS checkout step and make SMS the default ready channel for opted-in shoppers.
+  3️⃣ Customer Service uses orders that received a pickup-ready notification but no order-pickup event within the hold window (typically 5–7 days) as the trigger for a reminder sequence and an agent outreach queue before the order goes back to stock and is refunded, cutting abandoned-pickup refunds.
+  4️⃣ Merchandising and Inventory Planning compare notification volume per store against pickup-counter capacity; stores with persistent ready-order backlogs are prioritized for pickup lockers or curbside lanes in the next capital planning cycle.
 
 Dependencies:
   Events: [purchase]
@@ -80,5 +93,5 @@ Source Data: Order Management (OMS) + ESP/CRM send logs (Salesforce Marketing Cl
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-09-19T18:28:27.321+00:00
+    Last Modified At: 2026-09-20T00:24:39.922+00:00
 
