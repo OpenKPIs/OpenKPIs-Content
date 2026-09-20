@@ -1,5 +1,5 @@
 # Event: Order Status Check
-# Generated: 2026-09-14T05:57:37.481Z
+# Generated: 2026-09-20T01:25:07.280Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -7,7 +7,7 @@ Event Name: Order Status Check
 Event Serialization: always
 
 Description: |
-  Storefront self-service event recorded when a signed-in or guest customer opens the merchant's order status, Track Order or order details page for a specific order ID, the classic WISMO ("where is my order") check, recorded as the unified page_view event with page_type = order_status. It differs from Shipment Tracking View, which records the carrier or shipment-level tracking view for a parcel, and feeds the order status check rate, order tracking page view volume and WISMO contact deflection analysis used by Customer Service and fulfillment teams.
+  Fires when a signed-in or guest customer opens the merchant's own order status, Track Order or order detail page for a single resolved order ID — the classic WISMO ("where is my order") self-service check — captured as the unified page_view event with page_type = order_status and carrying the order ID, the status rendered to the customer and the lookup path used. It is scoped to the merchant domain and to one order, with carrier or parcel-level tracking recorded separately as Shipment Tracking View, and supplies the behavioural signal behind order status check rate, WISMO contact deflection and delivery-promise accuracy reporting.
 
 Category: Experience
 
@@ -19,6 +19,7 @@ Priority: High
 
 Core Area: Engagement
 
+Scope: Event
 
 Event Type: standard
 
@@ -31,25 +32,124 @@ Adobe Event: |
   page:view
 
 W3 Data Layer: |
-  {"page":{"pageInfo":{"pageName":"order status","pageType":"order_status"}},"transaction":{"transactionID":"ORD-100482","attributes":{"orderStatus":"shipped","lookupMethod":"email_link","daysSinceOrder":3}},"user":[{"profile":[{"attributes":{"loginStatus":"guest"}}]}],"event":[{"eventInfo":{"eventName":"page_view","eventAction":"view","type":"order_status"}}]}
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "order status",
+        "pageType": "order_status"
+      }
+    },
+    "transaction": {
+      "transactionID": "ORD-100482",
+      "attributes": {
+        "orderStatus": "shipped",
+        "lookupMethod": "email_link",
+        "daysSinceOrder": 3
+      }
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "attributes": {
+              "loginStatus": "guest"
+            }
+          }
+        ]
+      }
+    ],
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "page_view",
+          "eventAction": "view",
+          "type": "order_status"
+        }
+      }
+    ]
+  }
 
 GA4 Data Layer: |
-  {"event":"page_view","page_type":"order_status","transaction_id":"ORD-100482","order_status":"shipped","login_status":"guest","lookup_method":"email_link","days_since_order":3}
+  {
+    "event": "page_view",
+    "page_type": "order_status",
+    "transaction_id": "ORD-100482",
+    "order_status": "shipped",
+    "login_status": "guest",
+    "lookup_method": "email_link",
+    "days_since_order": 3
+  }
 
 Adobe Client Data Layer: |
-  {"event":"page:view","eventInfo":{"eventName":"pageView"},"page":{"pageName":"order status","pageType":"order_status"},"order":{"transactionId":"ORD-100482","orderStatus":"shipped","lookupMethod":"email_link","daysSinceOrder":3},"user":{"loginStatus":"guest"}}
+  {
+    "event": "page:view",
+    "eventInfo": {
+      "eventName": "pageView"
+    },
+    "page": {
+      "pageName": "order status",
+      "pageType": "order_status"
+    },
+    "order": {
+      "transactionId": "ORD-100482",
+      "orderStatus": "shipped",
+      "lookupMethod": "email_link",
+      "daysSinceOrder": 3
+    },
+    "user": {
+      "loginStatus": "guest"
+    }
+  }
 
 XDM Mapping: |
-  {"eventType":"web.webpagedetails.pageViews","timestamp":"2026-09-13T10:15:00Z","web":{"webPageDetails":{"name":"order status","siteSection":"order_status","pageViews":{"value":1}}},"commerce":{"order":{"purchaseID":"ORD-100482"}},"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar40":"ORD-100482","eVar41":"shipped","eVar42":"guest","eVar43":"email_link","eVar44":"3","eVar45":"order_status"}}}}}
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "timestamp": "2026-09-13T10:15:00Z",
+    "web": {
+      "webPageDetails": {
+        "name": "order status",
+        "siteSection": "order_status",
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-100482"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "ORD-100482",
+            "eVar41": "shipped",
+            "eVar42": "guest",
+            "eVar43": "email_link",
+            "eVar44": "3",
+            "eVar45": "order_status"
+          }
+        }
+      }
+    }
+  }
 
 Parameters: |
-  {"page_type":"string - Page template classification; always order_status for this check, used to isolate the order status or order details page view from other page_view hits","transaction_id":"string - Merchant order ID for the order being viewed; must equal the transaction_id sent on the originating purchase event so the check joins to the order","order_status":"string - Order status shown to the customer when the page rendered: placed, processing, shipped, out_for_delivery, delivered, cancelled","login_status":"string - Authentication state at view time: logged_in or guest","lookup_method":"string - How the customer reached the order: account (My Orders list), order_lookup_form (order ID + email/postcode form), email_link (link in an order or shipping confirmation email or SMS)","days_since_order":"integer - Whole calendar days between the order placement timestamp and the check, in the store's reporting time zone (0 = same day)"}
+  {
+    "page_type": "string - Page template classification; always order_status for this check, used to isolate the order status or order details page view from other page_view hits",
+    "transaction_id": "string - Merchant order ID for the order being viewed; must equal the transaction_id sent on the originating purchase event so the check joins to the order",
+    "order_status": "string - Order status shown to the customer when the page rendered: placed, processing, shipped, out_for_delivery, delivered, cancelled",
+    "login_status": "string - Authentication state at view time: logged_in or guest",
+    "lookup_method": "string - How the customer reached the order: account (My Orders list), order_lookup_form (order ID + email/postcode form), email_link (link in an order or shipping confirmation email or SMS)",
+    "days_since_order": "integer - Whole calendar days between the order placement timestamp and the check, in the store's reporting time zone (0 = same day)"
+  }
 
 
 
 Dependencies:
   Events: [purchase, page-view]
-  Dimensions: [transaction-id, order-status, login-status]
+  Dimensions: [transaction-id, order-status, login-status, lookup-method, days-since-order]
 
 Source Data: Digital Analytics (GA4) + Order Management (Shopify / Salesforce Commerce)
 
@@ -81,5 +181,5 @@ Source Data: Digital Analytics (GA4) + Order Management (Shopify / Salesforce Co
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-09-14T05:57:37.33+00:00
+    Last Modified At: 2026-09-20T01:25:06.935+00:00
 
