@@ -1,5 +1,5 @@
 # Event: Order Pickup
-# Generated: 2026-09-15T21:48:49.793Z
+# Generated: 2026-09-20T00:25:30.411Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -48,7 +48,20 @@ Parameters: |
     "pickup_wait_minutes": "number - Minutes from arrival_timestamp to pickup_timestamp, rounded to two decimals. It is null for locker pickups and when arrival_timestamp is missing or later than pickup_timestamp."
   }
 
+Calculation Notes: |
+  1️⃣ Fires once per fulfillment (collection trip) when the POS or store handheld handover scan, or the locker door-open confirmation, is written to the OMS and at least one line with quantity above 0 reaches latest status handed_over. Fulfillments with no handed_over line emit nothing, and placing the order (pickup_order) or a carrier collecting parcels (Pickup Scheduling Completion) never triggers it.
+  2️⃣ Serialization is always, with the unique and deduplication key transaction_id + fulfillment_id. A retried scan, an OMS replay or a duplicate POS message carrying the same pair must be dropped, while a split pickup of one order legitimately yields several events that share transaction_id and differ in fulfillment_id, so never dedupe on transaction_id alone.
+  3️⃣ Required parameters: transaction_id, fulfillment_id, store_id, pickup_method (in_store, curbside or locker, lower case), pickup_status (full or partial), value, currency (ISO 4217, upper case), items_quantity, items and pickup_timestamp. Optional and nullable by design: ready_timestamp, arrival_timestamp, hours_ready_to_pickup and pickup_wait_minutes. Derived durations are null, not zero, when a source timestamp is missing or later than pickup_timestamp, and pickup_wait_minutes is always null for locker pickups.
+  4️⃣ All timestamps are UTC, while reporting attributes such as Store Local Date and Pickup Hour are converted with the store's local time zone from the store master, so a late-evening handover lands on the correct store day. value is SUM(price × quantity) of the handed-over lines only, excluding tax and shipping, in the order currency, so a partial pickup is smaller than the order total and must not be summed across currencies without conversion.
+  5️⃣ Consent and PII: the payload carries no customer name, email, phone or loyalty identifier, only order, fulfillment and store keys, which is why pii_flag is false and sensitivity is Internal. Do not add arrival notes, licence-plate or vehicle details from the curbside check-in, or recipient names for third-party collection, and join to the customer profile downstream under existing consent rules rather than in the event.
+  6️⃣ Common instrumentation mistakes: emitting on Ready for Pickup or on the customer check-in instead of the handover scan; emitting one event per order rather than per fulfillment_id; labelling a partial pickup as full, or including refused, held-back or cancelled lines in items and value; sending pickup_method in mixed case; stamping ready_timestamp or pickup_timestamp in store local time; and backfilling arrival_timestamp with pickup_timestamp, which fakes a zero wait.
+  7️⃣ Timing and joins: source data is the OMS with POS, handheld and locker confirmations rather than a browser tag, so the event can arrive after store connectivity is restored. Attribute it to the pickup_timestamp rather than the load time, allow late-arriving records to reprocess the Hourly and Daily windows, and reconcile to the originating purchase event through transaction_id.
 
+Business Use Case: |
+  1️⃣ Store Operations managers watch hours_ready_to_pickup and pickup_wait_minutes by store and pickup_method on the BOPIS & Curbside Operations Dashboard, and when a store's curbside wait exceeds its target during a peak hour, they add staff to the curbside bay for that daypart.
+  2️⃣ Omnichannel fulfillment leads compare partial against full pickups by store and item category, and when a store's partial share rises, they investigate stock accuracy and hold-shelf picking with the store district manager.
+  3️⃣ Finance analysts in store revenue accounting match the value and currency of each pickup to the originating purchase during month-end close, and when handed-over value differs from the order value, they raise the difference for review in the Store Revenue Reconciliation Report.
+  4️⃣ Customer Service supervisors review pickups where hours_ready_to_pickup is long, and when the gap between ready_timestamp and pickup_timestamp keeps growing for a store or pickup_method, they revise the reminder cadence sent through the notification channel so customers collect before the hold period expires.
 
 Dependencies:
   Events: [purchase]
@@ -84,5 +97,5 @@ Source Data: Offline POS + OMS (Order Management System)
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-09-15T21:48:49.486+00:00
+    Last Modified At: 2026-09-20T00:25:29.991+00:00
 
