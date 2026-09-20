@@ -1,0 +1,96 @@
+# Event: Shipment Notification Open
+# Generated: 2026-09-20T04:04:54.998Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Shipment Notification Open
+Event Serialization: always
+
+Description: |
+  E-commerce specialisation of Notification Open: fires when a customer opens a transactional shipping-lifecycle message (shipping confirmation, out for delivery, delivered, pickup ready or delay) sent by email, SMS or push, as recorded by the ESP or push provider and stitched to the originating order through transaction_id. It is the base engagement signal for post-purchase communications and shows whether delivery updates actually reach customers before they contact support or check order status themselves.
+
+Category: Experience
+
+Tags: [event, E-commerce: Post-Purchase Logistics & Fulfillment, notification_open, transactional messaging, Offline / Backend]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Engagement
+
+
+Event Type: standard
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Parameters: |
+  {
+    "notification_type": "string - Shipping-lifecycle stage of the message: shipped, out_for_delivery, delivered, pickup_ready, delay",
+    "channel": "string - Delivery channel of the notification: email, sms, push",
+    "transaction_id": "string - Order identifier stitched from the OMS, matching the transaction_id of the purchase event",
+    "message_id": "string - ESP/push provider unique message send identifier; key for unique-open deduplication",
+    "campaign_or_flow_id": "string - Identifier of the transactional flow, journey or campaign that generated the message",
+    "sent_timestamp": "timestamp - UTC time the message was sent by the ESP or push provider",
+    "open_timestamp": "timestamp - UTC time of the recorded open (pixel load, push direct open or SMS tracked click)",
+    "is_machine_open": "boolean - True when the open is attributed to Apple Mail Privacy Protection, proxy pre-fetch or security scanning"
+  }
+
+Calculation Notes: |
+  1️⃣ Scope is restricted to transactional shipping-lifecycle messages (notification_type IN shipped, out_for_delivery, delivered, pickup_ready, delay); marketing campaigns, review requests and cross-sell flows triggered from the same ESP are excluded even when they reference the order.
+  2️⃣ Email opens are inflated by Apple Mail Privacy Protection proxy pre-fetching and by security-scanner machine opens; flag them with the ESP's machine-open indicator (e.g. Klaviyo machine_open, SFMC/Braze MPP flags) or an open_timestamp within 2 seconds of the delivery timestamp, and exclude them from human open counts and open-rate KPIs while retaining them for raw volume reporting.
+  3️⃣ Opens are recorded per channel: email via tracking pixel, push via the provider's direct-open callback (influenced opens excluded), SMS only where a tracked link click is used as the open proxy; SMS without click tracking cannot produce an open and must be omitted from the denominator of open-rate calculations.
+  4️⃣ Serialization is always: every open is kept as a row, and unique opens are derived by deduplicating on message_id (first open_timestamp wins); re-opens and forwarded-message opens remain in total-open counts only.
+  5️⃣ Only messages with a delivered send status count toward rate denominators; bounced, suppressed, unsubscribed and failed sends are excluded, and opens whose transaction_id cannot be matched to an order in the OMS are held in an unmatched bucket rather than dropped.
+  6️⃣ Attribution timing uses open_timestamp in the reporting time zone, with a 7-day open window from sent_timestamp for rate KPIs; opens later than 7 days are counted as late engagement and excluded from lifecycle-stage rates.
+  7️⃣ Value action by channel: email = unique non-machine pixel open; push = direct open reported by the Braze/Airship/FCM provider callback export (backend record, no client-side tag); SMS = first tracked short-link click; a single order can therefore generate several opens across notification_type stages and channels, and cross-channel reporting must not sum them into one per-order open.
+
+Business Use Case: |
+  1️⃣ The Customer Service operations lead reviews weekly open rates for out_for_delivery and delay messages; when open rate falls below the trailing 8-week baseline while WISMO (where is my order) contact volume rises, the team reroutes delay alerts from email to SMS/push for affected carriers.
+  2️⃣ The CRM / Lifecycle Marketing manager A/B tests subject lines, send times and sender names in the shipping confirmation flow in Klaviyo or SFMC and rolls out the variant with the higher human (non-MPP) unique open rate to all orders.
+  3️⃣ The Fulfillment & Logistics manager compares delivered-notification opens against order-status-check page views by carrier; carriers with low open-to-tracking engagement are flagged for branded tracking-page adoption in the next carrier QBR.
+  4️⃣ The Retention Marketing team uses customers who opened the delivered notification as the eligible audience for post-delivery review and replenishment flows, suppressing non-openers from same-week promotional sends.
+
+Dependencies:
+  Events: [purchase, notification-open]
+  Metrics: [notifications-delivered]
+  Dimensions: [transaction-id, notification-channel]
+
+Source Data: Offline / Backend: ESP & Push Engagement Tables (Klaviyo, Salesforce Marketing Cloud, Braze) + OMS order records
+
+    Report Attributes: |
+  notification_type; channel; campaign_or_flow_id; carrier; shipping_method; fulfillment_type; device_or_mail_client; open_date
+
+    Dashboard Usage: [Post-Purchase Communications Performance, WISMO & Delivery Experience Dashboard, Lifecycle Messaging Engagement Overview]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [notification-type, notification-channel, carrier, fulfillment-type]
+
+    Derived Dimensions: [notification-opened-flag, time-to-open]
+
+    Derived Metrics: [shipment-notification-opens, unique-shipment-notification-opens]
+
+    Derived KPIs: [shipping-notification-open-rate, notification-click-through-rate]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-14T01:09:37.425+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-20T04:04:54.604+00:00
+
