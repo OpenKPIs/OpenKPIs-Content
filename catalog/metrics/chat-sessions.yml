@@ -1,7 +1,7 @@
 # Metric: Chat Sessions
-# Generated: 2026-09-20T19:40:31.156Z
+# Generated: 2026-09-20T19:40:39.439Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Chat Sessions
 Formula: COUNT(DISTINCT chat_conversation_id) WHERE event_name = 'chat_start' AND customer_engaged = true
@@ -11,30 +11,321 @@ Description: |
 
 Category: Experience
 
+Tags: [metric, E-commerce: Returns, Refunds & Customer Support]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Engagement
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Hourly, Daily, Weekly, Monthly, Quarterly
 
+GA4 Event: |
+  select_content
 
+Adobe Event: |
+  Live Chat Start
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "pageInstanceID": "prod-web-order-tracking",
+      "page": {
+        "pageInfo": {
+          "pageID": "order-tracking",
+          "pageName": "Order Tracking",
+          "destinationURL": "https://www.example.com/account/orders/track",
+          "sysEnv": "mobile web"
+        },
+        "category": {
+          "primaryCategory": "Customer Support",
+          "subCategory1": "Post-Purchase"
+        }
+      },
+      "user": [
+        {
+          "profile": [
+            {
+              "profileInfo": {
+                "profileID": "a1f3c9d2-77b4-4e8a-9c21-5f0e6d3b8a44",
+                "returningStatus": "returning"
+              }
+            }
+          ]
+        }
+      ],
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "Live Chat Start",
+            "eventAction": "select_content",
+            "type": "customer support",
+            "effect": "chat session started",
+            "timeStamp": "2026-09-20T14:32:07.000Z"
+          },
+          "attributes": {
+            "contentType": "live_chat",
+            "chatConversationID": "cnv_8f42a19c7b0e",
+            "chatType": "virtual_agent",
+            "supportChannel": "Chat",
+            "supportTopic": "order_tracking",
+            "chatEntryPoint": "widget_button",
+            "chatEntryPage": "https://www.example.com/account/orders/track",
+            "chatInitiatedBy": "customer",
+            "customerEngaged": true
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "select_content",
+    "content_type": "live_chat",
+    "content_id": "cnv_8f42a19c7b0e",
+    "chat_conversation_id": "cnv_8f42a19c7b0e",
+    "chat_type": "virtual_agent",
+    "chat_entry_point": "widget_button",
+    "chat_entry_page": "https://www.example.com/account/orders/track",
+    "support_channel": "Chat",
+    "support_topic": "order_tracking",
+    "chat_initiated_by": "customer",
+    "customer_engaged": true
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "selectContent",
+    "eventInfo": {
+      "eventName": "Live Chat Start",
+      "path": "support.chat"
+    },
+    "support": {
+      "chat": {
+        "contentType": "live_chat",
+        "conversationID": "cnv_8f42a19c7b0e",
+        "chatType": "virtual_agent",
+        "channel": "Chat",
+        "topic": "order_tracking",
+        "entryPoint": "widget_button",
+        "entryPage": "https://www.example.com/account/orders/track",
+        "initiatedBy": "customer",
+        "customerEngaged": true
+      }
+    },
+    "web": {
+      "webPageDetails": {
+        "name": "Order Tracking",
+        "URL": "https://www.example.com/account/orders/track"
+      }
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "timestamp": "2026-09-20T14:32:07.000Z",
+    "web": {
+      "webInteraction": {
+        "name": "Live Chat Start",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      },
+      "webPageDetails": {
+        "name": "Order Tracking",
+        "URL": "https://www.example.com/account/orders/track"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar61": "cnv_8f42a19c7b0e",
+            "eVar62": "virtual_agent",
+            "eVar63": "order_tracking",
+            "eVar64": "https://www.example.com/account/orders/track",
+            "eVar65": "widget_button"
+          },
+          "props": {
+            "prop61": "live_chat",
+            "prop62": "Chat"
+          }
+        },
+        "event1to100": {
+          "event61": {
+            "value": 1,
+            "id": "cnv_8f42a19c7b0e"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Chat Sessions: distinct live-chat / virtual-agent conversations started by an engaged customer.
+  
+  -- Reporting window: ends 48 hours back so late-arriving chat-platform events are already restated, 90 days deep.
+  DECLARE end_date   DATE   DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY);
+  DECLARE start_date DATE   DEFAULT DATE_SUB(end_date, INTERVAL 89 DAY);
+  -- Extra scan day so a conversation that opened before midnight or before the session timeout is read whole.
+  DECLARE lookback_days INT64 DEFAULT 1;
+  
+  WITH chat_events AS (
+    -- Pivot the chat payload of the unified select_content event and keep only hits from the chat widget
+    SELECT
+      event_timestamp,
+      (SELECT value.string_value FROM UNNEST(user_properties) WHERE key = 'user_type') AS user_type,
+      MAX(IF(ep.key = 'content_type',          ep.value.string_value, NULL)) AS content_type,
+      MAX(IF(ep.key = 'chat_conversation_id',  ep.value.string_value, NULL)) AS chat_conversation_id,
+      MAX(IF(ep.key = 'chat_type',             ep.value.string_value, NULL)) AS chat_type,
+      MAX(IF(ep.key = 'support_channel',       ep.value.string_value, NULL)) AS support_channel,
+      MAX(IF(ep.key = 'customer_engaged',      COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS customer_engaged,
+      MAX(IF(ep.key = 'traffic_type',          ep.value.string_value, NULL)) AS traffic_type,
+      MAX(IF(ep.key = 'chat_traffic_quality',  ep.value.string_value, NULL)) AS chat_traffic_quality
+    FROM `your-project.analytics_123456789.events_*`,
+         UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL lookback_days DAY))
+                            AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'select_content'
+    GROUP BY event_timestamp, user_pseudo_id, user_type
+    HAVING content_type = 'live_chat'
+  ),
+  
+  conversations AS (
+    -- Collapse widget reopens, refreshes and page navigation into one row per conversation, pinned to its chat-start moment
+    SELECT
+      chat_conversation_id,
+      MIN(event_timestamp) AS started_at,
+      ARRAY_AGG(STRUCT(chat_type, support_channel) ORDER BY event_timestamp LIMIT 1)[OFFSET(0)] AS start_attributes,
+      LOGICAL_OR(LOWER(customer_engaged) IN ('true', '1')) AS customer_engaged,
+      LOGICAL_OR(chat_type = 'live_agent') AS reached_live_agent,
+      -- Internal IP ranges, agent-side test accounts, vendor smoke tests and platform-flagged spam or bot traffic
+      LOGICAL_OR(traffic_type = 'internal'
+                 OR user_type IN ('agent', 'internal_test')
+                 OR chat_traffic_quality IN ('vendor_test', 'monitoring', 'spam', 'bot')) AS excluded_traffic
+    FROM chat_events
+    -- Null or malformed conversation IDs are data-quality rejects, never one session each
+    WHERE REGEXP_CONTAINS(chat_conversation_id, r'^[A-Za-z0-9_-]{6,}$')
+    GROUP BY chat_conversation_id
+  )
+  
+  -- Count every qualifying conversation once on its chat-start date; escalation to a live agent is a breakdown, not a second session
+  SELECT
+    DATE(TIMESTAMP_MICROS(started_at)) AS chat_date,
+    start_attributes.support_channel   AS support_channel,
+    start_attributes.chat_type         AS start_chat_type,
+    (start_attributes.chat_type = 'virtual_agent' AND reached_live_agent) AS escalated_to_live_agent,
+    COUNT(DISTINCT chat_conversation_id) AS chat_sessions
+  FROM conversations
+  -- Ignored proactive invitations and zero-message widget opens never set customer_engaged; chats abandoned in queue after a first message do
+  WHERE customer_engaged
+    AND NOT excluded_traffic
+    AND DATE(TIMESTAMP_MICROS(started_at)) BETWEEN start_date AND end_date
+  GROUP BY chat_date, support_channel, start_chat_type, escalated_to_live_agent
+  ORDER BY chat_date, support_channel, start_chat_type;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Chat Sessions: distinct live-chat / virtual-agent conversations started by an engaged customer.
+  -- Chat payload slots: eVar61 conversation ID, eVar62 chat type, eVar66 customer engaged, prop61 content type, prop62 support channel, prop63 traffic quality.
+  
+  WITH bounds AS (
+    -- Reporting window ends 48 hours back for the restatement lag; the scan starts one day earlier so conversations opened before midnight are read whole
+    SELECT
+      CURRENT_DATE - INTERVAL '91' DAY AS start_date,
+      CURRENT_DATE - INTERVAL '2'  DAY AS end_date,
+      CURRENT_DATE - INTERVAL '92' DAY AS scan_from
+  ),
+  
+  chat_events AS (
+    -- Chat payload of the unified interaction event, restricted to hits from the chat widget
+    SELECT
+      e.timestamp AS event_ts,
+      e._experience.analytics.customDimensions.eVars.eVar61 AS chat_conversation_id,
+      e._experience.analytics.customDimensions.eVars.eVar62 AS chat_type,
+      e._experience.analytics.customDimensions.eVars.eVar66 AS customer_engaged,
+      e._experience.analytics.customDimensions.props.prop62 AS support_channel,
+      e._experience.analytics.customDimensions.props.prop63 AS traffic_quality
+    FROM your_experience_event_dataset e
+    CROSS JOIN bounds b
+    WHERE e.timestamp >= b.scan_from
+      AND e.timestamp <  b.end_date + INTERVAL '1' DAY
+      AND e.eventType = 'web.webinteraction.linkClicks'
+      AND e.web.webInteraction.name = 'Live Chat Start'
+      AND e._experience.analytics.customDimensions.props.prop61 = 'live_chat'
+  ),
+  
+  conversations AS (
+    -- Collapse widget reopens, refreshes and page navigation into one row per conversation, pinned to its chat-start moment
+    SELECT
+      chat_conversation_id,
+      MIN(event_ts) AS started_at,
+      MIN_BY(chat_type, event_ts)      AS start_chat_type,
+      MIN_BY(support_channel, event_ts) AS support_channel,
+      MAX(CASE WHEN LOWER(customer_engaged) IN ('true', '1') THEN 1 ELSE 0 END) AS customer_engaged,
+      MAX(CASE WHEN chat_type = 'live_agent' THEN 1 ELSE 0 END) AS reached_live_agent,
+      -- Internal IP ranges, agent-side test accounts, vendor smoke tests and platform-flagged spam or bot traffic
+      MAX(CASE WHEN traffic_quality IN ('internal', 'agent_test', 'vendor_test', 'monitoring', 'spam', 'bot') THEN 1 ELSE 0 END) AS excluded_traffic
+    FROM chat_events
+    -- Null or malformed conversation IDs are data-quality rejects, never one session each
+    WHERE chat_conversation_id RLIKE '^[A-Za-z0-9_-]{6,}$'
+    GROUP BY chat_conversation_id
+  )
+  
+  -- Count every qualifying conversation once on its chat-start date; escalation to a live agent is a breakdown, not a second session
+  SELECT
+    DATE(c.started_at) AS chat_date,
+    c.support_channel,
+    c.start_chat_type,
+    (c.start_chat_type = 'virtual_agent' AND c.reached_live_agent = 1) AS escalated_to_live_agent,
+    COUNT(DISTINCT c.chat_conversation_id) AS chat_sessions
+  FROM conversations c
+  CROSS JOIN bounds b
+  -- Ignored proactive invitations and zero-message widget opens never set customer_engaged; chats abandoned in queue after a first message do
+  WHERE c.customer_engaged = 1
+    AND c.excluded_traffic = 0
+    AND DATE(c.started_at) BETWEEN b.start_date AND b.end_date
+  GROUP BY 1, 2, 3, 4
+  ORDER BY 1, 2, 3;
 
+Calculation Notes: |
+  1️⃣ The conversation ID issued by the chat platform is the unit of count, not the widget interaction: minimising and reopening the panel, navigating to another page with the widget persisted, or a page refresh that re-fires chat_start must all resolve to the same conversation ID and contribute exactly one Chat Session.,2️⃣ Proactive and automated invitations are excluded until the customer engages — a rules-based greeting, banner or pop-out that is ignored, dismissed or times out is a chat invitation impression, not a Chat Session; the count is triggered by the first customer-authored message or an explicit accept on the invitation.,3️⃣ Bot-only and agent-escalated conversations are both in scope and counted once; escalation from virtual agent to a live agent is reported as a breakdown on Support Channel / Resolution Type, never as a second Chat Session, otherwise escalation-heavy weeks inflate volume against a flat contact base.,4️⃣ A conversation that spans the 30-minute analytics session timeout, is transferred between agents or queues, or is resumed from persisted history within the platform's continuation window stays one Chat Session and is attributed to the timestamp and reporting date of its chat_start, including conversations that cross midnight.,5️⃣ Abandoned chats are counted when the customer sent at least one message but left the queue before agent pickup, because they represent real contact demand; widget opens with zero customer messages are excluded here and belong to Chat Widget Opens.,6️⃣ Excluded from the count: conversations originating from internal IP ranges or agent-side test accounts, vendor smoke tests and monitoring scripts, conversations flagged as spam or bot traffic by the chat platform, and any event whose conversation ID is null or malformed — null-ID rows are logged as a data-quality reject rather than counted as one session each.,7️⃣ The metric is conversation-level, not user-level: multiple conversations opened by the same customer in the same day each count, and unique contacting customers is reported separately; figures are restated for up to 48 hours to absorb late-arriving chat-platform events before the period is locked.
 
+Business Use Case: |
+  1️⃣ The Customer Service workforce planning lead reviews Chat Sessions by day-part and day-of-week each Monday and reshapes agent shift coverage and concurrency limits whenever volume in any hour band runs more than 10% above the staffing forecast for two consecutive weeks.,2️⃣ The Customer Service self-service content manager monitors Chat Sessions per 1,000 orders split by entry page and ticket category, and commissions or rewrites the matching help-centre article when a page or topic enters the top five contact drivers, then tracks the deflection in the following period.,3️⃣ The Product manager for checkout and post-purchase treats a week-over-week spike in Chat Sessions started from a specific checkout step, order-tracking page or returns flow as a friction signal and raises it into the next sprint with the offending step named in the ticket.,4️⃣ The Conversion Rate Optimisation analyst uses Chat Sessions as the denominator for Chat Conversion Rate and compares chat-assisted against non-assisted sessions each quarter to size the incremental revenue that justifies chat licence volume and the proactive-invitation rule set.
 
+Dependencies:
+  Events: [chat-start, chat-end]
+  Dimensions: [support-channel, ticket-category, device-category]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Support Channel; Ticket Category; Page Location; Device Category; Default Channel Grouping; New vs Returning User; Country/Region; Order Status
 
+Dashboard Usage: [Customer Support Operations Dashboard, Contact Deflection & Self-Service Dashboard, Post-Purchase & Returns Experience Dashboard, Peak Season Readiness Dashboard]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [support-tickets, contact-form-submissions, help-center-views, faq-views, returns-initiated]
 
+Derived KPIs: [chat-conversion-rate, self-service-resolution-rate, first-contact-resolution-rate, average-resolution-time, customer-satisfaction-score]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +335,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-20T19:40:30.651+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-20T19:40:39.167+00:00
 
