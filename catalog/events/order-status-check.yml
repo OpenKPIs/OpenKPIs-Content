@@ -1,0 +1,198 @@
+# Event: Order Status Check
+# Generated: 2026-09-20T04:04:40.751Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Order Status Check
+Event Serialization: always
+
+Description: |
+  Fires when a signed-in or guest customer opens the merchant's own order status, Track Order or order detail page for a single resolved order ID — the classic WISMO ("where is my order") self-service check — captured as the unified page_view event with page_type = order_status and carrying the order ID, the status rendered to the customer and the lookup path used. It is scoped to the merchant domain and to one order, with carrier or parcel-level tracking recorded separately as Shipment Tracking View, and supplies the behavioural signal behind order status check rate, WISMO contact deflection and delivery-promise accuracy reporting.
+
+Category: Experience
+
+Tags: [event, E-commerce: Post-Purchase Logistics & Fulfillment, WISMO, Self-Service, Order Tracking]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Event Type: standard
+
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  page:view
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "order status",
+        "pageType": "order_status"
+      }
+    },
+    "transaction": {
+      "transactionID": "ORD-100482",
+      "attributes": {
+        "orderStatus": "shipped",
+        "lookupMethod": "email_link",
+        "daysSinceOrder": 3
+      }
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "attributes": {
+              "loginStatus": "guest"
+            }
+          }
+        ]
+      }
+    ],
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "page_view",
+          "eventAction": "view",
+          "type": "order_status"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_type": "order_status",
+    "transaction_id": "ORD-100482",
+    "order_status": "shipped",
+    "login_status": "guest",
+    "lookup_method": "email_link",
+    "days_since_order": 3
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "page:view",
+    "eventInfo": {
+      "eventName": "pageView"
+    },
+    "page": {
+      "pageName": "order status",
+      "pageType": "order_status"
+    },
+    "order": {
+      "transactionId": "ORD-100482",
+      "orderStatus": "shipped",
+      "lookupMethod": "email_link",
+      "daysSinceOrder": 3
+    },
+    "user": {
+      "loginStatus": "guest"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "timestamp": "2026-09-13T10:15:00Z",
+    "web": {
+      "webPageDetails": {
+        "name": "order status",
+        "siteSection": "order_status",
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-100482"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "ORD-100482",
+            "eVar41": "shipped",
+            "eVar42": "guest",
+            "eVar43": "email_link",
+            "eVar44": "3",
+            "eVar45": "order_status"
+          }
+        }
+      }
+    }
+  }
+
+Parameters: |
+  {
+    "page_type": "string - Page template classification; always order_status for this check, used to isolate the order status or order details page view from other page_view hits",
+    "transaction_id": "string - Merchant order ID for the order being viewed; must equal the transaction_id sent on the originating purchase event so the check joins to the order",
+    "order_status": "string - Order status shown to the customer when the page rendered: placed, processing, shipped, out_for_delivery, delivered, cancelled",
+    "login_status": "string - Authentication state at view time: logged_in or guest",
+    "lookup_method": "string - How the customer reached the order: account (My Orders list), order_lookup_form (order ID + email/postcode form), email_link (link in an order or shipping confirmation email or SMS)",
+    "days_since_order": "integer - Whole calendar days between the order placement timestamp and the check, in the store's reporting time zone (0 = same day)"
+  }
+
+Calculation Notes: |
+  1️⃣ Fires once on successful render of the order status or order detail page for one resolved order, after the order management response has returned a status. It must not fire on the lookup form itself, on a failed or rejected lookup (wrong order ID, email or postcode), on the My Orders list page where no single order is in context, or on background status polling that refreshes an already-rendered page.
+  2️⃣ Serialization is always — every qualifying render counts, because repeat checks on the same order are the WISMO signal itself. Suppress technical duplicates only: drop a hit with the same transaction_id, order_status and page path fired within 30 minutes by the same client (back/forward cache restores, tab refreshes, SPA re-renders that do not re-query the order). Sessions follow the standard 30-minute inactivity timeout, so a check after that gap opens a new session and is counted again.
+  3️⃣ Boundary with Shipment Tracking View: this event is merchant-domain and order-scoped (one transaction_id, status supplied by order management). The moment the customer opens a parcel-level or carrier tracking view keyed by a tracking number — embedded carrier iframe, branded tracking page or carrier hand-off — that is Shipment Tracking View and page_view with page_type = order_status must not also fire. A split, multi-parcel order therefore yields one Order Status Check and several Shipment Tracking Views.
+  4️⃣ page_type, transaction_id and login_status are required on every hit; order_status and lookup_method are required whenever order management resolves them. transaction_id must be the merchant order ID sent on the originating purchase event, never the internal surrogate key, cart ID or fulfillment ID, or the join back to the order breaks. order_status must be the enumerated status rendered at page load, not a cached or predicted one.
+  5️⃣ Lookup paths: the authenticated path (account → My Orders → order detail) sets login_status = logged_in with lookup_method = account; the guest paths set login_status = guest with lookup_method = order_lookup_form (order ID plus email or postcode) or email_link (deep link from an order or shipping confirmation email or SMS). A signed deep link that renders the order without creating a session stays guest — inferring logged_in from a recognised device or a marketing cookie is incorrect and inflates the authenticated cohort.
+  6️⃣ days_since_order is whole calendar days between the order placement date and the check date in the store's reporting time zone, resolved server-side from the order record at render — not elapsed hours and not the visitor's local zone. Same-day checks are 0, negative values from back-dated or migrated orders are clamped to 0, and the parameter is omitted rather than defaulted when the placement date is unavailable.
+  7️⃣ Consent and PII: the hit is sent only under granted analytics consent; where consent is denied, no transaction_id is attached. The email address, postcode, phone number, tracking number and shipping address used in the lookup must never appear in a parameter, the page path or the query string — strip lookup tokens from the page location before the hit. Common instrumentation faults to avoid are naming the event after the KPI (wismo_check) instead of the unified page_view, sending free-text page copy ("your order is on its way") in place of the status enumeration, omitting login_status on guest lookups, and double-firing on SPA route changes.
+
+Business Use Case: |
+  1️⃣ Customer Service: the contact-deflection lead reviews checks per order against WISMO ticket volume for the same order cohort each week, and where a status (typically processing beyond 48 hours) shows repeat checks converting into contacts, adds the missing detail — revised ETA, split-parcel notice, carrier hand-off — to the status page and re-measures deflection.
+  2️⃣ Fulfillment & Logistics: the operations planner monitors check volume by fulfillment_location and shipping_method; a rise in checks on orders at day three and beyond, ahead of any carrier exception, flags a node or lane running behind promise and triggers a capacity, cut-off or carrier-reroute decision.
+  3️⃣ Post-Purchase Experience / CRM: the lifecycle manager reads the days_since_order bucket at which checks peak for each status and moves that moment from pull to push — scheduling the proactive status email or SMS just before the peak — then tests the send against reduced check and contact volume for the treated cohort.
+  4️⃣ Product & Merchandising: the post-purchase product manager compares days_since_order at check time with the promised delivery window by shipping method to quantify promise accuracy, and tightens or widens the delivery dates shown on the product page and in checkout where customers are checking before the promise has even lapsed.
+
+Dependencies:
+  Events: [purchase, page-view]
+  Dimensions: [transaction-id, order-status, login-status, lookup-method, days-since-order]
+
+Source Data: Digital Analytics (GA4) + Order Management (Shopify / Salesforce Commerce)
+
+    Report Attributes: |
+  order_status; login_status; lookup_method; days_since_order; device_category; shipping_method; fulfillment_location; order_date
+
+    Dashboard Usage: [Post-Purchase Experience & WISMO Dashboard, Customer Service Contact Deflection Dashboard, Fulfillment & Delivery Performance Dashboard]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [transaction-id, order-status, login-status, lookup-method, days-since-order, shipping-method]
+
+    Derived Dimensions: [order-status-check-count-per-order, days-since-order-bucket]
+
+    Derived Metrics: [order-tracking-page-views, orders-with-status-check]
+
+    Derived KPIs: [order-status-check-rate, wismo-contact-rate]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-14T01:08:42.555+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-20T04:04:40.28+00:00
+
