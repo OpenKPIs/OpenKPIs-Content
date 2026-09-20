@@ -1,5 +1,5 @@
 # Dimension: Store Inventory Status
-# Generated: 2026-09-18T16:35:50.377Z
+# Generated: 2026-09-20T00:32:07.392Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -391,6 +391,16 @@ AEP Query Service SQL: |
   --   productListItems[].storeID / fulfillmentMethod
   --   placeContext.POIinteraction.POIDetail.poiID / name
   --   _experience.analytics.customDimensions.eVars.eVar41 / eVar42 (event-scoped fallback)
+  -- Carrier events (same three unified events as the BigQuery script):
+  --   view_item    -> eventType commerce.productViews
+  --   select_item  -> eventType web.webinteraction.linkClicks with web.webInteraction.name = 'select_item'
+  --                   (the product-list click convention used across this catalog; commerce.productListOpens
+  --                    is the initialisation of a new product list/cart, NOT a product-list click, so it is
+  --                    deliberately not used here)
+  --   add_to_cart  -> eventType commerce.productListAdds
+  -- Parity notes against the BigQuery script: XDM carries no store-selection-method field, so block C
+  -- groups by the carrier event where BigQuery groups by store_selection_method, and block B omits the
+  -- item_category column BigQuery reports (productListItems carries no category in this mapping).
   -- Point-in-time rule: the label is read as captured on the event. No join to a current
   -- inventory dataset is made, so a later replenishment cannot restate past exposure.
   -- Reference datasets are used for LABELS ONLY, never to re-derive the status.
@@ -399,10 +409,11 @@ AEP Query Service SQL: |
     SELECT
       to_date(timestamp)                                                    AS event_day,
       timestamp                                                             AS event_ts,
-      CASE eventType
-        WHEN 'commerce.productViews'     THEN 'view_item'
-        WHEN 'commerce.productListOpens' THEN 'select_item'
-        WHEN 'commerce.productListAdds'  THEN 'add_to_cart'
+      CASE
+        WHEN eventType = 'commerce.productViews'    THEN 'view_item'
+        WHEN eventType = 'web.webinteraction.linkClicks'
+             AND web.webInteraction.name = 'select_item' THEN 'select_item'
+        WHEN eventType = 'commerce.productListAdds' THEN 'add_to_cart'
       END                                                                   AS unified_event_name,
       _id                                                                   AS event_id,
       enduserids._experience.mcid.id                                        AS visitor_id,
@@ -418,7 +429,10 @@ AEP Query Service SQL: |
     FROM experience_events
     WHERE timestamp >= current_date - interval '28' day
       AND timestamp <  current_date
-      AND eventType IN ('commerce.productViews', 'commerce.productListOpens', 'commerce.productListAdds')
+      AND (
+        eventType IN ('commerce.productViews', 'commerce.productListAdds')
+        OR (eventType = 'web.webinteraction.linkClicks' AND web.webInteraction.name = 'select_item')
+      )
   ),
   
   -- Item grain: availability is resolved per item and per store.
@@ -540,10 +554,10 @@ Business Use Case: |
   1️⃣ The Merchandising team reviews the weekly availability mix by store and category; when Out of Stock exposure on a top-selling item exceeds its threshold at a cluster of stores, they reallocate assortment depth and raise the store replenishment minimum for that item so BOPIS demand stops being turned away at the product page.,2️⃣ The Store Operations team monitors the gap between displayed availability and picked orders; when a store shows In Stock but its BOPIS pick failure rate rises, they trigger a cycle count and a shelf audit at that location to correct the position feeding the storefront.,3️⃣ The Marketing team suppresses paid local inventory listings and store-targeted campaigns for item-store pairs that have been shown as Out of Stock over a sustained period, redirecting budget to stores with confirmed availability and cutting spend on clicks that cannot convert to a pickup order.,4️⃣ The Product team quantifies lost conversion by comparing add-to-cart and BOPIS order rates across the three availability states; when Low Stock underperforms In Stock beyond the expected margin, they test alternative messaging and nearby-store substitution on the product page.
 
 Dependencies:
-  Events: [view-item, select-item, add-to-cart]
+  Events: [product-view, store-inventory-check, add-to-cart]
   Dimensions: [store-id, fulfillment-method]
 
-Source Data: Digital Analytics (GA4) + Store Inventory Availability Feed (Adobe Commerce MSI), stitched to Commerce Order Management (Salesforce Commerce Cloud)
+Source Data: Digital Analytics (GA4) + Storefront-Stamped Store Availability Label (Adobe Commerce MSI)
 
 Report Attributes: |
   store-id; fulfillment-method; item-category; device-category; region; traffic-source
@@ -555,7 +569,7 @@ Segment Eligibility: |
 
 Related Dimensions: [store-id, fulfillment-method]
 
-Derived Dimensions: [bopis-eligibility]
+Derived Dimensions: [fulfillment-method]
 
 Data Sensitivity: Internal
 
@@ -569,5 +583,5 @@ Created At: 2026-09-18T16:35:37.41+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-18T16:35:48.198+00:00
+Last Modified At: 2026-09-20T00:32:06.898+00:00
 
