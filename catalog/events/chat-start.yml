@@ -1,5 +1,5 @@
 # Event: Chat Start
-# Generated: 2026-09-20T00:25:43.115Z
+# Generated: 2026-09-20T04:12:06.273Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -135,7 +135,20 @@ Parameters: |
     "order_id": "string - Order reference when the chat is opened from an order context; omitted otherwise"
   }
 
+Calculation Notes: |
+  1️⃣ Fire chat_start once, when the shopper's first message is submitted (or the bot's first intent selection is registered), not when the launcher widget renders or the window opens; widget loads and abandoned pre-chat forms must not generate the event.
+  2️⃣ Serialization is 'always', so a session can legitimately carry several chat_start events; deduplicate on conversation_id, keeping one event per conversation so vendor webhook retries, widget re-renders and SPA route changes never double count, and reopening an existing thread is not a new start.
+  3️⃣ Required parameters are contact_method (fixed 'chat'), chat_type ('live_agent' or 'bot' at the moment of start), page_type, conversation_id and chat_vendor; contact_reason, entry_point and order_id are optional, with contact_reason sent as 'unspecified' when no pre-chat form or bot intent exists and order_id omitted outside an order context.
+  4️⃣ Capture chat_type at start and do not rewrite it on bot-to-agent handoff; handoffs are separate downstream interactions, so bot containment is measured against the original bot-started population and not against a mutated chat_type.
+  5️⃣ Consent and PII: gate the tag on analytics consent, send only the vendor conversation identifier and enumerated values, and never pass message text, names, emails, phone numbers or free-text form fields; order_id is an internal reference and must not be replaced with customer-identifying data.
+  6️⃣ Proactive invites need care: entry_point = 'proactive_invite' counts only when the shopper replies, since firing on invite display inflates chat contact rate and distorts pre-purchase assisted-conversion analysis.
+  7️⃣ Common instrumentation mistakes: firing on widget load, omitting conversation_id so the event cannot be stitched to the helpdesk ticket, hard-coding page_type to the widget host page instead of the template the shopper was on, mixing vendor-specific contact_reason labels instead of the governed vocabulary, and leaving internal or agent-test conversations unfiltered in production reporting.
 
+Business Use Case: |
+  1️⃣ Customer Service Operations managers monitor hourly chat_start volume by chat_type and page_type on the Customer Service Operations Dashboard and re-plan live-agent staffing when a spike appears on order_status or returns pages.
+  2️⃣ The Customer Service team reviews contact_reason and entry_point mix weekly on the Contact Rate & Deflection Dashboard, then prioritises help-center and order-tracking content fixes for reasons such as order_status that a bot could resolve.
+  3️⃣ E-commerce Merchandising and CX leads compare chat_start rates on product, cart and checkout pages, then add or revise proactive invite rules and pre-purchase FAQs where chat demand signals a friction point.
+  4️⃣ Marketing and Conversion analysts join chat_start to subsequent purchase events on the Assisted Conversion Dashboard to quantify the revenue influenced by pre-purchase chats and decide whether to expand live-agent coverage on high-intent pages.
 
 Dependencies:
   Dimensions: [support-channel, page-type]
@@ -170,5 +183,5 @@ Source Data: Digital Analytics (GA4) + Helpdesk (Zendesk / Gorgias / Intercom / 
 
     Last Modified By: devyendarm
 
-    Last Modified At: 2026-09-20T00:25:42.93+00:00
+    Last Modified At: 2026-09-20T04:12:05.553+00:00
 
