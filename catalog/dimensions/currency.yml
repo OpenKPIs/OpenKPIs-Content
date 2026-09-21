@@ -1,0 +1,277 @@
+# Dimension: Currency
+# Generated: 2026-09-21T16:52:06.773Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Currency
+
+Description: |
+  Currency is the three-letter ISO 4217 code (for example USD, EUR, GBP, JPY) in which the monetary values of an ecommerce interaction are denominated, captured as the GA4 `currency` parameter on every event that carries `value`, from view_item and add_to_cart through begin_checkout, add_payment_info, purchase and refund. It is the currency the shopper was shown and charged in (the presentment currency), so Finance, Merchandising and Marketing can split revenue, order value and funnel conversion by currency market and reconcile analytics revenue with settlement before converting to a single reporting currency.
+
+Category: Monetization
+
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "T-100294",
+      "total": {
+        "transactionTotal": 129.99,
+        "currency": "USD"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-4821"
+          },
+          "price": {
+            "basePrice": 129.99,
+            "currency": "USD"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T-100294",
+      "currency": "USD",
+      "value": 129.99,
+      "tax": 8.99,
+      "shipping": 5,
+      "items": [
+        {
+          "item_id": "SKU-4821",
+          "item_name": "Wireless Headphones",
+          "price": 129.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-100294",
+        "priceTotal": 129.99,
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-4821",
+        "priceTotal": 129.99,
+        "currencyCode": "USD"
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "commerce": {
+      "order": {
+        "purchaseID": "T-100294",
+        "priceTotal": 129.99,
+        "currencyCode": "USD"
+      },
+      "purchases": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-4821",
+        "priceTotal": 129.99,
+        "currencyCode": "USD"
+      }
+    ]
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH iso_4217 AS (
+    -- Active ISO 4217 alphabetic currency codes; any other value reports as (not set)
+    SELECT code FROM UNNEST(SPLIT('AED AFN ALL AMD AOA ARS AUD AWG AZN BAM BBD BDT BHD BIF BMD BND BOB BRL BSD BTN BWP BYN BZD CAD CDF CHF CLP CNY COP CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD UYU UZS VED VES VND VUV WST XAF XCD XCG XOF XPF YER ZAR ZMW ZWG', ' ')) AS code
+  ),
+  monetary_events AS (
+    -- Monetary events in the window with currency (trimmed, uppercased) and transaction_id pivoted from event_params
+    SELECT
+      event_name,
+      UPPER(TRIM((SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'currency'))) AS raw_currency,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'transaction_id') AS transaction_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name IN ('view_item', 'add_to_cart', 'remove_from_cart', 'begin_checkout', 'add_shipping_info', 'add_payment_info', 'purchase', 'refund')
+  ),
+  purchase_currency AS (
+    -- Valid ISO 4217 currency of each original purchase up to end_date, so refunds inherit it via transaction_id
+    SELECT
+      (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'transaction_id') AS transaction_id,
+      MAX(UPPER(TRIM((SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'currency')))) AS currency
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX <= FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+      AND UPPER(TRIM((SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'currency'))) IN (SELECT code FROM iso_4217)
+    GROUP BY transaction_id
+  ),
+  classified AS (
+    -- Currency per event: refunds take the original purchase currency, otherwise the event code if it is on the ISO 4217 list, else NULL
+    SELECT
+      e.event_name,
+      COALESCE(IF(e.event_name = 'refund', p.currency, NULL), c.code) AS currency
+    FROM monetary_events e
+    LEFT JOIN purchase_currency p
+      ON e.event_name = 'refund' AND e.transaction_id = p.transaction_id
+    LEFT JOIN iso_4217 c
+      ON e.raw_currency = c.code
+  )
+  -- Events by currency and event; missing or invalid codes stay in the counts as (not set)
+  SELECT
+    COALESCE(currency, '(not set)') AS currency,
+    event_name,
+    COUNT(*) AS event_count
+  FROM classified
+  GROUP BY currency, event_name
+  ORDER BY currency, event_name;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Relative reporting window: the last 90 complete days
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  ),
+  iso_4217 AS (
+    -- Active ISO 4217 alphabetic currency codes; any other value reports as (not set)
+    SELECT explode(split('AED AFN ALL AMD AOA ARS AUD AWG AZN BAM BBD BDT BHD BIF BMD BND BOB BRL BSD BTN BWP BYN BZD CAD CDF CHF CLP CNY COP CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD UYU UZS VED VES VND VUV WST XAF XCD XCG XOF XPF YER ZAR ZMW ZWG', ' ')) AS code
+  ),
+  monetary_events AS (
+    -- Monetary XDM commerce events in the window, labelled with the unified event names; order currency on checkout steps, purchases and refunds, product-line currency on product views and cart events
+    SELECT
+      CASE e.eventType
+        WHEN 'commerce.productViews' THEN 'view_item'
+        WHEN 'commerce.productListAdds' THEN 'add_to_cart'
+        WHEN 'commerce.productListRemovals' THEN 'remove_from_cart'
+        WHEN 'commerce.checkouts' THEN 'begin_checkout'
+        WHEN 'commerce.purchases' THEN 'purchase'
+        ELSE e.eventType
+      END AS event_name,
+      upper(trim(COALESCE(e.commerce.order.currencyCode, e.productListItems[0].currencyCode))) AS raw_currency,
+      e.commerce.order.purchaseID AS transaction_id
+    FROM aep_web_events_dataset e
+    CROSS JOIN params
+    WHERE to_date(e.timestamp) BETWEEN params.start_date AND params.end_date
+      AND e.eventType IN ('commerce.productViews', 'commerce.productListAdds', 'commerce.productListRemovals', 'commerce.checkouts', 'add_shipping_info', 'add_payment_info', 'commerce.purchases', 'refund')
+  ),
+  purchase_currency AS (
+    -- Valid ISO 4217 currency of each original purchase up to end_date, so refunds inherit it via purchase ID
+    SELECT
+      e.commerce.order.purchaseID AS transaction_id,
+      MAX(upper(trim(e.commerce.order.currencyCode))) AS currency
+    FROM aep_web_events_dataset e
+    CROSS JOIN params
+    WHERE to_date(e.timestamp) <= params.end_date
+      AND e.eventType = 'commerce.purchases'
+      AND upper(trim(e.commerce.order.currencyCode)) IN (SELECT code FROM iso_4217)
+    GROUP BY e.commerce.order.purchaseID
+  ),
+  classified AS (
+    -- Currency per event: refunds take the original purchase currency, otherwise the event code if it is on the ISO 4217 list, else NULL
+    SELECT
+      m.event_name,
+      COALESCE(CASE WHEN m.event_name = 'refund' THEN p.currency END, c.code) AS currency
+    FROM monetary_events m
+    LEFT JOIN purchase_currency p
+      ON m.event_name = 'refund' AND m.transaction_id = p.transaction_id
+    LEFT JOIN iso_4217 c
+      ON m.raw_currency = c.code
+  )
+  -- Events by currency and event; missing or invalid codes stay in the counts as (not set)
+  SELECT
+    COALESCE(currency, '(not set)') AS currency,
+    event_name,
+    COUNT(*) AS event_count
+  FROM classified
+  GROUP BY currency, event_name
+  ORDER BY currency, event_name;
+
+Calculation Notes: |
+  1️⃣ Format and validation: the value must be an uppercase three-letter ISO 4217 alphabetic code from the active code list. Lowercase codes are uppercased at collection; currency symbols ("$", "€"), numeric ISO codes (840, 978), locale strings (en-US) and display names ("US Dollar") are invalid and report as (not set) instead of being guessed, because "$" alone can mean USD, CAD, AUD or MXN.
+  2️⃣ Grain and capture point: event-scoped, one value per event. It is required whenever `value` is sent on view_item, add_to_cart, remove_from_cart, begin_checkout, add_shipping_info, add_payment_info, purchase and refund; GA4 does not compute revenue for a monetary event without a valid currency. Item prices in the `items` array share the event currency, so a single event can never mix currencies, and a cart cannot either.
+  3️⃣ Presentment versus settlement currency: record the currency the shopper saw at checkout and was charged in (Shopify presentment_currency, Salesforce Commerce Cloud basket currency, Adobe Commerce quote currency), not the store base or settlement currency. GA4 converts `value` into the property reporting currency at the exchange rate of the event date; the raw `currency` parameter stays on the event, so native-currency and converted revenue can both be reported. Adobe Analytics reads the same code from s.currencyCode and converts it to the report suite base currency.
+  4️⃣ Currency switching during a journey: when a shopper changes currency through a currency selector, a geo-redirected storefront or a market-specific domain, each event carries the currency in force when it fired and earlier events are never restated. The cart is repriced, so add_to_cart and purchase for the same session can legitimately differ; funnel rates broken down by currency should be read at session level using the currency of the last monetary event.
+  5️⃣ Refunds and adjustments: a refund must carry the currency of the original purchase (joined on transaction_id), even if the storefront currency has changed since then, so that net revenue in native currency nets to zero on a full refund.
+  6️⃣ Exclusions and data quality: monetary events with a missing or invalid currency are kept in counts but excluded from revenue by currency and reported as (not set); the (not set) share of purchase events is a release-quality check with a target of 0%. Zero-value events (free samples, 100% discounted orders) still send a currency so they stay in the correct market.
+  7️⃣ Interpretation limits: currency is not a proxy for country or market; EUR covers multiple countries, and USD is often shown to shoppers outside the United States. Market analysis combines Currency with shipping country or storefront locale, and cross-currency comparisons of Average Order Value always use the converted reporting-currency value, never summed native amounts.
+
+Business Use Case: |
+  1️⃣ Every day, the Finance revenue accounting team reconciles GA4 purchase revenue by currency, in native currency, against payment service provider settlement reports (Stripe, Adyen, PayPal) for the same day. When the variance for any currency exceeds 2% on two consecutive days, they open an investigation into missing purchase tags, duplicate transaction_ids or refunds that were not sent, before month-end close.
+  2️⃣ Every month, the Merchandising pricing lead reviews checkout conversion and Average Order Value by presentment currency. When a localized currency converts more than 15% below the base-currency storefront for the same product mix, they test psychological price endings and rounding rules for that currency and adjust the cross-border price list.
+  3️⃣ After each checkout release, the Product owner for checkout monitors the share of purchase events with a (not set) or invalid currency. When the share rises above 0.5% of purchases, they block the next deployment and assign a defect to restore the currency parameter on the affected templates and payment methods.
+  4️⃣ Every week, Marketing performance leads split Return on Ad Spend and revenue by currency market. When a currency market holds ROAS above target for three weeks, they move budget into campaigns that target that market's storefront and cut spend where the local-currency conversion rate trails.
+
+Dependencies:
+  Events: [purchase, add-to-cart, refund-issued]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Currency; Shipping Country; Storefront Locale; Payment Method; Device Category; Date
+
+Dashboard Usage: [Revenue by Currency Market, Finance Revenue Reconciliation, Checkout Funnel Performance, Cross-Border Pricing Review]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [payment-method, coupon-code, shipping-tier, checkout-type, delivery-location, transaction-id]
+
+Derived Dimensions: [delivery-region]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-21T16:28:40.016+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-21T16:52:06.419+00:00
+
