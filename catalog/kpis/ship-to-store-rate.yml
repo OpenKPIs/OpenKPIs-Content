@@ -1,0 +1,316 @@
+# KPI: Ship-to-Store Rate
+# Generated: 2026-09-21T17:14:16.959Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Ship-to-Store Rate
+Formula: Ship-to-Store Rate (%) = (COUNT(DISTINCT transaction_id where at least one order line has fulfillment_method = 'ship_to_store', i.e. store pickup sourced from a node other than the pickup store) / COUNT(DISTINCT transaction_id of all orders placed in the period across every fulfilment method)) × 100
+
+Description: |
+  Ship-to-Store Rate is the percentage of all orders placed in a period for which the customer chose store pickup and the merchandise was sourced from a distribution centre, fulfilment centre or another store and transferred to the pickup store. It differs from BOPIS, which picks from the pickup store's own on-hand stock, and tells omnichannel, supply chain and store operations leaders how much online demand relies on the store network as a free last-mile node instead of home delivery or local inventory.
+
+Category: Operations
+
+Tags: [kpi, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: [["Retail"]]
+
+Priority: Medium
+
+Core Area: Checkout
+
+Scope: Global
+
+Measure Type: Percentage
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "{{transaction_id}}",
+      "total": {
+        "basePrice": "{{value}}",
+        "currency": "{{currency}}"
+      },
+      "attributes": {
+        "fulfillment_method": "ship_to_store",
+        "checkout_type": "{{checkout_type}}",
+        "customer_type": "{{customer_type}}",
+        "shipping_tier": "{{shipping_tier}}"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "{{item_id}}"
+          },
+          "quantity": "{{quantity}}",
+          "attributes": {
+            "fulfillment_method": "ship_to_store",
+            "store_id": "{{pickup_store_id}}",
+            "sourcing_node_id": "{{sourcing_node_id}}"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "{{transaction_id}}",
+      "value": 0,
+      "currency": "USD",
+      "shipping": 0,
+      "tax": 0,
+      "coupon": "",
+      "payment_type": "",
+      "affiliation": "",
+      "checkout_type": "",
+      "customer_type": "",
+      "shipping_tier": "",
+      "fulfillment_method": "ship_to_store",
+      "items": [
+        {
+          "item_id": "",
+          "item_name": "",
+          "quantity": 1,
+          "price": 0,
+          "fulfillment_method": "ship_to_store",
+          "store_id": "",
+          "sourcing_node_id": ""
+        }
+      ]
+    },
+    "user_id": "",
+    "traffic_type": "",
+    "campaign_source": "",
+    "campaign_medium": ""
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "purchase": {
+      "transactionID": "",
+      "value": 0,
+      "currency": "USD",
+      "fulfillment_method": "ship_to_store",
+      "checkout_type": "",
+      "customer_type": "",
+      "shipping_tier": "",
+      "items": [
+        {
+          "productID": "",
+          "quantity": 1,
+          "price": 0,
+          "fulfillment_method": "ship_to_store",
+          "store_id": "",
+          "sourcing_node_id": ""
+        }
+      ]
+    },
+    "user": {
+      "user_id": "",
+      "traffic_type": ""
+    }
+  }
+
+XDM Mapping: |
+  {
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "{transaction_id}",
+        "priceTotal": "{value}",
+        "currencyCode": "{currency}"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "{item_id}",
+        "quantity": "{quantity}",
+        "priceTotal": "{price}",
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "fulfillmentMethod": "ship_to_store",
+                "storeId": "{pickup_store_id}",
+                "sourcingNodeId": "{sourcing_node_id}"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "checkoutType": "{checkout_type}",
+            "customerType": "{customer_type}",
+            "shippingTier": "{shipping_tier}"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 1 DAY);
+  DECLARE reporting_tz STRING DEFAULT 'America/New_York';
+  
+  WITH placed_orders AS (
+    -- One row per order: the first purchase event per transaction_id fixes the classification at placement
+    SELECT
+      ecommerce.transaction_id AS transaction_id,
+      DATE(TIMESTAMP_MICROS(event_timestamp), reporting_tz) AS placement_date,
+      items
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL 1 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL 1 DAY))
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+      AND ecommerce.transaction_id NOT IN ('', '(not set)')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY ecommerce.transaction_id ORDER BY event_timestamp) = 1
+  ),
+  ship_to_store_orders AS (
+    -- Orders with at least one line labelled ship_to_store on the storefront purchase event
+    SELECT o.transaction_id
+    FROM placed_orders AS o,
+      UNNEST(o.items) AS it,
+      UNNEST(it.item_params) AS p
+    WHERE p.key = 'fulfillment_method'
+      AND p.value.string_value = 'ship_to_store'
+    UNION DISTINCT
+    -- Orders with an OMS line recorded at placement as ship_to_store, or as pickup_in_store with a sourcing node other than the pickup store
+    SELECT o.transaction_id
+    FROM placed_orders AS o
+    JOIN `your-project.oms.order_lines` AS l ON l.order_id = o.transaction_id
+    WHERE l.initial_fulfillment_method = 'ship_to_store'
+      OR (l.initial_fulfillment_method = 'pickup_in_store'
+          AND l.initial_sourcing_node_id <> l.initial_pickup_store_id)
+  )
+  -- Ship-to-store orders over all orders placed in the window, excluding test / internal QA, unreleased fraud-rejected and seller-shipped marketplace orders from both sides
+  SELECT
+    COUNT(DISTINCT s.transaction_id) AS ship_to_store_orders,
+    COUNT(DISTINCT o.transaction_id) AS total_orders,
+    ROUND(100 * SAFE_DIVIDE(COUNT(DISTINCT s.transaction_id), COUNT(DISTINCT o.transaction_id)), 2) AS ship_to_store_rate_pct
+  FROM placed_orders AS o
+  LEFT JOIN ship_to_store_orders AS s ON s.transaction_id = o.transaction_id
+  LEFT JOIN `your-project.oms.orders` AS oms ON oms.order_id = o.transaction_id
+  WHERE o.placement_date BETWEEN start_date AND end_date
+    AND NOT COALESCE(oms.is_test_order, FALSE)
+    AND NOT COALESCE(oms.is_fraud_rejected_unreleased, FALSE)
+    AND NOT COALESCE(oms.is_marketplace_seller_fulfilled, FALSE);
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Relative reporting window and reporting time zone
+    SELECT
+      date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 90) AS start_date,
+      date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 1) AS end_date,
+      'America/New_York' AS reporting_tz
+  ),
+  placed_orders AS (
+    -- One row per order: the first purchase event per purchaseID fixes the classification at placement
+    SELECT transaction_id, placement_date, productListItems
+    FROM (
+      SELECT
+        e.commerce.order.purchaseID AS transaction_id,
+        to_date(from_utc_timestamp(e.timestamp, p.reporting_tz)) AS placement_date,
+        e.productListItems,
+        ROW_NUMBER() OVER (PARTITION BY e.commerce.order.purchaseID ORDER BY e.timestamp) AS rn
+      FROM your_aep_web_dataset AS e
+      CROSS JOIN params AS p
+      WHERE e.commerce.purchases.value = 1
+        AND e.timestamp >= to_timestamp(date_sub(p.start_date, 1))
+        AND e.timestamp < to_timestamp(date_add(p.end_date, 2))
+        AND e.commerce.order.purchaseID IS NOT NULL
+        AND e.commerce.order.purchaseID <> ''
+    ) AS ranked
+    WHERE rn = 1
+  ),
+  ship_to_store_orders AS (
+    -- Orders with at least one line labelled ship_to_store on the storefront purchase event
+    SELECT o.transaction_id
+    FROM placed_orders AS o
+    LATERAL VIEW explode(o.productListItems) AS pli
+    WHERE pli._experience.analytics.customDimensions.eVars.fulfillmentMethod = 'ship_to_store'
+    UNION
+    -- Orders with an OMS line recorded at placement as ship_to_store, or as pickup_in_store with a sourcing node other than the pickup store
+    SELECT o.transaction_id
+    FROM placed_orders AS o
+    JOIN oms_order_lines_dataset AS l ON l.order_id = o.transaction_id
+    WHERE l.initial_fulfillment_method = 'ship_to_store'
+      OR (l.initial_fulfillment_method = 'pickup_in_store'
+          AND l.initial_sourcing_node_id <> l.initial_pickup_store_id)
+  )
+  -- Ship-to-store orders over all orders placed in the window, excluding test / internal QA, unreleased fraud-rejected and seller-shipped marketplace orders from both sides
+  SELECT
+    COUNT(DISTINCT s.transaction_id) AS ship_to_store_orders,
+    COUNT(DISTINCT o.transaction_id) AS total_orders,
+    ROUND(100 * COUNT(DISTINCT s.transaction_id) / NULLIF(COUNT(DISTINCT o.transaction_id), 0), 2) AS ship_to_store_rate_pct
+  FROM placed_orders AS o
+  CROSS JOIN params AS p
+  LEFT JOIN ship_to_store_orders AS s ON s.transaction_id = o.transaction_id
+  LEFT JOIN oms_orders_dataset AS oms ON oms.order_id = o.transaction_id
+  WHERE o.placement_date BETWEEN p.start_date AND p.end_date
+    AND NOT COALESCE(oms.is_test_order, FALSE)
+    AND NOT COALESCE(oms.is_fraud_rejected_unreleased, FALSE)
+    AND NOT COALESCE(oms.is_marketplace_seller_fulfilled, FALSE);
+
+Calculation Notes: |
+  1️⃣ Numerator definition: an order counts as ship-to-store when the pickup store differs from the sourcing node, meaning the units travel from a distribution centre, e-commerce fulfilment centre or another store to the customer's chosen store; on the purchase event this is fulfillment_method = 'ship_to_store', or fulfillment_method = 'pickup_in_store' where the sourcing node differs from the pickup store. BOPIS means only pickup_in_store orders sourced from the pickup store itself (sourcing_node_id = store_id, picked from its own on-hand stock, typically ready same day); BOPIS and curbside lines do not qualify an order here and are reported in BOPIS Order Share and Curbside Pickup Rate. All three are order-level shares, so a mixed order carrying, for example, one BOPIS line and one ship-to-store line counts in both BOPIS Order Share and this KPI; the shares can overlap and must never be summed into a total pickup share. 2️⃣ Full-base denominator: every order placed in the period across all fulfilment methods (ship-to-home, same-day delivery, BOPIS, curbside, ship-to-store, digital-only), deduplicated on transaction_id; never restrict the denominator to pickup orders or to sessions where ship-to-store was offered, since that turns the KPI into a pickup-mix ratio. 3️⃣ Pickup sourcing classification: on every storefront, and especially where checkout shows a single 'Pick up in store' choice and the order management system decides sourcing, classify each pickup_in_store order from the OMS sourcing record (sourcing node ≠ pickup store = ship-to-store) rather than from the storefront label, which would report every such order as BOPIS. 4️⃣ Mixed-fulfilment orders: an order with at least one ship-to-store line counts once in the numerator regardless of its other lines; line and unit mix is analysed separately and never blended into this order-level rate. 5️⃣ Classification is fixed at placement: each line is classified from the OMS order line as recorded at order placement, using its placement-time fulfilment method, pickup store and initial sourcing node, never the values after later edits. A BOPIS order later re-sourced from a DC because store stock was short, or a ship-to-store order converted to ship-to-home, keeps its original method here and is tracked as re-sourcing in the OMS reconciliation. Cancelled orders stay in both numerator and denominator; test orders, internal QA transactions, fraud-rejected orders never released to fulfilment and third-party marketplace orders shipped by the seller are excluded from both. 6️⃣ Timing: orders are dated by order placement timestamp in the retailer's reporting time zone, not by shipment or pickup date, and the rate for any window is the ratio of summed counts, never an average of daily rates. 7️⃣ Geographic breakdowns use the customer's local market (store trade area or shipping postal region) so numerator and denominator stay aligned; breaking out by pickup store is only valid for ship-to-store order counts, because ship-to-home orders carry no pickup store.
+
+Business Use Case: |
+  1️⃣ Supply Chain planning reviews the weekly rate by region and, when a region's ship-to-store share rises more than 3 points above its trailing 8-week baseline, consolidates those parcels onto scheduled DC-to-store replenishment trucks instead of parcel carriers to hold transfer cost per order flat. 2️⃣ Store Operations uses the forecast ship-to-store volume per store to size backroom staging, pickup lockers and receiving labour, adding hold-shelf capacity at any store whose projected pickups exceed 85% of its current capacity. 3️⃣ Merchandising compares ship-to-store and BOPIS share by category each month and, where a SKU is repeatedly shipped to the same stores, moves it into the store-stocked assortment so the demand is served same day from local inventory. 4️⃣ Finance and the E-commerce Product team compare fulfilment cost per order across ship-to-store and ship-to-home, and when the rate falls below plan they test free ship-to-store messaging and free-shipping thresholds at checkout to shift volume onto the lower-cost method.
+
+Dependencies:
+  Events: [purchase]
+  Dimensions: [fulfillment-method]
+  KPIs: [orders]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics) + Order Management (reconciliation)
+
+Report Attributes: |
+  Fulfillment Method; Store Zip Code Local Market; Delivery Region; Item Category; Store Inventory Status; Device Category; Traffic Source; Customer Status
+
+Dashboard Usage: [Omnichannel Fulfilment Mix, Store Pickup Capacity Planning, Supply Chain Transfer Cost Review, Executive E-commerce Weekly]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [bopis-order-share, curbside-pickup-rate, pickup-completion-rate, omnichannel-customer-rate, online-to-store-visit-rate, split-shipment-rate, orders]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-21T17:12:34.515+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-21T17:14:16.524+00:00
+
