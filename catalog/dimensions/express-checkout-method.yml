@@ -1,0 +1,232 @@
+# Dimension: Express Checkout Method
+# Generated: 2026-09-21T16:52:20.148Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Express Checkout Method
+
+Description: |
+  Express Checkout Method records which accelerated wallet checkout a shopper launched to place an order (apple_pay, google_pay, shop_pay, paypal_express, amazon_pay or other_express), or none when the order went through the merchant's standard multi-step checkout, captured as the express_checkout parameter on begin_checkout, add_payment_info and purchase. Where Payment Method describes the tender that settled the order, this dimension describes the checkout path, so it is the breakdown used to size how much revenue skips the address, shipping and payment forms, and to see how each wallet converts compared with standard checkout.
+
+Category: Conversion
+
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  commerce.purchases
+
+W3 Data Layer: |
+  {
+    "cart": {
+      "cartID": "cart_8841236",
+      "attributes": {
+        "checkoutStep": "1",
+        "checkoutStepName": "cart_review",
+        "checkoutType": "guest",
+        "expressCheckout": "apple_pay"
+      }
+    },
+    "transaction": {
+      "transactionID": "T-10029384",
+      "attributes": {
+        "expressCheckout": "apple_pay",
+        "checkoutType": "guest"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T-10029384",
+      "currency": "USD",
+      "value": 128.5,
+      "checkout_type": "guest",
+      "express_checkout": "apple_pay",
+      "items": [
+        {
+          "item_id": "SKU_10293",
+          "item_name": "Classic Tee",
+          "price": 128.5,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "commerce.purchases",
+    "purchase": {
+      "purchaseID": "T-10029384",
+      "checkoutType": "guest",
+      "expressCheckout": "apple_pay"
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-10029384",
+        "priceTotal": 128.5
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar30": "apple_pay"
+          }
+        }
+      }
+    },
+    "_tenant": {
+      "traffic_type": "external"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Test and cancelled or voided orders are excluded downstream in the order metrics joined on transaction_id (note 5), not here.
+  -- Pivot each purchase event's parameters into one row
+  WITH purchases AS (
+    SELECT
+      event_timestamp,
+      MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) AS transaction_id,
+      MAX(IF(ep.key = 'express_checkout', LOWER(TRIM(ep.value.string_value)), NULL)) AS express_checkout_raw,
+      MAX(IF(ep.key = 'value', COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64)), NULL)) AS order_value,
+      MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`, UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+    GROUP BY user_pseudo_id, event_timestamp, event_bundle_sequence_id
+  )
+  -- One value per order: drop internal, zero-value and id-less purchases, keep the first purchase per transaction_id, map to the controlled vocabulary
+  SELECT
+    transaction_id,
+    CASE
+      WHEN express_checkout_raw IN ('apple_pay', 'google_pay', 'shop_pay', 'paypal_express', 'amazon_pay', 'other_express', 'none')
+        THEN express_checkout_raw
+      ELSE 'unknown'
+    END AS express_checkout_method
+  FROM purchases
+  WHERE transaction_id IS NOT NULL
+    AND order_value > 0
+    AND COALESCE(traffic_type, '') != 'internal'
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Test and cancelled or voided orders are excluded downstream in the order metrics joined on transaction_id (note 5), not here.
+  -- Purchase events with the order id, express checkout value, order value and traffic type
+  WITH purchases AS (
+    SELECT
+      timestamp,
+      commerce.order.purchaseID AS transaction_id,
+      LOWER(TRIM(_experience.analytics.customDimensions.eVars.eVar30)) AS express_checkout_raw,
+      commerce.order.priceTotal AS order_value,
+      _tenant.traffic_type AS traffic_type
+    FROM your_aep_web_events_dataset
+    WHERE timestamp >= CAST(DATE_SUB(CURRENT_DATE, 90) AS TIMESTAMP)
+      AND timestamp < CAST(CURRENT_DATE AS TIMESTAMP)
+      AND commerce.purchases.value > 0
+  )
+  -- One value per order: drop internal, zero-value and id-less purchases, keep the first purchase per transaction_id, map to the controlled vocabulary
+  SELECT
+    transaction_id,
+    CASE
+      WHEN express_checkout_raw IN ('apple_pay', 'google_pay', 'shop_pay', 'paypal_express', 'amazon_pay', 'other_express', 'none')
+        THEN express_checkout_raw
+      ELSE 'unknown'
+    END AS express_checkout_method
+  FROM (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY timestamp) AS rn
+    FROM purchases
+    WHERE transaction_id IS NOT NULL
+      AND order_value > 0
+      AND COALESCE(traffic_type, '') != 'internal'
+  ) ranked
+  WHERE rn = 1;
+
+Calculation Notes: |
+  1️⃣ Controlled vocabulary: apple_pay (Apple Pay payment sheet), google_pay (Google Pay payment sheet), shop_pay (Shop Pay accelerated checkout), paypal_express (PayPal Checkout / Pay Later launched from an express button, where PayPal returns the buyer's address and shipping choice), amazon_pay (Amazon Pay button), other_express (any other wallet that pre-fills identity and address, such as Venmo, Link or Meta Pay), none (standard checkout completed through the merchant's own address, shipping and payment steps) and unknown (the parameter is missing or not recognised). Values are lowercase snake_case and are never localised or passed through as the button label or the processor's raw string.
+  2️⃣ Express means the checkout path, not the tender. A shopper who enters standard checkout and then chooses Apple Pay or PayPal at the payment step is recorded as none here, with payment_type = apple_pay or paypal on Payment Method. The value is set only when the order was started from an express button (on the product page, mini-cart, cart or the top of checkout) and the wallet supplied the contact and shipping details.
+  3️⃣ Grain and attribution: one value per checkout (checkout_id) and per order (transaction_id). The purchase event is the authoritative record. If a shopper opens a wallet sheet, cancels it and then completes standard checkout, the order is none; the abandoned express attempt remains visible only on the begin_checkout event that carried the wallet value. If several express attempts occur in one checkout, the purchase carries the wallet that authorised payment.
+  4️⃣ Timing: begin_checkout fires with the wallet value when the payment sheet or wallet window opens, not when the button is rendered. Sheet impressions, button renders and eligibility checks (for example canMakePayment) are not checkout starts. Cancelling a sheet sends no event, so express begin_checkout volume counts attempts that reached the wallet, and funnels for this dimension run from begin_checkout to purchase within the same session using the standard 30-minute inactivity timeout.
+  5️⃣ Exclusions and filters: exclude purchase events from internal traffic (traffic_type = internal), orders with a value of zero or less, and purchases without a transaction_id before comparing wallets. Test orders and fully cancelled or voided transactions are flagged only in the order system, so those exclusions are applied in the downstream order metrics joined on transaction_id, not in the value of this dimension. Orders placed by agents, through marketplaces or in store are out of scope and report as unknown rather than none. The unknown share should stay below 2% of purchases; a higher share points to a missing parameter on the purchase event, not to shopper behaviour.
+  6️⃣ Eligibility bias: each wallet is shown only on supported browsers and devices (Apple Pay on Safari and iOS, Google Pay on Chromium and Android, Shop Pay only for Shopify merchants), so comparisons between wallets are read within Device Category and browser. A raw share across all traffic understates Apple Pay on desktop Windows and overstates it on mobile Safari.
+  7️⃣ Refunds and chargebacks keep the value of the original order through transaction_id. Express orders are compared with standard orders on returns, chargebacks and failed deliveries as well as on conversion, because the shipping address is supplied by the wallet rather than typed and checked in the merchant's address form.
+
+Business Use Case: |
+  1️⃣ The checkout product manager reviews begin_checkout-to-purchase conversion by Express Checkout Method and Device Category every week. When Apple Pay conversion on iOS Safari falls more than 5 points below its four-week baseline, they open a priority ticket with payments engineering to check Apple Pay domain verification, the merchant certificate and shipping-method callbacks before the next release.
+  2️⃣ The Finance payments lead reconciles each month's revenue share by Express Checkout Method against the processor and wallet fee schedules. When a wallet's share of orders passes the volume tier in the contract, they renegotiate the rate or ask Product to change the order in which express buttons are shown.
+  3️⃣ The Customer Service operations manager compares Failed Delivery Rate and WISMO contact rate for express orders with orders marked none. When express orders run more than 1.5 times the standard rate for two consecutive weeks, they ask the checkout team to add address validation to the wallet shipping-address callback and update the agent macros for address corrections.
+  4️⃣ The ecommerce merchandising lead runs product-page A/B tests that add or remove express buttons and reads the result by Express Checkout Method. A variant ships only if total Checkout Conversion Rate and Average Order Value hold, so orders moved from standard checkout to a wallet are not counted as new demand.
+
+Dependencies:
+  Events: [purchase]
+  Metrics: [begin-checkout, payment-info-added]
+  Dimensions: [payment-method, checkout-type]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Device Category; Payment Method; Checkout Type; Page Type; Traffic Source; Shipping Tier
+
+Dashboard Usage: [Checkout Funnel Performance, Payment Mix and Wallet Adoption, Checkout Conversion by Device, Express Checkout A/B Test Readout]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [payment-method, checkout-type, device-category, shipping-tier, fulfillment-method, coupon-code, page-type, checkout-error-type]
+
+Derived Dimensions: [customer-segmentation-by-risk-profile]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-21T16:28:55.873+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-21T16:52:19.88+00:00
+
