@@ -1,0 +1,330 @@
+# KPI: BOPIS Order Share
+# Generated: 2026-09-21T17:13:40.880Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: BOPIS Order Share
+Formula: BOPIS Order Share (%) = (COUNT(DISTINCT transaction_id of completed online orders with at least one line where fulfillment_method = pickup_in_store, curbside included) / COUNT(DISTINCT transaction_id of all completed online orders in the period, every fulfilment method)) × 100
+
+Description: |
+  BOPIS Order Share is the percentage of all online orders placed in a period (web and app, every fulfilment method) that the customer chose to collect in store from that store's inventory, curbside pickup included. It shows how much digital demand the store network absorbs instead of parcel delivery, which drives store labour planning, pickup-eligible inventory and last-mile shipping cost.
+
+Category: Operations
+
+Tags: [kpi, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: [["Retail"]]
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Global
+
+Measure Type: Percentage
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "T-20260921-00456",
+      "total": {
+        "transactionTotal": 128.5,
+        "currency": "USD",
+        "shipping": 0,
+        "tax": 10.28
+      },
+      "attributes": {
+        "affiliation": "Online Store",
+        "paymentType": "credit_card",
+        "checkoutType": "standard",
+        "customerType": "returning",
+        "shippingTier": "pickup",
+        "fulfillmentMethod": "pickup_in_store",
+        "couponCode": ""
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-10456",
+            "productName": "Wireless Earbuds"
+          },
+          "quantity": 1,
+          "unitPrice": 128.5,
+          "fulfillmentMethod": "pickup_in_store",
+          "storeID": "0452"
+        }
+      ]
+    },
+    "user": {
+      "profile": {
+        "profileInfo": {
+          "userID": "u_88213"
+        },
+        "attributes": {
+          "customerType": "returning"
+        }
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T-20260921-00456",
+      "value": 128.5,
+      "currency": "USD",
+      "shipping": 0,
+      "tax": 10.28,
+      "coupon": "",
+      "affiliation": "Online Store",
+      "items": [
+        {
+          "item_id": "SKU-10456",
+          "item_name": "Wireless Earbuds",
+          "price": 128.5,
+          "quantity": 1,
+          "fulfillment_method": "pickup_in_store",
+          "store_id": "0452"
+        }
+      ]
+    },
+    "user_id": "u_88213",
+    "payment_type": "credit_card",
+    "checkout_type": "standard",
+    "customer_type": "returning",
+    "shipping_tier": "pickup",
+    "fulfillment_method": "pickup_in_store",
+    "user_properties": {
+      "customer_status": "returning"
+    },
+    "traffic_type": "organic",
+    "campaign_source": "google",
+    "campaign_medium": "cpc"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "order": {
+      "orderId": "T-20260921-00456",
+      "orderTotal": 128.5,
+      "currency": "USD",
+      "shipping": 0,
+      "tax": 10.28,
+      "coupon": "",
+      "affiliation": "Online Store",
+      "paymentType": "credit_card",
+      "checkoutType": "standard",
+      "customerType": "returning",
+      "shippingTier": "pickup",
+      "fulfillmentMethod": "pickup_in_store",
+      "items": [
+        {
+          "itemId": "SKU-10456",
+          "itemName": "Wireless Earbuds",
+          "price": 128.5,
+          "quantity": 1,
+          "fulfillmentMethod": "pickup_in_store",
+          "storeId": "0452"
+        }
+      ]
+    },
+    "user": {
+      "userId": "u_88213",
+      "customerType": "returning"
+    },
+    "traffic": {
+      "trafficType": "organic",
+      "campaignSource": "google",
+      "campaignMedium": "cpc"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-20260921-00456",
+        "priceTotal": 128.5,
+        "currencyCode": "USD"
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-10456",
+          "name": "Wireless Earbuds",
+          "priceTotal": 128.5,
+          "quantity": 1,
+          "fulfillmentMethod": "pickup_in_store",
+          "storeId": "0452"
+        }
+      ]
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar12": "pickup_in_store",
+            "eVar13": "returning"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  DECLARE reporting_tz STRING DEFAULT 'America/New_York';
+  
+  WITH
+  -- One row per web/app order (purchase re-fires collapsed), dated by its first purchase hit in the business reporting time zone
+  online_orders AS (
+    SELECT ecommerce.transaction_id AS transaction_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL 1 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL 1 DAY))
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+      AND ecommerce.transaction_id != '(not set)'
+    GROUP BY transaction_id
+    HAVING DATE(TIMESTAMP_MICROS(MIN(event_timestamp)), reporting_tz) BETWEEN start_date AND end_date
+  ),
+  -- Order ledger as held at period close: latest version of each order line updated at or before the end of end_date in the reporting time zone
+  ledger_lines_at_close AS (
+    SELECT *
+    FROM `your-project.commerce.order_ledger_lines`
+    WHERE updated_at < TIMESTAMP(DATE_ADD(end_date, INTERVAL 1 DAY), reporting_tz)
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id, line_id ORDER BY updated_at DESC) = 1
+  ),
+  -- BOPIS flag from the period-close line fulfilment methods (ship-to-store not counted), minus test/employee, fraud-cancelled, zero-value replacement and third-party marketplace orders
+  -- Call-centre orders are outside sales_channel here; add 'call_center' only when the business reports them as online orders
+  ledger_orders AS (
+    SELECT
+      transaction_id,
+      LOGICAL_OR(LOWER(fulfillment_method) IN ('pickup_in_store', 'curbside', 'drive_up', 'locker')) AS is_bopis
+    FROM ledger_lines_at_close
+    WHERE sales_channel IN ('web', 'app')
+    GROUP BY transaction_id
+    HAVING NOT LOGICAL_OR(is_test_order OR is_employee_order)
+       AND NOT LOGICAL_OR(is_marketplace_order)
+       AND NOT LOGICAL_OR(cancel_reason = 'fraud_screening')
+       AND NOT (LOGICAL_OR(order_type = 'replacement') AND MAX(order_total) = 0)
+  )
+  -- Share of reconciled online orders with at least one pickup-in-store line, over all reconciled online orders
+  SELECT
+    COUNT(DISTINCT IF(l.is_bopis, o.transaction_id, NULL)) AS bopis_orders,
+    COUNT(DISTINCT o.transaction_id) AS online_orders,
+    ROUND(SAFE_DIVIDE(COUNT(DISTINCT IF(l.is_bopis, o.transaction_id, NULL)), COUNT(DISTINCT o.transaction_id)) * 100, 2) AS bopis_order_share_pct
+  FROM online_orders AS o
+  JOIN ledger_orders AS l USING (transaction_id);
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH
+  -- Relative reporting window and business reporting time zone (same defaults as the BigQuery DECLAREs)
+  params AS (
+    SELECT date_sub(current_date(), 90) AS start_date,
+           date_sub(current_date(), 1) AS end_date,
+           'America/New_York' AS reporting_tz
+  ),
+  -- One row per web/app order (purchase re-fires collapsed), dated by its first purchase hit in the business reporting time zone
+  online_orders AS (
+    SELECT e.commerce.order.purchaseID AS transaction_id
+    FROM web_events_dataset e
+    CROSS JOIN params p
+    WHERE e.commerce.purchases.value = 1
+      AND e.commerce.order.purchaseID IS NOT NULL
+      AND e.timestamp >= to_timestamp(date_sub(p.start_date, 1))
+      AND e.timestamp < to_timestamp(date_add(p.end_date, 2))
+    GROUP BY e.commerce.order.purchaseID, p.start_date, p.end_date, p.reporting_tz
+    HAVING to_date(from_utc_timestamp(MIN(e.timestamp), p.reporting_tz)) BETWEEN p.start_date AND p.end_date
+  ),
+  -- Order ledger as held at period close: latest version of each order line updated at or before the end of end_date in the reporting time zone
+  ledger_lines_at_close AS (
+    SELECT v.*
+    FROM (
+      SELECT b.*,
+             row_number() OVER (PARTITION BY b.transaction_id, b.line_id ORDER BY b.updated_at DESC) AS version_rank
+      FROM aep_backend_dataset b
+      CROSS JOIN params p
+      WHERE b.updated_at < to_utc_timestamp(to_timestamp(date_add(p.end_date, 1)), p.reporting_tz)
+    ) v
+    WHERE v.version_rank = 1
+  ),
+  -- BOPIS flag from the period-close line fulfilment methods (ship-to-store not counted), minus test/employee, fraud-cancelled, zero-value replacement and third-party marketplace orders
+  -- Call-centre orders are outside sales_channel here; add 'call_center' only when the business reports them as online orders
+  ledger_orders AS (
+    SELECT
+      transaction_id,
+      MAX(CASE WHEN lower(fulfillment_method) IN ('pickup_in_store', 'curbside', 'drive_up', 'locker') THEN 1 ELSE 0 END) = 1 AS is_bopis
+    FROM ledger_lines_at_close
+    WHERE sales_channel IN ('web', 'app')
+    GROUP BY transaction_id
+    HAVING MAX(CASE WHEN is_test_order OR is_employee_order THEN 1 ELSE 0 END) = 0
+       AND MAX(CASE WHEN is_marketplace_order THEN 1 ELSE 0 END) = 0
+       AND MAX(CASE WHEN cancel_reason = 'fraud_screening' THEN 1 ELSE 0 END) = 0
+       AND NOT (MAX(CASE WHEN order_type = 'replacement' THEN 1 ELSE 0 END) = 1 AND MAX(order_total) = 0)
+  )
+  -- Share of reconciled online orders with at least one pickup-in-store line, over all reconciled online orders
+  SELECT
+    COUNT(DISTINCT CASE WHEN l.is_bopis THEN o.transaction_id END) AS bopis_orders,
+    COUNT(DISTINCT o.transaction_id) AS online_orders,
+    ROUND(COUNT(DISTINCT CASE WHEN l.is_bopis THEN o.transaction_id END) * 100.0 / NULLIF(COUNT(DISTINCT o.transaction_id), 0), 2) AS bopis_order_share_pct
+  FROM online_orders o
+  JOIN ledger_orders l ON o.transaction_id = l.transaction_id;
+
+Calculation Notes: |
+  1️⃣ Denominator is the full base: every distinct completed online order (web and app purchase events, reconciled to the commerce platform order ledger) in the period, whatever its fulfilment method and whether or not the basket or ship-to address was pickup-eligible; restricting it to pickup-eligible orders or stores produces a different ratio and must never be published under this name. 2️⃣ Order classification: an order counts in the numerator when at least one line carries fulfillment_method = pickup_in_store, sourced from the order's store inventory; curbside, drive-up and in-store locker collection are BOPIS variants and count, whereas ship-to-store (fulfilled from a DC and shipped to the store) is excluded and measured by Ship-to-Store Rate. Mixed baskets (pickup plus ship lines) count once as BOPIS and are flagged mixed_fulfillment for the split view. 3️⃣ Timing: orders are attributed to the order placement timestamp in the reporting time zone of the business, not to the pickup or ready-for-pickup date, so the period's share is final once the period closes and does not move with late collections. 4️⃣ Deduplication: count one order per transaction_id; purchase re-fires on confirmation page reloads, app retries and duplicate server-side hits are collapsed, and an order edited after placement (fulfilment method switched from ship to pickup or back) takes the method held on the order ledger at period close. 5️⃣ Exclusions applied to numerator and denominator alike: test and employee QA orders, orders cancelled by fraud screening before fulfilment release, and zero-value replacement orders; customer-cancelled and uncollected BOPIS orders stay in both, since collection is tracked by Pickup Completion Rate. 6️⃣ In-store POS transactions, endless-aisle orders keyed by associates and marketplace orders fulfilled by third-party sellers are not online orders and sit outside both terms; call-centre orders are included only when the business reports them in the online order count, and the choice is stated on the dashboard. 7️⃣ Report the count-based share; a revenue-weighted share (BOPIS order revenue over total online revenue) is a separate cut and must never be blended into the same trend line, because BOPIS baskets typically carry a different average order value than shipped orders.
+
+Business Use Case: |
+  1️⃣ Store Operations converts each store's forecast BOPIS order share into weekly picking and pickup-desk labour hours, and adds associate shifts to any store where the share exceeds its plan by more than 5 percentage points for two consecutive weeks. 2️⃣ E-commerce Merchandising reviews the share by category every month and, where a category's share sits below the chain average while pickup-eligible store inventory is available, turns on pickup messaging and the default pickup toggle on product detail and cart pages for that category. 3️⃣ Finance models last-mile savings from the share each quarter, crediting avoided parcel cost per BOPIS order against store fulfilment labour, and uses the result to set the free-shipping threshold and the pickup incentive budget. 4️⃣ Omnichannel Marketing targets customers who have never chosen pickup but live within the pickup radius of a store with a same-day-ready rate above target, with a first-pickup offer, and measures the campaign on the lift in the share among that audience.
+
+Dependencies:
+  Events: [purchase]
+  Metrics: [bopis-orders]
+  Dimensions: [fulfillment-method, order-status, transaction-id]
+  KPIs: [orders]
+
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
+
+Report Attributes: |
+  Store ID / Pickup Store; Fulfillment Method; Item Category; Device Category; Traffic Source; Customer Status; Delivery Region; Customer Loyalty Tier
+
+Dashboard Usage: [Omnichannel Fulfilment Mix, Store Operations Weekly Review, E-commerce Executive Scorecard, Last-Mile Cost Tracker]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [pickup-completion-rate, curbside-pickup-rate, ship-to-store-rate, online-to-store-visit-rate, omnichannel-customer-rate, orders, split-shipment-rate, average-order-value, online-order-conversion-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-21T17:11:41.876+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-21T17:13:40.467+00:00
+
