@@ -1,0 +1,191 @@
+# Event: Product List Click
+# Generated: 2026-09-21T18:53:44.066Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Product List Click
+Event Serialization: always
+
+Description: |
+  Product List Click is the standard ecommerce select_item event, recorded when a shopper deliberately selects one product tile from a rendered list such as a category grid, search results page, recommendation carousel or cross-sell module, and it carries the list identity (item_list_id, item_list_name) together with the selected item and its position in the list. Paired with the view_item_list impressions of Product List View it forms the numerator of Product List Click-Through Rate, and it is the anchor for list attribution, crediting downstream product views, cart adds and revenue to the list and slot that produced them.
+
+Category: Engagement
+
+Tags: [event, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Discovery
+
+
+Event Type: standard
+
+Aggregation Window: Event, Session, Daily, Weekly
+
+GA4 Event: |
+  select_item
+
+Adobe Event: |
+  productListClick
+
+W3 Data Layer: |
+  {
+    "event": {
+      "eventName": "Product List Click",
+      "eventAction": "select_item"
+    },
+    "listing": {
+      "item_list_id": "category_listing",
+      "item_list_name": "Category Listing",
+      "page_type": "category"
+    },
+    "items": [
+      {
+        "item_id": "SKU12345",
+        "item_name": "Classic Cotton T-Shirt",
+        "index": 0,
+        "item_brand": "Acme",
+        "item_category": "Apparel",
+        "item_variant": "Blue / M",
+        "price": 29.99
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "select_item",
+    "item_list_id": "category_listing",
+    "item_list_name": "Category Listing",
+    "items": [
+      {
+        "item_id": "SKU12345",
+        "item_name": "Classic Cotton T-Shirt",
+        "index": 0,
+        "item_brand": "Acme",
+        "item_category": "Apparel",
+        "item_variant": "Blue / M",
+        "price": 29.99
+      }
+    ],
+    "page_type": "category"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "productListClick",
+    "eventInfo": {
+      "eventAction": "select_item"
+    },
+    "item_list_id": "category_listing",
+    "item_list_name": "Category Listing",
+    "items": [
+      {
+        "item_id": "SKU12345",
+        "item_name": "Classic Cotton T-Shirt",
+        "index": 0,
+        "item_brand": "Acme",
+        "item_category": "Apparel",
+        "item_variant": "Blue / M",
+        "price": 29.99
+      }
+    ],
+    "page_type": "category"
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "web": {
+      "webInteraction": {
+        "name": "productListClick",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "commerce": {
+      "productListItems": [
+        {
+          "SKU": "SKU12345",
+          "name": "Classic Cotton T-Shirt",
+          "priceTotal": 29.99
+        }
+      ]
+    },
+    "_openkpis": {
+      "productListClicks": {
+        "value": 1
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "category_listing",
+            "eVar2": "Category Listing",
+            "eVar3": "category",
+            "eVar4": "Apparel",
+            "eVar5": "0"
+          },
+          "props": {
+            "prop1": "category"
+          }
+        }
+      }
+    }
+  }
+
+Parameters: |
+  {
+    "item_list_id": "string - Stable machine identifier of the list the product was selected from (e.g. category_listing, search_results, pdp_recommendations); must equal the value sent on the paired view_item_list impression",
+    "item_list_name": "string - Human-readable list label matching the view_item_list impression (e.g. Category Listing, Search Results, Recommended For You); a static label that never contains the search query",
+    "items": "array - Exactly one item object for the selected product: item_id and item_name required, index (zero-based rendered position) required, item_brand, item_category, item_variant and price optional",
+    "page_type": "string - Template on which the list was rendered (e.g. category, search, product, cart, home), used to separate the same list component across page templates"
+  }
+
+Calculation Notes: |
+  ["1️⃣ Fires in the click handler of a product tile (image, product name, price block or tile CTA) inside a list that has already been rendered and impressed, before navigation to the Product Detail Page starts. Send it with beacon transport, or hold the route change until the push resolves, so the hit is not lost when the page unloads. Opening a quick-view overlay from the tile counts as a selection and fires select_item; hovering, swatch changes on the tile and wishlist-heart clicks do not.","2️⃣ Serialization is always: every deliberate selection is counted, including a return to the list followed by a second click on the same product. The one dedupe rule suppresses client double-fires, meaning an identical item_id + item_list_id + index within 1 second, which is typical of touchend + click on mobile and double-clicks. Middle-click, Ctrl/Cmd-click and long-press 'open in new tab' fire the event once from the originating page.","3️⃣ Required parameters are item_list_id, item_list_name and an items array holding exactly one item with item_id, item_name and index. item_list_id and item_list_name must match, character for character, the values sent on the view_item_list impression of the same list (for example category_listing / Category Listing, search_results / Search Results, pdp_recommendations / Recommended For You). A mismatch leaves the click with no denominator and breaks click-through rate by list. Optional parameters are page_type and the item-level item_brand, item_category, item_variant and price.","4️⃣ index is the tile's zero-based position in the list as the shopper saw it, after sorting and filtering, and it runs on across pagination and infinite scroll: with 24 tiles per page, the first tile on page 2 is index 24. Sponsored and pinned tiles keep their rendered position. Carousels report the position within the full carousel, not within the visible frame.","5️⃣ List attribution must persist: the selected item_list_id and item_list_name are stored against the item_id for the session and repeated at item level on the resulting view_item, add_to_cart and purchase payloads. Without that, revenue by list cannot be reported. A selection made on another device or after the session has timed out is not carried forward.","6️⃣ No personal data is collected. item_list_name is a static list label and never embeds the raw query (search terms can contain email addresses or phone numbers and belong on the search event), and no customer identifier is sent as a parameter. Consent behaviour depends on the Consent Mode implementation. Under Advanced Consent Mode with analytics_storage denied, the tag still loads and sends select_item as a cookieless ping with no client_id cookie read or written, so it only enters reports through GA4 behavioural modelling. Under Basic Consent Mode the Google tag is blocked until consent is granted and no hit is sent at all, so clicks made before consent are lost for good.","7️⃣ Common instrumentation mistakes: firing select_item for banner and hero creatives, which are select_promotion; sending the whole list in items instead of the single selected product; firing on PDP load instead of on the click, which double-counts with view_item; and reading index from the DOM order before client-side sorting is applied, which misattributes position."]
+
+Business Use Case: |
+  ["1️⃣ The Merchandising Manager ranks every category grid by product list clicks against Product List View impressions in the Monday trading review. Where a list's click-through rate falls below the category median for two consecutive weeks, they change its default sort rule or re-pin its hero products before the next weekly trading cycle.","2️⃣ The Search & Discovery Product Manager tracks the distribution of clicks by index on the search_results list after every relevance release. When the share of clicks landing beyond position 8 rises, they roll back or retune the ranking model and send the query set to the A/B testing queue.","3️⃣ The Personalization team compares clicks and the list-attributed add-to-cart and revenue per pdp_recommendations and cart cross-sell carousel during an algorithm test. They promote the challenger strategy to 100% of traffic only when it improves click-through without lowering attributed revenue per impression.","4️⃣ The Retail Media Sales team reports clicks on sponsored tiles by item_list_name and index to brand advertisers each month. They use the per-slot click-through rate to set floor prices for sponsored positions in the next quarter's rate card."]
+
+Dependencies:
+  Events: [product-list-view]
+  Dimensions: [page-type]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  Item List Name; Item List ID; List Position (index); Item Category; Product Name; Page Type; Device Category
+
+    Dashboard Usage: [Product Discovery & Merchandising Performance, Search & Browse Effectiveness, Recommendation & Cross-Sell Performance, Retail Media Sponsored Placement Report]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [page-type, item-category, product-name, internal-search-term, device-category]
+
+    Derived Dimensions: [item-category, product-name, page-type]
+
+    Derived Metrics: [product-view]
+
+    Derived KPIs: [product-list-click-through-rate]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-21T17:38:12.025+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-21T18:53:43.634+00:00
+
