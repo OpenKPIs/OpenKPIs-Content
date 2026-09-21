@@ -1,0 +1,210 @@
+# Event: Add to Wishlist
+# Generated: 2026-09-21T18:53:15.008Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Add to Wishlist
+Event Serialization: always
+
+Description: |
+  Add to Wishlist is the GA4 recommended add_to_wishlist event, recorded when a shopper saves a product to a wishlist, favourites list or save-for-later list and the platform has confirmed the save, with currency, value and a single-element items array describing the saved SKU. It is the deferred-intent signal behind Wishlist Additions and Add to List Rate, and it lets Merchandising separate products that shoppers want but are not yet ready to buy from those they are simply browsing, which is the input for back-in-stock, price-drop and remarketing programmes.
+
+Category: Engagement
+
+Tags: [event, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Discovery
+
+
+Event Type: standard
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  add_to_wishlist
+
+Adobe Event: |
+  addToWishlist
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "add_to_wishlist",
+          "eventAction": "Add to Wishlist",
+          "eventID": "evt_wishlist_20260921173045"
+        },
+        "category": {
+          "primaryCategory": "Product Discovery & Merchandising"
+        },
+        "attributes": {
+          "currency": "USD",
+          "value": 89,
+          "item_list_id": "search_results",
+          "item_list_name": "search_results",
+          "add_source": "plp",
+          "page_type": "category"
+        }
+      }
+    ],
+    "product": [
+      {
+        "productInfo": {
+          "productID": "SKU-48213",
+          "productName": "Classic Leather Tote - Tan",
+          "manufacturer": "Aurelia"
+        },
+        "category": {
+          "primaryCategory": "Handbags",
+          "productVariant": "Tan"
+        },
+        "price": {
+          "basePrice": 89
+        },
+        "quantity": 1
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "add_to_wishlist",
+    "event_id": "evt_wishlist_20260921173045",
+    "currency": "USD",
+    "value": 89,
+    "items": [
+      {
+        "item_id": "SKU-48213",
+        "item_name": "Classic Leather Tote - Tan",
+        "item_brand": "Aurelia",
+        "item_category": "Handbags",
+        "item_variant": "Tan",
+        "price": 89,
+        "quantity": 1
+      }
+    ],
+    "item_list_id": "search_results",
+    "item_list_name": "search_results",
+    "add_source": "plp",
+    "page_type": "category"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "addToWishlist",
+    "eventInfo": {
+      "eventId": "evt_wishlist_20260921173045"
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-48213",
+        "name": "Classic Leather Tote - Tan",
+        "brand": "Aurelia",
+        "category": "Handbags",
+        "variant": "Tan",
+        "priceTotal": 89,
+        "quantity": 1,
+        "currencyCode": "USD"
+      }
+    ],
+    "listMetadata": {
+      "listId": "search_results",
+      "listName": "search_results",
+      "addSource": "plp",
+      "pageType": "category"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.saveForLaters",
+    "commerce": {
+      "saveForLaters": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-48213",
+        "name": "Classic Leather Tote - Tan",
+        "brand": "Aurelia",
+        "category": "Handbags",
+        "variant": "Tan",
+        "priceTotal": 89,
+        "quantity": 1,
+        "currencyCode": "USD"
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "search_results",
+            "eVar2": "search_results",
+            "eVar3": "plp",
+            "eVar4": "category"
+          }
+        }
+      }
+    },
+    "eventMergeId": "evt_wishlist_20260921173045"
+  }
+
+Parameters: |
+  {
+    "currency": "string - ISO 4217 code of the value, required whenever value is sent",
+    "value": "number - price × quantity of the saved item at the current selling price",
+    "items": "array - exactly one item object with item_id, item_name, item_brand, item_category, item_variant, price and quantity",
+    "item_list_id": "string - identifier of the product list the save came from, identical to product-list-view and product-list-click",
+    "item_list_name": "string - readable name of that list, for example search_results or category_grid",
+    "add_source": "string - surface of the save: plp, pdp, quick_view or cart",
+    "page_type": "string - page template on which the save happened",
+    "event_id": "string - unique identifier of the save, used for deduplication"
+  }
+
+Calculation Notes: |
+  ["1️⃣ Fires only after the wishlist service confirms the item was persisted (HTTP 2xx or the equivalent success callback), never on the heart or save click alone. When a guest is sent to sign in first, the event fires once the login completes and the pending item is written to the list; the abandoned sign-in prompt produces no event, and the login event carries that friction separately.","2️⃣ Serialization is always: one event per confirmed save, deduplicated on event_id so that retries, double taps and optimistic-UI replays do not count twice. Un-toggling the heart icon must not fire add_to_wishlist again, and saving a SKU that is already on the same list is a no-op that emits nothing.","3️⃣ Required parameters are currency, value and items; items holds exactly one element with item_id, item_name, item_brand, item_category, item_variant, price and quantity (normally 1). value equals price × quantity at the current selling price after item-level discounts, in the same currency as the purchase event, so that saved value can later be compared with purchased value.","4️⃣ Optional context parameters are item_list_id and item_list_name, which carry through the list that led to the save (search results, category grid, recommendation carousel) using the same identifiers as product-list-view and product-list-click, plus page_type and add_source (plp, pdp, quick_view, cart). Keep the vocabulary identical to add_to_cart so wishlist and cart intent can be read side by side by list and by page.","5️⃣ Save for later from the cart is the same unified event with add_source = cart, paired with the remove_from_cart event for the same SKU; it must not be modelled as a separate custom event. Moving an item from the wishlist into the cart fires add_to_cart with add_source = wishlist and does not remove the original add_to_wishlist from history.","6️⃣ Consent and PII: the event is collected under analytics_storage and is suppressed or sent cookieless when that consent is denied. Wishlist names typed by the shopper (for example gift lists naming a recipient), email addresses and shipping details are never passed as parameters; user identity travels only as the pseudonymous user_id already set on the login event.","7️⃣ Common instrumentation mistakes: firing on the click before the server response, sending an empty or multi-item items array, omitting currency so value is dropped from monetary reports, sending the parent product id instead of the variant SKU the shopper selected, and double counting because both the heart component and the page template push the event."]
+
+Business Use Case: |
+  ["1️⃣ The Merchandising Manager reviews wishlist additions by item_category and item_id every Monday against add_to_cart for the same SKUs, and reprices or repositions products that are saved heavily but rarely carted before the next promotional calendar is locked.","2️⃣ The CRM and Lifecycle Marketing team triggers back-in-stock and price-drop emails for signed-in shoppers whose saved SKU changes availability or falls below the saved price, and suppresses the message once a purchase of that item_id is recorded.","3️⃣ The Inventory Planning team adds wishlist volume for out-of-stock and pre-launch SKUs to the weekly demand review and raises reorder quantities for items whose saved count exceeds the forecast before a restock is committed.","4️⃣ The Product team compares wishlist additions by add_source and item_list_name after any change to the heart icon, quick view or recommendation carousel, and rolls back a release when saves from the affected surface drop against the prior four weeks."]
+
+Dependencies:
+  Dimensions: [item-category, page-type]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  item_id; item_name; item_category; item_brand; item_list_name; add_source; page_type; device_category; traffic_source
+
+    Dashboard Usage: [Product Discovery & Merchandising Performance, Wishlist & Deferred Demand Review, CRM Triggered Campaign Performance]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [item-category, product-name, page-type, device-category, traffic-source]
+
+    Derived Dimensions: [item-category, product-name, page-type, currency]
+
+    Derived Metrics: [wishlist-additions]
+
+    Derived KPIs: [add-to-list-rate]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-21T17:37:40.437+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-21T18:53:14.356+00:00
+
