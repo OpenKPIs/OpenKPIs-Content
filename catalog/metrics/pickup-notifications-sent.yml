@@ -1,0 +1,167 @@
+# Metric: Pickup Notifications Sent
+# Generated: 2026-09-21T16:50:59.704Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Pickup Notifications Sent
+Formula: COUNT(DISTINCT pickup_group_id × notification_channel) WHERE notification_type = 'ready_for_pickup' AND notification_stage = 'initial' AND provider_status IN ('accepted','sent','delivered') AND fulfillment_method IN ('pickup_in_store','curbside_pickup','locker_pickup','ship_to_store') AND is_test_order = FALSE
+
+Description: |
+  Counts the 'ready for pickup' notifications the order management and customer-messaging platforms successfully dispatched for store-pickup orders (BOPIS, curbside, locker), counted once per pickup group and channel at the moment the store marks the order picked, staged and ready. It sits between BOPIS Orders and Pickups Completed in the omnichannel funnel, so a shortfall against orders reaching ready status exposes stores or channels that stage orders without telling the customer, and it provides the notified-order base for pickup completion and abandonment analysis.
+
+Category: Operations
+
+Tags: [metric, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: Retail
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Hourly, Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Reporting window: the last 90 complete days, dated in the fulfilling store's local time zone
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- In-scope pickup groups the OMS moved to ready_for_pickup, excluding test stores, test, training and employee test orders, and orders cancelled before the ready transition
+  WITH ready_groups AS (
+    SELECT pickup_group_id, store_time_zone
+    FROM `your-project.oms.pickup_groups`
+    WHERE ready_for_pickup_at IS NOT NULL
+      AND fulfillment_method IN ('pickup_in_store', 'curbside_pickup', 'locker_pickup', 'ship_to_store')
+      AND is_test_store IS NOT TRUE
+      AND is_test_order IS NOT TRUE
+      AND is_training_order IS NOT TRUE
+      AND is_employee_test IS NOT TRUE
+      AND (cancelled_at IS NULL OR cancelled_at > ready_for_pickup_at)
+  ),
+  -- First accepted initial ready notice per pickup group x channel; provider retries, webhook replays (same message_id) and re-staging re-sends collapse, while rejected, bounced, suppressed and stuck-queued sends fall out on provider_status
+  first_notices AS (
+    SELECT
+      n.pickup_group_id,
+      n.notification_channel,
+      MIN(n.provider_accepted_at) AS accepted_at,
+      ANY_VALUE(r.store_time_zone) AS store_time_zone
+    FROM `your-project.crm.pickup_notification_send_log` AS n
+    JOIN ready_groups AS r USING (pickup_group_id)
+    WHERE n.notification_type = 'ready_for_pickup'
+      AND n.notification_stage = 'initial'
+      AND n.provider_status IN ('accepted', 'sent', 'delivered')
+    GROUP BY n.pickup_group_id, n.notification_channel
+  )
+  -- Pickup Notifications Sent per day, attributed to the provider acceptance time in store local time
+  SELECT
+    DATE(accepted_at, store_time_zone) AS notification_date,
+    COUNT(*) AS pickup_notifications_sent
+  FROM first_notices
+  WHERE DATE(accepted_at, store_time_zone) BETWEEN start_date AND end_date
+  GROUP BY notification_date
+  ORDER BY notification_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window: the last 90 complete days, dated in the fulfilling store's local time zone
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  ),
+  -- In-scope pickup groups the OMS moved to ready_for_pickup, excluding test stores, test, training and employee test orders, and orders cancelled before the ready transition
+  ready_groups AS (
+    SELECT pickup_group_id, store_time_zone
+    FROM oms_pickup_groups
+    WHERE ready_for_pickup_at IS NOT NULL
+      AND fulfillment_method IN ('pickup_in_store', 'curbside_pickup', 'locker_pickup', 'ship_to_store')
+      AND is_test_store IS NOT TRUE
+      AND is_test_order IS NOT TRUE
+      AND is_training_order IS NOT TRUE
+      AND is_employee_test IS NOT TRUE
+      AND (cancelled_at IS NULL OR cancelled_at > ready_for_pickup_at)
+  ),
+  -- First accepted initial ready notice per pickup group x channel; provider retries, webhook replays (same message_id) and re-staging re-sends collapse, while rejected, bounced, suppressed and stuck-queued sends fall out on provider_status
+  first_notices AS (
+    SELECT
+      n.pickup_group_id,
+      n.notification_channel,
+      MIN(n.provider_accepted_at) AS accepted_at,
+      first(r.store_time_zone) AS store_time_zone
+    FROM crm_pickup_notification_send_log AS n
+    JOIN ready_groups AS r ON n.pickup_group_id = r.pickup_group_id
+    WHERE n.notification_type = 'ready_for_pickup'
+      AND n.notification_stage = 'initial'
+      AND n.provider_status IN ('accepted', 'sent', 'delivered')
+    GROUP BY n.pickup_group_id, n.notification_channel
+  )
+  -- Pickup Notifications Sent per day, attributed to the provider acceptance time in store local time
+  SELECT
+    to_date(from_utc_timestamp(f.accepted_at, f.store_time_zone)) AS notification_date,
+    COUNT(*) AS pickup_notifications_sent
+  FROM first_notices AS f
+  CROSS JOIN params AS p
+  WHERE to_date(from_utc_timestamp(f.accepted_at, f.store_time_zone)) BETWEEN p.start_date AND p.end_date
+  GROUP BY to_date(from_utc_timestamp(f.accepted_at, f.store_time_zone))
+  ORDER BY notification_date;
+
+Calculation Notes: |
+  1️⃣ Source and trigger: counted from the backend send log, not from a browser or app event. A notification qualifies only when the OMS transitions the pickup group to ready_for_pickup and the ESP / SMS / push provider accepts the message (status accepted, sent or delivered). Messages rejected at dispatch, hard bounces, invalid or landline numbers, and sends suppressed by opt-out or quiet-hours rules are excluded, as are records stuck in queued for more than 24 hours.
+  2️⃣ Serialization: one count per pickup group × channel for the initial ready notice. Provider retries and webhook replays that share a message_id collapse to one, and a re-send triggered because the store re-staged the same group within 30 minutes is treated as a duplicate. Email and SMS for the same group count separately; publish the distinct-pickup-groups-notified variant next to the channel count whenever the figure is used as a denominator.
+  3️⃣ Notification stage: only the first ready_for_pickup notice counts. Reminder notices (typically day 2 and day 5), pickup-window-expiring warnings, curbside 'we see you've arrived' replies and cancellation notices are excluded here and reported by notification_stage, so reminder cadence changes never inflate the core volume.
+  4️⃣ Split and partial orders: an order picked from two stores, or released in two waves from one store, produces one pickup group per ready event and each group counts once. A partial-ready notice sent while lines are still short-picked counts; the follow-up notice for the remaining lines counts as a new pickup group only if the OMS issues a new group identifier.
+  5️⃣ Scope filters: include fulfillment_method in ('pickup_in_store', 'curbside_pickup', 'locker_pickup', 'ship_to_store') and exclude test stores, training orders, employee test transactions and orders cancelled before the ready transition. Associate-assisted in-store orders set to pickup later are included because the customer receives the same notice.
+  6️⃣ Timing: attribute to the provider acceptance timestamp converted to the fulfilling store's local time zone, not the order date, so Monday's orders notified on Tuesday roll into Tuesday. Late-arriving provider webhooks are accepted for 72 hours; restate the prior three days on each daily load.
+  7️⃣ Reconciliation: the gap between OMS ready_for_pickup transitions and notifications sent should stay below 1% per store per day. A larger gap points to missing contact data, messaging-platform outages or a store workflow that bypasses the ready scan, and must be read before any change in Pickup Completion Rate is attributed to customer behaviour.
+
+Business Use Case: |
+  1️⃣ The Omnichannel Operations Manager reviews the daily store scorecard each morning; when a store's notifications sent fall more than 2% below its ready_for_pickup transitions for two consecutive days, they open a store-operations ticket to retrain associates on the staging scan and confirm the handheld workflow fires the ready status.
+  2️⃣ The CRM and Lifecycle Messaging team monitors notifications sent by channel hourly during peak weeks; when the SMS share of total sends drops more than 10 points below its trailing four-week average, they escalate to the SMS aggregator, check carrier filtering and 10DLC throughput, and fail over to email plus push until volumes recover.
+  3️⃣ The Customer Service leader correlates notified pickup groups with 'is my order ready' contacts each week; when contacts per 100 notified groups rise above target in a region, they work with Product to test earlier notices, richer pickup instructions and a pickup-code link in the message template.
+  4️⃣ Store Operations planning uses the hourly notification curve by store to set curbside and pickup-counter staffing for the following week, adding coverage in the two hours after notification peaks, when customer arrivals concentrate.
+
+Dependencies:
+  Metrics: [bopis-orders]
+  Dimensions: [fulfillment-method, pickup-window]
+
+Source Data: CRM
+
+Report Attributes: |
+  Fulfillment Method; Pickup Window; Store ID; Store Region; Notification Channel; Notification Stage; Messaging Provider; Order Channel
+
+Dashboard Usage: [BOPIS & Curbside Operations Scorecard, Store Fulfillment Daily Performance, Customer Messaging Delivery Health, Omnichannel Funnel: Order to Pickup]
+
+Segment Eligibility: |
+  false
+
+Related Metrics: [bopis-orders, pickups-completed, store-inventory-checks, store-locator-searches]
+
+Derived KPIs: [pickup-completion-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-21T16:48:40.718+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-21T16:50:59.346+00:00
+
