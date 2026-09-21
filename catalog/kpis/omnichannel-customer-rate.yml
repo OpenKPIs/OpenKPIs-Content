@@ -1,0 +1,327 @@
+# KPI: Omnichannel Customer Rate
+# Generated: 2026-09-21T17:14:06.506Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Omnichannel Customer Rate
+Formula: Omnichannel Customer Rate (%) = (COUNT(DISTINCT resolved customer_id with ≥ 1 qualifying digitally placed order AND ≥ 1 qualifying physical-store transaction in the period) / COUNT(DISTINCT resolved customer_id with ≥ 1 qualifying purchase in any channel in the period)) × 100
+
+Description: |
+  Omnichannel Customer Rate is the percentage of active purchasing customers in a period who bought through both a digital channel (web or app order, any fulfilment method) and a physical store (in-store POS purchase or a collected BOPIS, curbside or ship-to-store order), measured on resolved customer identities. It is the retailer's headline measure of cross-channel penetration, used to size the omnichannel base that typically carries higher purchase frequency and lifetime value than single-channel buyers, and it counts completed purchases only, unlike engagement-based omnichannel measures that credit browsing or store visits without a transaction.
+
+Category: Retention
+
+Tags: [kpi, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: [["Retail"]]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Measure Type: Percentage
+
+Aggregation Window: Monthly, Quarterly, Yearly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "transaction": {
+        "transactionID": "T-88213",
+        "profile": {
+          "profileInfo": {
+            "userID": "cust_5f2a19"
+          }
+        },
+        "total": {
+          "transactionTotal": 129.99,
+          "currency": "USD"
+        },
+        "attributes": {
+          "fulfillment_method": "pickup_in_store",
+          "customer_type": "returning",
+          "channel": "digital"
+        }
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T-88213",
+      "value": 129.99,
+      "currency": "USD",
+      "items": [
+        {
+          "item_id": "SKU-4471",
+          "item_name": "Wireless Earbuds",
+          "quantity": 1,
+          "price": 129.99
+        }
+      ]
+    },
+    "user_id": "cust_5f2a19",
+    "customer_type": "returning",
+    "fulfillment_method": "pickup_in_store",
+    "traffic_type": "returning"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-88213",
+        "priceTotal": 129.99
+      }
+    },
+    "user": {
+      "userID": "cust_5f2a19",
+      "customer_type": "returning"
+    },
+    "fulfillment_method": "pickup_in_store"
+  }
+
+XDM Mapping: |
+  {
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "cust_5f2a19",
+          "authenticatedState": "authenticated"
+        }
+      ]
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "T-88213",
+        "priceTotal": 129.99,
+        "fulfillmentMethod": "pickup_in_store"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "fulfillment_method",
+            "eVar2": "customer_type"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH
+  -- Eligible resolved customers: B2B / reseller accounts and employees excluded
+  eligible_customers AS (
+    SELECT customer_id
+    FROM `your-project.crm.customers`
+    WHERE account_type NOT IN ('b2b', 'reseller')
+      AND NOT is_employee
+  ),
+  -- Non-qualifying orders: cancelled, auto-cancelled uncollected pickups, test and employee orders
+  non_qualifying_orders AS (
+    SELECT order_id
+    FROM `your-project.oms.orders`
+    WHERE order_status IN ('cancelled', 'auto_cancelled')
+      OR is_test
+      OR is_employee_order
+  ),
+  -- Digital leg: non-zero web / app purchase events dated by order placement, resolved from the hashed user_id
+  digital_leg AS (
+    SELECT DISTINCT m.customer_id
+    FROM `your-project.analytics_123456789.events_*` AS e
+    JOIN `your-project.crm.customer_identity_map` AS m
+      ON m.id_namespace = 'ga4_user_id' AND m.id_value = e.user_id
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND e.event_name = 'purchase'
+      AND e.ecommerce.purchase_revenue > 0
+      AND e.ecommerce.transaction_id NOT IN (SELECT order_id FROM non_qualifying_orders)
+  ),
+  -- Physical leg (pickup): collected BOPIS, curbside and ship-to-store orders dated by collection timestamp
+  pickup_leg AS (
+    SELECT DISTINCT customer_id
+    FROM `your-project.oms.orders`
+    WHERE fulfillment_method IN ('pickup_in_store', 'curbside', 'ship_to_store')
+      AND collected_at IS NOT NULL
+      AND DATE(collected_at) BETWEEN start_date AND end_date
+      AND order_value > 0
+      AND order_id NOT IN (SELECT order_id FROM non_qualifying_orders)
+  ),
+  -- Physical leg (POS): non-zero in-store sales dated by receipt time in store local time; anonymous receipts that cannot be resolved are excluded
+  pos_sales AS (
+    SELECT DISTINCT m.customer_id
+    FROM `your-project.pos.store_transactions` AS t
+    JOIN `your-project.crm.customer_identity_map` AS m
+      ON m.id_namespace = t.id_namespace AND m.id_value = t.id_value
+    WHERE t.transaction_type = 'sale'
+      AND NOT t.is_voided
+      AND NOT t.is_test
+      AND NOT t.is_employee_sale
+      AND t.net_value > 0
+      AND DATE(t.receipt_local_ts) BETWEEN start_date AND end_date
+  ),
+  -- Channel legs per eligible purchasing customer (anonymous store receipts excluded from both sides)
+  customer_legs AS (
+    SELECT
+      l.customer_id,
+      LOGICAL_OR(l.leg = 'digital') AS has_digital,
+      LOGICAL_OR(l.leg = 'store') AS has_store
+    FROM (
+      SELECT customer_id, 'digital' AS leg FROM digital_leg
+      UNION ALL SELECT customer_id, 'store' FROM pickup_leg
+      UNION ALL SELECT customer_id, 'store' FROM pos_sales
+    ) AS l
+    JOIN eligible_customers AS c ON c.customer_id = l.customer_id
+    GROUP BY l.customer_id
+  )
+  -- Omnichannel customers (digital and store leg) over all purchasing customers
+  SELECT
+    COUNT(*) AS purchasing_customers,
+    COUNTIF(has_digital AND has_store) AS omnichannel_customers,
+    ROUND(100 * SAFE_DIVIDE(COUNTIF(has_digital AND has_store), COUNT(*)), 2) AS omnichannel_customer_rate_pct
+  FROM customer_legs;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH
+  -- Reporting window: last 90 complete days
+  params AS (
+    SELECT CAST(CURRENT_DATE - INTERVAL '90' DAY AS DATE) AS start_date,
+           CAST(CURRENT_DATE - INTERVAL '1' DAY AS DATE) AS end_date
+  ),
+  -- Eligible resolved customers: B2B / reseller accounts and employees excluded
+  eligible_customers AS (
+    SELECT customer_id
+    FROM aep_backend_crm_customers
+    WHERE account_type NOT IN ('b2b', 'reseller')
+      AND NOT is_employee
+  ),
+  -- Non-qualifying orders: cancelled, auto-cancelled uncollected pickups, test and employee orders
+  non_qualifying_orders AS (
+    SELECT order_id
+    FROM aep_backend_oms_orders
+    WHERE order_status IN ('cancelled', 'auto_cancelled')
+      OR is_test
+      OR is_employee_order
+  ),
+  -- Digital leg: non-zero web / app purchase events dated by order placement, resolved from the CRMID
+  digital_leg AS (
+    SELECT DISTINCT m.customer_id
+    FROM aep_web_experience_events AS e
+    CROSS JOIN params AS p
+    JOIN aep_backend_customer_identity_map AS m
+      ON m.id_namespace = 'CRMID' AND m.id_value = e.identityMap['CRMID'][0].id
+    WHERE CAST(e.timestamp AS DATE) BETWEEN p.start_date AND p.end_date
+      AND e.commerce.purchases.value = 1
+      AND e.commerce.order.priceTotal > 0
+      AND e.commerce.order.purchaseID NOT IN (SELECT order_id FROM non_qualifying_orders)
+  ),
+  -- Physical leg (pickup): collected BOPIS, curbside and ship-to-store orders dated by collection timestamp
+  pickup_leg AS (
+    SELECT DISTINCT o.customer_id
+    FROM aep_backend_oms_orders AS o
+    CROSS JOIN params AS p
+    WHERE o.fulfillment_method IN ('pickup_in_store', 'curbside', 'ship_to_store')
+      AND o.collected_at IS NOT NULL
+      AND CAST(o.collected_at AS DATE) BETWEEN p.start_date AND p.end_date
+      AND o.order_value > 0
+      AND o.order_id NOT IN (SELECT order_id FROM non_qualifying_orders)
+  ),
+  -- Physical leg (POS): non-zero in-store sales dated by receipt time in store local time; anonymous receipts that cannot be resolved are excluded
+  pos_sales AS (
+    SELECT DISTINCT m.customer_id
+    FROM aep_backend_pos_store_transactions AS t
+    CROSS JOIN params AS p
+    JOIN aep_backend_customer_identity_map AS m
+      ON m.id_namespace = t.id_namespace AND m.id_value = t.id_value
+    WHERE t.transaction_type = 'sale'
+      AND NOT t.is_voided
+      AND NOT t.is_test
+      AND NOT t.is_employee_sale
+      AND t.net_value > 0
+      AND CAST(t.receipt_local_ts AS DATE) BETWEEN p.start_date AND p.end_date
+  ),
+  -- Channel legs per eligible purchasing customer (anonymous store receipts excluded from both sides)
+  customer_legs AS (
+    SELECT
+      l.customer_id,
+      BOOL_OR(l.leg = 'digital') AS has_digital,
+      BOOL_OR(l.leg = 'store') AS has_store
+    FROM (
+      SELECT customer_id, 'digital' AS leg FROM digital_leg
+      UNION ALL SELECT customer_id, 'store' FROM pickup_leg
+      UNION ALL SELECT customer_id, 'store' FROM pos_sales
+    ) AS l
+    JOIN eligible_customers AS c ON c.customer_id = l.customer_id
+    GROUP BY l.customer_id
+  )
+  -- Omnichannel customers (digital and store leg) over all purchasing customers
+  SELECT
+    COUNT(*) AS purchasing_customers,
+    COUNT_IF(has_digital AND has_store) AS omnichannel_customers,
+    ROUND(100.0 * COUNT_IF(has_digital AND has_store) / NULLIF(COUNT(*), 0), 2) AS omnichannel_customer_rate_pct
+  FROM customer_legs;
+
+Calculation Notes: |
+  1️⃣ Channel legs: the digital leg is any non-cancelled order placed on web or app (purchase event or OMS order with a digital order channel), whatever its fulfilment_method; the physical leg is either an in-store POS sale tied to the customer or the completed collection of a BOPIS, curbside or ship-to-store order. A single collected pickup order satisfies both legs by design, because the journey itself crosses channels; read the rate alongside the split between pickup-only omnichannel customers and customers with a separate store purchase, so that it is not mistaken for a pure BOPIS proxy (that is BOPIS Order Share). 2️⃣ Denominator: every resolved customer with at least one qualifying purchase in any channel during the period (digital-only, store-only and omnichannel together); prospects, browsers, registered non-buyers and lapsed customers with no purchase in the period are excluded from both numerator and denominator. 3️⃣ Identity resolution: attribute transactions to one customer_id through the customer identity map (hashed GA4 user_id / AEP CRMID for digital, loyalty ID, e-receipt email or payment-token match at the POS); anonymous store transactions that cannot be resolved are excluded from both sides, which biases the rate toward identified shoppers, so read it alongside the store transaction identification rate as companion context and never compare stores whose identification rates differ by more than 10 points without that caveat. 4️⃣ Qualifying transactions: exclude cancelled orders, pickup orders never collected and auto-cancelled after the hold window, test and employee orders, B2B / reseller accounts and zero-value replacement orders; later returns or refunds do not remove a transaction, since the KPI measures channel behaviour rather than net revenue. 5️⃣ Timing: both legs must fall inside the same reporting window, dated by order placement for digital orders, collection timestamp for pickups and receipt timestamp in store local time for POS sales; a BOPIS order placed on the last day of the month and collected on the first day of the next counts its physical leg in the following month. 6️⃣ Window sensitivity: the rate rises mechanically with window length because more customers have time to cross channels, so trend only like-for-like windows (month vs month, rolling 12 months vs rolling 12 months) and use rolling 12 months as the strategic view and calendar month for operational tracking. 7️⃣ Distinction from engagement measures: an Omnichannel Engagement Rate credits research-online / buy-in-store or store-visit touches without a purchase on both sides; this KPI requires a completed purchase in each channel leg, so digital sessions, store locator searches and store inventory checks never qualify a customer here.
+
+Business Use Case: |
+  1️⃣ The CRM & Loyalty team reviews the monthly rate by store trade area and, for digital-only customers living within 10 miles of a store with BOPIS capacity, launches a first-pickup incentive journey, then measures the lift in omnichannel conversion against a 10% holdout. 2️⃣ Finance compares rolling 12-month Customer Lifetime Value and purchase frequency of omnichannel versus single-channel customers each quarter and uses the gap, multiplied by the change in Omnichannel Customer Rate, to justify or cut capital requests for pickup lockers, curbside bays and store fulfilment labour. 3️⃣ Store Operations flags any store whose rate sits more than 5 points below its region median for two consecutive months and audits its pickup experience (Pickup Completion Rate, wait times, pickup notifications) before the next staffing plan is set. 4️⃣ Marketing tracks the store transaction identification rate next to the KPI and, when identification at a store falls below 60%, runs POS loyalty sign-up and e-receipt capture campaigns so that store purchases are attributable before the rate is used for targeting.
+
+Dependencies:
+  Events: [purchase, order-pickup]
+  Metrics: [bopis-orders, pickups-completed]
+  Dimensions: [fulfillment-method, customer-status]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics) + Order Management (reconciliation)
+
+Report Attributes: |
+  Fulfillment Method; Customer Loyalty Tier; Acquisition Cohort; RFM Segment; Store ZIP Code / Local Market; Device Category; First-Touch Channel Grouping
+
+Dashboard Usage: [Omnichannel Performance Dashboard, Customer Health & Loyalty Dashboard, Store Fulfilment Operations Scorecard, Executive Retail KPI Summary]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [bopis-order-share, curbside-pickup-rate, online-to-store-visit-rate, ship-to-store-rate, customer-retention-rate, customer-lifetime-value, pickup-completion-rate, online-order-conversion-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-21T17:12:16.908+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-21T17:14:06.063+00:00
+
