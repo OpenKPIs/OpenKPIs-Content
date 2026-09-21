@@ -1,7 +1,7 @@
 # KPI: Curbside Pickup Rate
-# Generated: 2026-09-21T17:11:58.351Z
+# Generated: 2026-09-21T17:12:09.605Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Curbside Pickup Rate
 Formula: Curbside Pickup Rate (%) = (COUNT(DISTINCT transaction_id) of BOPIS orders placed in the period with fulfillment_method = 'curbside' / COUNT(DISTINCT transaction_id) of all BOPIS orders placed in the period, where fulfillment_method IN ('pickup_in_store', 'curbside')) × 100
@@ -11,29 +11,322 @@ Description: |
 
 Category: Operations
 
+Tags: [kpi, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
 
+Industry: [["Retail"]]
 
+Priority: Medium
 
+Core Area: Checkout
 
+Scope: Event
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "purchase"
+          }
+        }
+      ],
+      "transaction": {
+        "transactionID": "ORD-2049183",
+        "total": {
+          "basePrice": 39.53,
+          "taxRate": 3.44,
+          "shipping": 0,
+          "transactionTotal": 42.97,
+          "currency": "USD"
+        },
+        "profile": {
+          "userID": "u_7788213",
+          "customerType": "returning"
+        },
+        "attributes": {
+          "fulfillmentMethod": "curbside",
+          "checkoutType": "bopis",
+          "shippingTier": "pickup",
+          "affiliation": "Store 482",
+          "paymentType": "credit_card"
+        },
+        "item": [
+          {
+            "productID": "SKU-10293",
+            "productInfo": {
+              "productName": "Organic Whole Milk 1 Gal",
+              "category": "Grocery"
+            },
+            "price": 4.99,
+            "quantity": 3
+          },
+          {
+            "productID": "SKU-55210",
+            "productInfo": {
+              "productName": "Rotisserie Chicken",
+              "category": "Deli"
+            },
+            "price": 8.99,
+            "quantity": 3
+          }
+        ]
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "ORD-2049183",
+      "affiliation": "Store 482",
+      "value": 42.97,
+      "currency": "USD",
+      "tax": 3.44,
+      "shipping": 0,
+      "coupon": "",
+      "payment_type": "credit_card",
+      "checkout_type": "bopis",
+      "shipping_tier": "pickup",
+      "items": [
+        {
+          "item_id": "SKU-10293",
+          "item_name": "Organic Whole Milk 1 Gal",
+          "item_category": "Grocery",
+          "price": 4.99,
+          "quantity": 3
+        },
+        {
+          "item_id": "SKU-55210",
+          "item_name": "Rotisserie Chicken",
+          "item_category": "Deli",
+          "price": 8.99,
+          "quantity": 3
+        }
+      ]
+    },
+    "user_id": "u_7788213",
+    "customer_type": "returning",
+    "fulfillment_method": "curbside",
+    "traffic_type": "app"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "orderId": "ORD-2049183",
+        "priceTotal": 42.97,
+        "currencyCode": "USD",
+        "purchaseTax": 3.44,
+        "affiliation": "Store 482",
+        "payments": [
+          {
+            "paymentType": "credit_card"
+          }
+        ]
+      }
+    },
+    "fulfillment": {
+      "fulfillmentMethod": "curbside",
+      "checkoutType": "bopis",
+      "shippingTier": "pickup"
+    },
+    "product": [
+      {
+        "productID": "SKU-10293",
+        "productName": "Organic Whole Milk 1 Gal",
+        "category": "Grocery",
+        "price": 4.99,
+        "quantity": 3
+      },
+      {
+        "productID": "SKU-55210",
+        "productName": "Rotisserie Chicken",
+        "category": "Deli",
+        "price": 8.99,
+        "quantity": 3
+      }
+    ],
+    "user": {
+      "userID": "u_7788213",
+      "customerType": "returning"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD-2049183",
+        "priceTotal": 42.97,
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-10293",
+        "name": "Organic Whole Milk 1 Gal",
+        "category": "Grocery",
+        "priceTotal": 4.99,
+        "quantity": 3
+      },
+      {
+        "SKU": "SKU-55210",
+        "name": "Rotisserie Chicken",
+        "category": "Deli",
+        "priceTotal": 8.99,
+        "quantity": 3
+      }
+    ],
+    "_orgkpis": {
+      "fulfillmentMethod": "curbside",
+      "checkoutType": "bopis",
+      "shippingTier": "pickup",
+      "affiliation": "Store 482",
+      "paymentType": "credit_card"
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- One row per order: the first purchase hit per transaction_id with its checkout fulfillment method (suffix widened one day each side for store time zones)
+  WITH ga4_orders AS (
+    SELECT
+      ecommerce.transaction_id AS transaction_id,
+      ARRAY_AGG(STRUCT(
+        event_timestamp,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'fulfillment_method') AS fulfillment_method
+      ) ORDER BY event_timestamp LIMIT 1)[OFFSET(0)] AS first_hit
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL 1 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL 1 DAY))
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+    GROUP BY transaction_id
+  ),
+  -- Platform header wins: last pre-arrival pickup selection of the pickup lines (arrival reclassification not included), placement date in store local time; test, fraud-voided-before-release and employee exchange orders excluded
+  classified AS (
+    SELECT
+      g.transaction_id,
+      IF(o.order_id IS NOT NULL, o.selected_pickup_method, g.first_hit.fulfillment_method) AS fulfillment_method,
+      IF(o.order_id IS NOT NULL, DATE(o.placed_at, o.store_time_zone), DATE(TIMESTAMP_MICROS(g.first_hit.event_timestamp))) AS placed_date
+    FROM ga4_orders AS g
+    LEFT JOIN `your-project.commerce.orders` AS o
+      ON o.order_id = g.transaction_id
+    WHERE COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_fraud_voided_before_release, FALSE) = FALSE
+      AND COALESCE(o.is_employee_exchange, FALSE) = FALSE
+  )
+  -- Curbside orders over all BOPIS orders placed in the period, one count per order; cancelled and uncollected orders stay on both sides
+  SELECT
+    ROUND(SAFE_DIVIDE(
+      COUNT(DISTINCT IF(fulfillment_method = 'curbside', transaction_id, NULL)),
+      COUNT(DISTINCT transaction_id)
+    ) * 100, 2) AS curbside_pickup_rate_pct
+  FROM classified
+  WHERE fulfillment_method IN ('pickup_in_store', 'curbside')
+    AND placed_date BETWEEN start_date AND end_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window: last 90 complete days
+  WITH params AS (
+    SELECT CAST(CURRENT_DATE - INTERVAL '90' DAY AS DATE) AS start_date,
+           CAST(CURRENT_DATE - INTERVAL '1' DAY AS DATE) AS end_date
+  ),
+  -- One row per order: the first purchase hit per purchaseID with its checkout fulfillment method (window widened one day each side for store time zones)
+  aep_orders AS (
+    SELECT transaction_id, fulfillment_method, event_ts
+    FROM (
+      SELECT
+        e.commerce.order.purchaseID AS transaction_id,
+        e._orgkpis.fulfillmentMethod AS fulfillment_method,
+        e.timestamp AS event_ts,
+        ROW_NUMBER() OVER (PARTITION BY e.commerce.order.purchaseID ORDER BY e.timestamp) AS rn
+      FROM aep_web_dataset AS e
+      CROSS JOIN params AS p
+      WHERE e.eventType = 'commerce.purchases'
+        AND e.commerce.order.purchaseID IS NOT NULL
+        AND e.timestamp >= p.start_date - INTERVAL '1' DAY
+        AND e.timestamp < p.end_date + INTERVAL '2' DAY
+    ) AS hits
+    WHERE rn = 1
+  ),
+  -- Platform header wins: last pre-arrival pickup selection of the pickup lines (arrival reclassification not included), placement date in store local time; test, fraud-voided-before-release and employee exchange orders excluded
+  classified AS (
+    SELECT
+      a.transaction_id,
+      CASE WHEN o.order_id IS NOT NULL THEN o.selected_pickup_method ELSE a.fulfillment_method END AS fulfillment_method,
+      CASE WHEN o.order_id IS NOT NULL THEN TO_DATE(FROM_UTC_TIMESTAMP(o.placed_at, o.store_time_zone))
+           ELSE TO_DATE(a.event_ts) END AS placed_date
+    FROM aep_orders AS a
+    LEFT JOIN commerce_orders_dataset AS o
+      ON o.order_id = a.transaction_id
+    WHERE COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_fraud_voided_before_release, FALSE) = FALSE
+      AND COALESCE(o.is_employee_exchange, FALSE) = FALSE
+  )
+  -- Curbside orders over all BOPIS orders placed in the period, one count per order; cancelled and uncollected orders stay on both sides
+  SELECT
+    ROUND(
+      100.0 * COUNT(DISTINCT CASE WHEN c.fulfillment_method = 'curbside' THEN c.transaction_id END)
+      / NULLIF(COUNT(DISTINCT c.transaction_id), 0), 2) AS curbside_pickup_rate_pct
+  FROM classified AS c
+  CROSS JOIN params AS p
+  WHERE c.fulfillment_method IN ('pickup_in_store', 'curbside')
+    AND c.placed_date BETWEEN p.start_date AND p.end_date;
 
+Calculation Notes: |
+  1️⃣ Denominator is the full BOPIS base: every order placed in the period with at least one line fulfilled by store pickup (fulfillment_method 'pickup_in_store' or 'curbside' on the purchase event), counted once per transaction_id. Ship-to-home, ship-to-store and same-day delivery orders are excluded from both sides, so the rate describes the pickup mix and never the share of all online orders (that is BOPIS Order Share). 2️⃣ Curbside classification uses the fulfillment method on the order header in the commerce platform, joined to the GA4 purchase event on transaction_id; where the two disagree the platform value wins, because customers can switch from counter to curbside in the order-status page or the app after checkout, and that final selection before arrival is what the store fulfils. 3️⃣ Order grain, not line or unit grain: a split order carrying both pickup and ship-to-home lines counts once in the denominator, and counts as curbside only when its pickup lines are designated curbside; a BOPIS order split across two pickup stores counts once, attributed to the store holding the higher-value pickup group. 4️⃣ Cancelled and uncollected orders stay in both numerator and denominator, because the KPI measures the customer's handoff choice at placement; whether the order was collected is measured by Pickup Completion Rate and must not be folded into this number. Test orders, fraud-cancelled orders voided before release to the store, and employee exchange orders are excluded. 5️⃣ Timing: attribute each order to the reporting period of its placement timestamp in the store's local time zone, not the pickup or check-in timestamp, so the numerator and denominator share one cohort. Orders placed near midnight whose pickup falls in the next period stay in the placement period. 6️⃣ Store eligibility: the headline rate uses all BOPIS orders, including stores without curbside bays, as the denominator. When reviewing a single store or comparing stores, break the rate down by the curbside-enabled store flag, because a chain-level drop can simply reflect new stores without curbside rather than lower customer adoption. 7️⃣ Curbside reclassified at arrival (the customer taps 'I'm here' from the car for a counter order and the store accepts the handoff) is not counted as curbside here; that handoff mode is reported from the Order Pickup event and belongs in pickup operations reporting.
 
+Business Use Case: |
+  1️⃣ Store Operations reviews the rate by store and hour band each Monday, and when a store's curbside share holds above 40% for three consecutive weeks it adds a dedicated curbside runner to peak pickup windows and requests an extra marked bay from Facilities. 2️⃣ The Omnichannel Product team tests the default handoff option on the checkout fulfilment selector; if a variant shifts the curbside rate by more than 5 points without lowering Pickup Completion Rate, it rolls the variant out and updates the pickup-slot capacity model. 3️⃣ Customer Service correlates weekly curbside rate with curbside wait-time complaints per store, and when complaints per 1,000 curbside orders rise while the rate climbs it escalates to the regional manager to recalibrate the promised handoff time shown in the ready-for-pickup notification. 4️⃣ Merchandising limits curbside eligibility for bulky or age-restricted categories in stores where the rate exceeds bay capacity, and re-checks the category-level rate the following month to confirm the shift to counter pickup.
 
+Dependencies:
+  Events: [purchase, order-pickup]
+  Metrics: [bopis-orders]
+  Dimensions: [fulfillment-method, pickup-window]
 
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
 
+Report Attributes: |
+  Store; Region; Curbside-Enabled Store Flag; Fulfillment Method; Pickup Window; Order Channel (Web / App); Device Category; Item Category; Customer Loyalty Tier; Day of Week
 
+Dashboard Usage: [Omnichannel Fulfilment Performance, Store Operations Weekly Review, BOPIS & Curbside Capacity Planning]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [pickup-completion-rate, bopis-order-share, ship-to-store-rate, online-to-store-visit-rate, omnichannel-customer-rate, online-order-conversion-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +336,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-21T17:11:57.984+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-21T17:12:09.21+00:00
 
