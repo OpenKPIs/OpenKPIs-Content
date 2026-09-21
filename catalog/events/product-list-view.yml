@@ -1,7 +1,7 @@
 # Event: Product List View
-# Generated: 2026-09-21T17:38:28.463Z
+# Generated: 2026-09-21T17:38:36.654Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Event Name: Product List View
 Event Serialization: always
@@ -11,38 +11,218 @@ Description: |
 
 Category: Engagement
 
+Tags: [event, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Discovery
+
+
+Event Type: standard
+
+Aggregation Window: Event, Session, Daily, Weekly
+
+GA4 Event: |
+  view_item_list
+
+Adobe Event: |
+  productListView
+
+W3 Data Layer: |
+  {
+    "event": {
+      "eventName": "Product List View",
+      "eventAction": "view_item_list"
+    },
+    "listing": {
+      "item_list_id": "category_listing",
+      "item_list_name": "Category Listing",
+      "page_type": "category",
+      "currency": "USD"
+    },
+    "items": [
+      {
+        "item_id": "SKU12345",
+        "item_name": "Trail Running Shoe",
+        "item_brand": "Acme",
+        "item_category": "Footwear",
+        "item_variant": "Blue / 10",
+        "price": 89.99,
+        "index": 0
+      },
+      {
+        "item_id": "SKU12346",
+        "item_name": "Trail Running Shoe - Wide",
+        "item_brand": "Acme",
+        "item_category": "Footwear",
+        "item_variant": "Blue / 10.5 Wide",
+        "price": 94.99,
+        "index": 1
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "view_item_list",
+    "item_list_id": "category_listing",
+    "item_list_name": "Category Listing",
+    "page_type": "category",
+    "currency": "USD",
+    "items": [
+      {
+        "item_id": "SKU12345",
+        "item_name": "Trail Running Shoe",
+        "item_brand": "Acme",
+        "item_category": "Footwear",
+        "item_variant": "Blue / 10",
+        "price": 89.99,
+        "index": 0,
+        "item_list_id": "category_listing",
+        "item_list_name": "Category Listing"
+      },
+      {
+        "item_id": "SKU12346",
+        "item_name": "Trail Running Shoe - Wide",
+        "item_brand": "Acme",
+        "item_category": "Footwear",
+        "item_variant": "Blue / 10.5 Wide",
+        "price": 94.99,
+        "index": 1,
+        "item_list_id": "category_listing",
+        "item_list_name": "Category Listing"
+      }
+    ]
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "productListView",
+    "eventInfo": {
+      "eventAction": "view_item_list"
+    },
+    "item_list_id": "category_listing",
+    "item_list_name": "Category Listing",
+    "page_type": "category",
+    "currency": "USD",
+    "items": [
+      {
+        "item_id": "SKU12345",
+        "item_name": "Trail Running Shoe",
+        "item_brand": "Acme",
+        "item_category": "Footwear",
+        "item_variant": "Blue / 10",
+        "price": 89.99,
+        "index": 0
+      },
+      {
+        "item_id": "SKU12346",
+        "item_name": "Trail Running Shoe - Wide",
+        "item_brand": "Acme",
+        "item_category": "Footwear",
+        "item_variant": "Blue / 10.5 Wide",
+        "price": 94.99,
+        "index": 1
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.productListViews",
+    "commerce": {
+      "productListViews": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU12345",
+        "name": "Trail Running Shoe",
+        "priceTotal": 89.99,
+        "currencyCode": "USD",
+        "_index": 0,
+        "product": {
+          "brand": "Acme",
+          "category": "Footwear",
+          "variant": "Blue / 10"
+        }
+      },
+      {
+        "SKU": "SKU12346",
+        "name": "Trail Running Shoe - Wide",
+        "priceTotal": 94.99,
+        "currencyCode": "USD",
+        "_index": 1,
+        "product": {
+          "brand": "Acme",
+          "category": "Footwear",
+          "variant": "Blue / 10.5 Wide"
+        }
+      }
+    ],
+    "web": {
+      "webPageDetails": {
+        "pageType": "category"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "category_listing",
+            "eVar2": "Category Listing"
+          }
+        }
+      }
+    }
+  }
+
+Parameters: |
+  {
+    "item_list_id": "string - Required. Stable identifier of the list from the governed list registry, e.g. category_listing, search_results, pdp_recommendations, cart_recommendations; must match the value sent on select_item",
+    "item_list_name": "string - Required. Readable name of the list, e.g. Category Listing, Search Results, Recommended For You, Cart Recommendations; never a raw search term or page title",
+    "items": "array - Required. The products rendered in this list or batch (maximum 200 per event), each with item_id and index (zero-based, continuing across batches) required and item_name, item_brand, item_category to item_category5, item_variant and price recommended",
+    "page_type": "string - Optional. Template on which the list rendered, e.g. category, search, product, cart, home",
+    "currency": "string - Optional. ISO 4217 code for the item prices in the items array, e.g. USD; required whenever price is sent"
+  }
 
 
 
+Dependencies:
+  Events: [page-view]
 
+Source Data: Digital Analytics (GA4)
 
+    Report Attributes: |
+  item_list_name; item_list_id; index; item_category; item_brand; page_type; device_category; traffic_source
 
+    Dashboard Usage: [Product Discovery & Merchandising Performance, Category & Listing Page Performance, Search & Recommendations Effectiveness]
 
+    Segment Eligibility: |
+  true
 
+    Related Dimensions: [item-category, product-name, page-type, internal-search-term, device-category, traffic-source]
 
+    Derived Dimensions: [item-category, product-name, page-type]
 
+    Derived Metrics: [product-view]
 
+    Derived KPIs: [product-list-click-through-rate]
 
+    Data Sensitivity: Internal
 
+    Contains PII: No
 
-
-
-
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
     Status: draft
 
     Contributed By: devyendarm
 
     Created At: 2026-09-21T17:38:27.968+00:00
 
-    
-    
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-21T17:38:36.321+00:00
+
