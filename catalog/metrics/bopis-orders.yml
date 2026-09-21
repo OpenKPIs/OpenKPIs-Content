@@ -1,7 +1,7 @@
 # Metric: BOPIS Orders
-# Generated: 2026-09-21T16:48:23.143Z
+# Generated: 2026-09-21T16:48:34.088Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: BOPIS Orders
 Formula: COUNT(DISTINCT transaction_id) FROM purchase WHERE fulfillment_method IN ('pickup_in_store', 'curbside_pickup') AND traffic_type NOT IN ('internal', 'test')
@@ -11,30 +11,302 @@ Description: |
 
 Category: Conversion
 
+Tags: [metric, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
 
+Industry: Retail
 
+Priority: High
 
+Core Area: Checkout
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "transaction": {
+        "transactionID": "T-882451",
+        "total": {
+          "transactionTotal": 89.97,
+          "transactionTax": 6.75,
+          "transactionShipping": 0,
+          "currency": "USD"
+        },
+        "payment": {
+          "type": "credit_card"
+        },
+        "attributes": {
+          "fulfillment_method": "pickup_in_store",
+          "store_id": "ST-4521",
+          "pickup_window": "2026-09-22 10:00-12:00",
+          "checkout_type": "standard",
+          "customer_type": "returning",
+          "shipping_tier": "store_pickup",
+          "affiliation": "Retail Store Online",
+          "traffic_type": "external"
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU-1001",
+              "productName": "Cordless Drill"
+            },
+            "linkedProduct": {
+              "quantity": 1,
+              "unitPrice": 89.97
+            },
+            "attributes": {
+              "fulfillment_method": "pickup_in_store",
+              "item_category": "Power Tools"
+            }
+          }
+        ]
+      },
+      "user": [
+        {
+          "profile": [
+            {
+              "profileInfo": {
+                "userID": "U-88421"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "transaction_id": "T-882451",
+    "value": 89.97,
+    "currency": "USD",
+    "tax": 6.75,
+    "shipping": 0,
+    "coupon": "",
+    "payment_type": "credit_card",
+    "affiliation": "Retail Store Online",
+    "checkout_type": "standard",
+    "customer_type": "returning",
+    "shipping_tier": "store_pickup",
+    "fulfillment_method": "pickup_in_store",
+    "store_id": "ST-4521",
+    "pickup_window": "2026-09-22 10:00-12:00",
+    "traffic_type": "external",
+    "user_id": "U-88421",
+    "user_properties": {
+      "customer_type": "returning"
+    },
+    "items": [
+      {
+        "item_id": "SKU-1001",
+        "item_name": "Cordless Drill",
+        "price": 89.97,
+        "quantity": 1,
+        "fulfillment_method": "pickup_in_store",
+        "item_category": "Power Tools"
+      }
+    ]
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "purchase": {
+      "transaction_id": "T-882451",
+      "value": 89.97,
+      "currency": "USD",
+      "tax": 6.75,
+      "shipping": 0,
+      "coupon": "",
+      "payment_type": "credit_card",
+      "affiliation": "Retail Store Online",
+      "checkout_type": "standard",
+      "customer_type": "returning",
+      "shipping_tier": "store_pickup",
+      "fulfillment_method": "pickup_in_store",
+      "store_id": "ST-4521",
+      "pickup_window": "2026-09-22 10:00-12:00",
+      "traffic_type": "external",
+      "user_id": "U-88421",
+      "items": [
+        {
+          "item_id": "SKU-1001",
+          "item_name": "Cordless Drill",
+          "price": 89.97,
+          "quantity": 1,
+          "fulfillment_method": "pickup_in_store",
+          "item_category": "Power Tools"
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "$.transaction_id",
+        "currencyCode": "$.currency",
+        "priceTotal": "$.value"
+      },
+      "payments": [
+        {
+          "paymentType": "$.payment_type"
+        }
+      ]
+    },
+    "productListItems": [
+      {
+        "SKU": "$.items[].item_id",
+        "name": "$.items[].item_name",
+        "priceTotal": "$.items[].price",
+        "quantity": "$.items[].quantity",
+        "category": "$.items[].item_category"
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "fulfillment_method": "$.fulfillment_method",
+            "store_id": "$.store_id",
+            "pickup_window": "$.pickup_window",
+            "checkout_type": "$.checkout_type",
+            "customer_type": "$.customer_type",
+            "shipping_tier": "$.shipping_tier",
+            "traffic_type": "$.traffic_type"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- One row per purchase hit with the order-level parameters pivoted from event_params (event_date is in the property reporting time zone)
+  WITH purchase_hits AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS placement_date,
+      event_timestamp,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'transaction_id') AS transaction_id,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'fulfillment_method') AS fulfillment_method,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'traffic_type') AS traffic_type,
+      (SELECT COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64)) FROM UNNEST(event_params) AS ep WHERE ep.key = 'value') AS order_value
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+  ),
+  -- Qualifying pickup orders (store or curbside, external traffic, non-zero value, transaction_id present), collapsed to the first hit per transaction_id
+  bopis_orders AS (
+    SELECT placement_date, transaction_id
+    FROM purchase_hits
+    WHERE transaction_id IS NOT NULL AND transaction_id != ''
+      AND fulfillment_method IN ('pickup_in_store', 'curbside_pickup')
+      AND COALESCE(traffic_type, '') NOT IN ('internal', 'test')
+      AND order_value IS DISTINCT FROM 0
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1
+  )
+  -- Gross BOPIS Orders per placement date
+  SELECT
+    placement_date,
+    COUNT(*) AS bopis_orders
+  FROM bopis_orders
+  GROUP BY placement_date
+  ORDER BY placement_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- One row per purchase hit with the order-level fields, dated in the property reporting time zone over the last 90 complete days
+  WITH purchase_hits AS (
+    SELECT
+      TO_DATE(from_utc_timestamp(timestamp, 'America/New_York')) AS placement_date,
+      timestamp AS event_ts,
+      commerce.order.purchaseID AS transaction_id,
+      _experience.analytics.customDimensions.eVars.fulfillment_method AS fulfillment_method,
+      _experience.analytics.customDimensions.eVars.traffic_type AS traffic_type,
+      commerce.order.priceTotal AS order_value
+    FROM aep_web_events_dataset
+    WHERE eventType = 'commerce.purchases'
+      AND TO_DATE(from_utc_timestamp(timestamp, 'America/New_York')) BETWEEN DATE_SUB(CURRENT_DATE, 90) AND DATE_SUB(CURRENT_DATE, 1)
+  ),
+  -- Qualifying pickup orders (store or curbside, external traffic, non-zero value, transaction_id present), ranked to keep the first hit per transaction_id
+  bopis_orders AS (
+    SELECT
+      placement_date,
+      transaction_id,
+      ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_ts) AS hit_rank
+    FROM purchase_hits
+    WHERE transaction_id IS NOT NULL AND transaction_id != ''
+      AND fulfillment_method IN ('pickup_in_store', 'curbside_pickup')
+      AND COALESCE(traffic_type, '') NOT IN ('internal', 'test')
+      AND order_value IS DISTINCT FROM 0
+  )
+  -- Gross BOPIS Orders per placement date
+  SELECT
+    placement_date,
+    COUNT(*) AS bopis_orders
+  FROM bopis_orders
+  WHERE hit_rank = 1
+  GROUP BY placement_date
+  ORDER BY placement_date;
 
+Calculation Notes: |
+  1️⃣ Counted from the unified purchase event where the order-level fulfillment_method is 'pickup_in_store' or 'curbside_pickup'. Curbside is a pickup sub-type, not a separate metric: it stays inside the count and is split out by breaking the metric down on fulfillment_method. Ship-to-home, ship-from-store, same-day delivery and ship-to-locker orders are excluded, even when a store fulfils them.
+  2️⃣ Deduplication: one count per transaction_id. Confirmation-page reloads, back-button resubmissions and app/web double firing collapse into the first purchase hit; a purchase with no transaction_id is excluded and reported as an instrumentation defect rather than counted per hit.
+  3️⃣ Split baskets: an order that mixes pickup lines with shipped lines counts once as a BOPIS order when any line is designated for pickup; the data layer must set the order-level fulfillment_method to the pickup value in that case and carry the shipped portion in shipping_tier. The order is never counted twice, and line-level pickup volume belongs in Units Sold broken down by fulfillment method.
+  4️⃣ Timing: the order is attributed to the placement timestamp in the property's reporting time zone, not to the scheduled pickup_window or the collection date. An order placed at 23:50 on Friday for Saturday pickup is a Friday BOPIS order and a Saturday pickup in Pickups Completed.
+  5️⃣ Gross placed volume: cancellations, customer no-shows and orders returned to stock after the hold period are not netted out. Those outcomes are measured by Pickups Completed and Pickup Completion Rate against this base, so subtracting them here would double-count the leakage.
+  6️⃣ Exclusions: internal and test traffic (traffic_type 'internal' or 'test'), any purchase whose order value is 0 (treated as a customer-service replacement or other non-revenue order, which also removes fully discounted orders), and reserve-online-pay-in-store reservations that do not fire purchase. Associate-assisted endless-aisle orders count only when they are placed through the digital storefront and fire purchase.
+  7️⃣ Reconciliation: GA4 undercounts orders when consent is denied or tags are blocked, and the size of the gap varies by region and consent-mode configuration. Where BOPIS Orders is used for store labor planning or finance reporting, reconcile weekly against order management system pickup orders and publish the capture ratio next to the digital count instead of overwriting it.
 
+Business Use Case: |
+  1️⃣ The Omnichannel Operations Manager checks the BOPIS Orders placed so far today by store_id, broken down by pickup_window, each afternoon. When a store's orders for tomorrow's pickup windows exceed its trailing four-week same-weekday average by more than 25 percent, they add picker hours for the morning shift and move the store's pickup_window cut-off earlier so that the promised ready-for-pickup time holds.
+  2️⃣ The Digital Merchandising Lead compares the share of BOPIS Orders among all orders for categories that are expensive to ship, such as furniture, grills and bulk consumables. When pickup share falls below target after a site release, they review whether the pickup option and store inventory status still show on the product detail page and cart, and restore the placement before the weekend.
+  3️⃣ The Finance Business Partner uses weekly BOPIS Orders multiplied by the fulfillment cost gap between pickup and parcel delivery to report avoided shipping cost for the quarter. If the digital count and the order management system count differ by more than 10 percent, they escalate the capture gap to Product Analytics before the figures go into the board pack.
+  4️⃣ The CRM Marketing Manager targets shoppers whose last order was ship-to-home and who live within a set drive-time radius of a store with a free-pickup campaign. They judge the campaign by the lift in BOPIS Orders from the treated segment against a holdout group.
 
+Dependencies:
+  Events: [purchase]
+  Dimensions: [fulfillment-method, transaction-id]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Fulfillment Method (pickup_in_store, curbside_pickup); Pickup Store (store_id); Pickup Window; Store ZIP Code / Local Market; Item Category; Device Category; Traffic Source; Customer Status (new vs returning); Checkout Type
 
+Dashboard Usage: [Omnichannel Fulfillment Performance, Store Pickup Operations Daily, BOPIS Demand by Store and Region, Executive Retail Sales Overview]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [pickups-completed, pickup-notifications-sent, store-inventory-checks, store-locator-searches, average-order-value, units-sold]
 
+Derived KPIs: [pickup-completion-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +316,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-21T16:48:22.545+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-21T16:48:33.707+00:00
 
