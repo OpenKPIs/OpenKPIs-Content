@@ -1,7 +1,7 @@
 # Metric: Pickups Completed
-# Generated: 2026-09-21T16:48:56.454Z
+# Generated: 2026-09-21T16:49:06.906Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Pickups Completed
 Formula: COUNT(DISTINCT transaction_id) of POS / OMS order-pickup handoff records WHERE pickup_method IN ('in_store', 'curbside', 'locker') (mapped to the fulfillment_method reporting values 'pickup_in_store', 'curbside_pickup', 'locker_pickup') AND pickup_status IN ('full', 'partial') AND first confirmed handoff dated within the reporting period in store-local time AND transaction_id reconciled to an Order Management status of Picked Up / Collected AND NOT test, training or demo-store order
@@ -11,6 +11,19 @@ Description: |
 
 Category: Operations
 
+Tags: [metric, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: Retail
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly
 
 
 
@@ -18,23 +31,158 @@ Category: Operations
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Reporting window: the last 90 complete days, dated by handoff in the store's local time zone
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Earliest store-confirmed full or partial POS handoff per order on an in-scope pickup method (mapped to the fulfillment_method reporting values), read 7 days before the window so earlier handoffs of the same order are seen; associate retries, offline replays, duplicate scans and second pickup groups collapse, customer check-ins never qualify
+  WITH first_handoff AS (
+    SELECT
+      transaction_id,
+      store_id,
+      CASE pickup_method WHEN 'in_store' THEN 'pickup_in_store' WHEN 'curbside' THEN 'curbside_pickup' WHEN 'locker' THEN 'locker_pickup' END AS fulfillment_method,
+      handoff_ts
+    FROM `your-project.pos.pickup_handoffs`
+    WHERE DATE(handoff_ts) BETWEEN DATE_SUB(start_date, INTERVAL 7 DAY) AND DATE_ADD(end_date, INTERVAL 1 DAY)
+      AND transaction_id IS NOT NULL
+      AND confirmation_type IN ('associate_scan', 'locker_release', 'curbside_checkout')
+      AND pickup_method IN ('in_store', 'curbside', 'locker')
+      AND pickup_status IN ('full', 'partial')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY handoff_ts) = 1
+  ),
+  -- OMS orders marked Picked Up / Collected on a pickup method, excluding test, training and demo-store orders (cancelled, expired-hold and ship-to-home conversions never reach this status or method)
+  oms_picked_up AS (
+    SELECT transaction_id, store_id, fulfillment_method, picked_up_at, store_time_zone
+    FROM `your-project.oms.orders`
+    WHERE order_status IN ('picked_up', 'collected')
+      AND fulfillment_method IN ('pickup_in_store', 'curbside_pickup', 'locker_pickup')
+      AND is_test_order IS NOT TRUE
+      AND is_training_order IS NOT TRUE
+      AND is_demo_store IS NOT TRUE
+  ),
+  -- Reconciliation: OMS pickups without a POS handoff are added, POS handoffs without OMS confirmation within 48 hours are dropped; the handoff store and POS handoff time win when both exist
+  reconciled AS (
+    SELECT
+      o.transaction_id,
+      COALESCE(e.store_id, o.store_id) AS store_id,
+      COALESCE(e.fulfillment_method, o.fulfillment_method) AS fulfillment_method,
+      DATE(COALESCE(e.handoff_ts, o.picked_up_at), o.store_time_zone) AS handoff_date
+    FROM oms_picked_up AS o
+    LEFT JOIN first_handoff AS e ON e.transaction_id = o.transaction_id
+    WHERE e.transaction_id IS NULL
+      OR o.picked_up_at <= TIMESTAMP_ADD(e.handoff_ts, INTERVAL 48 HOUR)
+  )
+  -- Pickups Completed per handoff date, store and fulfillment method
+  SELECT
+    handoff_date,
+    store_id,
+    fulfillment_method,
+    COUNT(DISTINCT transaction_id) AS pickups_completed
+  FROM reconciled
+  WHERE handoff_date BETWEEN start_date AND end_date
+  GROUP BY handoff_date, store_id, fulfillment_method
+  ORDER BY handoff_date, store_id, fulfillment_method;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window: the last 90 complete days, dated by handoff in the store's local time zone
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  ),
+  -- Earliest store-confirmed full or partial POS handoff per order on an in-scope pickup method (mapped to the fulfillment_method reporting values), read 7 days before the window so earlier handoffs of the same order are seen; associate retries, offline replays, duplicate scans and second pickup groups collapse, customer check-ins never qualify
+  first_handoff AS (
+    SELECT
+      transaction_id,
+      store_id,
+      CASE pickup_method WHEN 'in_store' THEN 'pickup_in_store' WHEN 'curbside' THEN 'curbside_pickup' WHEN 'locker' THEN 'locker_pickup' END AS fulfillment_method,
+      handoff_ts
+    FROM (
+      SELECT h.*, ROW_NUMBER() OVER (PARTITION BY h.transaction_id ORDER BY h.handoff_ts) AS rn
+      FROM pos_pickup_handoffs AS h
+      CROSS JOIN params AS p
+      WHERE to_date(h.handoff_ts) BETWEEN date_sub(p.start_date, 7) AND date_add(p.end_date, 1)
+        AND h.transaction_id IS NOT NULL
+        AND h.confirmation_type IN ('associate_scan', 'locker_release', 'curbside_checkout')
+        AND h.pickup_method IN ('in_store', 'curbside', 'locker')
+        AND h.pickup_status IN ('full', 'partial')
+    ) AS ranked
+    WHERE rn = 1
+  ),
+  -- OMS orders marked Picked Up / Collected on a pickup method, excluding test, training and demo-store orders (cancelled, expired-hold and ship-to-home conversions never reach this status or method)
+  oms_picked_up AS (
+    SELECT transaction_id, store_id, fulfillment_method, picked_up_at, store_time_zone
+    FROM oms_orders
+    WHERE order_status IN ('picked_up', 'collected')
+      AND fulfillment_method IN ('pickup_in_store', 'curbside_pickup', 'locker_pickup')
+      AND is_test_order IS NOT TRUE
+      AND is_training_order IS NOT TRUE
+      AND is_demo_store IS NOT TRUE
+  ),
+  -- Reconciliation: OMS pickups without a POS handoff are added, POS handoffs without OMS confirmation within 48 hours are dropped; the handoff store and POS handoff time win when both exist
+  reconciled AS (
+    SELECT
+      o.transaction_id,
+      COALESCE(e.store_id, o.store_id) AS store_id,
+      COALESCE(e.fulfillment_method, o.fulfillment_method) AS fulfillment_method,
+      to_date(from_utc_timestamp(COALESCE(e.handoff_ts, o.picked_up_at), o.store_time_zone)) AS handoff_date
+    FROM oms_picked_up AS o
+    LEFT JOIN first_handoff AS e ON e.transaction_id = o.transaction_id
+    WHERE e.transaction_id IS NULL
+      OR o.picked_up_at <= e.handoff_ts + INTERVAL 48 HOURS
+  )
+  -- Pickups Completed per handoff date, store and fulfillment method
+  SELECT
+    r.handoff_date,
+    r.store_id,
+    r.fulfillment_method,
+    COUNT(DISTINCT r.transaction_id) AS pickups_completed
+  FROM reconciled AS r
+  CROSS JOIN params AS p
+  WHERE r.handoff_date BETWEEN p.start_date AND p.end_date
+  GROUP BY r.handoff_date, r.store_id, r.fulfillment_method
+  ORDER BY r.handoff_date, r.store_id, r.fulfillment_method;
 
+Calculation Notes: |
+  1️⃣ Serialization: one count per transaction_id, the same order key the purchase event carries in BOPIS Orders, on its first confirmed handoff. Associate-app retries, offline-queue replays after the store device reconnects, and duplicate scans at the pickup counter collapse to the earliest qualifying handoff timestamp in the POS / OMS order-pickup records; an order split across two pickup groups (for example, one ready on day 1, the remainder on day 3) counts once, on the date the first group is collected, with the second collection reported only in the line-level Units Sold view.
+  2️⃣ Qualification: only handoffs confirmed by the store (associate scan, locker door release or curbside check-out) count. Customer-side "I'm here" check-ins, arrival geofence triggers and Pickup Notifications Sent never increment the metric; they are upstream steps, not completions.
+  3️⃣ Partial collections count as completed when at least one line was handed over; lines refused or short-picked at the counter are excluded from units but not from the order count, and the order carries pickup_status = partial so the full-versus-partial split can be reported alongside the headline number.
+  4️⃣ Exclusions: orders cancelled before handoff, orders auto-cancelled and returned to stock after the hold window expires, ship-to-home orders converted from BOPIS, associate training and test transactions, and employee demo stores. Orders re-routed to a different store remain eligible and are attributed to the store that performed the handoff, not the store originally selected.
+  5️⃣ Timing: the metric is dated by the handoff timestamp in the store's local time zone, not by order placement date, so a Friday-evening order collected on Monday lands in Monday. Pickup Completion Rate uses an order-cohort view instead; do not divide this handoff-dated count by same-period BOPIS Orders without aligning cohorts, and hold the cohort open until the store's configured pickup hold window (typically 5–7 days) has elapsed.
+  6️⃣ Reconciliation: the POS handoff transaction written at the pickup counter, locker or curbside station is the primary record, reconciled daily against the Order Management System pickup status. Orders marked Picked Up / Collected in the OMS with no matching POS handoff (store device offline, status set manually by the store manager) are added; POS handoffs with no OMS confirmation within 48 hours are removed. Report the POS-versus-OMS reconciliation gap (records added plus records removed, as a share of the reconciled count) as a data-quality figure per store; a gap above 3% points to an associate-process or integration problem, not a demand change.
+  7️⃣ Reporting grain: break out by store and by pickup_method from the order-pickup record, mapped to the fulfillment_method reporting values ('in_store' → 'pickup_in_store', 'curbside' → 'curbside_pickup', 'locker' → 'locker_pickup'), using the same values the purchase event sets for BOPIS Orders; 'locker_pickup' sits outside the BOPIS Orders base, so exclude it whenever this count is set against that base; do not add ship-to-store orders into the BOPIS figure unless the report is explicitly labelled "all store pickups", because their ready-time and inventory source differ.
 
+Business Use Case: |
+  1️⃣ The Director of Store Operations reviews Pickups Completed against Ready-for-Pickup orders by store every Monday; when a store's completed count falls more than 15% below its trailing eight-week same-weekday average while BOPIS Orders hold steady, they open a store visit to check pickup-counter staffing, locker faults and the associate scan workflow.
+  2️⃣ The Omnichannel Product Manager tracks the curbside share of Pickups Completed after each release of the arrival check-in feature; if curbside completions stall while check-ins rise, they file a defect against the associate handoff screen before rolling the release to further regions.
+  3️⃣ The Finance revenue accounting team uses the reconciled daily count to confirm that deferred BOPIS revenue was released on collection; any store whose POS-versus-OMS reconciliation gap (OMS-only pickups added plus unconfirmed POS handoffs removed, as a share of the reconciled count) exceeds 3% for the month is flagged for the month-end close and its revenue-release entries are reviewed before sign-off.
+  4️⃣ The Merchandising planning team uses completed pickups by store and category to set pickup-eligible assortment and safety stock for the next season, withdrawing pickup eligibility from SKUs whose orders are frequently refused or partially collected at the counter.
 
+Dependencies:
+  Events: [order-pickup, purchase]
+  Metrics: [bopis-orders]
+  Dimensions: [fulfillment-method, order-status, pickup-window]
 
+Source Data: ERP
 
+Report Attributes: |
+  Store; Fulfillment Method; Pickup Window; Order Status; Fulfillment Strategy; Region; Device Category; Item Category
 
+Dashboard Usage: [Omnichannel Fulfillment Performance, Store Operations Daily Scorecard, BOPIS Funnel: Order to Collection]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [bopis-orders, pickup-notifications-sent, store-inventory-checks, units-sold]
 
+Derived KPIs: [pickup-completion-rate]
 
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +192,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-21T16:48:56.045+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-21T16:49:05.578+00:00
 
