@@ -1,7 +1,7 @@
 # Dimension: Checkout Error Type
-# Generated: 2026-09-21T16:28:22.422Z
+# Generated: 2026-09-21T16:28:32.137Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Checkout Error Type
 
@@ -10,31 +10,246 @@ Description: |
 
 Category: Conversion
 
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Checkout
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Session, Hourly, Daily, Weekly
 
+GA4 Event: |
+  checkout_error
 
+Adobe Event: |
+  checkout:error
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "Checkout Error",
+          "eventAction": "checkout_error",
+          "timeStamp": "2026-09-21T16:20:00Z",
+          "trafficType": "{{traffic_type}}"
+        },
+        "cart": {
+          "checkout": {
+            "step": "{{checkout_step}}",
+            "error": {
+              "type": "{{error_type}}",
+              "code": "{{error_code}}",
+              "source": "{{error_source}}"
+            }
+          }
+        }
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "checkout_error",
+    "error_type": "payment_declined",
+    "error_code": "card_declined",
+    "error_source": "payment_gateway",
+    "checkout_step": 3,
+    "traffic_type": "external"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "checkout:error",
+    "checkoutError": {
+      "errorType": "payment_declined",
+      "errorCode": "card_declined",
+      "errorSource": "payment_gateway",
+      "checkoutStep": 3
+    },
+    "trafficType": "external"
+  }
 
+XDM Mapping: |
+  {
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "checkoutError.errorType",
+            "eVar2": "checkoutError.errorCode",
+            "eVar3": "checkoutError.errorSource"
+          }
+        }
+      }
+    },
+    "_your_tenant": {
+      "checkoutError": {
+        "errorType": "{error_type}",
+        "errorCode": "{error_code}",
+        "errorSource": "{error_source}",
+        "checkoutStep": "{checkout_step}"
+      },
+      "trafficType": "{traffic_type}"
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Gateway test-mode payments and bot-flagged sessions carry no field in the event export, so they must be filtered before collection.
+  WITH checkout_errors AS (
+    -- One row per checkout_error event with its parameters pivoted from event_params
+    SELECT
+      event_date,
+      user_pseudo_id,
+      event_timestamp,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      (SELECT COALESCE(value.int_value, SAFE_CAST(value.string_value AS INT64)) FROM UNNEST(event_params) WHERE key = 'checkout_step') AS checkout_step,
+      (SELECT LOWER(TRIM(value.string_value)) FROM UNNEST(event_params) WHERE key = 'error_type') AS raw_error_type,
+      (SELECT LOWER(value.string_value) FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'checkout_error'
+  ),
+  typed_errors AS (
+    -- Drop internal and QA traffic, key sessions split at midnight (event_date is in the property time zone) and map values outside the closed list to other
+    SELECT
+      event_date,
+      CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING), '.', event_date) AS session_key,
+      event_timestamp,
+      checkout_step,
+      CASE
+        WHEN raw_error_type IN ('payment_declined', 'payment_authentication_failed', 'payment_details_invalid', 'payment_processing_error',
+                                'address_invalid', 'shipping_unavailable', 'out_of_stock', 'price_changed', 'coupon_invalid',
+                                'required_field_missing', 'session_expired', 'system_error')
+          THEN raw_error_type
+        ELSE 'other'
+      END AS error_type
+    FROM checkout_errors
+    WHERE COALESCE(traffic_type, '') NOT IN ('internal', 'qa')
+  )
+  -- Event-grain error type with the session rollup of first and last error type
+  SELECT
+    event_date,
+    session_key,
+    event_timestamp,
+    checkout_step,
+    error_type,
+    FIRST_VALUE(error_type) OVER session_window AS first_error_type,
+    LAST_VALUE(error_type) OVER session_window AS last_error_type
+  FROM typed_errors
+  WINDOW session_window AS (PARTITION BY session_key ORDER BY event_timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
+  ORDER BY session_key, event_timestamp;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Gateway test-mode payments and bot-flagged sessions carry no field in the event dataset, so they must be filtered before collection.
+  WITH params AS (
+    -- Relative reporting window and the property time zone used for the midnight session split
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date, 'America/New_York' AS property_tz
+  ),
+  local_events AS (
+    -- All web events in the window with the local event date, needed to rebuild sessions from full activity
+    SELECT
+      e.identityMap['ECID'][0].id AS ecid,
+      e.timestamp AS event_timestamp,
+      to_date(from_utc_timestamp(e.timestamp, p.property_tz)) AS event_date,
+      e.eventType AS event_type,
+      e._your_tenant.checkoutError.checkoutStep AS checkout_step,
+      lower(trim(e._your_tenant.checkoutError.errorType)) AS raw_error_type,
+      lower(e._your_tenant.trafficType) AS traffic_type
+    FROM your_aep_web_dataset e
+    CROSS JOIN params p
+    WHERE to_date(from_utc_timestamp(e.timestamp, p.property_tz)) BETWEEN p.start_date AND p.end_date
+  ),
+  sessionised AS (
+    -- Assign each event to a 30-minute inactivity session that also splits at local midnight
+    SELECT
+      *,
+      SESS_TIMEOUT(event_timestamp, 60 * 30) OVER (PARTITION BY ecid, event_date ORDER BY event_timestamp
+                                                   ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session
+    FROM local_events
+  ),
+  typed_errors AS (
+    -- Keep checkout:error events, drop internal and QA traffic and map values outside the closed list to other
+    SELECT
+      event_date,
+      concat(ecid, '.', cast(event_date AS STRING), '.', cast(session.num AS STRING)) AS session_key,
+      event_timestamp,
+      checkout_step,
+      CASE
+        WHEN raw_error_type IN ('payment_declined', 'payment_authentication_failed', 'payment_details_invalid', 'payment_processing_error',
+                                'address_invalid', 'shipping_unavailable', 'out_of_stock', 'price_changed', 'coupon_invalid',
+                                'required_field_missing', 'session_expired', 'system_error')
+          THEN raw_error_type
+        ELSE 'other'
+      END AS error_type
+    FROM sessionised
+    WHERE event_type = 'checkout:error'
+      AND coalesce(traffic_type, '') NOT IN ('internal', 'qa')
+  )
+  -- Event-grain error type with the session rollup of first and last error type
+  SELECT
+    event_date,
+    session_key,
+    event_timestamp,
+    checkout_step,
+    error_type,
+    first_value(error_type) OVER (PARTITION BY session_key ORDER BY event_timestamp
+                                  ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS first_error_type,
+    last_value(error_type) OVER (PARTITION BY session_key ORDER BY event_timestamp
+                                 ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_error_type
+  FROM typed_errors
+  ORDER BY session_key, event_timestamp;
 
+Calculation Notes: |
+  1️⃣ Canonical values (lowercase snake_case, closed list): payment_declined (issuer or gateway refusal, including insufficient funds, expired card, do-not-honor and fraud-screen blocks), payment_authentication_failed (3-D Secure / SCA challenge failed or abandoned), payment_details_invalid (card number, expiry or CVC rejected by the gateway), payment_processing_error (gateway timeout or provider outage), address_invalid (shipping or billing address failed validation or the carrier cannot serve it), shipping_unavailable (no shipping or pickup option for the destination or cart), out_of_stock (line item no longer available at submit), price_changed (price or tax recalculated since the cart was built), coupon_invalid (code expired, ineligible or already used), required_field_missing (form validation on submit), session_expired and system_error. Anything that cannot be mapped is set to other, never left blank. For executive views, a reporting rollup groups the values into payment (the four payment_* values) and non-payment (all others, including other); the rollup is a CASE expression on error_type in the report layer, not a separately collected field.
+  2️⃣ Source mapping: error_type is derived from the raw code at collection time, never from the displayed message text. Stripe decline_code / Adyen refusalReason / Braintree processor response codes map to the payment_* values; Shopify Checkout, Salesforce Commerce Cloud and Adobe Commerce validation codes map to the address, inventory, pricing, coupon and form values. The raw code is kept in error_code and the originating layer (client_validation, payment_gateway, platform, fraud_screen) in error_source, so the mapping table can be revised without losing history.
+  3️⃣ Grain and capture rule: one value per checkout_error event, fired when the error is rendered to the shopper after a submit action (continue to shipping, continue to payment, place order), with checkout_step recording the step. Real-time inline hints shown while the shopper is still typing are excluded; when one submit returns several errors, one event is sent per distinct error_type, and re-rendering the same error without a new submit does not fire again.
+  4️⃣ Scope and exclusions: only errors inside the checkout flow from begin_checkout to purchase count; cart-page, account login and post-purchase payment errors are out of scope. Payments made in gateway test mode (Stripe livemode = false, Adyen test merchant accounts) and sessions flagged as bot traffic are suppressed at collection time: the tag does not fire for them and the export carries no field to filter on later. Internal and QA traffic is still collected and is excluded in reporting through traffic_type (internal, qa). A decline followed by a successful retry in the same session keeps its payment_declined value; the retry outcome is read from payment_attempt_number and the later purchase, not by overwriting the error.
+  5️⃣ Session and user rollups: at session grain (30-minute inactivity timeout, split at midnight in the property time zone) report first_error_type and last_error_type as session rollups of this dimension (not separate catalog items) from the ordered checkout_error events, since the last error before exit is the one that explains abandonment. Sessions without any checkout_error carry null, not other, so the dimension never inflates error shares when joined to all checkout sessions.
+  6️⃣ Privacy: error_message and raw gateway payloads can echo card fragments, names or address lines, so free-text error messages are dropped or reduced to a template id and raw gateway response payloads are never forwarded; the error is described only through the normalised error_type, the raw error_code and the error_source layer, and no PAN, CVC or full address may appear in any parameter (PCI DSS scope stays with the payment provider).
+  7️⃣ Governance of the value list: review the mapping monthly and whenever a gateway, fraud tool or checkout platform is added; when other exceeds 5% of checkout_error events in a week, the unmapped error_code values are triaged and added to the table, and historic rows are restated only by re-deriving from error_code.
 
+Business Use Case: |
+  1️⃣ The Product checkout team reviews error share by error_type and checkout_step after every checkout release; when address_invalid or required_field_missing rises more than 20% over the prior four-week baseline on mobile, they roll back or fix the form change and adjust address autocomplete before the next sprint closes.
+  2️⃣ The Finance payments team reviews payment_declined, payment_authentication_failed and payment_processing_error by error_code and error_source every week; when the share of one raw decline code or of the fraud_screen source moves beyond its four-week baseline, they take the affected codes to the payment provider to revise retry rules, fraud-screen thresholds or 3-D Secure exemptions.
+  3️⃣ The Merchandising team reviews the daily count of out_of_stock and price_changed errors by checkout_step and error_source; when either value exceeds twice its trailing seven-day average, they audit the inventory sync buffer and the price and tax recalculation feed and hold price or stock changes on live campaigns until the error rate returns to baseline.
+  4️⃣ The Customer Service operations lead monitors system_error and session_expired hourly; when either exceeds three times its trailing daily average, they open an incident with the platform team, publish a checkout status notice and brief agents on the recovery script for affected orders.
 
+Dependencies:
+  Metrics: [begin-checkout]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  checkout_step; error_code; error_source; payment-method; checkout-type; device-category; shipping-tier; express-checkout-method
 
+Dashboard Usage: [Checkout Funnel Health, Payment Performance and Declines, Checkout Error Monitoring]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [payment-method, checkout-type, express-checkout-method, shipping-tier, fulfillment-method, store-inventory-status, coupon-code, device-category, order-status]
 
+Derived Dimensions: [customer-segmentation-by-risk-profile]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +257,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-21T16:28:21.684+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-21T16:28:31.858+00:00
 
