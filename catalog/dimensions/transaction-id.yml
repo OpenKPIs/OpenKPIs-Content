@@ -1,7 +1,7 @@
 # Dimension: Transaction ID
-# Generated: 2026-09-21T16:29:13.511Z
+# Generated: 2026-09-21T16:29:24.704Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Transaction ID
 
@@ -10,31 +10,217 @@ Description: |
 
 Category: Conversion
 
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Checkout
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Event, Daily
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "transaction": {
+        "transactionID": "US-1009358",
+        "total": {
+          "transactionTotal": 129.99,
+          "currency": "USD"
+        },
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "cust-882917"
+            }
+          }
+        ]
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "US-1009358",
+      "value": 129.99,
+      "currency": "USD",
+      "coupon": "SAVE10",
+      "shipping": 6.99,
+      "tax": 9.5,
+      "items": [
+        {
+          "item_id": "SKU-4471",
+          "item_name": "Wireless Earbuds",
+          "price": 129.99,
+          "quantity": 1
+        }
+      ]
+    },
+    "user_id": "cust-882917"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "commerce.purchases",
+    "commerce": {
+      "order": {
+        "purchaseID": "US-1009358",
+        "priceTotal": 129.99,
+        "currencyCode": "USD"
+      },
+      "purchases": {
+        "value": 1
+      }
+    },
+    "user": {
+      "userId": "cust-882917"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "commerce": {
+      "order": {
+        "purchaseID": "US-1009358"
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- The OMS match (48-hour window, test-order exclusion) applies when reconciling against order records, not to the Transaction ID values returned here.
+  -- Purchase hits with the Transaction ID trimmed and case preserved
+  WITH purchase_hits AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      event_timestamp,
+      TRIM(COALESCE(ecommerce.transaction_id,
+        (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'transaction_id'))) AS transaction_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+  ),
+  -- Classify empty, (not set), undefined, null, 0 and unrendered template values as invalid and rank repeat hits per ID by time
+  classified AS (
+    SELECT
+      event_date,
+      event_timestamp,
+      transaction_id,
+      NOT (COALESCE(transaction_id, '') = ''
+        OR LOWER(transaction_id) IN ('(not set)', 'undefined', 'null', '0')
+        OR REGEXP_CONTAINS(transaction_id, r'\{\{.*\}\}')) AS is_valid_transaction_id,
+      ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) AS hit_rank
+    FROM purchase_hits
+  )
+  -- One row per order: the earliest hit of each valid ID; invalid hits stay in the order count, flagged for the tracking-quality exception
+  SELECT
+    event_date,
+    transaction_id,
+    is_valid_transaction_id,
+    TIMESTAMP_MICROS(event_timestamp) AS order_event_timestamp
+  FROM classified
+  WHERE NOT is_valid_transaction_id
+     OR hit_rank = 1
+  ORDER BY event_date, order_event_timestamp;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- The OMS match (48-hour window, test-order exclusion) applies when reconciling against order records, not to the Transaction ID values returned here.
+  -- Relative reporting window: the last 90 complete days
+  WITH params AS (
+    SELECT
+      DATE_SUB(CURRENT_DATE, 90) AS start_date,
+      DATE_SUB(CURRENT_DATE, 1) AS end_date
+  ),
+  -- Purchase hits with the Transaction ID trimmed and case preserved
+  purchase_hits AS (
+    SELECT
+      CAST(e.timestamp AS DATE) AS event_date,
+      e.timestamp AS event_timestamp,
+      TRIM(e.commerce.`order`.purchaseID) AS transaction_id
+    FROM your_experience_event_dataset e
+    CROSS JOIN params p
+    WHERE e.eventType = 'commerce.purchases'
+      AND CAST(e.timestamp AS DATE) BETWEEN p.start_date AND p.end_date
+  ),
+  -- Classify empty, (not set), undefined, null, 0 and unrendered template values as invalid and rank repeat hits per ID by time
+  classified AS (
+    SELECT
+      event_date,
+      event_timestamp,
+      transaction_id,
+      NOT (COALESCE(transaction_id, '') = ''
+        OR LOWER(transaction_id) IN ('(not set)', 'undefined', 'null', '0')
+        OR transaction_id RLIKE '\\{\\{.*\\}\\}') AS is_valid_transaction_id,
+      ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) AS hit_rank
+    FROM purchase_hits
+  )
+  -- One row per order: the earliest hit of each valid ID; invalid hits stay in the order count, flagged for the tracking-quality exception
+  SELECT
+    event_date,
+    transaction_id,
+    is_valid_transaction_id,
+    event_timestamp AS order_event_timestamp
+  FROM classified
+  WHERE NOT is_valid_transaction_id
+     OR hit_rank = 1
+  ORDER BY event_date, order_event_timestamp;
 
+Calculation Notes: |
+  1️⃣ Source of truth and format: the value is the customer-facing order number the platform creates at order confirmation (Shopify order name or ID, Salesforce Commerce Cloud order_no, Adobe Commerce increment_id), sent unchanged as GA4 `transaction_id`, Adobe `s.purchaseID` and XDM `commerce.order.purchaseID`. Store it as a trimmed, case-preserved string; never substitute cart_id, checkout_id, payment authorisation IDs or a session identifier, and keep it within Adobe's 20-character purchaseID limit so the same value fits every platform.
+  2️⃣ De-duplication rule: GA4 reports and Adobe Analytics (per report suite) count revenue and orders for a repeated ID only once, but the GA4 BigQuery export and the AEP dataset keep every hit. Warehouse logic therefore keeps the earliest purchase event per transaction_id (ordered by event timestamp) and treats later hits with the same ID as duplicates, never as additional orders.
+  3️⃣ Invalid and missing values: empty strings, `(not set)`, `undefined`, `null`, `0` and unrendered template tokens such as `{{transaction_id}}` are classified as invalid. Purchases with an invalid ID are kept in the order count for trend continuity but are excluded from de-duplication and order joins, and are reported separately as a tracking-quality exception.
+  4️⃣ Timing and firing: the ID is populated only after the order is created and payment is authorised, on the confirmation page or app confirmation screen. Confirmation-page reloads, back-button returns and revisits from the order email must not produce a second purchase; server-side purchases sent through Measurement Protocol or the AEP Edge API must reuse the identical ID so client and server hits collapse to one order.
+  5️⃣ Join and match rules: join to the order management system on the exact normalised ID within a 48-hour window of the order timestamp. Orders present only in the OMS indicate tracking loss (ad blockers, consent denied, confirmation page not reached); IDs present only in analytics indicate test, fraudulent or rolled-back orders. Test orders are excluded by the platform's test flag or reserved ID prefix before any match rate is calculated.
+  6️⃣ Post-purchase lifecycle: refunds (the refund event), order edits, exchanges and split shipments keep the parent Transaction ID so reversals net against the original order; each subscription renewal or reorder receives its own ID. Storefronts with independent order counters (multiple regions, brands or marketplaces) prefix the ID with a store code so values never collide across properties.
+  7️⃣ Privacy and access: the ID contains no personal data on its own, but it resolves to a named customer once joined to the OMS, so the joined order table is restricted to approved roles. Never embed email addresses, names or payment details in the ID, and because it is unique per order it is unsuitable as an audience or segment dimension; use it for lookups, de-duplication and joins only.
 
+Business Use Case: |
+  1️⃣ The Finance revenue reconciliation analyst compares the prior day's GA4 and Adobe Transaction IDs with Shopify orders each morning; when the match rate for web orders drops below 97%, they raise an incident with the Digital Product team and annotate the revenue dashboard so the gap is not read as a sales decline.
+  2️⃣ The Product owner for checkout monitors the share of purchase events carrying a duplicate or invalid Transaction ID after every confirmation-page or app release; when it exceeds 0.5% of orders, they roll back the release or ship a reload guard before the next trading day.
+  3️⃣ The Marketing operations team passes the same Transaction ID to Google Ads conversion tracking and Meta Conversions API; when the platform-reported conversions exceed de-duplicated orders by more than 5% for a campaign, they correct the tag mapping and submit conversion retractions for refunded orders by Transaction ID so bidding algorithms optimise on real orders.
+  4️⃣ The Customer Service escalation lead retrieves the checkout session behind a disputed or allegedly unconfirmed order by Transaction ID, confirms whether payment and confirmation steps completed, and decides between reissuing the confirmation, refunding or escalating a chargeback.
 
+Dependencies:
+  Events: [purchase]
 
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
 
+Report Attributes: |
+  Order Status; Payment Method; Coupon Code; Checkout Type; Currency; Device Category; Traffic Source; Date
 
+Dashboard Usage: [Order Reconciliation: Analytics vs OMS, Purchase Tracking Data Quality, Checkout Funnel Performance]
 
+Segment Eligibility: |
+  false
 
+Related Dimensions: [order-status, coupon-code, payment-method, checkout-type, shipping-tier, fulfillment-method, number-of-shipments, refund-type, currency]
 
+Derived Dimensions: [purchase-count-band, last-purchase-recency-band, acquisition-cohort]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +228,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-21T16:29:13.061+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-21T16:29:24.267+00:00
 
