@@ -1,0 +1,178 @@
+# Event: Add Shipping Info
+# Generated: 2026-09-23T15:49:26.693Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Add Shipping Info
+Event Serialization: always
+
+Description: |
+  GA4 recommended add_shipping_info event, fired when a shopper submits a shipping method at checkout. It carries shipping_tier, cart value and items, and feeds shipping-step drop-off and delivery-mix analysis.
+
+Category: Conversion
+
+Tags: [event, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Checkout
+
+
+Event Type: standard
+
+Aggregation Window: Event, Session, Daily
+
+GA4 Event: |
+  add_shipping_info
+
+Adobe Event: |
+  add_shipping_info
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "Add Shipping Info",
+            "eventAction": "add_shipping_info",
+            "type": "checkout"
+          }
+        }
+      ],
+      "cart": {
+        "cartID": "{cart_id}",
+        "price": {
+          "currency": "{currency}",
+          "basePrice": "{value}"
+        },
+        "item": "{items}",
+        "attributes": {
+          "checkoutID": "{checkout_id}",
+          "shippingTier": "{shipping_tier}",
+          "fulfillmentMethod": "{fulfillment_method}",
+          "checkoutType": "{checkout_type}",
+          "coupon": "{coupon}"
+        }
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "add_shipping_info",
+    "ecommerce": {
+      "currency": "{currency}",
+      "value": "{value}",
+      "coupon": "{coupon}",
+      "shipping_tier": "{shipping_tier}",
+      "checkout_id": "{checkout_id}",
+      "cart_id": "{cart_id}",
+      "fulfillment_method": "{fulfillment_method}",
+      "checkout_type": "{checkout_type}",
+      "items": "{items}"
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "add_shipping_info",
+    "shipping": {
+      "shippingTier": "{shipping_tier}",
+      "fulfillmentMethod": "{fulfillment_method}",
+      "checkoutType": "{checkout_type}",
+      "checkoutId": "{checkout_id}",
+      "cartId": "{cart_id}",
+      "coupon": "{coupon}"
+    },
+    "cart": {
+      "currency": "{currency}",
+      "value": "{value}",
+      "items": "{items}"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.checkouts",
+    "commerce": {
+      "checkouts": {
+        "value": 1
+      },
+      "cart": {
+        "cartID": "{cart_id}"
+      },
+      "order": {
+        "currencyCode": "{currency}"
+      },
+      "promotion": {
+        "couponCode": "{coupon}"
+      }
+    },
+    "productListItems": "{items}",
+    "_tenant": {
+      "checkoutStepName": "shipping_info",
+      "checkoutID": "{checkout_id}",
+      "merchandiseValue": "{value}",
+      "shippingTier": "{shipping_tier}",
+      "fulfillmentMethod": "{fulfillment_method}",
+      "checkoutType": "{checkout_type}"
+    }
+  }
+
+Parameters: |
+  {
+    "currency": "string - ISO 4217 code of the cart value, e.g. USD",
+    "value": "number - merchandise value of the cart, excluding shipping and tax",
+    "items": "array - cart line items (item_id, item_name, price, quantity, item_category)",
+    "shipping_tier": "string - selected shipping option, controlled lowercase value: standard, express, next_day or click_and_collect",
+    "coupon": "string - order-level coupon code applied at checkout, if any",
+    "checkout_id": "string - checkout identifier used to dedupe resubmissions",
+    "cart_id": "string - cart identifier linking to add_to_cart and begin_checkout",
+    "fulfillment_method": "string - delivery, click_and_collect or ship_to_store",
+    "checkout_type": "string - guest or registered checkout"
+  }
+
+Calculation Notes: |
+  ["1️⃣ Fires when the shipping step is submitted and address and method pass validation; not on method clicks or on page load.","2️⃣ Serialization always: re-fires on each resubmission; dedupe on checkout_id within a session when counting shipping-step completions.","3️⃣ Required: currency, value, items. Recommended: shipping_tier, coupon, checkout_id. value is merchandise total, excluding shipping and tax.","4️⃣ shipping_tier takes lowercase controlled values (standard, express, next_day, click_and_collect), as in add_payment_info; never rate IDs.","5️⃣ No PII: never send name, street address, postcode, email or phone. Send only when analytics_storage consent is granted.","6️⃣ Express wallets (Apple Pay, Shop Pay) must fire it on shipping selection in the wallet sheet, or the funnel shows false drop-off.","7️⃣ Common mistakes: firing on begin_checkout load, items out of sync with the cart, value sent as a string, currency missing."]
+
+Business Use Case: |
+  ["1️⃣ Checkout Product Manager: shipping-step drop-off rises week on week → audit address form errors.","2️⃣ Pricing team: Express share of shipping_tier falls after a rate change → retest the free-shipping threshold.","3️⃣ Fulfilment Operations: tier mix shifts toward Next Day before peak → rebook carrier capacity for the forecast.","4️⃣ CRO team: step completion differs by device → prioritise address autocomplete tests on the weakest device."]
+
+Dependencies:
+  Dimensions: [shipping-tier, currency]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  shipping_tier; fulfillment_method; checkout_type; device_category; coupon; traffic_source
+
+    Dashboard Usage: [Checkout Funnel Performance, Shipping & Delivery Options Mix, Conversion Rate Optimisation]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [shipping-tier, fulfillment-method, checkout-type, coupon-code, currency, device-category]
+
+    Derived Dimensions: [shipping-tier]
+
+    Derived Metrics: [shipping-info-added]
+
+    Derived KPIs: [checkout-completion-rate, checkout-conversion-rate, cart-to-purchase-rate]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-23T15:46:34.085+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-23T15:49:26.456+00:00
+
