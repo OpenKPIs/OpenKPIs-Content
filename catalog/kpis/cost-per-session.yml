@@ -1,0 +1,289 @@
+# KPI: Cost per Session
+# Generated: 2026-09-23T16:53:57.315Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Cost per Session
+Formula: SUM(Paid Media Spend) / COUNT(DISTINCT Paid Sessions), matched on date, source, medium and campaign
+
+Description: |
+  Paid media spend divided by the sessions those same paid campaigns delivered in the period. Shows what each paid visit costs and is read against Revenue per Visit.
+
+Category: Acquisition
+
+Tags: [kpi, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Session
+
+Measure Type: Currency
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  session_start
+
+Adobe Event: |
+  sessionStart
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "session_start",
+            "timeStamp": "2026-09-23T14:05:00Z"
+          },
+          "attributes": {
+            "sessionID": "S_882471",
+            "gaSessionId": "1758632700",
+            "gaSessionNumber": 1,
+            "source": "google",
+            "medium": "cpc",
+            "campaign": "summer_sale_2026",
+            "firstTouchChannelGrouping": "Paid Search",
+            "landingPage": "/collections/summer-sale",
+            "engagedSession": true,
+            "trafficType": "external",
+            "userId": "U_55219"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "session_start",
+    "session_id": "S_882471",
+    "ga_session_id": "1758632700",
+    "ga_session_number": 1,
+    "source": "google",
+    "medium": "cpc",
+    "campaign": "summer_sale_2026",
+    "first_touch_channel_grouping": "Paid Search",
+    "landing_page": "/collections/summer-sale",
+    "engaged_session": true,
+    "traffic_type": "external",
+    "user_id": "U_55219"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "sessionStart",
+    "session": {
+      "sessionId": "S_882471",
+      "gaSessionId": "1758632700",
+      "gaSessionNumber": 1,
+      "engagedSession": true
+    },
+    "attribution": {
+      "source": "google",
+      "medium": "cpc",
+      "campaign": "summer_sale_2026",
+      "firstTouchChannelGrouping": "Paid Search",
+      "landingPage": "/collections/summer-sale",
+      "trafficType": "external"
+    },
+    "user": {
+      "userId": "U_55219"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "web": {
+      "webPageDetails": {
+        "URL": "/collections/summer-sale"
+      }
+    },
+    "marketing": {
+      "trackingCode": "summer_sale_2026",
+      "campaignGroup": {
+        "campaignName": "summer_sale_2026"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "session": {
+          "sessionID": "S_882471",
+          "gaSessionNumber": 1,
+          "engagedSession": true
+        },
+        "customDimensions": {
+          "eVars": {
+            "source": "google",
+            "medium": "cpc",
+            "firstTouchChannelGrouping": "Paid Search",
+            "trafficType": "external"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  DECLARE reporting_currency STRING DEFAULT 'USD';
+  DECLARE ad_account_tz STRING DEFAULT 'America/New_York';
+  
+  WITH media_spend AS (
+    -- Daily ad platform media cost only (no fees, production or owned channels), converted at the daily FX rate
+    SELECT
+      s.spend_date,
+      LOWER(s.source) AS source,
+      LOWER(s.medium) AS medium,
+      LOWER(s.campaign) AS campaign,
+      SUM(s.spend_amount * IF(s.currency = reporting_currency, 1, fx.rate)) AS spend
+    FROM `your-project.marketing.ad_spend_daily` AS s
+    LEFT JOIN `your-project.finance.fx_daily_rates` AS fx
+      ON fx.rate_date = s.spend_date
+     AND fx.from_currency = s.currency
+     AND fx.to_currency = reporting_currency
+    WHERE s.spend_date BETWEEN start_date AND end_date
+      AND s.cost_type = 'media'
+    GROUP BY 1, 2, 3, 4
+  ),
+  sessions AS (
+    -- One row per external session (user_pseudo_id + ga_session_id), internal and bot traffic excluded, dated in the ad account time zone
+    SELECT
+      CONCAT(user_pseudo_id, '.', (SELECT COALESCE(value.string_value, CAST(value.int_value AS STRING)) FROM UNNEST(event_params) WHERE key = 'ga_session_id')) AS session_key,
+      DATE(TIMESTAMP_MICROS(event_timestamp), ad_account_tz) AS session_date,
+      LOWER((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'source')) AS source,
+      LOWER((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'medium')) AS medium,
+      LOWER((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'campaign')) AS campaign
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL 1 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL 1 DAY))
+      AND event_name = 'session_start'
+      AND IFNULL((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type'), 'external') NOT IN ('internal', 'bot')
+  ),
+  paid_sessions AS (
+    -- Sessions whose date, source, medium and campaign match a media cost row
+    SELECT COUNT(DISTINCT se.session_key) AS paid_sessions
+    FROM sessions AS se
+    JOIN media_spend AS m
+      ON m.spend_date = se.session_date
+     AND m.source = se.source
+     AND m.medium = se.medium
+     AND m.campaign = se.campaign
+  )
+  -- Total spend over total matched sessions; zero matched sessions returns NULL
+  SELECT SAFE_DIVIDE((SELECT SUM(spend) FROM media_spend), paid_sessions) AS cost_per_session
+  FROM paid_sessions;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Relative reporting window, reporting currency and ad account time zone
+    SELECT
+      date_sub(current_date(), 90) AS start_date,
+      date_sub(current_date(), 1) AS end_date,
+      'USD' AS reporting_currency,
+      'America/New_York' AS ad_account_tz
+  ),
+  media_spend AS (
+    -- Daily ad platform media cost only (no fees, production or owned channels), converted at the daily FX rate
+    SELECT
+      s.spend_date,
+      lower(s.source) AS source,
+      lower(s.medium) AS medium,
+      lower(s.campaign) AS campaign,
+      SUM(s.spend_amount * CASE WHEN s.currency = p.reporting_currency THEN 1 ELSE fx.rate END) AS spend
+    FROM ad_spend_daily AS s
+    CROSS JOIN params AS p
+    LEFT JOIN fx_daily_rates AS fx
+      ON fx.rate_date = s.spend_date
+     AND fx.from_currency = s.currency
+     AND fx.to_currency = p.reporting_currency
+    WHERE s.spend_date BETWEEN p.start_date AND p.end_date
+      AND s.cost_type = 'media'
+    GROUP BY 1, 2, 3, 4
+  ),
+  sessions AS (
+    -- One row per external session (sessionID), internal and bot traffic excluded, dated in the ad account time zone
+    SELECT
+      e._experience.analytics.session.sessionID AS session_key,
+      to_date(from_utc_timestamp(e.timestamp, p.ad_account_tz)) AS session_date,
+      lower(e._experience.analytics.customDimensions.eVars.source) AS source,
+      lower(e._experience.analytics.customDimensions.eVars.medium) AS medium,
+      lower(e.marketing.campaignGroup.campaignName) AS campaign
+    FROM aep_web_events_dataset AS e
+    CROSS JOIN params AS p
+    WHERE e.eventType = 'sessionStart'
+      AND coalesce(e._experience.analytics.customDimensions.eVars.trafficType, 'external') NOT IN ('internal', 'bot')
+      AND e.timestamp >= date_sub(p.start_date, 1)
+      AND e.timestamp < date_add(p.end_date, 2)
+  ),
+  paid_sessions AS (
+    -- Sessions whose date, source, medium and campaign match a media cost row
+    SELECT COUNT(DISTINCT se.session_key) AS paid_sessions
+    FROM sessions AS se
+    JOIN media_spend AS m
+      ON m.spend_date = se.session_date
+     AND m.source = se.source
+     AND m.medium = se.medium
+     AND m.campaign = se.campaign
+  )
+  -- Total spend over total matched sessions; zero matched sessions returns NULL
+  SELECT (SELECT SUM(spend) FROM media_spend) / NULLIF(paid_sessions, 0) AS cost_per_session
+  FROM paid_sessions;
+
+Calculation Notes: |
+  1️⃣ Numerator is ad platform media cost only; agency fees, creative production and owned or organic channel costs are excluded.
+  2️⃣ Denominator counts sessions whose source, medium and campaign match a cost row; organic, direct and referral sessions are excluded.
+  3️⃣ A session is a distinct user_pseudo_id + ga_session_id under the GA4 30-minute inactivity timeout.
+  4️⃣ Exclude internal and bot traffic from sessions; spend is never filtered by traffic type.
+  5️⃣ Convert spend to one reporting currency at the daily rate and align both sides to the ad account time zone before joining.
+  6️⃣ Divide aggregated totals; never average daily ratios. Zero matched sessions returns NULL and flags a UTM tagging gap.
+
+Business Use Case: |
+  1️⃣ Paid media team: a campaign's cost per session rises 20% week over week; cut bids or pause weak placements.
+  2️⃣ Growth marketing: cost per session exceeds Revenue per Visit on a channel; shift budget to channels where it does not.
+  3️⃣ Finance: plans the quarterly traffic budget as planned sessions × trailing 90-day cost per session by channel.
+  4️⃣ Marketing analytics: campaigns with spend but zero sessions go to ad ops for UTM tagging fixes.
+
+Dependencies:
+  Events: [session-start]
+  Metrics: [ad-spend]
+  Dimensions: [traffic-source]
+  KPIs: [session]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Date; Session Source / Medium; Campaign; Traffic Source; Device Category
+
+Dashboard Usage: [Paid Media Performance, Marketing Acquisition Efficiency, Channel Budget Planning]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [revenue-per-visit, return-on-ad-spend, session, online-order-conversion-rate, cost-per-lead, marketing-return-on-investment, customer-acquisition-cost-payback-period]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-23T16:29:10.361+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-23T16:53:56.884+00:00
+
