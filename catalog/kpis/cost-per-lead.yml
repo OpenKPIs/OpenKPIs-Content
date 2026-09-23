@@ -1,0 +1,338 @@
+# KPI: Cost per Lead
+# Generated: 2026-09-23T16:53:46.611Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Cost per Lead
+Formula: Total Marketing Spend / Net-New Leads Generated
+
+Description: |
+  Marketing spend divided by net-new leads captured in the same period, where a lead is a generate_lead event such as an email or SMS opt-in. Read by channel and campaign to price list growth.
+
+Category: Acquisition
+
+Tags: [kpi, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: Currency
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
+
+GA4 Event: |
+  generate_lead
+
+Adobe Event: |
+  generate_lead
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "generate_lead",
+          "eventAction": "generate_lead",
+          "eventTimestamp": "2026-09-23T16:12:00Z",
+          "trafficType": "customer"
+        },
+        "lead": {
+          "leadID": "L20260923-004821",
+          "leadType": "email_optin",
+          "leadSource": "paid_search",
+          "formID": "footer_newsletter_signup",
+          "customerType": "new",
+          "leadValidationStatus": "valid",
+          "currency": "USD",
+          "value": 0
+        },
+        "campaign": {
+          "campaignName": "spring_newsletter_promo",
+          "campaignSource": "google",
+          "campaignMedium": "cpc"
+        },
+        "user": {
+          "userID": "u_5039281"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "generate_lead",
+    "lead_id": "L20260923-004821",
+    "form_id": "footer_newsletter_signup",
+    "lead_type": "email_optin",
+    "lead_source": "paid_search",
+    "customer_type": "new",
+    "lead_validation_status": "valid",
+    "currency": "USD",
+    "value": 0,
+    "campaign": "spring_newsletter_promo",
+    "campaign_source": "google",
+    "campaign_medium": "cpc",
+    "traffic_type": "customer",
+    "user_id": "u_5039281"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "generate_lead",
+    "leadDetail": {
+      "lead_id": "L20260923-004821",
+      "form_id": "footer_newsletter_signup",
+      "lead_type": "email_optin",
+      "lead_source": "paid_search",
+      "customer_type": "new",
+      "lead_validation_status": "valid",
+      "currency": "USD",
+      "value": 0,
+      "campaign": "spring_newsletter_promo",
+      "campaign_source": "google",
+      "campaign_medium": "cpc",
+      "traffic_type": "customer",
+      "user_id": "u_5039281"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "generate_lead",
+    "_id": "3f6a1c9e-8b2d-4e11-9c47-2a6f0b1d7e55",
+    "_tenant": {
+      "leadID": "L20260923-004821"
+    },
+    "web": {
+      "webInteraction": {
+        "name": "footer_newsletter_signup",
+        "type": "other"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "paid_search",
+            "eVar2": "email_optin",
+            "eVar3": "google",
+            "eVar4": "cpc",
+            "eVar5": "new",
+            "eVar6": "spring_newsletter_promo",
+            "eVar7": "customer",
+            "eVar8": "valid"
+          }
+        },
+        "event1to100": {
+          "event1": {
+            "value": 0
+          }
+        }
+      }
+    },
+    "identityMap": {
+      "loginID": [
+        {
+          "id": "u_5039281"
+        }
+      ]
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH lead_events AS (
+    -- Valid generate_lead hits from real traffic, parameters pivoted, full history up to end_date (to find leads that existed before the period)
+    SELECT event_dt, event_ts, lead_id, customer_type, source, medium, campaign
+    FROM (
+      SELECT
+        PARSE_DATE('%Y%m%d', event_date) AS event_dt,
+        event_timestamp AS event_ts,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'lead_id') AS lead_id,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'customer_type') AS customer_type,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type,
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'lead_validation_status') AS lead_validation_status,
+        COALESCE((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'campaign_source'), '(direct)') AS source,
+        COALESCE((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'campaign_medium'), '(none)') AS medium,
+        COALESCE((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'campaign'), '(not set)') AS campaign
+      FROM `your-project.analytics_123456789.events_*`
+      WHERE _TABLE_SUFFIX <= FORMAT_DATE('%Y%m%d', end_date)
+        AND event_name = 'generate_lead'
+    )
+    WHERE COALESCE(traffic_type, '') NOT IN ('internal', 'test', 'bot')
+      AND lead_validation_status = 'valid'
+  ),
+  
+  net_new_leads AS (
+    -- One row per lead_id: first generate_lead in the period, no hit with customer_type other than 'new', attributed last non-direct click
+    SELECT lead_id, source, medium, campaign
+    FROM (
+      SELECT
+        lead_id, source, medium, campaign,
+        MIN(event_dt) OVER (PARTITION BY lead_id) AS first_dt,
+        SUM(IF(COALESCE(customer_type, '') != 'new', 1, 0)) OVER (PARTITION BY lead_id) AS existing_flags,
+        ROW_NUMBER() OVER (PARTITION BY lead_id ORDER BY IF(source = '(direct)', 1, 0), event_ts DESC) AS rn
+      FROM lead_events
+      WHERE lead_id IS NOT NULL
+    )
+    WHERE rn = 1 AND first_dt >= start_date AND existing_flags = 0
+  ),
+  
+  leads_by_key AS (
+    -- Net-new leads per source / medium / campaign
+    SELECT source, medium, campaign, COUNT(*) AS leads
+    FROM net_new_leads
+    GROUP BY source, medium, campaign
+  ),
+  
+  spend_by_key AS (
+    -- Warehouse media cost in reporting currency net of credits, fees only where Finance includes them, same date range and keys
+    SELECT
+      source, medium, campaign,
+      SUM(media_cost - credits + IF(finance_includes_fees, fees, 0)) AS spend
+    FROM `your-project.marketing.ad_spend_daily`
+    WHERE spend_date BETWEEN start_date AND end_date
+    GROUP BY source, medium, campaign
+  )
+  
+  -- CPL per source / medium / campaign plus the blended total; zero leads returns NULL and spend-without-leads rows are listed first
+  SELECT
+    source,
+    medium,
+    campaign,
+    SUM(COALESCE(s.spend, 0)) AS spend,
+    SUM(COALESCE(l.leads, 0)) AS net_new_leads,
+    ROUND(SUM(COALESCE(s.spend, 0)) / NULLIF(SUM(COALESCE(l.leads, 0)), 0), 2) AS cost_per_lead
+  FROM spend_by_key AS s
+  FULL OUTER JOIN leads_by_key AS l USING (source, medium, campaign)
+  GROUP BY GROUPING SETS ((source, medium, campaign), ())
+  ORDER BY GROUPING(source), SUM(COALESCE(l.leads, 0)) = 0 DESC, SUM(COALESCE(s.spend, 0)) DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Relative reporting window
+    SELECT DATE_SUB(CURRENT_DATE, 90) AS start_date, DATE_SUB(CURRENT_DATE, 1) AS end_date
+  ),
+  
+  lead_events AS (
+    -- Valid generate_lead hits from real traffic, eVars mapped, full history up to end_date (to find leads that existed before the period)
+    SELECT
+      TO_DATE(e.timestamp) AS event_dt,
+      e.timestamp AS event_ts,
+      e._tenant.leadID AS lead_id,
+      e._experience.analytics.customDimensions.eVars.eVar5 AS customer_type,
+      COALESCE(e._experience.analytics.customDimensions.eVars.eVar3, '(direct)') AS source,
+      COALESCE(e._experience.analytics.customDimensions.eVars.eVar4, '(none)') AS medium,
+      COALESCE(e._experience.analytics.customDimensions.eVars.eVar6, '(not set)') AS campaign
+    FROM aep_web_events_dataset AS e
+    CROSS JOIN params AS p
+    WHERE TO_DATE(e.timestamp) <= p.end_date
+      AND e.eventType = 'generate_lead'
+      AND COALESCE(e._experience.analytics.customDimensions.eVars.eVar7, '') NOT IN ('internal', 'test', 'bot')
+      AND e._experience.analytics.customDimensions.eVars.eVar8 = 'valid'
+  ),
+  
+  net_new_leads AS (
+    -- One row per lead_id: first generate_lead in the period, no hit with customer_type other than 'new', attributed last non-direct click
+    SELECT r.lead_id, r.source, r.medium, r.campaign
+    FROM (
+      SELECT
+        lead_id, source, medium, campaign,
+        MIN(event_dt) OVER (PARTITION BY lead_id) AS first_dt,
+        SUM(IF(COALESCE(customer_type, '') != 'new', 1, 0)) OVER (PARTITION BY lead_id) AS existing_flags,
+        ROW_NUMBER() OVER (PARTITION BY lead_id ORDER BY IF(source = '(direct)', 1, 0), event_ts DESC) AS rn
+      FROM lead_events
+      WHERE lead_id IS NOT NULL
+    ) AS r
+    CROSS JOIN params AS p
+    WHERE r.rn = 1 AND r.first_dt >= p.start_date AND r.existing_flags = 0
+  ),
+  
+  leads_by_key AS (
+    -- Net-new leads per source / medium / campaign
+    SELECT source, medium, campaign, COUNT(*) AS leads
+    FROM net_new_leads
+    GROUP BY source, medium, campaign
+  ),
+  
+  spend_by_key AS (
+    -- Warehouse media cost in reporting currency net of credits, fees only where Finance includes them, same date range and keys
+    SELECT
+      a.source, a.medium, a.campaign,
+      SUM(a.media_cost - a.credits + IF(a.finance_includes_fees, a.fees, 0)) AS spend
+    FROM marketing_ad_spend_daily AS a
+    CROSS JOIN params AS p
+    WHERE a.spend_date BETWEEN p.start_date AND p.end_date
+    GROUP BY a.source, a.medium, a.campaign
+  )
+  
+  -- CPL per source / medium / campaign plus the blended total; zero leads returns NULL and spend-without-leads rows are listed first
+  SELECT
+    source,
+    medium,
+    campaign,
+    SUM(COALESCE(s.spend, 0)) AS spend,
+    SUM(COALESCE(l.leads, 0)) AS net_new_leads,
+    ROUND(SUM(COALESCE(s.spend, 0)) / NULLIF(SUM(COALESCE(l.leads, 0)), 0), 2) AS cost_per_lead
+  FROM spend_by_key AS s
+  FULL OUTER JOIN leads_by_key AS l USING (source, medium, campaign)
+  GROUP BY GROUPING SETS ((source, medium, campaign), ())
+  ORDER BY GROUPING(source), SUM(COALESCE(l.leads, 0)) = 0 DESC, SUM(COALESCE(s.spend, 0)) DESC;
+
+Calculation Notes: |
+  1️⃣ Count distinct lead_id from generate_lead; form resubmits and repeat opt-ins carrying the same lead_id count once.
+  2️⃣ Net-new only: no hit for the lead_id has customer_type other than 'new', and its first generate_lead falls in the period.
+  3️⃣ Spend and leads share the date range and source / medium / campaign keys; leads are attributed last non-direct click.
+  4️⃣ Spend is media cost in reporting currency, net of credits; agency and tool fees only if Finance includes them.
+  5️⃣ Zero leads returns NULL, not 0; list campaigns with spend and no leads separately.
+  6️⃣ Exclude internal, test and bot traffic, and leads failing validation (invalid or disposable email).
+  7️⃣ Spend comes from the warehouse ad-spend table by date, source and medium, not GA4 cost import; reconcile to ad platform invoices monthly.
+
+Business Use Case: |
+  1️⃣ Paid media team pauses campaigns whose weekly CPL runs 20% over target and moves budget to lower-CPL channels.
+  2️⃣ CRM team compares CPL by sign-up offer with the share of those leads that later purchase before scaling an offer.
+  3️⃣ Finance sets the quarterly lead budget from blended CPL and the target list-growth volume.
+
+Dependencies:
+  Metrics: [ad-spend]
+  Dimensions: [traffic-source]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Traffic Source; Campaign; First Touch Channel Grouping; Device Category
+
+Dashboard Usage: [Paid Media Performance, Marketing Acquisition Overview, Lead Generation Funnel]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [lead-conversion-rate, return-on-ad-spend, sign-up-rate, cost-per-session, customer-acquisition-cost-payback-period, marketing-return-on-investment]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-23T16:28:51.62+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-23T16:53:46.132+00:00
+
