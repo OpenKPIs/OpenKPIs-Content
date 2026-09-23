@@ -1,0 +1,135 @@
+# Metric: Ad Clicks
+# Generated: 2026-09-23T16:54:48.978Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Ad Clicks
+Formula: SUM(clicks) from ad-platform performance rows (account × campaign × ad group × date), paid placements only
+
+Description: |
+  Ad Clicks counts clicks on paid ads as reported by the ad platforms (Google Ads, Meta Ads, Microsoft Ads), net of invalid clicks. It is the volume base for CTR, CPC and paid conversion rate.
+
+Category: Acquisition
+
+Tags: [metric, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Global
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH deduped AS (
+    -- Paid-placement performance rows in account time zone, one row per platform x account x campaign x ad group x date (latest load wins)
+    SELECT
+      platform,
+      click_date,
+      clicks,
+      link_clicks
+    FROM `your-project.ads.ad_platform_performance_daily`
+    WHERE click_date BETWEEN start_date AND end_date
+      AND placement_type IN ('SEARCH', 'SHOPPING', 'DISPLAY', 'VIDEO', 'SOCIAL', 'PERFORMANCE_MAX')
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY platform, account_id, campaign_id, ad_group_id, click_date
+      ORDER BY loaded_at DESC
+    ) = 1
+  )
+  -- Daily ad clicks: platform Clicks (Meta: Link Clicks); these fields are already net of platform-filtered invalid clicks
+  SELECT
+    click_date,
+    SUM(IF(platform = 'meta_ads', link_clicks, clicks)) AS ad_clicks
+  FROM deduped
+  GROUP BY click_date
+  ORDER BY click_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Relative reporting window
+    SELECT
+      DATE_SUB(CURRENT_DATE, 90) AS start_date,
+      DATE_SUB(CURRENT_DATE, 1) AS end_date
+  ),
+  ranked AS (
+    -- Paid-placement performance rows in account time zone, ranked per platform x account x campaign x ad group x date (latest load first)
+    SELECT
+      a.platform,
+      a.click_date,
+      a.clicks,
+      a.link_clicks,
+      ROW_NUMBER() OVER (
+        PARTITION BY a.platform, a.account_id, a.campaign_id, a.ad_group_id, a.click_date
+        ORDER BY a.loaded_at DESC
+      ) AS rn
+    FROM aep_backend_dataset_ad_platform_performance_daily AS a
+    CROSS JOIN params AS p
+    WHERE a.click_date BETWEEN p.start_date AND p.end_date
+      AND a.placement_type IN ('SEARCH', 'SHOPPING', 'DISPLAY', 'VIDEO', 'SOCIAL', 'PERFORMANCE_MAX')
+  )
+  -- Daily ad clicks: platform Clicks (Meta: Link Clicks); these fields are already net of platform-filtered invalid clicks
+  SELECT
+    click_date,
+    SUM(CASE WHEN platform = 'meta_ads' THEN link_clicks ELSE clicks END) AS ad_clicks
+  FROM ranked
+  WHERE rn = 1
+  GROUP BY click_date
+  ORDER BY click_date;
+
+Calculation Notes: |
+  1️⃣ Source of truth is the platform Clicks field (Google Ads metrics.clicks, Microsoft Ads Clicks); for Meta use Link Clicks, not Clicks (all).,2️⃣ Paid placements only: search, shopping, display, video, social, Performance Max. Organic, email and on-site promotion clicks are excluded.,3️⃣ Invalid clicks the platform filters are excluded; reload the trailing 3 days daily because platforms restate them after the fact.,4️⃣ Bucket by click date in the ad account's time zone; do not re-bucket to UTC or the ad-platform totals will not tie out.,5️⃣ Dedupe on account, campaign, ad group and date before summing, so reloads and overlapping exports never double count.,6️⃣ Clicks exceed GA4 paid sessions (tag not yet fired, consent denied, repeat clicks in one session); report the gap, never force a match.
+
+Business Use Case: |
+  1️⃣ Paid search team: brand campaign clicks fall >20% week over week → check budget caps, bids and disapproved ads.,2️⃣ Performance marketing: clicks flatten while spend rises → move budget to ad groups with a lower cost per click.,3️⃣ Marketing ops: platform clicks exceed GA4 paid sessions by >30% → audit auto-tagging (gclid, fbclid) and landing pages.
+
+Dependencies:
+  Dimensions: [traffic-source, device-category]
+
+Source Data: Ad Platform Backend (Google Ads / Meta Ads / Microsoft Ads performance tables)
+
+Report Attributes: |
+  Ad Platform; Campaign; Ad Group / Ad Set; Ad Network Type; Device; Keyword; Date
+
+Dashboard Usage: [Paid Media Performance, Marketing Acquisition Overview]
+
+Segment Eligibility: |
+  false
+
+Related Metrics: [ad-spend, email-clicks, new-users, engaged-sessions]
+
+Derived KPIs: [return-on-ad-spend]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-23T16:06:09.923+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-23T16:54:48.65+00:00
+
