@@ -1,7 +1,7 @@
 # KPI: New vs Returning Customer Ratio
-# Generated: 2026-09-23T16:29:56.271Z
+# Generated: 2026-09-23T16:30:05.485Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: New vs Returning Customer Ratio
 Formula: COUNT(DISTINCT New Customers) / COUNT(DISTINCT Returning Customers)
@@ -11,6 +11,19 @@ Description: |
 
 Category: Acquisition
 
+Tags: [kpi, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: User
+
+Measure Type: Ratio
+
+Aggregation Window: Weekly, Monthly, Quarterly, Yearly
 
 
 
@@ -18,22 +31,167 @@ Category: Acquisition
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  DECLARE reporting_tz STRING DEFAULT 'America/New_York';
+  
+  -- Completed orders from the commerce platform backend up to period end, dated in the reporting time zone; cancelled, fully refunded, test, staff, marketplace and B2B orders removed
+  WITH eligible_orders AS (
+    SELECT
+      order_id,
+      customer_id,
+      hashed_email,
+      DATE(order_timestamp, reporting_tz) AS order_date
+    FROM `your-project.commerce.orders`
+    WHERE order_status = 'completed'
+      AND COALESCE(refund_status, 'none') != 'fully_refunded'
+      AND NOT COALESCE(is_test_order, FALSE)
+      AND NOT COALESCE(is_staff_order, FALSE)
+      AND COALESCE(sales_channel, '') != 'marketplace'
+      AND COALESCE(order_type, '') != 'b2b'
+      AND DATE(order_timestamp, reporting_tz) <= end_date
+  ),
+  -- Customer ID known for each hashed email, so guest orders merge with the same buyer's logged-in orders
+  email_identity AS (
+    SELECT hashed_email, MAX(customer_id) AS customer_id
+    FROM eligible_orders
+    WHERE customer_id IS NOT NULL AND hashed_email IS NOT NULL
+    GROUP BY hashed_email
+  ),
+  -- Resolved customer per order: customer ID, else the ID matched by hashed email, else the hashed email
+  resolved_orders AS (
+    SELECT
+      o.order_id,
+      o.order_date,
+      COALESCE(o.customer_id, e.customer_id, o.hashed_email) AS customer_key
+    FROM eligible_orders o
+    LEFT JOIN email_identity e ON e.hashed_email = o.hashed_email
+  ),
+  -- First-ever eligible order date per resolved customer from platform history
+  first_orders AS (
+    SELECT customer_key, MIN(order_date) AS first_order_date
+    FROM resolved_orders
+    WHERE customer_key IS NOT NULL
+    GROUP BY customer_key
+  ),
+  -- Distinct resolved customers with an eligible platform order in the period
+  period_customers AS (
+    SELECT DISTINCT customer_key
+    FROM resolved_orders
+    WHERE order_date BETWEEN start_date AND end_date
+      AND customer_key IS NOT NULL
+  )
+  -- New = first-ever order in the period (stays new after a reorder), returning = first order before it; null when no returning customers
+  SELECT
+    SAFE_DIVIDE(
+      COUNTIF(f.first_order_date >= start_date),
+      COUNTIF(f.first_order_date < start_date)
+    ) AS new_vs_returning_customer_ratio
+  FROM period_customers p
+  JOIN first_orders f ON f.customer_key = p.customer_key;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window and the store's reporting time zone
+  WITH params AS (
+    SELECT
+      date_sub(current_date(), 90) AS start_date,
+      date_sub(current_date(), 1) AS end_date,
+      'America/New_York' AS reporting_tz
+  ),
+  -- Completed orders from the commerce platform backend up to period end, dated in the reporting time zone; cancelled, fully refunded, test, staff, marketplace and B2B orders removed
+  eligible_orders AS (
+    SELECT
+      o.order_id,
+      o.customer_id,
+      o.hashed_email,
+      to_date(from_utc_timestamp(o.order_timestamp, p.reporting_tz)) AS order_date
+    FROM commerce_orders_dataset o
+    CROSS JOIN params p
+    WHERE o.order_status = 'completed'
+      AND COALESCE(o.refund_status, 'none') != 'fully_refunded'
+      AND NOT COALESCE(o.is_test_order, FALSE)
+      AND NOT COALESCE(o.is_staff_order, FALSE)
+      AND COALESCE(o.sales_channel, '') != 'marketplace'
+      AND COALESCE(o.order_type, '') != 'b2b'
+      AND to_date(from_utc_timestamp(o.order_timestamp, p.reporting_tz)) <= p.end_date
+  ),
+  -- Customer ID known for each hashed email, so guest orders merge with the same buyer's logged-in orders
+  email_identity AS (
+    SELECT hashed_email, MAX(customer_id) AS customer_id
+    FROM eligible_orders
+    WHERE customer_id IS NOT NULL AND hashed_email IS NOT NULL
+    GROUP BY hashed_email
+  ),
+  -- Resolved customer per order: customer ID, else the ID matched by hashed email, else the hashed email
+  resolved_orders AS (
+    SELECT
+      o.order_id,
+      o.order_date,
+      COALESCE(o.customer_id, e.customer_id, o.hashed_email) AS customer_key
+    FROM eligible_orders o
+    LEFT JOIN email_identity e ON e.hashed_email = o.hashed_email
+  ),
+  -- First-ever eligible order date per resolved customer from platform history
+  first_orders AS (
+    SELECT customer_key, MIN(order_date) AS first_order_date
+    FROM resolved_orders
+    WHERE customer_key IS NOT NULL
+    GROUP BY customer_key
+  ),
+  -- Distinct resolved customers with an eligible platform order in the period
+  period_customers AS (
+    SELECT DISTINCT r.customer_key
+    FROM resolved_orders r
+    CROSS JOIN params p
+    WHERE r.order_date BETWEEN p.start_date AND p.end_date
+      AND r.customer_key IS NOT NULL
+  )
+  -- New = first-ever order in the period (stays new after a reorder), returning = first order before it; null when no returning customers
+  SELECT
+    CAST(SUM(CASE WHEN f.first_order_date >= p.start_date THEN 1 ELSE 0 END) AS DOUBLE)
+      / NULLIF(SUM(CASE WHEN f.first_order_date < p.start_date THEN 1 ELSE 0 END), 0) AS new_vs_returning_customer_ratio
+  FROM period_customers c
+  JOIN first_orders f ON f.customer_key = c.customer_key
+  CROSS JOIN params p;
 
+Calculation Notes: |
+  1️⃣ New: the customer's first-ever completed order falls in the period. Returning: an order in the period plus at least one completed order before it.
+  2️⃣ Count distinct customers, not orders; a new customer who reorders later in the same period stays new for that period.
+  3️⃣ Resolve identity on customer ID or hashed email so guest and logged-in orders from the same buyer count once.
+  4️⃣ Order history comes from the commerce platform; GA4 alone misclassifies buyers whose first order predates the export or a cookie reset.
+  5️⃣ Exclude cancelled, fully refunded, test and staff orders; marketplace and B2B account orders are excluded.
+  6️⃣ Zero returning customers yields null, not infinity; 0.6 reads as 3 new customers for every 5 returning.
+  7️⃣ Assign orders to periods by order timestamp in the store's reporting time zone; compare like-for-like periods to avoid seasonal skew.
 
+Business Use Case: |
+  1️⃣ Growth Marketing: ratio rises while retention falls → shift budget from prospecting to lifecycle email and loyalty.
+  2️⃣ CRM team: promotion drives the ratio down → confirm it pulled existing buyers and cut discount depth for them.
+  3️⃣ Finance: ratio above plan → revisit first-order discount cost and CAC payback assumptions in the forecast.
+  4️⃣ Merchandising: categories with a high ratio → feature them in acquisition campaigns and entry-price bundles.
 
+Dependencies:
+  Dimensions: [customer-status]
 
+Source Data: Commerce Platform Orders (backend database: Shopify / Salesforce Commerce Cloud / Adobe Commerce)
 
+Report Attributes: |
+  First-Touch Channel Grouping; Traffic Source; Device Category; Item Category; Fulfillment Method
 
+Dashboard Usage: [Customer Acquisition Overview, Retention & Repeat Purchase, Executive E-commerce Scorecard]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [customer-retention-rate, marketing-sourced-new-customer-rate, customer-lifetime-value, average-order-value, omnichannel-customer-rate, customer-acquisition-cost-payback-period, marketing-return-on-investment]
 
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +201,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-23T16:29:55.957+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-23T16:30:05.167+00:00
 
