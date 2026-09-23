@@ -1,7 +1,7 @@
 # Dimension: Delivery Time Window
-# Generated: 2026-09-23T15:30:06.020Z
+# Generated: 2026-09-23T15:30:15.348Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Delivery Time Window
 
@@ -10,31 +10,192 @@ Description: |
 
 Category: Operations
 
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
 
+Industry: E-commerce
 
+Priority: Medium
 
+Core Area: Checkout
 
+Scope: Event
 
+Data Type: string
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "T1005843",
+      "delivery": {
+        "fulfillmentMethod": "ship_to_home",
+        "deliveryTimeWindow": "Morning 08-12"
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T1005843",
+      "value": 129.99,
+      "currency": "USD",
+      "fulfillment_method": "ship_to_home",
+      "delivery_time_window": "Morning 08-12",
+      "items": [
+        {
+          "item_id": "SKU_4821",
+          "item_name": "Stand Mixer",
+          "price": 129.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "purchase": {
+      "transactionID": "T1005843",
+      "fulfillmentMethod": "ship_to_home",
+      "deliveryTimeWindow": "Morning 08-12"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "order": {
+        "purchaseID": "T1005843"
+      },
+      "purchases": {
+        "value": 1
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar_fulfillment_method": "ship_to_home",
+            "eVar_delivery_time_window": "Morning 08-12"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Governed-label mapping of carrier free text (note 4) happens at collection; delivery_time_window arrives already governed.
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH purchases AS (
+    -- Slot confirmed on the purchase event only
+    SELECT
+      event_timestamp,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'transaction_id') AS transaction_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'fulfillment_method') AS fulfillment_method,
+      NULLIF(TRIM((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'delivery_time_window')), '') AS delivery_time_window
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+  ),
+  ranked AS (
+    -- Home delivery orders only; a duplicate purchase hit keeps the first one per order
+    SELECT
+      transaction_id,
+      delivery_time_window,
+      ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) AS rn
+    FROM purchases
+    WHERE fulfillment_method = 'ship_to_home'
+      AND transaction_id IS NOT NULL
+  )
+  -- One window per order; delivery orders without a slot are labelled "No Slot Selected"
+  SELECT
+    transaction_id,
+    COALESCE(delivery_time_window, 'No Slot Selected') AS delivery_time_window
+  FROM ranked
+  WHERE rn = 1;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Governed-label mapping of carrier free text (note 4) happens at collection; eVar_delivery_time_window arrives already governed.
+  WITH params AS (
+    -- Relative reporting window: last 90 complete days
+    SELECT CAST(CURRENT_DATE - INTERVAL '90' DAY AS DATE) AS start_date,
+           CAST(CURRENT_DATE - INTERVAL '1' DAY AS DATE) AS end_date
+  ),
+  purchases AS (
+    -- Slot confirmed on the purchase event only
+    SELECT
+      e.timestamp AS event_timestamp,
+      e.commerce.order.purchaseID AS transaction_id,
+      e._experience.analytics.customDimensions.eVars.eVar_fulfillment_method AS fulfillment_method,
+      NULLIF(TRIM(e._experience.analytics.customDimensions.eVars.eVar_delivery_time_window), '') AS delivery_time_window
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE e.eventType = 'commerce.purchases'
+      AND CAST(e.timestamp AS DATE) BETWEEN p.start_date AND p.end_date
+  ),
+  ranked AS (
+    -- Home delivery orders only; a duplicate purchase hit keeps the first one per order
+    SELECT
+      transaction_id,
+      delivery_time_window,
+      ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) AS rn
+    FROM purchases
+    WHERE fulfillment_method = 'ship_to_home'
+      AND transaction_id IS NOT NULL
+  )
+  -- One window per order; delivery orders without a slot are labelled "No Slot Selected"
+  SELECT
+    transaction_id,
+    COALESCE(delivery_time_window, 'No Slot Selected') AS delivery_time_window
+  FROM ranked
+  WHERE rn = 1;
 
+Calculation Notes: |
+  1️⃣ Value is the slot confirmed on the purchase event; slots viewed or changed earlier in checkout are ignored.,2️⃣ Home delivery orders only: BOPIS, curbside and ship-to-store orders are excluded and fall under Pickup Window.,3️⃣ Delivery orders with no bookable slot take "No Slot Selected", never null, so slot-share reports keep the full order base.,4️⃣ Labels follow a governed list keyed on local start-end hours in the delivery address time zone; carrier free text is mapped to it.,5️⃣ Reschedules do not overwrite the value; the rebooked slot is read from the order management record as a separate field.,6️⃣ One value per order: purchase carries a single delivery_time_window, no per-shipment slot; a duplicate purchase hit keeps the first one.,7️⃣ Intra-day slot only: the date sits in Delivery Promise Date and the speed option in Shipping Tier.
 
+Business Use Case: |
+  1️⃣ Fulfillment ops reviews on-time rate by window weekly and cuts slot capacity where SLA misses exceed target.,2️⃣ Customer Service maps WISMO contacts to windows and adds proactive ETA messages for the worst slots.,3️⃣ Revenue Management raises the fee on evening slots that stay above 90% fill for four straight weeks.,4️⃣ Product tests checkout slot ordering when the "No Slot Selected" share rises month over month.
 
+Dependencies:
+  Events: [purchase]
+  Dimensions: [fulfillment-method]
 
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
 
+Report Attributes: |
+  fulfillment-method; shipping-tier; delivery-region; carrier; delivery-promise-date
 
+Dashboard Usage: [Last-Mile Delivery Performance, Delivery Slot Utilization, Post-Purchase Customer Contact (WISMO)]
 
+Segment Eligibility: |
+  true
 
+Related Dimensions: [pickup-window, delivery-promise-date, shipping-tier, fulfillment-method, delivery-location, delivery-sla-status]
 
+Derived Dimensions: [delivery-sla-status]
 
+Data Sensitivity: Internal
 
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +203,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-23T15:30:05.582+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-23T15:30:14.655+00:00
 
