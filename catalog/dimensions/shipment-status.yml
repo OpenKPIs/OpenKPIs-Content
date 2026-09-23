@@ -1,0 +1,216 @@
+# Dimension: Shipment Status
+# Generated: 2026-09-23T15:49:12.661Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Shipment Status
+
+Description: |
+  Latest carrier milestone of one shipment: Label Created, In Transit, Out for Delivery, Delivered, Exception or Returned to Sender. Set per tracking number; Order Status covers the whole order.
+
+Category: Operations
+
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  pageView
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "Shipment Tracking",
+        "pageType": "order_tracking"
+      }
+    },
+    "order": {
+      "transactionID": "ORD-100293",
+      "shipmentStatus": "Out for Delivery",
+      "trackingNumber": "1Z999AA10123456784"
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_type": "order_tracking",
+    "transaction_id": "ORD-100293",
+    "tracking_number": "1Z999AA10123456784",
+    "shipment_status": "Out for Delivery"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "page": {
+      "pageType": "order_tracking"
+    },
+    "order": {
+      "transactionId": "ORD-100293",
+      "trackingNumber": "1Z999AA10123456784",
+      "shipmentStatus": "Out for Delivery"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-100293"
+      }
+    },
+    "_tenant": {
+      "shipmentStatus": "Out for Delivery",
+      "trackingNumber": "1Z999AA10123456784"
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar12": "shipmentStatus"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH
+  -- Carrier scans normalised to the governed status list (unmapped codes become Unknown); return shipments excluded
+  scans AS (
+    SELECT
+      e.tracking_number,
+      e.carrier_event_ts,
+      COALESCE(m.shipment_status, 'Unknown') AS shipment_status
+    FROM `your-project.oms_backend.carrier_tracking_events` AS e
+    LEFT JOIN `your-project.oms_backend.carrier_status_map` AS m
+      ON m.carrier = e.carrier
+     AND m.carrier_status_code = e.carrier_status_code
+    WHERE DATE(e.carrier_event_ts) BETWEEN start_date AND end_date
+      AND COALESCE(e.shipment_direction, '') != 'return'
+  ),
+  -- One status per tracking number: terminal statuses win, otherwise the newest carrier event timestamp (not webhook receipt)
+  latest AS (
+    SELECT tracking_number, shipment_status
+    FROM scans
+    WHERE TRUE
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY tracking_number
+      ORDER BY IF(shipment_status IN ('Delivered', 'Returned to Sender'), 1, 0) DESC, carrier_event_ts DESC
+    ) = 1
+  )
+  -- Shipment Status: the latest normalised status per tracking number
+  SELECT tracking_number, shipment_status
+  FROM latest;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH
+  -- Relative reporting window: last 90 complete days
+  params AS (
+    SELECT date_sub(current_date(), 90) AS start_date,
+           date_sub(current_date(), 1) AS end_date
+  ),
+  -- Carrier scans normalised to the governed status list (unmapped codes become Unknown); return shipments excluded
+  scans AS (
+    SELECT
+      e.tracking_number,
+      e.carrier_event_ts,
+      COALESCE(m.shipment_status, 'Unknown') AS shipment_status
+    FROM oms_backend_carrier_tracking_events AS e
+    LEFT JOIN oms_backend_carrier_status_map AS m
+      ON m.carrier = e.carrier
+     AND m.carrier_status_code = e.carrier_status_code
+    CROSS JOIN params AS p
+    WHERE CAST(e.carrier_event_ts AS DATE) BETWEEN p.start_date AND p.end_date
+      AND COALESCE(e.shipment_direction, '') <> 'return'
+  ),
+  -- One status per tracking number: terminal statuses win, otherwise the newest carrier event timestamp (not webhook receipt)
+  latest AS (
+    SELECT tracking_number, shipment_status
+    FROM (
+      SELECT
+        tracking_number,
+        shipment_status,
+        ROW_NUMBER() OVER (
+          PARTITION BY tracking_number
+          ORDER BY CASE WHEN shipment_status IN ('Delivered', 'Returned to Sender') THEN 1 ELSE 0 END DESC, carrier_event_ts DESC
+        ) AS rn
+      FROM scans
+    ) AS ranked
+    WHERE rn = 1
+  )
+  -- Shipment Status: the latest normalised status per tracking number
+  SELECT tracking_number, shipment_status
+  FROM latest;
+
+Calculation Notes: |
+  1️⃣ Normalise carrier scan codes (UPS, FedEx, USPS, DHL) to the six governed values; unmapped codes go to Unknown and are reviewed weekly.
+  2️⃣ Latest status is the scan with the newest carrier event timestamp, not the newest webhook receipt, so late webhooks cannot overwrite it.
+  3️⃣ One value per tracking number: a split order carries several shipment statuses; the order-level roll-up belongs to Order Status.
+  4️⃣ On shipment tracking views, send the status shown at view time as shipment_status; current status comes from the OMS carrier feed.
+  5️⃣ Delivered and Returned to Sender are terminal; an Exception can move back to In Transit or Out for Delivery on a later scan.
+  6️⃣ A label with no carrier acceptance scan stays Label Created; aged pre-transit labels are flagged, never reclassified.
+  7️⃣ Return (reverse-logistics) shipments are excluded; they are reported through return and refund flows.
+
+Business Use Case: |
+  1️⃣ Customer Service: when a carrier's Exception share spikes, send proactive delay emails before WISMO contacts arrive.
+  2️⃣ Fulfillment Operations: review shipments stuck in Label Created over 48 hours daily and escalate missed pickups.
+  3️⃣ Product: split tracking views by status to see where customers check most and add ETA messaging there.
+  4️⃣ Finance: file weekly carrier claims for Returned to Sender and unresolved Exception shipments.
+
+Dependencies:
+  Events: [shipment-tracking-view, delivery-confirmation, delivery-exception-occurrence]
+  Dimensions: [carrier, transaction-id]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics) + Order Management (reconciliation)
+
+Report Attributes: |
+  carrier; shipment_mode; shipping_tier; delivery_region; fulfillment_method; number_of_shipments
+
+Dashboard Usage: [Post-Purchase Delivery Tracking, Carrier Performance, WISMO & Customer Contact]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [order-status, carrier, carrier-performance, number-of-shipments, shipment-mode, delivery-promise-date, delivery-region, fulfillment-method, delivery-confirmation-method, delivery-sla-status]
+
+Derived Dimensions: [delivery-exception-type]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-23T15:30:33.057+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-23T15:49:12.089+00:00
+
