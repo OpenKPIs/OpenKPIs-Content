@@ -1,7 +1,7 @@
 # Metric: Email Clicks
-# Generated: 2026-09-23T16:06:46.132Z
+# Generated: 2026-09-23T16:06:54.975Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Email Clicks
 Formula: COUNT(click_events) WHERE email_type = 'marketing' AND delivery_status = 'delivered'
@@ -11,6 +11,19 @@ Description: |
 
 Category: Acquisition
 
+Tags: [metric, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly
 
 
 
@@ -18,23 +31,103 @@ Category: Acquisition
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Total ESP-logged clicks per click date (repeats counted), on delivered marketing sends only
+  SELECT
+    DATE(c.click_timestamp) AS click_date,
+    COUNT(*) AS email_clicks
+  FROM `your-project.crm.esp_clicks` AS c
+  JOIN `your-project.crm.esp_sends` AS s
+    ON c.send_id = s.send_id
+  JOIN `your-project.crm.esp_campaigns` AS cp
+    ON s.campaign_id = cp.campaign_id
+  -- Bucket by the date the click occurred, not the send date
+  WHERE DATE(c.click_timestamp) BETWEEN start_date AND end_date
+    -- Marketing campaigns and automated flows only; transactional, order and shipping mail excluded
+    AND cp.email_type = 'marketing'
+    AND s.delivery_status = 'delivered'
+    -- Bot and security-scanner prefetch clicks flagged by the ESP excluded
+    AND COALESCE(c.is_bot_flagged, FALSE) = FALSE
+    -- Unsubscribe and preference-centre links excluded
+    AND c.link_type NOT IN ('unsubscribe', 'preference_center')
+    -- Test and seed lists and internal recipient domains excluded
+    AND s.list_type NOT IN ('test', 'seed')
+    AND LOWER(s.recipient_domain) NOT IN ('yourcompany.com')
+  GROUP BY click_date
+  ORDER BY click_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window: last 90 complete days
+  WITH params AS (
+    SELECT
+      CAST(DATE_SUB(CURRENT_DATE, 90) AS DATE) AS start_date,
+      CAST(DATE_SUB(CURRENT_DATE, 1) AS DATE) AS end_date
+  )
+  -- Total ESP-logged clicks per click date (repeats counted), on delivered marketing sends only
+  SELECT
+    CAST(c.click_timestamp AS DATE) AS click_date,
+    COUNT(*) AS email_clicks
+  FROM aep_backend_dataset_esp_clicks AS c
+  JOIN aep_backend_dataset_esp_sends AS s
+    ON c.send_id = s.send_id
+  JOIN aep_backend_dataset_esp_campaigns AS cp
+    ON s.campaign_id = cp.campaign_id
+  CROSS JOIN params AS p
+  -- Bucket by the date the click occurred, not the send date
+  WHERE CAST(c.click_timestamp AS DATE) BETWEEN p.start_date AND p.end_date
+    -- Marketing campaigns and automated flows only; transactional, order and shipping mail excluded
+    AND cp.email_type = 'marketing'
+    AND s.delivery_status = 'delivered'
+    -- Bot and security-scanner prefetch clicks flagged by the ESP excluded
+    AND COALESCE(c.is_bot_flagged, FALSE) = FALSE
+    -- Unsubscribe and preference-centre links excluded
+    AND c.link_type NOT IN ('unsubscribe', 'preference_center')
+    -- Test and seed lists and internal recipient domains excluded
+    AND s.list_type NOT IN ('test', 'seed')
+    AND LOWER(s.recipient_domain) NOT IN ('yourcompany.com')
+  GROUP BY CAST(c.click_timestamp AS DATE)
+  ORDER BY click_date;
 
+Calculation Notes: |
+  1️⃣ Source is the ESP click log (redirect-tracked links); site sessions tagged utm_medium=email are a different measure and are not used here.
+  2️⃣ Include marketing sends only (campaigns, automated flows); exclude transactional, order and shipping notifications.
+  3️⃣ Exclude clicks flagged as bot or security-scanner prefetch by the ESP, and clicks on unsubscribe and preference-centre links.
+  4️⃣ Attribute each click to the date it occurred, not the send date; late clicks on older sends count in the period they happen.
+  5️⃣ Total clicks count repeats; unique clicks count one per recipient per send and must be labelled separately.
+  6️⃣ Clicks on sends to test or seed lists and internal domains are excluded.
 
+Business Use Case: |
+  1️⃣ CRM marketing reviews clicks by campaign weekly and retires creative that falls below the list average.
+  2️⃣ Email team sees a sudden click spike with no sessions and reviews bot-filter settings with the ESP.
+  3️⃣ Lifecycle marketing tests subject lines and CTAs, keeping the variant with more clicks per delivered email.
 
+Dependencies:
+  Dimensions: [device-category]
 
+Source Data: CRM
 
+Report Attributes: |
+  Campaign Name; Send Date; Email Flow / Automation; Link URL; Audience Segment; Device Category
 
+Dashboard Usage: [Email Marketing Performance, Marketing Acquisition Overview, Campaign Performance]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [ad-clicks, ad-spend, new-users, engaged-sessions]
 
+Derived KPIs: [email-click-to-purchase-conversion-rate]
 
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +137,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-23T16:06:44.846+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-23T16:06:54.629+00:00
 
