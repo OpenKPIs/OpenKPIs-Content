@@ -1,7 +1,7 @@
 # KPI: Marketing Return on Investment
-# Generated: 2026-09-23T16:29:40.999Z
+# Generated: 2026-09-23T16:29:49.832Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Marketing Return on Investment
 Formula: ((Revenue Attributed to Marketing - Total Marketing Spend) / Total Marketing Spend) × 100
@@ -11,29 +11,253 @@ Description: |
 
 Category: Performance
 
+Tags: [kpi, E-commerce: Top-of-Funnel & Marketing Acquisition]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Monetization
 
+Scope: Global
 
+Measure Type: Percentage
 
+Aggregation Window: Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "T-100234",
+      "total": {
+        "transactionTotal": 249.95,
+        "currency": "USD",
+        "tax": 18.5,
+        "shipping": 5.99
+      },
+      "attributes": {
+        "campaign_source": "google",
+        "campaign_medium": "cpc",
+        "traffic_type": "paid",
+        "affiliation": "Online Store"
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T-100234",
+      "value": 249.95,
+      "currency": "USD",
+      "affiliation": "Online Store",
+      "coupon": "SAVE10",
+      "shipping": 5.99,
+      "tax": 18.5,
+      "items": [
+        {
+          "item_id": "SKU_12345",
+          "item_name": "Wireless Headphones",
+          "price": 249.95,
+          "quantity": 1
+        }
+      ]
+    },
+    "campaign_source": "google",
+    "campaign_medium": "cpc",
+    "traffic_type": "paid",
+    "user_id": "u_88213"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "purchase": {
+      "transactionID": "T-100234",
+      "value": 249.95,
+      "currency": "USD",
+      "affiliation": "Online Store",
+      "tax": 18.5,
+      "shipping": 5.99,
+      "campaign_source": "google",
+      "campaign_medium": "cpc",
+      "traffic_type": "paid",
+      "items": [
+        {
+          "item_id": "SKU_12345",
+          "item_name": "Wireless Headphones",
+          "price": 249.95,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "commerce": {
+      "order": {
+        "purchaseID": "{{transaction_id}}",
+        "priceTotal": "{{value}}",
+        "currencyCode": "{{currency}}",
+        "taxAmount": "{{tax}}"
+      },
+      "shipping": {
+        "shippingAmount": "{{shipping}}"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "{{campaign_source}}",
+            "eVar2": "{{campaign_medium}}",
+            "eVar3": "{{traffic_type}}"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Last closed month is the latest month that ended at least 30 days ago (lookback for late conversions); three full months by default
+  DECLARE end_date DATE DEFAULT DATE_SUB(DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY), MONTH), INTERVAL 1 DAY);
+  DECLARE start_date DATE DEFAULT DATE_TRUNC(DATE_SUB(end_date, INTERVAL 2 MONTH), MONTH);
+  
+  WITH purchases AS (
+    -- Marketing-attributed purchases (direct and organic excluded); captured value is the item subtotal and already excludes tax and shipping
+    SELECT
+      DATE_TRUNC(PARSE_DATE('%Y%m%d', event_date), MONTH) AS report_month,
+      ecommerce.transaction_id,
+      ecommerce.purchase_revenue AS net_revenue
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+      AND IFNULL((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'campaign_medium'), '(none)') NOT IN ('(none)', 'organic')
+      AND IFNULL((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'campaign_source'), '(direct)') != '(direct)'
+  ),
+  refunds AS (
+    -- Refunds and cancellations issued up to today against those transactions
+    SELECT ecommerce.transaction_id, SUM(ecommerce.refund_value) AS refund_value
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND event_name = 'refund'
+    GROUP BY 1
+  ),
+  attributed_revenue AS (
+    -- Monthly attributed revenue net of refunds
+    SELECT p.report_month, SUM(p.net_revenue - IFNULL(r.refund_value, 0)) AS revenue
+    FROM purchases p
+    LEFT JOIN refunds r USING (transaction_id)
+    GROUP BY 1
+  ),
+  spend AS (
+    -- Total marketing spend: media, agency and creative fees, martech licences, allocated staff cost
+    SELECT DATE_TRUNC(spend_date, MONTH) AS report_month, SUM(amount) AS total_spend
+    FROM `your-project.marketing.marketing_spend`
+    WHERE spend_date BETWEEN start_date AND end_date
+      AND cost_type IN ('media', 'agency', 'creative', 'martech', 'staff')
+    GROUP BY 1
+  )
+  -- Marketing ROI % per month; NULL (undefined) when spend is zero
+  SELECT
+    s.report_month,
+    SAFE_DIVIDE(IFNULL(a.revenue, 0) - s.total_spend, s.total_spend) * 100 AS marketing_roi_pct
+  FROM spend s
+  LEFT JOIN attributed_revenue a USING (report_month)
+  ORDER BY s.report_month
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Last closed month is the latest month that ended at least 30 days ago (lookback for late conversions); three full months by default
+    SELECT
+      date_sub(trunc(date_sub(current_date(), 30), 'MM'), 1) AS end_date,
+      trunc(add_months(date_sub(trunc(date_sub(current_date(), 30), 'MM'), 1), -2), 'MM') AS start_date
+  ),
+  purchases AS (
+    -- Marketing-attributed purchases (direct and organic excluded); captured priceTotal is the item subtotal and already excludes tax and shipping
+    SELECT
+      trunc(to_date(e.timestamp), 'MM') AS report_month,
+      e.commerce.order.purchaseID AS transaction_id,
+      e.commerce.order.priceTotal AS net_revenue
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE e.eventType = 'commerce.purchases'
+      AND to_date(e.timestamp) BETWEEN p.start_date AND p.end_date
+      AND COALESCE(e._experience.analytics.customDimensions.eVars.eVar2, '(none)') NOT IN ('(none)', 'organic')
+      AND COALESCE(e._experience.analytics.customDimensions.eVars.eVar1, '(direct)') != '(direct)'
+  ),
+  refunds AS (
+    -- Refunds and cancellations issued up to today against those transactions
+    SELECT e.commerce.order.purchaseID AS transaction_id, SUM(e.commerce.order.priceTotal) AS refund_value
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE e.eventType = 'refund'
+      AND to_date(e.timestamp) BETWEEN p.start_date AND current_date()
+    GROUP BY 1
+  ),
+  attributed_revenue AS (
+    -- Monthly attributed revenue net of refunds
+    SELECT pu.report_month, SUM(pu.net_revenue - COALESCE(r.refund_value, 0)) AS revenue
+    FROM purchases pu
+    LEFT JOIN refunds r ON pu.transaction_id = r.transaction_id
+    GROUP BY 1
+  ),
+  spend AS (
+    -- Total marketing spend: media, agency and creative fees, martech licences, allocated staff cost
+    SELECT trunc(m.spend_date, 'MM') AS report_month, SUM(m.amount) AS total_spend
+    FROM marketing_spend_dataset m
+    CROSS JOIN params p
+    WHERE m.spend_date BETWEEN p.start_date AND p.end_date
+      AND m.cost_type IN ('media', 'agency', 'creative', 'martech', 'staff')
+    GROUP BY 1
+  )
+  -- Marketing ROI % per month; NULL (undefined) when spend is zero
+  SELECT
+    s.report_month,
+    (COALESCE(a.revenue, 0) - s.total_spend) / NULLIF(s.total_spend, 0) * 100 AS marketing_roi_pct
+  FROM spend s
+  LEFT JOIN attributed_revenue a ON s.report_month = a.report_month
+  ORDER BY s.report_month
 
+Calculation Notes: |
+  1️⃣ Total Marketing Spend = media cost plus agency and creative fees, martech licences and allocated marketing staff cost for the same period.,2️⃣ Attributed revenue is net of refunds, cancellations, tax and shipping; name the attribution model on every report.,3️⃣ A 4.0 ROAS equals 300% ROI only when media is the sole cost; adding non-media cost lowers ROI, never ROAS.,4️⃣ Profit-based variant replaces revenue with attributed gross profit; never plot both variants in one trend.,5️⃣ Undefined when spend is zero; exclude direct and organic revenue unless their cost (SEO, content) sits in the spend base.,6️⃣ Revenue and spend use the same window; hold a 30-day lookback before closing a month so late conversions are counted.
 
+Business Use Case: |
+  1️⃣ CMO: channel ROI below 0% for two quarters → cut or restructure that channel's budget in the next plan.,2️⃣ Finance: at quarterly close → reconcile marketing ROI to the P&L before approving next quarter's budget.,3️⃣ Performance marketing: channel ranks high on ROAS but low on ROI → review its agency and tooling cost.
 
+Dependencies:
+  Events: [purchase, refund-issued]
+  Metrics: [ad-spend]
+  Dimensions: [traffic-source, first-touch-channel-grouping]
+  KPIs: [revenue]
 
+Source Data: Digital Analytics, Business Intelligence
 
+Report Attributes: |
+  Marketing Channel; Campaign; Traffic Source; First-Touch Channel Grouping; Country
 
+Dashboard Usage: [Marketing Performance Overview, Channel Budget Allocation, Executive Growth Scorecard]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [return-on-ad-spend, revenue, customer-lifetime-value, marketing-sourced-new-customer-rate, customer-acquisition-cost-payback-period, cost-per-lead, cost-per-session]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +267,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-23T16:29:40.612+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-23T16:29:49.363+00:00
 
