@@ -1,7 +1,7 @@
 # Metric: New Users
-# Generated: 2026-09-23T16:07:01.621Z
+# Generated: 2026-09-23T16:07:10.674Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: New Users
 Formula: COUNT(DISTINCT user_pseudo_id WHERE event_name IN ('first_visit', 'first_open') AND event_date IN reporting window)
@@ -11,30 +11,157 @@ Description: |
 
 Category: Acquisition
 
+Tags: [metric, E-commerce: Top-of-Funnel & Marketing Acquisition]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Engagement
 
+Scope: User
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  first_visit
 
+Adobe Event: |
+  userVisit
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "first_visit",
+          "traffic_type": "external"
+        },
+        "category": {
+          "primaryCategory": "Acquisition"
+        }
+      }
+    ],
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "visitorType": "new"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "web": {
+      "event": "first_visit",
+      "traffic_type": "external"
+    },
+    "app": {
+      "event": "first_open",
+      "traffic_type": "external"
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "web": {
+      "event": "userVisit",
+      "traffic_type": "external"
+    },
+    "app": {
+      "event": "appLaunch",
+      "firstLaunch": 1,
+      "traffic_type": "external"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "acquisition.firstVisit",
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "traffic_type"
+          }
+        }
+      }
+    },
+    "application": {
+      "firstLaunches": {
+        "value": 1
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Bot and known-IP filtering happens at collection and is not in the export; the query excludes traffic_type = 'internal'.
+  -- Distinct users whose first_visit / first_open falls in the window; event_date is already in the property time zone
+  SELECT
+    COUNT(DISTINCT user_pseudo_id) AS new_users
+  FROM `your-project.analytics_123456789.events_*`
+  WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+    AND event_name IN ('first_visit', 'first_open')
+    AND COALESCE((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type'), 'external') != 'internal';
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Bot and known-IP filtering happens at collection and is not in the dataset; the query excludes traffic_type = 'internal'.
+  -- Window bounds, same relative defaults as the BigQuery query
+  WITH params AS (
+    SELECT DATE_SUB(CURRENT_DATE, 90) AS start_date,
+           DATE_SUB(CURRENT_DATE, 1) AS end_date
+  )
+  -- Distinct users whose first visit (web) or first launch (app) falls in the window, dated in the property time zone
+  SELECT
+    COUNT(DISTINCT e.identityMap['ECID'][0].id) AS new_users
+  FROM aep_web_events_dataset e
+  CROSS JOIN params p
+  WHERE (e.eventType = 'acquisition.firstVisit' OR e.application.firstLaunches.value > 0)
+    AND TO_DATE(from_utc_timestamp(e.timestamp, 'America/New_York')) BETWEEN p.start_date AND p.end_date
+    AND COALESCE(e._experience.analytics.customDimensions.eVars.eVar1, 'external') <> 'internal';
 
+Calculation Notes: |
+  1️⃣ A user counts once per window, on the date of first_visit or first_open; later sessions in the window do not add to the count.,2️⃣ Identity is the device/browser ID (user_pseudo_id), so cleared cookies, new devices and incognito sessions inflate the count.,3️⃣ Web and app streams are not de-duplicated by device ID; use user_id only where login stitching is in place and state it on the report.,4️⃣ Exclude traffic_type = 'internal'; bot and known-IP traffic is filtered at collection; denied consent records no first_visit.,5️⃣ Summing daily values gives the weekly or monthly figure only because first_visit fires once per device; never sum Unique Visitors that way.,6️⃣ Attribute acquisition source with first-touch dimensions (first_user_source / medium), not session source, to avoid returning-visit bias.,7️⃣ Dates follow the property time zone.
 
+Business Use Case: |
+  1️⃣ Performance Marketing compares weekly New Users by first-touch channel with Ad Spend and reallocates budget.,2️⃣ Growth team divides new sign-ups by New Users per landing page and reworks pages below the site average.,3️⃣ Marketing leads flag a sharp week-on-week drop in New Users from paid search and check campaign and tag status.,4️⃣ Merchandising tracks the New Users share of traffic before a launch to size first-order promotions.
 
+Dependencies:
+  Events: [first-visit, session-start]
+  Metrics: [unique-visitors]
+  Dimensions: [first-touch-channel-grouping]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  first-touch-channel-grouping; traffic-source; device-category; acquisition-cohort; page-type
 
+Dashboard Usage: [Acquisition Overview, Paid Media Performance, Executive Traffic Summary]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [unique-visitors, engaged-sessions, ad-clicks, email-clicks, ad-spend, time-to-first-purchase]
 
+Derived KPIs: [sign-up-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +171,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-23T16:07:01.248+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-23T16:07:10.252+00:00
 
