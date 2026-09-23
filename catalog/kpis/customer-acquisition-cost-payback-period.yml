@@ -1,7 +1,7 @@
 # KPI: Customer Acquisition Cost Payback Period
-# Generated: 2026-09-23T16:29:26.070Z
+# Generated: 2026-09-23T16:29:34.524Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Customer Acquisition Cost Payback Period
 Formula: Customer Acquisition Cost / (Average Order Value × Gross Margin % × Monthly Purchase Frequency)
@@ -11,29 +11,444 @@ Description: |
 
 Category: Acquisition
 
+Tags: [kpi, E-commerce: Top-of-Funnel & Marketing Acquisition]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Monetization
 
+Scope: Global
 
+Measure Type: Ratio
 
+Aggregation Window: Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "purchase",
+          "eventAction": "purchase"
+        },
+        "category": {
+          "primaryCategory": "Acquisition"
+        },
+        "transaction": {
+          "transactionID": "ORD-100293",
+          "total": {
+            "transactionTotal": 128.5,
+            "currency": "USD",
+            "tax": 8.42,
+            "shipping": 5.99
+          },
+          "item": [
+            {
+              "productInfo": {
+                "productID": "SKU123",
+                "productName": "Wireless Headphones"
+              },
+              "quantity": 1,
+              "linePrice": 128.5
+            }
+          ]
+        },
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "usr_88213",
+              "customerType": "new"
+            },
+            "attributes": {
+              "firstTouchChannelGrouping": "Paid Search",
+              "acquisitionCohort": "2026-09",
+              "campaignSource": "google",
+              "campaignMedium": "cpc",
+              "paymentType": "credit_card",
+              "fulfillmentMethod": "ship_to_home"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "ORD-100293",
+      "value": 128.5,
+      "currency": "USD",
+      "affiliation": "Online Store",
+      "coupon": "WELCOME10",
+      "shipping": 5.99,
+      "tax": 8.42,
+      "items": [
+        {
+          "item_id": "SKU123",
+          "item_name": "Wireless Headphones",
+          "price": 128.5,
+          "quantity": 1
+        }
+      ]
+    },
+    "customer_type": "new",
+    "payment_type": "credit_card",
+    "fulfillment_method": "ship_to_home",
+    "campaign_source": "google",
+    "campaign_medium": "cpc",
+    "user_properties": {
+      "user_id": "usr_88213",
+      "first_touch_channel_grouping": "Paid Search",
+      "acquisition_cohort": "2026-09"
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD-100293",
+        "priceTotal": 128.5,
+        "currencyCode": "USD"
+      }
+    },
+    "product": [
+      {
+        "SKU": "SKU123",
+        "quantity": 1,
+        "priceTotal": 128.5
+      }
+    ],
+    "customer": {
+      "customerType": "new",
+      "customerID": "usr_88213",
+      "firstTouchChannelGrouping": "Paid Search",
+      "acquisitionCohort": "2026-09"
+    },
+    "campaign": {
+      "source": "google",
+      "medium": "cpc"
+    },
+    "paymentType": "credit_card",
+    "fulfillmentMethod": "ship_to_home"
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "ORD-100293",
+        "priceTotal": {
+          "total": 128.5,
+          "currency": "USD",
+          "taxAmount": 8.42,
+          "shippingAmount": 5.99
+        }
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU123",
+        "name": "Wireless Headphones",
+        "quantity": 1,
+        "priceTotal": 128.5
+      }
+    ],
+    "identityMap": {
+      "crm_id": [
+        {
+          "id": "usr_88213",
+          "primary": true
+        }
+      ]
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "new",
+            "eVar2": "Paid Search",
+            "eVar3": "2026-09"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH), MONTH);
+  DECLARE end_date DATE DEFAULT CURRENT_DATE();
+  
+  WITH
+  -- One row per order (transaction_id) with order value and the customer's first-touch channel, over the full export history
+  orders AS (
+    SELECT
+      user_id,
+      ecommerce.transaction_id AS transaction_id,
+      MIN(PARSE_DATE('%Y%m%d', event_date)) AS order_date,
+      MAX(ecommerce.purchase_revenue) AS order_value,
+      MAX(IFNULL((SELECT value.string_value FROM UNNEST(user_properties) WHERE key = 'first_touch_channel_grouping'), '(not set)')) AS channel
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE event_name = 'purchase'
+      AND user_id IS NOT NULL
+      AND ecommerce.transaction_id IS NOT NULL
+      AND _TABLE_SUFFIX <= FORMAT_DATE('%Y%m%d', end_date)
+    GROUP BY user_id, transaction_id
+  ),
+  -- New customers: first-ever order on the logged-in customer ID falls in the window (reactivated lapsed customers have an earlier order and drop out)
+  new_customers AS (
+    SELECT
+      user_id,
+      DATE_TRUNC(MIN(order_date), MONTH) AS cohort_month,
+      ARRAY_AGG(channel ORDER BY order_date LIMIT 1)[OFFSET(0)] AS channel
+    FROM orders
+    GROUP BY user_id
+    HAVING MIN(order_date) BETWEEN start_date AND end_date
+  ),
+  -- Acquisition spend (media, agency, welcome offer; retention excluded) by month and first-touch channel, the same attribution model
+  channel_spend AS (
+    SELECT
+      DATE_TRUNC(spend_date, MONTH) AS cohort_month,
+      first_touch_channel_grouping AS channel,
+      SUM(spend_amount) AS acquisition_spend
+    FROM `your-project.marketing.acquisition_spend`
+    WHERE spend_type IN ('media', 'agency', 'welcome_offer')
+      AND spend_objective != 'retention'
+      AND spend_date BETWEEN start_date AND end_date
+    GROUP BY cohort_month, channel
+  ),
+  -- Report scopes per channel: blended (all channels), the channel itself, and paid-only for paid channels
+  channel_scopes AS (
+    SELECT channel, scope
+    FROM (SELECT channel FROM new_customers UNION DISTINCT SELECT channel FROM channel_spend),
+      UNNEST(['Blended', channel, IF(REGEXP_CONTAINS(channel, r'^(Paid|Display|Cross-network)'), 'Paid only', NULL)]) AS scope
+    WHERE scope IS NOT NULL
+  ),
+  -- Orders in each new customer's first 12 cohort months with Finance's order-level net revenue (after discounts and refunds) and gross margin (net revenue minus COGS)
+  cohort_orders AS (
+    SELECT n.user_id, o.transaction_id, o.order_value, m.net_revenue, m.gross_margin
+    FROM new_customers AS n
+    JOIN orders AS o
+      ON o.user_id = n.user_id
+     AND o.order_date < DATE_ADD(n.cohort_month, INTERVAL 12 MONTH)
+    JOIN `your-project.finance.order_gross_margin` AS m
+      ON m.transaction_id = o.transaction_id
+  ),
+  -- New customers, orders, order revenue, net revenue and gross margin per cohort month and scope
+  cohort_stats AS (
+    SELECT
+      n.cohort_month,
+      cs.scope,
+      COUNT(DISTINCT n.user_id) AS new_customers,
+      COUNT(DISTINCT c.transaction_id) AS orders,
+      SUM(c.order_value) AS revenue,
+      SUM(c.net_revenue) AS net_revenue,
+      SUM(c.gross_margin) AS gross_margin
+    FROM new_customers AS n
+    JOIN channel_scopes AS cs ON cs.channel = n.channel
+    LEFT JOIN cohort_orders AS c ON c.user_id = n.user_id
+    GROUP BY n.cohort_month, cs.scope
+  ),
+  -- Acquisition spend per cohort month and scope
+  scope_spend AS (
+    SELECT s.cohort_month, cs.scope, SUM(s.acquisition_spend) AS acquisition_spend
+    FROM channel_spend AS s
+    JOIN channel_scopes AS cs ON cs.channel = s.channel
+    GROUP BY s.cohort_month, cs.scope
+  ),
+  -- CAC and monthly margin per new customer = AOV x gross margin % (gross margin / net revenue) x monthly purchase frequency (run-rate over observed months, the projection for young cohorts)
+  economics AS (
+    SELECT
+      st.cohort_month,
+      st.scope,
+      DATE_DIFF(end_date, st.cohort_month, MONTH) AS cohort_age_months,
+      sp.acquisition_spend / st.new_customers AS cac,
+      COALESCE(
+        SAFE_DIVIDE(st.revenue, st.orders)
+        * SAFE_DIVIDE(st.gross_margin, st.net_revenue)
+        * (st.orders / st.new_customers / LEAST(12, DATE_DIFF(end_date, st.cohort_month, MONTH) + 1)),
+        0) AS monthly_margin
+    FROM cohort_stats AS st
+    JOIN scope_spend AS sp USING (cohort_month, scope)
+  )
+  -- Payback in months (one decimal); non-positive monthly margin is 'not recovered'; provisional under 3 months or until actuals cover the payback horizon
+  SELECT
+    cohort_month,
+    scope,
+    ROUND(cac, 2) AS cac,
+    IF(monthly_margin > 0, CAST(ROUND(cac / monthly_margin, 1) AS STRING), 'not recovered') AS cac_payback_months,
+    cohort_age_months < 3 OR (monthly_margin > 0 AND cohort_age_months < cac / monthly_margin) AS is_provisional
+  FROM economics
+  ORDER BY cohort_month, scope
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH
+  -- Reporting window: cohorts from the start of the month 12 months ago to today
+  params AS (
+    SELECT add_months(trunc(current_date(), 'MM'), -12) AS start_date, current_date() AS end_date
+  ),
+  -- One row per order (purchaseID) with order value and the customer's first-touch channel, over the full dataset history
+  orders AS (
+    SELECT
+      identityMap['crm_id'][0].id AS user_id,
+      commerce.order.purchaseID AS transaction_id,
+      MIN(to_date(timestamp)) AS order_date,
+      MAX(commerce.order.priceTotal.total) AS order_value,
+      MAX(COALESCE(_experience.analytics.customDimensions.eVars.eVar2, '(not set)')) AS channel
+    FROM web_events_dataset
+    CROSS JOIN params AS p
+    WHERE eventType = 'commerce.purchases'
+      AND identityMap['crm_id'][0].id IS NOT NULL
+      AND commerce.order.purchaseID IS NOT NULL
+      AND to_date(timestamp) <= p.end_date
+    GROUP BY identityMap['crm_id'][0].id, commerce.order.purchaseID
+  ),
+  -- New customers: first-ever order on the logged-in customer ID falls in the window (reactivated lapsed customers have an earlier order and drop out)
+  new_customers AS (
+    SELECT
+      o.user_id,
+      trunc(MIN(o.order_date), 'MM') AS cohort_month,
+      min_by(o.channel, o.order_date) AS channel
+    FROM orders AS o
+    CROSS JOIN params AS p
+    GROUP BY o.user_id, p.start_date, p.end_date
+    HAVING MIN(o.order_date) BETWEEN p.start_date AND p.end_date
+  ),
+  -- Acquisition spend (media, agency, welcome offer; retention excluded) by month and first-touch channel, the same attribution model
+  channel_spend AS (
+    SELECT
+      trunc(s.spend_date, 'MM') AS cohort_month,
+      s.first_touch_channel_grouping AS channel,
+      SUM(s.spend_amount) AS acquisition_spend
+    FROM aep_backend_dataset.acquisition_spend AS s
+    CROSS JOIN params AS p
+    WHERE s.spend_type IN ('media', 'agency', 'welcome_offer')
+      AND s.spend_objective != 'retention'
+      AND s.spend_date BETWEEN p.start_date AND p.end_date
+    GROUP BY trunc(s.spend_date, 'MM'), s.first_touch_channel_grouping
+  ),
+  -- Report scopes per channel: blended (all channels), the channel itself, and paid-only for paid channels
+  channel_scopes AS (
+    SELECT c.channel, scope
+    FROM (SELECT channel FROM new_customers UNION SELECT channel FROM channel_spend) AS c
+    LATERAL VIEW explode(array('Blended', c.channel, CASE WHEN c.channel RLIKE '^(Paid|Display|Cross-network)' THEN 'Paid only' END)) sc AS scope
+    WHERE scope IS NOT NULL
+  ),
+  -- Orders in each new customer's first 12 cohort months with Finance's order-level net revenue (after discounts and refunds) and gross margin (net revenue minus COGS)
+  cohort_orders AS (
+    SELECT n.user_id, o.transaction_id, o.order_value, m.net_revenue, m.gross_margin
+    FROM new_customers AS n
+    JOIN orders AS o
+      ON o.user_id = n.user_id
+     AND o.order_date < add_months(n.cohort_month, 12)
+    JOIN aep_backend_dataset.order_gross_margin AS m
+      ON m.transaction_id = o.transaction_id
+  ),
+  -- New customers, orders, order revenue, net revenue and gross margin per cohort month and scope
+  cohort_stats AS (
+    SELECT
+      n.cohort_month,
+      cs.scope,
+      COUNT(DISTINCT n.user_id) AS new_customers,
+      COUNT(DISTINCT c.transaction_id) AS orders,
+      SUM(c.order_value) AS revenue,
+      SUM(c.net_revenue) AS net_revenue,
+      SUM(c.gross_margin) AS gross_margin
+    FROM new_customers AS n
+    JOIN channel_scopes AS cs ON cs.channel = n.channel
+    LEFT JOIN cohort_orders AS c ON c.user_id = n.user_id
+    GROUP BY n.cohort_month, cs.scope
+  ),
+  -- Acquisition spend per cohort month and scope
+  scope_spend AS (
+    SELECT s.cohort_month, cs.scope, SUM(s.acquisition_spend) AS acquisition_spend
+    FROM channel_spend AS s
+    JOIN channel_scopes AS cs ON cs.channel = s.channel
+    GROUP BY s.cohort_month, cs.scope
+  ),
+  -- CAC and monthly margin per new customer = AOV x gross margin % (gross margin / net revenue) x monthly purchase frequency (run-rate over observed months, the projection for young cohorts)
+  economics AS (
+    SELECT
+      st.cohort_month,
+      st.scope,
+      CAST(FLOOR(months_between(p.end_date, st.cohort_month)) AS INT) AS cohort_age_months,
+      sp.acquisition_spend / st.new_customers AS cac,
+      COALESCE(
+        (st.revenue / NULLIF(st.orders, 0))
+        * (st.gross_margin / NULLIF(st.net_revenue, 0))
+        * (st.orders / st.new_customers / LEAST(12, CAST(FLOOR(months_between(p.end_date, st.cohort_month)) AS INT) + 1)),
+        0) AS monthly_margin
+    FROM cohort_stats AS st
+    JOIN scope_spend AS sp ON sp.cohort_month = st.cohort_month AND sp.scope = st.scope
+    CROSS JOIN params AS p
+  )
+  -- Payback in months (one decimal); non-positive monthly margin is 'not recovered'; provisional under 3 months or until actuals cover the payback horizon
+  SELECT
+    cohort_month,
+    scope,
+    ROUND(cac, 2) AS cac,
+    CASE WHEN monthly_margin > 0 THEN CAST(ROUND(cac / monthly_margin, 1) AS STRING) ELSE 'not recovered' END AS cac_payback_months,
+    cohort_age_months < 3 OR (monthly_margin > 0 AND cohort_age_months < cac / monthly_margin) AS is_provisional
+  FROM economics
+  ORDER BY cohort_month, scope
 
+Calculation Notes: |
+  1️⃣ CAC = acquisition marketing spend (media, agency, welcome-offer cost) ÷ new customers in the same cohort month; retention spend excluded.
+  2️⃣ New customer = first-ever order on the logged-in customer ID; reactivated lapsed customers excluded.
+  3️⃣ Gross Margin % = (net revenue after discounts and refunds − COGS) ÷ net revenue, using Finance's order-level gross margin.
+  4️⃣ AOV and monthly purchase frequency come from the cohort's own orders in its first 12 months, not from the blended customer base.
+  5️⃣ Reported in months, one decimal; if monthly margin per new customer is ≤ 0, report "not recovered" instead of a negative or infinite value.
+  6️⃣ Cohorts younger than 3 months use projected frequency and are flagged provisional until actuals cover the payback horizon.
+  7️⃣ Spend and new customers use the same attribution model; blended (all-channel) and paid-only payback are reported separately.
 
+Business Use Case: |
+  1️⃣ Finance: when blended payback passes 12 months, cap growth in paid acquisition budget in the quarterly plan.
+  2️⃣ Performance Marketing: rank channels by cohort payback each month and move spend from the slowest to the fastest.
+  3️⃣ Merchandising: when first-order margin drags payback, reduce welcome-offer discount depth on acquisition products.
+  4️⃣ FP&A: check payback alongside CLV before approving launch spend for a new market or channel.
 
+Dependencies:
+  Events: [purchase]
+  Metrics: [ad-spend, average-order-value]
+  Dimensions: [acquisition-cohort, first-touch-channel-grouping]
 
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
 
+Report Attributes: |
+  Acquisition Cohort; First-Touch Channel Grouping; Traffic Source; Device Category
 
+Dashboard Usage: [Marketing Efficiency & Unit Economics, Executive Growth Scorecard]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [customer-lifetime-value, return-on-ad-spend, marketing-sourced-new-customer-rate, average-order-value, cost-per-lead, marketing-return-on-investment, new-vs-returning-customer-ratio]
 
+Data Sensitivity: Restricted
 
 Contains PII: No
 
@@ -43,5 +458,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-23T16:29:25.623+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-23T16:29:34.119+00:00
 
