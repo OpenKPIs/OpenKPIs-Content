@@ -1,7 +1,7 @@
 # Metric: Ad Spend
-# Generated: 2026-09-23T16:06:28.893Z
+# Generated: 2026-09-23T16:06:38.545Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Ad Spend
 Formula: SUM(ad_platform_cost) − SUM(platform_credits_and_refunds)
@@ -11,6 +11,19 @@ Description: |
 
 Category: Acquisition
 
+Tags: [metric, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: Currency
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
 
 
 
@@ -18,23 +31,132 @@ Category: Acquisition
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  DECLARE reporting_currency STRING DEFAULT 'USD';
+  
+  WITH media_cost AS (
+    -- Platform media cost excluding taxes and non-media cost lines, converted at the spend-date rate, bucketed by served date
+    SELECT
+      c.spend_date AS report_date,
+      SUM((c.cost_amount - COALESCE(c.tax_amount, 0)) * IF(c.account_currency = reporting_currency, 1, fx.rate)) AS amount
+    FROM `your-project.ads.ad_platform_cost_daily` AS c
+    LEFT JOIN `your-project.erp.fx_rates` AS fx
+      ON fx.rate_date = c.spend_date
+     AND fx.from_currency = c.account_currency
+     AND fx.to_currency = reporting_currency
+    WHERE c.spend_date BETWEEN start_date AND end_date
+      AND c.cost_line_type NOT IN ('agency_fee', 'creative_production', 'martech_licence', 'salary', 'affiliate_commission')
+    GROUP BY report_date
+  ),
+  credits AS (
+    -- Invalid-traffic refunds and platform credits excluding taxes, counted on the date issued (closed months are not restated)
+    SELECT
+      r.issued_date AS report_date,
+      SUM((r.credit_amount - COALESCE(r.tax_amount, 0)) * IF(r.account_currency = reporting_currency, 1, fx.rate)) AS amount
+    FROM `your-project.ads.ad_platform_credits` AS r
+    LEFT JOIN `your-project.erp.fx_rates` AS fx
+      ON fx.rate_date = r.issued_date
+     AND fx.from_currency = r.account_currency
+     AND fx.to_currency = reporting_currency
+    WHERE r.issued_date BETWEEN start_date AND end_date
+      AND r.credit_type IN ('invalid_traffic_refund', 'platform_credit')
+    GROUP BY report_date
+  )
+  -- Daily ad spend: media cost minus credits and refunds, in reporting currency
+  SELECT
+    report_date,
+    ROUND(COALESCE(m.amount, 0) - COALESCE(cr.amount, 0), 2) AS ad_spend
+  FROM media_cost AS m
+  FULL OUTER JOIN credits AS cr USING (report_date)
+  ORDER BY report_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Relative reporting window and reporting currency
+    SELECT
+      DATE_SUB(CURRENT_DATE, 90) AS start_date,
+      DATE_SUB(CURRENT_DATE, 1) AS end_date,
+      'USD' AS reporting_currency
+  ),
+  media_cost AS (
+    -- Platform media cost excluding taxes and non-media cost lines, converted at the spend-date rate, bucketed by served date
+    SELECT
+      c.spend_date AS report_date,
+      SUM((c.cost_amount - COALESCE(c.tax_amount, 0)) * CASE WHEN c.account_currency = p.reporting_currency THEN 1 ELSE fx.rate END) AS amount
+    FROM aep_backend_dataset_ad_platform_cost_daily AS c
+    CROSS JOIN params AS p
+    LEFT JOIN aep_backend_dataset_erp_fx_rates AS fx
+      ON fx.rate_date = c.spend_date
+     AND fx.from_currency = c.account_currency
+     AND fx.to_currency = p.reporting_currency
+    WHERE c.spend_date BETWEEN p.start_date AND p.end_date
+      AND c.cost_line_type NOT IN ('agency_fee', 'creative_production', 'martech_licence', 'salary', 'affiliate_commission')
+    GROUP BY c.spend_date
+  ),
+  credits AS (
+    -- Invalid-traffic refunds and platform credits excluding taxes, counted on the date issued (closed months are not restated)
+    SELECT
+      r.issued_date AS report_date,
+      SUM((r.credit_amount - COALESCE(r.tax_amount, 0)) * CASE WHEN r.account_currency = p.reporting_currency THEN 1 ELSE fx.rate END) AS amount
+    FROM aep_backend_dataset_ad_platform_credits AS r
+    CROSS JOIN params AS p
+    LEFT JOIN aep_backend_dataset_erp_fx_rates AS fx
+      ON fx.rate_date = r.issued_date
+     AND fx.from_currency = r.account_currency
+     AND fx.to_currency = p.reporting_currency
+    WHERE r.issued_date BETWEEN p.start_date AND p.end_date
+      AND r.credit_type IN ('invalid_traffic_refund', 'platform_credit')
+    GROUP BY r.issued_date
+  )
+  -- Daily ad spend: media cost minus credits and refunds, in reporting currency
+  SELECT
+    COALESCE(m.report_date, cr.report_date) AS report_date,
+    ROUND(COALESCE(m.amount, 0) - COALESCE(cr.amount, 0), 2) AS ad_spend
+  FROM media_cost AS m
+  FULL OUTER JOIN credits AS cr
+    ON cr.report_date = m.report_date
+  ORDER BY report_date;
 
+Calculation Notes: |
+  1️⃣ Sum daily cost from each ad platform's cost export (Google Ads, Meta, Microsoft Ads, TikTok) on the date the media was served.
+  2️⃣ Exclude agency fees, creative production, martech licences, salaries and affiliate commissions; report those as separate cost lines.
+  3️⃣ Exclude VAT/GST and other recoverable taxes billed on top of media cost.
+  4️⃣ Convert each account currency to reporting currency at the spend-date rate, not the invoice-date rate.
+  5️⃣ Net invalid-traffic refunds and platform credits in the period issued; do not restate closed months.
+  6️⃣ Platform cost settles within about 3 days; re-load a trailing 7-day window on every refresh to pick up adjustments.
+  7️⃣ Reconcile monthly totals to ERP invoices; variances beyond the agreed tolerance go to Finance before month-end reporting.
 
+Business Use Case: |
+  1️⃣ Performance marketing: when channel ROAS falls below target, move next week's budget to higher-return campaigns.
+  2️⃣ Finance: at month close, reconcile spend to ERP invoices and flag overruns against the approved media budget.
+  3️⃣ CMO: in quarterly planning, set channel budgets from spend versus new-user and ad-click trends.
 
+Dependencies:
+  Dimensions: [currency]
 
+Source Data: ERP
 
+Report Attributes: |
+  Channel; Ad Platform; Campaign; Date; Country; Currency
 
+Dashboard Usage: [Paid Media Performance, Marketing Budget Pacing, Monthly Marketing P&L]
 
+Segment Eligibility: |
+  false
 
+Related Metrics: [ad-clicks, new-users]
 
+Derived KPIs: [return-on-ad-spend]
 
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +166,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-23T16:06:28.394+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-23T16:06:38.128+00:00
 
