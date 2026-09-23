@@ -1,7 +1,7 @@
 # Dimension: Delivery Confirmation Method
-# Generated: 2026-09-23T15:29:16.234Z
+# Generated: 2026-09-23T15:29:25.625Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Delivery Confirmation Method
 
@@ -10,6 +10,19 @@ Description: |
 
 Category: Operations
 
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
 
 
 
@@ -17,24 +30,165 @@ Category: Operations
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH delivered AS (
+    -- Delivered carrier scans only (one day of padding each side for store time zones); in-transit, returned and lost shipments produce no row, so they stay null
+    SELECT
+      sc.shipment_id,
+      s.order_id,
+      sc.carrier_code,
+      NULLIF(TRIM(sc.pod_code), '') AS pod_code,
+      sc.scan_timestamp,
+      s.store_time_zone
+    FROM `your-project.erp.carrier_scans` sc
+    JOIN `your-project.erp.shipments` s
+      ON s.shipment_id = sc.shipment_id
+    WHERE sc.scan_type = 'delivered'
+      AND sc.scan_timestamp >= TIMESTAMP(DATE_SUB(start_date, INTERVAL 1 DAY))
+      AND sc.scan_timestamp < TIMESTAMP(DATE_ADD(end_date, INTERVAL 2 DAY))
+  ),
+  latest AS (
+    -- One row per shipment: the last delivered scan by OMS scan timestamp wins, earlier corrected scans are discarded
+    SELECT *
+    FROM delivered
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY shipment_id ORDER BY scan_timestamp DESC) = 1
+  ),
+  mapped AS (
+    -- Raw carrier POD code mapped to the governed list; a delivered scan with a null or blank code is none, an unmapped code becomes other
+    SELECT
+      l.order_id,
+      l.shipment_id,
+      DATE(l.scan_timestamp, l.store_time_zone) AS delivery_date,
+      CASE
+        WHEN l.pod_code IS NULL THEN 'none'
+        ELSE COALESCE(m.delivery_confirmation_method, 'other')
+      END AS delivery_confirmation_method
+    FROM latest l
+    LEFT JOIN `your-project.erp.pod_code_map` m
+      ON m.carrier_code = l.carrier_code
+     AND LOWER(m.raw_pod_code) = LOWER(l.pod_code)
+  )
+  -- Shipment-level method code on the store-local delivery date, with the order-level rollup (mixed when shipments differ)
+  SELECT
+    delivery_date,
+    order_id,
+    shipment_id,
+    delivery_confirmation_method,
+    CASE
+      WHEN MIN(delivery_confirmation_method) OVER (PARTITION BY order_id)
+        <> MAX(delivery_confirmation_method) OVER (PARTITION BY order_id)
+      THEN 'mixed'
+      ELSE delivery_confirmation_method
+    END AS order_delivery_confirmation_method
+  FROM mapped
+  WHERE delivery_date BETWEEN start_date AND end_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Relative reporting window: last 90 complete days
+    SELECT CAST(CURRENT_DATE - INTERVAL '90' DAY AS DATE) AS start_date,
+           CAST(CURRENT_DATE - INTERVAL '1' DAY AS DATE) AS end_date
+  ),
+  delivered AS (
+    -- Delivered carrier scans only (one day of padding each side for store time zones); in-transit, returned and lost shipments produce no row, so they stay null
+    SELECT
+      sc.shipment_id,
+      s.order_id,
+      sc.carrier_code,
+      NULLIF(TRIM(sc.pod_code), '') AS pod_code,
+      sc.scan_timestamp,
+      s.store_time_zone
+    FROM erp_carrier_scans sc
+    JOIN erp_shipments s
+      ON s.shipment_id = sc.shipment_id
+    CROSS JOIN params p
+    WHERE sc.scan_type = 'delivered'
+      AND sc.scan_timestamp >= CAST(p.start_date - INTERVAL '1' DAY AS TIMESTAMP)
+      AND sc.scan_timestamp < CAST(p.end_date + INTERVAL '2' DAY AS TIMESTAMP)
+  ),
+  latest AS (
+    -- One row per shipment: the last delivered scan by OMS scan timestamp wins, earlier corrected scans are discarded
+    SELECT *
+    FROM (
+      SELECT d.*, ROW_NUMBER() OVER (PARTITION BY shipment_id ORDER BY scan_timestamp DESC) AS rn
+      FROM delivered d
+    ) r
+    WHERE rn = 1
+  ),
+  mapped AS (
+    -- Raw carrier POD code mapped to the governed list; a delivered scan with a null or blank code is none, an unmapped code becomes other
+    SELECT
+      l.order_id,
+      l.shipment_id,
+      CAST(FROM_UTC_TIMESTAMP(l.scan_timestamp, l.store_time_zone) AS DATE) AS delivery_date,
+      CASE
+        WHEN l.pod_code IS NULL THEN 'none'
+        ELSE COALESCE(m.delivery_confirmation_method, 'other')
+      END AS delivery_confirmation_method
+    FROM latest l
+    LEFT JOIN erp_pod_code_map m
+      ON m.carrier_code = l.carrier_code
+     AND LOWER(m.raw_pod_code) = LOWER(l.pod_code)
+  )
+  -- Shipment-level method code on the store-local delivery date, with the order-level rollup (mixed when shipments differ)
+  SELECT
+    mp.delivery_date,
+    mp.order_id,
+    mp.shipment_id,
+    mp.delivery_confirmation_method,
+    CASE
+      WHEN MIN(mp.delivery_confirmation_method) OVER (PARTITION BY mp.order_id)
+        <> MAX(mp.delivery_confirmation_method) OVER (PARTITION BY mp.order_id)
+      THEN 'mixed'
+      ELSE mp.delivery_confirmation_method
+    END AS order_delivery_confirmation_method
+  FROM mapped mp
+  CROSS JOIN params p
+  WHERE mp.delivery_date BETWEEN p.start_date AND p.end_date;
+
+Calculation Notes: |
+  1️⃣ Values: signature, photo, pin_code, parcel_locker, access_point, none, other. Raw carrier POD codes map to these; unmapped codes go to other.
+  2️⃣ Grain is the shipment. The last delivered scan by OMS scan timestamp wins; earlier scans the carrier corrected are discarded.
+  3️⃣ Shipments without a delivered scan (in transit, returned, lost) stay null; never default them to none.
+  4️⃣ none means delivered with no proof captured (left at door, mailbox); it is not a missing value.
+  5️⃣ Split orders keep one value per shipment; an order-level rollup shows mixed when shipments differ.
+  6️⃣ Store only the method code. Signer name, photo image and GPS coordinates stay in the carrier system and never enter analytics.
+  7️⃣ Attribute to the delivery date in the store time zone, not the order date.
+
+Business Use Case: |
+  1️⃣ Customer Service checks the method on item-not-received claims; none or photo triggers a carrier trace.
+  2️⃣ Loss Prevention requires signature on orders above a value threshold when none-method claims rise in a region.
+  3️⃣ Logistics compares claim and failed delivery rates by carrier and method to renegotiate POD terms.
+  4️⃣ Product tests locker and access point options at checkout where porch-theft claims are highest.
+
+Dependencies:
+  Dimensions: [carrier]
+
+Source Data: ERP
+
+Report Attributes: |
+  carrier; shipment-mode; shipping-tier; delivery-region; delivery-location; fulfillment-method
+
+Dashboard Usage: [Delivery Performance, Carrier Scorecard, Item-Not-Received Claims, Post-Purchase Experience]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [carrier, shipment-mode, shipping-tier, fulfillment-method, delivery-location, delivery-region, shipment-status, delivery-exception-type]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +196,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-23T15:29:15.643+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-23T15:29:25.186+00:00
 
