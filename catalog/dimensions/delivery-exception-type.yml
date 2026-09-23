@@ -1,0 +1,261 @@
+# Dimension: Delivery Exception Type
+# Generated: 2026-09-23T15:48:27.424Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Delivery Exception Type
+
+Description: |
+  Carrier-reported reason a shipment stalled or failed in transit: weather, address issue, damaged, recipient unavailable, held at facility. Used to split failed deliveries by root cause.
+
+Category: Operations
+
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  pageView
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "page": {
+          "pageInfo": {
+            "pageName": "Order Status",
+            "pageType": "order_status"
+          }
+        },
+        "shipment": {
+          "orderID": "",
+          "trackingNumber": "",
+          "carrier": "",
+          "deliveryExceptionType": "",
+          "exceptionTimestamp": "",
+          "shipmentMode": "",
+          "fulfillmentMethod": "",
+          "deliveryRegion": "",
+          "shippingTier": ""
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_type": "order_status",
+    "order_id": "ORD-100234",
+    "carrier": "UPS",
+    "tracking_number": "1Z999AA10123456784",
+    "delivery_exception_type": "address_issue",
+    "exception_timestamp": "2026-09-23T14:12:00Z",
+    "shipment_mode": "Standard",
+    "fulfillment_method": "ship_to_home",
+    "delivery_region": "US-West",
+    "shipping_tier": "Standard"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "page": {
+      "pageType": "order_status"
+    },
+    "shipment": {
+      "orderId": "ORD-100234",
+      "carrier": "UPS",
+      "trackingNumber": "1Z999AA10123456784",
+      "deliveryExceptionType": "address_issue",
+      "exceptionTimestamp": "2026-09-23T14:12:00Z",
+      "shipmentMode": "Standard",
+      "fulfillmentMethod": "ship_to_home",
+      "deliveryRegion": "US-West",
+      "shippingTier": "Standard"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "pageView",
+    "page": {
+      "pageType": "order_status"
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar12": "shipment.deliveryExceptionType"
+          }
+        }
+      }
+    },
+    "shipment": {
+      "orderId": "{{orderId}}",
+      "trackingNumber": "{{trackingNumber}}",
+      "carrier": "{{carrier}}",
+      "shipmentMode": "{{shipmentMode}}",
+      "fulfillmentMethod": "{{fulfillmentMethod}}",
+      "deliveryExceptionType": "{{deliveryExceptionType}}",
+      "exceptionTimestamp": "{{exceptionTimestamp}}",
+      "deliveryRegion": "{{deliveryRegion}}",
+      "shippingTier": "{{shippingTier}}"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH scans AS (
+    -- Exception scans seen on tracking pages, one row per package scan, UTC timestamp (source rank 2)
+    SELECT
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'tracking_number') AS tracking_number,
+      LOWER(TRIM((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'delivery_exception_type'))) AS raw_type,
+      SAFE.TIMESTAMP((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'exception_timestamp')) AS scan_ts,
+      2 AS source_rank
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL 1 DAY)) AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL 1 DAY))
+      AND event_name = 'page_view'
+      AND (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_type') = 'order_status'
+    UNION ALL
+    -- OMS carrier exception events for the same packages (source rank 1, wins on conflict)
+    SELECT tracking_number, LOWER(TRIM(exception_type)), scan_timestamp_utc, 1
+    FROM `your-project.oms.carrier_events`
+    WHERE event_category = 'exception'
+  ),
+  mapped AS (
+    -- Map raw codes to the fixed value list (attempted delivery = recipient_unavailable, unmapped = other); drop customer holds/reroutes and empty values
+    SELECT
+      tracking_number,
+      scan_ts,
+      source_rank,
+      CASE
+        WHEN raw_type IN ('weather', 'weather_delay', 'severe_weather') THEN 'weather'
+        WHEN raw_type IN ('address_issue', 'incorrect_address', 'bad_address', 'incomplete_address') THEN 'address_issue'
+        WHEN raw_type IN ('damaged', 'damage', 'package_damaged') THEN 'damaged'
+        WHEN raw_type IN ('recipient_unavailable', 'attempted_delivery', 'delivery_attempted', 'notice_left') THEN 'recipient_unavailable'
+        WHEN raw_type IN ('held_at_facility', 'facility_hold', 'held_at_terminal') THEN 'held_at_facility'
+        ELSE 'other'
+      END AS delivery_exception_type
+    FROM scans
+    WHERE tracking_number IS NOT NULL
+      AND raw_type IS NOT NULL
+      AND raw_type NOT IN ('', 'none', 'customer_hold', 'customer_requested_hold', 'customer_reroute', 'reroute_requested')
+      AND DATE(scan_ts, 'UTC') BETWEEN start_date AND end_date
+  )
+  -- One value per package: OMS scans first, then the last exception scan, dated by the carrier exception scan (UTC)
+  SELECT
+    tracking_number,
+    DATE(scan_ts, 'UTC') AS exception_date,
+    delivery_exception_type
+  FROM mapped
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY tracking_number ORDER BY source_rank, scan_ts DESC) = 1;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Relative reporting window (UTC dates)
+    SELECT CAST(CURRENT_DATE - INTERVAL '90' DAY AS DATE) AS start_date, CAST(CURRENT_DATE - INTERVAL '1' DAY AS DATE) AS end_date
+  ),
+  scans AS (
+    -- Exception scans seen on tracking pages, one row per package scan, UTC timestamp (source rank 2)
+    SELECT
+      e.shipment.trackingNumber AS tracking_number,
+      LOWER(TRIM(e.shipment.deliveryExceptionType)) AS raw_type,
+      to_timestamp(e.shipment.exceptionTimestamp) AS scan_ts,
+      2 AS source_rank
+    FROM web_events_dataset e
+    WHERE e.eventType = 'pageView'
+      AND e.page.pageType = 'order_status'
+    UNION ALL
+    -- OMS carrier exception events for the same packages (source rank 1, wins on conflict)
+    SELECT tracking_number, LOWER(TRIM(exception_type)), scan_timestamp_utc, 1
+    FROM oms_carrier_events
+    WHERE event_category = 'exception'
+  ),
+  mapped AS (
+    -- Map raw codes to the fixed value list (attempted delivery = recipient_unavailable, unmapped = other); drop customer holds/reroutes and empty values
+    SELECT
+      s.tracking_number,
+      s.scan_ts,
+      s.source_rank,
+      CASE
+        WHEN s.raw_type IN ('weather', 'weather_delay', 'severe_weather') THEN 'weather'
+        WHEN s.raw_type IN ('address_issue', 'incorrect_address', 'bad_address', 'incomplete_address') THEN 'address_issue'
+        WHEN s.raw_type IN ('damaged', 'damage', 'package_damaged') THEN 'damaged'
+        WHEN s.raw_type IN ('recipient_unavailable', 'attempted_delivery', 'delivery_attempted', 'notice_left') THEN 'recipient_unavailable'
+        WHEN s.raw_type IN ('held_at_facility', 'facility_hold', 'held_at_terminal') THEN 'held_at_facility'
+        ELSE 'other'
+      END AS delivery_exception_type
+    FROM scans s
+    CROSS JOIN params p
+    WHERE s.tracking_number IS NOT NULL
+      AND s.raw_type IS NOT NULL
+      AND s.raw_type NOT IN ('', 'none', 'customer_hold', 'customer_requested_hold', 'customer_reroute', 'reroute_requested')
+      AND CAST(s.scan_ts AS DATE) BETWEEN p.start_date AND p.end_date
+  )
+  -- One value per package: OMS scans first, then the last exception scan, dated by the carrier exception scan (UTC)
+  SELECT tracking_number, CAST(scan_ts AS DATE) AS exception_date, delivery_exception_type
+  FROM (
+    SELECT m.*, ROW_NUMBER() OVER (PARTITION BY tracking_number ORDER BY source_rank, scan_ts DESC) AS rn
+    FROM mapped m
+  ) ranked
+  WHERE rn = 1;
+
+Calculation Notes: |
+  1️⃣ Map raw carrier codes (UPS, FedEx, USPS, DHL) to one fixed value list; unmapped codes go to 'other', never passed through raw.,2️⃣ Grain is the package (tracking number), not the order; a split shipment can carry a different exception type per package.,3️⃣ Each exception scan keeps its own value; for package-level reporting use the last exception before delivery or return to sender.,4️⃣ Attempted delivery with a notice left maps to recipient unavailable; customer-requested holds and reroutes are not exceptions.,5️⃣ Null when a package has no exception; filter on null for clean deliveries rather than storing a 'none' value.,6️⃣ Date by the carrier exception scan timestamp converted to UTC, not by order or ship date.,7️⃣ Values seen on tracking pages are reconciled to OMS carrier events; the OMS value wins on conflict.
+
+Business Use Case: |
+  1️⃣ Customer Service: on a damaged or address-issue exception, contact the customer before the WISMO call arrives.,2️⃣ Logistics: when one carrier's facility-hold or weather share spikes, shift volume to the backup carrier.,3️⃣ Product: when address-issue exceptions rise, tighten address validation at the shipping step of checkout.,4️⃣ Finance: file damage and loss claims against carrier SLA credits using damaged-exception packages.
+
+Dependencies:
+  Events: [delivery-exception-occurrence, shipment-delay-notification]
+  Dimensions: [carrier]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics) + Order Management (reconciliation)
+
+Report Attributes: |
+  carrier; delivery-region; shipment-mode; fulfillment-method; shipping-tier
+
+Dashboard Usage: [Delivery Exceptions & Carrier Performance, Post-Purchase Experience (WISMO)]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [carrier, carrier-performance, delivery-location, delivery-region, delivery-promise-date, shipment-mode, fulfillment-method, order-status, shipment-status, delivery-sla-status]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-23T15:29:32.48+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-23T15:48:27.14+00:00
+
