@@ -1,0 +1,189 @@
+# Event: Remove from Cart
+# Generated: 2026-09-23T15:49:54.089Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Remove from Cart
+Event Serialization: always
+
+Description: |
+  Captures every confirmed removal of one or more product units from the cart, aligned to GA4 remove_from_cart and Adobe scRemove. Source event for Cart Removals and cart-edit analysis.
+
+Category: Conversion
+
+Tags: [event, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Checkout
+
+
+Event Type: standard
+
+Aggregation Window: Event, Session, Daily, Weekly
+
+GA4 Event: |
+  remove_from_cart
+
+Adobe Event: |
+  scRemove
+
+W3 Data Layer: |
+  {
+    "event": "remove_from_cart",
+    "cart": {
+      "cartID": "{{cart_id}}",
+      "eventID": "{{event_id}}",
+      "price": {
+        "currency": "{{currency}}"
+      },
+      "attributes": {
+        "removalValue": "{{value}}"
+      },
+      "removeMethod": "{{remove_method}}",
+      "pageType": "{{page_type}}",
+      "item": [
+        {
+          "productInfo": {
+            "productID": "{{item_id}}",
+            "productName": "{{item_name}}",
+            "category": "{{item_category}}"
+          },
+          "price": {
+            "basePrice": "{{price}}"
+          },
+          "quantity": "{{quantity}}"
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "remove_from_cart",
+    "ecommerce": {
+      "currency": "{{currency}}",
+      "value": "{{value}}",
+      "cart_id": "{{cart_id}}",
+      "remove_method": "{{remove_method}}",
+      "page_type": "{{page_type}}",
+      "event_id": "{{event_id}}",
+      "items": [
+        {
+          "item_id": "{{item_id}}",
+          "item_name": "{{item_name}}",
+          "item_category": "{{item_category}}",
+          "price": "{{price}}",
+          "quantity": "{{quantity}}"
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "scRemove",
+    "eventInfo": {
+      "cartId": "{{cart_id}}",
+      "removeMethod": "{{remove_method}}",
+      "pageType": "{{page_type}}",
+      "eventId": "{{event_id}}"
+    },
+    "commerce": {
+      "productListRemovals": {
+        "value": 1
+      }
+    },
+    "product": {
+      "currency": "{{currency}}",
+      "value": "{{value}}",
+      "items": [
+        {
+          "itemId": "{{item_id}}",
+          "itemName": "{{item_name}}",
+          "itemCategory": "{{item_category}}",
+          "price": "{{price}}",
+          "quantity": "{{quantity}}"
+        }
+      ]
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.productListRemovals",
+    "commerce": {
+      "productListRemovals": {
+        "value": 1
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "{{item_id}}",
+        "name": "{{item_name}}",
+        "category": "{{item_category}}",
+        "currencyCode": "{{currency}}",
+        "priceTotal": "{{price}} * {{quantity}}",
+        "quantity": "{{quantity}}"
+      }
+    ],
+    "_tenant": {
+      "cartId": "{{cart_id}}",
+      "removeMethod": "{{remove_method}}",
+      "pageType": "{{page_type}}",
+      "eventId": "{{event_id}}"
+    }
+  }
+
+Parameters: |
+  {
+    "items": "array - removed products with item_id, item_name, item_category, price and quantity (removed units only)",
+    "currency": "string - ISO 4217 code, matching the add_to_cart currency",
+    "value": "number - sum of price × removed quantity across items",
+    "cart_id": "string - opaque cart identifier shared with add_to_cart and begin_checkout",
+    "remove_method": "string - how the removal happened: remove_button, quantity_decrease, clear_cart, system",
+    "page_type": "string - page where the removal happened, e.g. cart, mini_cart, checkout",
+    "event_id": "string - unique id per confirmed removal, used for deduplication"
+  }
+
+Calculation Notes: |
+  ["1️⃣ Shopper removals fire in the client after the cart service confirms the change, not on click; a failed cart update sends nothing.","2️⃣ Serialization always: one hit per confirmed action; dedupe on event_id so a retried request or double-click counts once.","3️⃣ On a quantity decrease, items[].quantity and value cover removed units only; a cleared cart sends one event listing every line.","4️⃣ Required: items (item_id or item_name), currency, value. Optional: cart_id, remove_method, page_type, event_id.","5️⃣ System removals (out of stock, expired cart) go server-side via GA4 Measurement Protocol, remove_method=system, same event_id dedupe.","6️⃣ No PII in parameters; cart_id is an opaque token. Respect analytics_storage consent; denied hits are not queued for later replay.","7️⃣ Common mistakes: firing on mini-cart open, sending the full line value on a one-unit decrease, re-firing when the cart re-renders."]
+
+Business Use Case: |
+  ["1️⃣ Merchandising reviews products with a high removal share weekly and checks price, size or stock messaging on the PDP.","2️⃣ Product team sees removals spike after the shipping cost appears in cart and tests showing shipping estimates earlier.","3️⃣ CRM team sends a price-drop or low-stock reminder for items removed by opted-in shoppers who did not purchase."]
+
+Dependencies:
+  Events: [add-to-cart]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  Product Name; Item Category; Page Type; Remove Method; Device Category
+
+    Dashboard Usage: [Cart & Checkout Funnel, Product Performance]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [product-name, item-category, page-type, currency, device-category]
+
+    
+    Derived Metrics: [cart-removals]
+
+    
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-23T15:47:06.711+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-23T15:49:53.63+00:00
+
