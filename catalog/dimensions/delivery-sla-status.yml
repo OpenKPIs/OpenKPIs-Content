@@ -1,7 +1,7 @@
 # Dimension: Delivery SLA Status
-# Generated: 2026-09-23T15:29:48.860Z
+# Generated: 2026-09-23T15:29:58.832Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Delivery SLA Status
 
@@ -10,31 +10,273 @@ Description: |
 
 Category: Operations
 
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "ORD1029384",
+      "fulfillmentMethod": "ship_to_home",
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU12345"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "transaction_id": "ORD1029384",
+    "currency": "USD",
+    "value": 149.98,
+    "fulfillment_method": "ship_to_home",
+    "items": [
+      {
+        "item_id": "SKU12345",
+        "item_name": "Wireless Headphones",
+        "quantity": 1,
+        "price": 149.98
+      }
+    ]
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "order": {
+      "orderId": "ORD1029384",
+      "fulfillmentMethod": "ship_to_home"
+    },
+    "items": [
+      {
+        "sku": "SKU12345"
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD1029384"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar_fulfillment_method": "ship_to_home"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT CURRENT_DATE();
+  
+  -- Orders placed in the window with a carrier leg (BOPIS and curbside excluded)
+  WITH purchases AS (
+    SELECT DISTINCT
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'transaction_id') AS transaction_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+      AND COALESCE((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'fulfillment_method'), '') NOT IN ('bopis', 'curbside')
+  ),
+  -- Packages of those orders from order management, excluding cancelled shipments
+  packages AS (
+    SELECT s.shipment_id, s.order_id, s.tracking_number, s.destination_timezone,
+           s.checkout_promise_start_date, s.checkout_promise_end_date
+    FROM `your-project.oms.shipments` AS s
+    JOIN purchases AS pu ON pu.transaction_id = s.order_id
+    WHERE s.shipment_status != 'cancelled'
+  ),
+  -- Latest customer-requested reschedule per package; carrier re-estimates never change the promise
+  reschedules AS (
+    SELECT shipment_id, new_promise_start_date, new_promise_end_date
+    FROM `your-project.oms.delivery_promise_changes`
+    WHERE change_source = 'customer_reschedule'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY shipment_id ORDER BY changed_at DESC) = 1
+  ),
+  -- First carrier delivered scan per tracking number; failed attempts leave the package open
+  delivered AS (
+    SELECT tracking_number, MIN(scan_timestamp) AS delivered_at
+    FROM `your-project.oms.carrier_tracking_events`
+    WHERE scan_type = 'delivered'
+    GROUP BY tracking_number
+  ),
+  -- Tracking numbers with a delivery exception still open
+  open_exceptions AS (
+    SELECT DISTINCT tracking_number
+    FROM `your-project.oms.delivery_exceptions`
+    WHERE resolved_at IS NULL
+  ),
+  -- Effective promise window (checkout promise unless rescheduled by the customer) and local delivery date per package
+  promised AS (
+    SELECT p.shipment_id, p.order_id,
+           COALESCE(r.new_promise_start_date, p.checkout_promise_start_date) AS promise_start,
+           COALESCE(r.new_promise_end_date, p.checkout_promise_end_date) AS promise_end,
+           DATE(d.delivered_at, p.destination_timezone) AS delivered_date,
+           CURRENT_DATE(p.destination_timezone) AS local_today,
+           x.tracking_number IS NOT NULL AS has_open_exception
+    FROM packages AS p
+    LEFT JOIN reschedules AS r USING (shipment_id)
+    LEFT JOIN delivered AS d USING (tracking_number)
+    LEFT JOIN open_exceptions AS x USING (tracking_number)
+  ),
+  -- Per-package status: delivered packages are final; open packages turn Late the day after the latest promised date
+  classified AS (
+    SELECT shipment_id, order_id,
+           CASE
+             WHEN delivered_date < promise_start THEN 'Early'
+             WHEN delivered_date <= promise_end THEN 'On Time'
+             WHEN delivered_date IS NOT NULL THEN 'Late'
+             WHEN local_today > promise_end THEN 'Late'
+             WHEN has_open_exception THEN 'At Risk'
+             ELSE 'In Transit'
+           END AS delivery_sla_status
+    FROM promised
+  )
+  -- The order is On Time only when every package is Early or On Time
+  SELECT shipment_id, order_id, delivery_sla_status,
+         LOGICAL_AND(delivery_sla_status IN ('Early', 'On Time')) OVER (PARTITION BY order_id) AS order_on_time
+  FROM classified;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window: last 90 days
+  WITH params AS (
+    SELECT CAST(CURRENT_DATE - INTERVAL '90' DAY AS DATE) AS start_date,
+           CURRENT_DATE AS end_date
+  ),
+  -- Orders placed in the window with a carrier leg (BOPIS and curbside excluded)
+  purchases AS (
+    SELECT DISTINCT e.commerce.order.purchaseID AS transaction_id
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE e.eventType = 'commerce.purchases'
+      AND CAST(e.timestamp AS DATE) BETWEEN p.start_date AND p.end_date
+      AND COALESCE(e._experience.analytics.customDimensions.eVars.eVar_fulfillment_method, '') NOT IN ('bopis', 'curbside')
+  ),
+  -- Packages of those orders from order management, excluding cancelled shipments
+  packages AS (
+    SELECT s.shipment_id, s.order_id, s.tracking_number, s.destination_timezone,
+           s.checkout_promise_start_date, s.checkout_promise_end_date
+    FROM oms_shipments AS s
+    JOIN purchases AS pu ON pu.transaction_id = s.order_id
+    WHERE s.shipment_status != 'cancelled'
+  ),
+  -- Latest customer-requested reschedule per package; carrier re-estimates never change the promise
+  reschedules AS (
+    SELECT shipment_id, new_promise_start_date, new_promise_end_date
+    FROM (
+      SELECT shipment_id, new_promise_start_date, new_promise_end_date,
+             ROW_NUMBER() OVER (PARTITION BY shipment_id ORDER BY changed_at DESC) AS rn
+      FROM oms_delivery_promise_changes
+      WHERE change_source = 'customer_reschedule'
+    ) AS c
+    WHERE rn = 1
+  ),
+  -- First carrier delivered scan per tracking number; failed attempts leave the package open
+  delivered AS (
+    SELECT tracking_number, MIN(scan_timestamp) AS delivered_at
+    FROM carrier_tracking_events
+    WHERE scan_type = 'delivered'
+    GROUP BY tracking_number
+  ),
+  -- Tracking numbers with a delivery exception still open
+  open_exceptions AS (
+    SELECT DISTINCT tracking_number
+    FROM delivery_exceptions
+    WHERE resolved_at IS NULL
+  ),
+  -- Effective promise window (checkout promise unless rescheduled by the customer) and local delivery date per package
+  promised AS (
+    SELECT p.shipment_id, p.order_id,
+           COALESCE(r.new_promise_start_date, p.checkout_promise_start_date) AS promise_start,
+           COALESCE(r.new_promise_end_date, p.checkout_promise_end_date) AS promise_end,
+           TO_DATE(FROM_UTC_TIMESTAMP(d.delivered_at, p.destination_timezone)) AS delivered_date,
+           TO_DATE(FROM_UTC_TIMESTAMP(CURRENT_TIMESTAMP, p.destination_timezone)) AS local_today,
+           x.tracking_number IS NOT NULL AS has_open_exception
+    FROM packages AS p
+    LEFT JOIN reschedules AS r ON r.shipment_id = p.shipment_id
+    LEFT JOIN delivered AS d ON d.tracking_number = p.tracking_number
+    LEFT JOIN open_exceptions AS x ON x.tracking_number = p.tracking_number
+  ),
+  -- Per-package status: delivered packages are final; open packages turn Late the day after the latest promised date
+  classified AS (
+    SELECT shipment_id, order_id,
+           CASE
+             WHEN delivered_date < promise_start THEN 'Early'
+             WHEN delivered_date <= promise_end THEN 'On Time'
+             WHEN delivered_date IS NOT NULL THEN 'Late'
+             WHEN local_today > promise_end THEN 'Late'
+             WHEN has_open_exception THEN 'At Risk'
+             ELSE 'In Transit'
+           END AS delivery_sla_status
+    FROM promised
+  )
+  -- The order is On Time only when every package is Early or On Time
+  SELECT shipment_id, order_id, delivery_sla_status,
+         BOOL_AND(delivery_sla_status IN ('Early', 'On Time')) OVER (PARTITION BY order_id) AS order_on_time
+  FROM classified;
+
+Calculation Notes: |
+  1️⃣ Compare the local date of the first carrier delivered scan with the OMS checkout_promise_start_date to checkout_promise_end_date window.,2️⃣ Early = before the earliest promised date; On Time = on the promise date or inside the window; Late = after the latest promised date.,3️⃣ Undelivered shipments before the promise date are In Transit, or At Risk when a delivery exception is open on the tracking number.,4️⃣ An undelivered shipment turns Late the day after the promise date passes; once the delivered scan lands, the value is final.,5️⃣ Use the promise shown at checkout; customer-requested reschedules reset it, carrier re-estimates never do.,6️⃣ Split shipments are classified per package; the order is On Time only when every package is Early or On Time.,7️⃣ Exclude BOPIS and curbside orders (no carrier leg) and cancelled shipments; a failed first attempt stays open until delivered.
+
+Business Use Case: |
+  1️⃣ Logistics Operations: when a carrier's Late share rises week over week, open a service review and shift volume.,2️⃣ Customer Service: send a proactive delay message for At Risk shipments before the promise date to cut WISMO contacts.,3️⃣ E-commerce team: when Late share for a shipping tier and region exceeds target, widen the promise shown at checkout.,4️⃣ Finance: file guaranteed-service refund claims with carriers for Late Express and Next Day packages.
+
+Dependencies:
+  Events: [purchase, delivery-confirmation, delivery-exception-occurrence]
+  Dimensions: [delivery-promise-date, shipment-status]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics) + Order Management (reconciliation)
+
+Report Attributes: |
+  carrier; shipping_tier; fulfillment_method; delivery_region; shipment_mode; transit_distance_band
+
+Dashboard Usage: [Delivery Performance, Carrier Scorecard, Post-Purchase Customer Experience]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [delivery-promise-date, carrier, carrier-performance, shipping-tier, fulfillment-method, delivery-region, shipment-mode, shipment-status, delivery-exception-type, delivery-time-window]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +284,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-23T15:29:48.403+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-23T15:29:58.487+00:00
 
