@@ -1,7 +1,7 @@
 # KPI: Recommendation Click-Through Rate
-# Generated: 2026-09-24T13:53:55.842Z
+# Generated: 2026-09-24T13:54:20.691Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Recommendation Click-Through Rate
 Formula: (Recommendation Module Impressions with a Recommended Item Click / Viewable Recommendation Module Impressions) × 100
@@ -11,29 +11,378 @@ Description: |
 
 Category: Engagement
 
+Tags: [kpi, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Event
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  select_item
 
+Adobe Event: |
+  select_item
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "view_item_list",
+          "eventAction": "Recommendation Module Impression",
+          "type": "other"
+        },
+        "category": {
+          "primaryCategory": "recommendation"
+        },
+        "page": {
+          "pageInfo": {
+            "pageType": "product_detail"
+          }
+        },
+        "listing": {
+          "itemListId": "pdp_similar_items",
+          "itemListName": "Similar Items",
+          "viewable": true,
+          "trafficType": "customer"
+        },
+        "product": [
+          {
+            "productInfo": {
+              "productID": "SKU12345",
+              "productName": "Wireless Earbuds"
+            },
+            "attributes": {
+              "itemListId": "pdp_similar_items",
+              "itemListName": "Similar Items",
+              "listPosition": 2
+            }
+          }
+        ]
+      },
+      {
+        "eventInfo": {
+          "eventName": "select_item",
+          "eventAction": "Recommendation Click",
+          "type": "other"
+        },
+        "category": {
+          "primaryCategory": "recommendation"
+        },
+        "page": {
+          "pageInfo": {
+            "pageType": "product_detail"
+          }
+        },
+        "product": [
+          {
+            "productInfo": {
+              "productID": "SKU12345",
+              "productName": "Wireless Earbuds"
+            },
+            "attributes": {
+              "itemListId": "pdp_similar_items",
+              "itemListName": "Similar Items",
+              "listPosition": 2
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "view_item_list": {
+      "event": "view_item_list",
+      "page_type": "product_detail",
+      "item_list_id": "pdp_similar_items",
+      "item_list_name": "Similar Items",
+      "viewable": true,
+      "traffic_type": "customer",
+      "items": [
+        {
+          "item_id": "SKU12345",
+          "item_name": "Wireless Earbuds",
+          "item_list_id": "pdp_similar_items",
+          "item_list_name": "Similar Items",
+          "index": 2,
+          "price": 49.99
+        }
+      ]
+    },
+    "select_item": {
+      "event": "select_item",
+      "page_type": "product_detail",
+      "item_list_id": "pdp_similar_items",
+      "item_list_name": "Similar Items",
+      "items": [
+        {
+          "item_id": "SKU12345",
+          "item_name": "Wireless Earbuds",
+          "item_list_id": "pdp_similar_items",
+          "item_list_name": "Similar Items",
+          "index": 2,
+          "price": 49.99
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "view_item_list": {
+      "event": "view_item_list",
+      "page_type": "product_detail",
+      "item_list_id": "pdp_similar_items",
+      "item_list_name": "Similar Items",
+      "viewable": true,
+      "traffic_type": "customer",
+      "items": [
+        {
+          "item_id": "SKU12345",
+          "item_name": "Wireless Earbuds",
+          "index": 2,
+          "price": 49.99
+        }
+      ]
+    },
+    "select_item": {
+      "event": "select_item",
+      "page_type": "product_detail",
+      "item_list_id": "pdp_similar_items",
+      "item_list_name": "Similar Items",
+      "items": [
+        {
+          "item_id": "SKU12345",
+          "item_name": "Wireless Earbuds",
+          "index": 2,
+          "price": 49.99
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "view_item_list": {
+      "eventType": "commerce.productListViews",
+      "commerce": {
+        "productListViews": {
+          "value": 1
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "items[].item_id",
+          "name": "items[].item_name"
+        }
+      ],
+      "web": {
+        "webPageDetails": {
+          "pageType": "page_type"
+        }
+      },
+      "_tenant": {
+        "viewable": "viewable",
+        "traffic_type": "traffic_type"
+      },
+      "_experience": {
+        "analytics": {
+          "customDimensions": {
+            "eVars": {
+              "eVar25": "item_list_id",
+              "eVar26": "item_list_name"
+            }
+          }
+        }
+      }
+    },
+    "select_item": {
+      "eventType": "web.webinteraction.linkClicks",
+      "productListItems": [
+        {
+          "SKU": "items[].item_id",
+          "name": "items[].item_name"
+        }
+      ],
+      "web": {
+        "webInteraction": {
+          "name": "select_item",
+          "type": "other",
+          "linkClicks": {
+            "value": 1
+          }
+        }
+      },
+      "_experience": {
+        "analytics": {
+          "customDimensions": {
+            "eVars": {
+              "eVar25": "item_list_id",
+              "eVar26": "item_list_name"
+            }
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- List views and item clicks with their parameters pivoted from event_params
+  WITH events AS (
+    SELECT
+      event_name,
+      event_timestamp,
+      device.category AS device_category,
+      ARRAY_LENGTH(items) AS item_count,
+      CONCAT(user_pseudo_id, '.', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_key,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_location') AS page_location,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'item_list_id') AS item_list_id,
+      (SELECT COALESCE(value.string_value, CAST(value.int_value AS STRING)) FROM UNNEST(event_params) WHERE key = 'viewable') AS viewable,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name IN ('view_item_list', 'select_item')
+  ),
+  -- Viewable, non-empty impressions of registered recommendation modules, excluding bot, internal and QA traffic
+  impressions AS (
+    SELECT e.session_key, e.page_location, e.item_list_id, e.event_timestamp AS impression_ts, e.device_category, r.algorithm
+    FROM events e
+    JOIN `your-project.merchandising.recommendation_module_registry` r USING (item_list_id)
+    WHERE e.event_name = 'view_item_list'
+      AND e.viewable IN ('true', '1')
+      AND e.item_count > 0
+      AND COALESCE(e.traffic_type, '') NOT IN ('internal', 'qa', 'bot')
+  ),
+  -- Each click attached to the latest preceding impression of the same module on the same page in the session; clicks without one drop out
+  clicked AS (
+    SELECT c.session_key, c.page_location, c.item_list_id, c.event_timestamp AS click_ts, MAX(i.impression_ts) AS impression_ts
+    FROM events c
+    JOIN impressions i
+      ON i.session_key = c.session_key
+     AND i.page_location = c.page_location
+     AND i.item_list_id = c.item_list_id
+     AND i.impression_ts <= c.event_timestamp
+    WHERE c.event_name = 'select_item'
+    GROUP BY 1, 2, 3, 4
+  )
+  -- Share of impressions with at least one click (several clicks count once), by module, algorithm and device category
+  SELECT
+    i.item_list_id,
+    i.algorithm,
+    i.device_category,
+    COUNT(*) AS viewable_impressions,
+    COUNTIF(k.impression_ts IS NOT NULL) AS clicked_impressions,
+    ROUND(SAFE_DIVIDE(COUNTIF(k.impression_ts IS NOT NULL), COUNT(*)) * 100, 2) AS recommendation_ctr_pct
+  FROM impressions i
+  LEFT JOIN (SELECT DISTINCT session_key, page_location, item_list_id, impression_ts FROM clicked) k
+    USING (session_key, page_location, item_list_id, impression_ts)
+  GROUP BY 1, 2, 3
+  ORDER BY viewable_impressions DESC;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window (last 90 complete days)
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  ),
+  -- List views (commerce.productListViews) and select_item link clicks in the window, sessionized per ECID with a 30-minute inactivity timeout
+  events AS (
+    SELECT
+      CASE WHEN e.eventType = 'commerce.productListViews' THEN 'view_item_list' ELSE 'select_item' END AS event_name,
+      e.timestamp AS event_ts,
+      e.device.type AS device_category,
+      size(e.productListItems) AS item_count,
+      concat(e.identityMap['ECID'][0].id, '.', CAST(SESS_TIMEOUT(e.timestamp, 60 * 30) OVER (PARTITION BY e.identityMap['ECID'][0].id ORDER BY e.timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW).num AS STRING)) AS session_key,
+      e.web.webPageDetails.URL AS page_location,
+      e._experience.analytics.customDimensions.eVars.eVar25 AS item_list_id,
+      CAST(e._tenant.viewable AS STRING) AS viewable,
+      e._tenant.traffic_type AS traffic_type
+    FROM aep_web_events e
+    CROSS JOIN params p
+    WHERE to_date(e.timestamp) BETWEEN p.start_date AND p.end_date
+      AND (e.eventType = 'commerce.productListViews'
+        OR (e.eventType = 'web.webinteraction.linkClicks' AND e.web.webInteraction.name = 'select_item'))
+  ),
+  -- Viewable, non-empty impressions of registered recommendation modules, excluding bot, internal and QA traffic
+  impressions AS (
+    SELECT e.session_key, e.page_location, e.item_list_id, e.event_ts AS impression_ts, e.device_category, r.algorithm
+    FROM events e
+    JOIN recommendation_module_registry r ON r.item_list_id = e.item_list_id
+    WHERE e.event_name = 'view_item_list'
+      AND e.viewable IN ('true', '1')
+      AND e.item_count > 0
+      AND COALESCE(e.traffic_type, '') NOT IN ('internal', 'qa', 'bot')
+  ),
+  -- Each click attached to the latest preceding impression of the same module on the same page in the session; clicks without one drop out
+  clicked AS (
+    SELECT c.session_key, c.page_location, c.item_list_id, c.event_ts AS click_ts, MAX(i.impression_ts) AS impression_ts
+    FROM events c
+    JOIN impressions i
+      ON i.session_key = c.session_key
+     AND i.page_location = c.page_location
+     AND i.item_list_id = c.item_list_id
+     AND i.impression_ts <= c.event_ts
+    WHERE c.event_name = 'select_item'
+    GROUP BY c.session_key, c.page_location, c.item_list_id, c.event_ts
+  )
+  -- Share of impressions with at least one click (several clicks count once), by module, algorithm and device category
+  SELECT
+    i.item_list_id,
+    i.algorithm,
+    i.device_category,
+    COUNT(*) AS viewable_impressions,
+    SUM(CASE WHEN k.impression_ts IS NOT NULL THEN 1 ELSE 0 END) AS clicked_impressions,
+    ROUND(SUM(CASE WHEN k.impression_ts IS NOT NULL THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 2) AS recommendation_ctr_pct
+  FROM impressions i
+  LEFT JOIN (SELECT DISTINCT session_key, page_location, item_list_id, impression_ts FROM clicked) k
+    ON k.session_key = i.session_key
+   AND k.page_location = i.page_location
+   AND k.item_list_id = i.item_list_id
+   AND k.impression_ts = i.impression_ts
+  GROUP BY i.item_list_id, i.algorithm, i.device_category
+  ORDER BY viewable_impressions DESC;
 
+Calculation Notes: |
+  1️⃣ Recommendation modules only: view_item_list and select_item whose item_list_id is in the recommendation module registry (e.g. pdp_similar_items).,2️⃣ An impression counts only when the module is viewable (≥50% on screen for 1s); lazy-loaded modules never scrolled into view are excluded.,3️⃣ Several clicks in one module impression count once; a click joins its impression on session, page view and item_list_id.,4️⃣ Clicks with no matching impression in the session (cached pages, lost hits) are dropped from the numerator so the rate never exceeds 100%.,5️⃣ Empty modules (zero items returned) are excluded; fallback lists such as bestsellers stay in and are split out by algorithm.,6️⃣ Exclude bot, internal and QA traffic; compare algorithms or test arms only within the same placement and device category.
 
+Business Use Case: |
+  1️⃣ Merchandising: a placement's CTR trails site median for 2 weeks → change its algorithm or move it above the fold.,2️⃣ Product (personalization): new model in A/B test → ship only if CTR lift holds with no drop in Add to Cart Rate.,3️⃣ E-commerce manager: cart module CTR is low → replace similar-item recs with complementary accessories.
 
+Dependencies:
+  Events: [product-list-view, product-list-click]
+  Dimensions: [page-type, device-category]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Recommendation Module (item_list_name); Page Type; Recommendation Algorithm; Device Category; Traffic Source; Item Category
 
+Dashboard Usage: [Recommendation Performance, Product Discovery & Merchandising, Personalization A/B Test Readout]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [product-list-click-through-rate, promotion-click-through-rate, add-to-cart-rate, item-view-to-cart-rate, autocomplete-click-through-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +392,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-24T13:53:55.43+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-24T13:54:20.342+00:00
 
