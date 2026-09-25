@@ -1,7 +1,7 @@
 # Dimension: Customer Value Tier
-# Generated: 2026-09-25T19:02:59.003Z
+# Generated: 2026-09-25T19:03:11.363Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Customer Value Tier
 
@@ -10,31 +10,282 @@ Description: |
 
 Category: Retention
 
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV, ltv]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: Monthly, Quarterly
+
+GA4 Event: |
+  login
+
+Adobe Event: |
+  login
+
+W3 Data Layer: |
+  {
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "usr_48213",
+              "loginMethod": "email"
+            },
+            "attributes": {
+              "customerValueTier": "High"
+            }
+          }
+        ]
+      }
+    ],
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "login"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "login",
+    "method": "email",
+    "user_id": "usr_48213",
+    "user_properties": {
+      "customer_value_tier": "High"
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "login",
+    "user": {
+      "id": "usr_48213",
+      "loginMethod": "email",
+      "customerValueTier": "High"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "identityMap": {
+      "userID": [
+        {
+          "id": "usr_48213",
+          "primary": true
+        }
+      ]
+    },
+    "_openkpis": {
+      "customerValueTier": "High"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Monthly snapshot: tiers held for the current month, ranked on all orders placed before it began
+  DECLARE end_date DATE DEFAULT DATE_TRUNC(CURRENT_DATE(), MONTH);
+  DECLARE start_date DATE DEFAULT DATE_SUB(end_date, INTERVAL 20 YEAR);
+  
+  WITH
+  -- Purchase and refund events with order parameters pivoted; net value excludes tax and shipping
+  commerce_events AS (
+    SELECT
+      event_name,
+      PARSE_DATE('%Y%m%d', event_date) AS event_day,
+      user_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'transaction_id') AS transaction_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'currency') AS currency,
+      (SELECT COALESCE(value.double_value, value.int_value) FROM UNNEST(event_params) WHERE key = 'value')
+        - IFNULL((SELECT COALESCE(value.double_value, value.int_value) FROM UNNEST(event_params) WHERE key = 'tax'), 0)
+        - IFNULL((SELECT COALESCE(value.double_value, value.int_value) FROM UNNEST(event_params) WHERE key = 'shipping'), 0) AS net_value
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', DATE_SUB(end_date, INTERVAL 1 DAY))
+      AND event_name IN ('purchase', 'refund')
+  ),
+  -- Orders resolved to a customer through the order's stitched customer id (guest orders count once stitched), never cancelled for any reason (fraud included), excluding test and employee orders; one row per order
+  orders AS (
+    SELECT
+      e.transaction_id,
+      MAX(co.customer_id) AS user_id,
+      MIN(e.event_day) AS order_day,
+      MAX(e.currency) AS currency,
+      MAX(e.net_value) AS net_value
+    FROM commerce_events AS e
+    JOIN `your-project.commerce.orders` AS co ON co.order_id = e.transaction_id
+    WHERE e.event_name = 'purchase'
+      AND co.customer_id IS NOT NULL
+      AND co.cancelled_at IS NULL
+      AND NOT co.is_test
+      AND NOT co.is_employee
+    GROUP BY e.transaction_id
+  ),
+  -- Refunded value per order, excluding tax and shipping
+  refunds AS (
+    SELECT transaction_id, SUM(net_value) AS refund_value
+    FROM commerce_events
+    WHERE event_name = 'refund'
+    GROUP BY transaction_id
+  ),
+  -- Net lifetime value per customer in the reporting currency at the order-date rate
+  customer_ltv AS (
+    SELECT
+      o.user_id,
+      SUM((o.net_value - IFNULL(r.refund_value, 0)) * fx.rate_to_reporting) AS net_ltv
+    FROM orders AS o
+    LEFT JOIN refunds AS r USING (transaction_id)
+    JOIN `your-project.finance.fx_rates` AS fx ON fx.rate_date = o.order_day AND fx.currency = o.currency
+    GROUP BY o.user_id
+  ),
+  -- Rank from the top over the full purchasing base; ties share the top position of their group, so they take the higher tier
+  ranked AS (
+    SELECT user_id, PERCENT_RANK() OVER (ORDER BY net_ltv DESC) AS rank_from_top
+    FROM customer_ltv
+  ),
+  -- Every identified customer plus every stitched purchaser, so non-purchasers carry a null tier
+  customers AS (
+    SELECT user_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', DATE_SUB(end_date, INTERVAL 1 DAY))
+      AND user_id IS NOT NULL
+    UNION DISTINCT
+    SELECT user_id FROM customer_ltv
+  )
+  -- Tier per customer: percentile >= 0.80 High, 0.50 to < 0.80 Medium, < 0.50 Low (percentile = 1 - rank_from_top)
+  SELECT
+    c.user_id,
+    CASE
+      WHEN r.rank_from_top <= 0.20 THEN 'High'
+      WHEN r.rank_from_top <= 0.50 THEN 'Medium'
+      WHEN r.rank_from_top IS NOT NULL THEN 'Low'
+    END AS customer_value_tier
+  FROM customers AS c
+  LEFT JOIN ranked AS r USING (user_id);
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Monthly snapshot: tiers held for the current month, ranked on all orders placed before it began
+  WITH params AS (
+    SELECT TRUNC(CURRENT_DATE, 'MM') AS end_date, ADD_MONTHS(TRUNC(CURRENT_DATE, 'MM'), -240) AS start_date
+  ),
+  -- Purchase and refund events with order fields; net value excludes tax and shipping
+  commerce_events AS (
+    SELECT
+      e.eventType AS event_name,
+      TO_DATE(e.timestamp) AS event_day,
+      e.identityMap['userID'][0].id AS user_id,
+      e.commerce.order.purchaseID AS transaction_id,
+      e.commerce.order.currencyCode AS currency,
+      e.commerce.order.priceTotal
+        - COALESCE(e.commerce.order.taxAmount, 0)
+        - COALESCE(e.commerce.shipping.shippingAmount, 0) AS net_value
+    FROM web_events_dataset AS e
+    CROSS JOIN params AS p
+    WHERE e.eventType IN ('purchase', 'refund')
+      AND e.timestamp >= p.start_date
+      AND e.timestamp < p.end_date
+  ),
+  -- Orders resolved to a customer through the order's stitched customer id (guest orders count once stitched), never cancelled for any reason (fraud included), excluding test and employee orders; one row per order
+  orders AS (
+    SELECT
+      e.transaction_id,
+      MAX(co.customer_id) AS user_id,
+      MIN(e.event_day) AS order_day,
+      MAX(e.currency) AS currency,
+      MAX(e.net_value) AS net_value
+    FROM commerce_events AS e
+    JOIN commerce_orders_dataset AS co ON co.order_id = e.transaction_id
+    WHERE e.event_name = 'purchase'
+      AND co.customer_id IS NOT NULL
+      AND co.cancelled_at IS NULL
+      AND NOT co.is_test
+      AND NOT co.is_employee
+    GROUP BY e.transaction_id
+  ),
+  -- Refunded value per order, excluding tax and shipping
+  refunds AS (
+    SELECT transaction_id, SUM(net_value) AS refund_value
+    FROM commerce_events
+    WHERE event_name = 'refund'
+    GROUP BY transaction_id
+  ),
+  -- Net lifetime value per customer in the reporting currency at the order-date rate
+  customer_ltv AS (
+    SELECT
+      o.user_id,
+      SUM((o.net_value - COALESCE(r.refund_value, 0)) * fx.rate_to_reporting) AS net_ltv
+    FROM orders AS o
+    LEFT JOIN refunds AS r ON r.transaction_id = o.transaction_id
+    JOIN fx_rates_dataset AS fx ON fx.rate_date = o.order_day AND fx.currency = o.currency
+    GROUP BY o.user_id
+  ),
+  -- Rank from the top over the full purchasing base; ties share the top position of their group, so they take the higher tier
+  ranked AS (
+    SELECT user_id, PERCENT_RANK() OVER (ORDER BY net_ltv DESC) AS rank_from_top
+    FROM customer_ltv
+  ),
+  -- Every identified customer plus every stitched purchaser, so non-purchasers carry a null tier
+  customers AS (
+    SELECT e.identityMap['userID'][0].id AS user_id
+    FROM web_events_dataset AS e
+    CROSS JOIN params AS p
+    WHERE e.timestamp >= p.start_date
+      AND e.timestamp < p.end_date
+      AND e.identityMap['userID'][0].id IS NOT NULL
+    UNION
+    SELECT user_id FROM customer_ltv
+  )
+  -- Tier per customer: percentile >= 0.80 High, 0.50 to < 0.80 Medium, < 0.50 Low (percentile = 1 - rank_from_top)
+  SELECT
+    c.user_id,
+    CASE
+      WHEN r.rank_from_top <= 0.20 THEN 'High'
+      WHEN r.rank_from_top <= 0.50 THEN 'Medium'
+      WHEN r.rank_from_top IS NOT NULL THEN 'Low'
+    END AS customer_value_tier
+  FROM customers AS c
+  LEFT JOIN ranked AS r ON r.user_id = c.user_id;
+
+Calculation Notes: |
+  1️⃣ LTV input is net historical revenue per customer: value of orders not cancelled, minus refunds, excluding tax and shipping, all orders to date.,2️⃣ Rank purchasers by LTV with PERCENT_RANK: ≥ 0.80 is High, 0.50 to < 0.80 is Medium, < 0.50 is Low.,3️⃣ Customers with no completed purchase get a null tier, never Low; guest orders count only once stitched to a user_id.,4️⃣ Cut-offs are recomputed monthly on the full purchasing base and held for the month, so tier moves reflect customers, not threshold drift.,5️⃣ Exclude every cancelled order (fraud included), plus test and employee orders, before ranking; customers tied at a cut-off take the higher tier.,6️⃣ Convert order values to the reporting currency at the order-date rate before summing.
+
+Business Use Case: |
+  1️⃣ CRM team: when a customer enters High tier, move them to the VIP journey and suppress discount-led offers.,2️⃣ Paid media team: refresh High-tier seed audiences monthly for lookalikes; exclude Low tier from costly retargeting.,3️⃣ Customer Service: route High-tier contacts to the priority queue and review their SLA breaches weekly.,4️⃣ Finance: review revenue share and customer count by tier each quarter to set retention budget per tier.
+
+Dependencies:
+  Events: [purchase, refund-issued]
+  KPIs: [customer-lifetime-value]
+
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
+
+Report Attributes: |
+  Acquisition Cohort; Traffic Source; Device Category; Item Category; Customer Status
+
+Dashboard Usage: [Customer Value & Retention, CRM Audience Performance, Customer Lifetime Value Overview]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [rfm-segment, customer-loyalty-tier, purchase-count-band, last-purchase-recency-band, customer-status, acquisition-cohort, churn-risk-segment]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +293,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-25T19:02:58.417+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-25T19:03:11.104+00:00
 
