@@ -1,0 +1,191 @@
+# Dimension: Churn Risk Segment
+# Generated: 2026-09-25T19:05:49.168Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Churn Risk Segment
+
+Description: |
+  Low, Medium or High bucket of the churn probability the CRM, CDP or retention model assigns to each customer. Unlike RFM Segment or Lifecycle Stage, it ranks forward-looking risk of lapsing.
+
+Category: Retention
+
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV, churn]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT CURRENT_DATE();
+  DECLARE low_cutoff FLOAT64 DEFAULT 0.30;
+  DECLARE high_cutoff FLOAT64 DEFAULT 0.60;
+  DECLARE max_score_age_days INT64 DEFAULT 35;
+  
+  -- One daily snapshot date per day in the reporting range
+  WITH snapshot_dates AS (
+    SELECT snapshot_date
+    FROM UNNEST(GENERATE_DATE_ARRAY(start_date, end_date)) AS snapshot_date
+  ),
+  -- First completed order per identified customer (eligibility; guests have no customer_id)
+  first_orders AS (
+    SELECT customer_id, MIN(DATE(order_timestamp)) AS first_completed_order_date
+    FROM `your-project.crm.orders`
+    WHERE customer_id IS NOT NULL
+      AND order_status = 'completed'
+    GROUP BY customer_id
+  ),
+  -- Latest score on or before each snapshot date, within the refresh cadence (older scores leave no row)
+  latest_scores AS (
+    SELECT d.snapshot_date, s.customer_id, s.churn_probability, s.model_version
+    FROM snapshot_dates AS d
+    JOIN `your-project.crm.churn_scores` AS s
+      ON s.score_date <= d.snapshot_date
+     AND s.score_date >= DATE_SUB(d.snapshot_date, INTERVAL max_score_age_days DAY)
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY d.snapshot_date, s.customer_id ORDER BY s.score_date DESC) = 1
+  )
+  -- Bucket the delivered probability as-is; ineligible or stale customers get Not Scored
+  SELECT
+    d.snapshot_date,
+    c.customer_id,
+    CASE
+      WHEN f.first_completed_order_date IS NULL
+        OR f.first_completed_order_date > d.snapshot_date
+        OR ls.churn_probability IS NULL THEN 'Not Scored'
+      WHEN ls.churn_probability >= high_cutoff THEN 'High'
+      WHEN ls.churn_probability >= low_cutoff THEN 'Medium'
+      ELSE 'Low'
+    END AS churn_risk_segment,
+    ls.model_version
+  FROM snapshot_dates AS d
+  JOIN `your-project.crm.customers` AS c
+    ON DATE(c.created_at) <= d.snapshot_date
+  LEFT JOIN first_orders AS f
+    ON f.customer_id = c.customer_id
+  LEFT JOIN latest_scores AS ls
+    ON ls.customer_id = c.customer_id
+   AND ls.snapshot_date = d.snapshot_date
+  ORDER BY d.snapshot_date, c.customer_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting range (last 90 days), cut-offs and refresh cadence
+  WITH params AS (
+    SELECT
+      DATE_SUB(CURRENT_DATE(), 90) AS start_date,
+      CURRENT_DATE() AS end_date,
+      0.30 AS low_cutoff,
+      0.60 AS high_cutoff,
+      35 AS max_score_age_days
+  ),
+  -- One daily snapshot date per day in the reporting range
+  snapshot_dates AS (
+    SELECT EXPLODE(SEQUENCE(p.start_date, p.end_date, INTERVAL 1 DAY)) AS snapshot_date
+    FROM params AS p
+  ),
+  -- First completed order per identified customer (eligibility; guests have no customer_id)
+  first_orders AS (
+    SELECT customer_id, MIN(TO_DATE(order_timestamp)) AS first_completed_order_date
+    FROM crm_orders_dataset
+    WHERE customer_id IS NOT NULL
+      AND order_status = 'completed'
+    GROUP BY customer_id
+  ),
+  -- Latest score on or before each snapshot date, within the refresh cadence (older scores leave no row)
+  latest_scores AS (
+    SELECT snapshot_date, customer_id, churn_probability, model_version
+    FROM (
+      SELECT
+        d.snapshot_date,
+        s.customer_id,
+        s.churn_probability,
+        s.model_version,
+        ROW_NUMBER() OVER (PARTITION BY d.snapshot_date, s.customer_id ORDER BY s.score_date DESC) AS rn
+      FROM snapshot_dates AS d
+      CROSS JOIN params AS p
+      JOIN crm_churn_scores_dataset AS s
+        ON s.score_date <= d.snapshot_date
+       AND s.score_date >= DATE_SUB(d.snapshot_date, p.max_score_age_days)
+    ) AS ranked
+    WHERE rn = 1
+  )
+  -- Bucket the delivered probability as-is; ineligible or stale customers get Not Scored
+  SELECT
+    d.snapshot_date,
+    c.customer_id,
+    CASE
+      WHEN f.first_completed_order_date IS NULL
+        OR f.first_completed_order_date > d.snapshot_date
+        OR ls.churn_probability IS NULL THEN 'Not Scored'
+      WHEN ls.churn_probability >= p.high_cutoff THEN 'High'
+      WHEN ls.churn_probability >= p.low_cutoff THEN 'Medium'
+      ELSE 'Low'
+    END AS churn_risk_segment,
+    ls.model_version
+  FROM snapshot_dates AS d
+  CROSS JOIN params AS p
+  JOIN crm_customers_dataset AS c
+    ON TO_DATE(c.created_at) <= d.snapshot_date
+  LEFT JOIN first_orders AS f
+    ON f.customer_id = c.customer_id
+  LEFT JOIN latest_scores AS ls
+    ON ls.customer_id = c.customer_id
+   AND ls.snapshot_date = d.snapshot_date
+  ORDER BY d.snapshot_date, c.customer_id;
+
+Calculation Notes: |
+  1️⃣ Buckets the supplied churn probability (0–1) at configurable cut-offs; default Low < 0.30, Medium 0.30 to < 0.60, High ≥ 0.60.,2️⃣ The score is taken as delivered by the CRM, CDP or ML model; this dimension never recomputes or reweights it.,3️⃣ Eligible: customers with a customer_id and at least one completed order; guests and prospects get "Not Scored", never Low.,4️⃣ Uses the latest score on or before the reporting date; a score older than the refresh cadence (e.g. 35 days) falls to "Not Scored".,5️⃣ Eligibility is judged per snapshot date: before a customer's first completed order, that day's value is "Not Scored" even if a score exists.,6️⃣ Churn definition (e.g. no order in 180 days), cut-offs and model version are logged together so trends stay comparable after retraining.,7️⃣ Snapshot the segment daily per customer; trend reports read historical snapshots, not today's label applied to past periods.
+
+Business Use Case: |
+  1️⃣ CRM team: each week, enrols newly High-risk customers in a win-back journey before the lapse window closes.,2️⃣ Customer Service: sees the High flag on contact and offers goodwill credit on delivery or return complaints.,3️⃣ Marketing: excludes Low-risk customers from discount campaigns to protect margin on likely repeat buyers.,4️⃣ Finance: each quarter, sums customer lifetime value in the High bucket to size revenue at risk in the forecast.
+
+Dependencies:
+  Events: [purchase]
+
+Source Data: CRM
+
+Report Attributes: |
+  Customer Value Tier; RFM Segment; Customer Loyalty Tier; Acquisition Cohort; Last Purchase Recency Band
+
+Dashboard Usage: [Customer Retention Overview, Win-back Campaign Performance, Customer Health & LTV]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [rfm-segment, customer-value-tier, last-purchase-recency-band, purchase-count-band, customer-loyalty-tier, customer-status]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-25T19:02:23.284+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-25T19:05:48.337+00:00
+
