@@ -1,7 +1,7 @@
 # KPI: Site Search Revenue Contribution Rate
-# Generated: 2026-09-25T18:03:57.363Z
+# Generated: 2026-09-25T18:04:06.617Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Site Search Revenue Contribution Rate
 Formula: (Purchase Revenue from Sessions with ≥1 Site Search / Total Purchase Revenue) × 100
@@ -11,29 +11,304 @@ Description: |
 
 Category: Monetization
 
+Tags: [kpi, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Session
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "search": {
+        "search_term": "{{search_term}}",
+        "search_type": "{{search_type}}",
+        "is_refire": "{{is_refire}}",
+        "traffic_type": "{{traffic_type}}",
+        "session_id": "{{session_id}}"
+      },
+      "transaction": {
+        "transactionID": "{{transaction_id}}",
+        "total": "{{value}}",
+        "currency": "{{currency}}",
+        "shipping": "{{shipping}}",
+        "tax": "{{tax}}",
+        "items": "{{items}}",
+        "session_id": "{{session_id}}",
+        "traffic_type": "{{traffic_type}}"
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  [
+    {
+      "event": "search",
+      "search_term": "{{search_term}}",
+      "search_type": "{{search_type}}",
+      "is_refire": "{{is_refire}}",
+      "traffic_type": "{{traffic_type}}",
+      "session_id": "{{session_id}}"
+    },
+    {
+      "event": "purchase",
+      "ecommerce": {
+        "transaction_id": "{{transaction_id}}",
+        "value": "{{value}}",
+        "currency": "{{currency}}",
+        "shipping": "{{shipping}}",
+        "tax": "{{tax}}",
+        "coupon": "{{coupon}}",
+        "items": "{{items}}"
+      },
+      "user_id": "{{user_id}}",
+      "session_id": "{{session_id}}",
+      "traffic_type": "{{traffic_type}}"
+    }
+  ]
 
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "search",
+      "data": {
+        "search_term": "{{search_term}}",
+        "search_type": "{{search_type}}",
+        "is_refire": "{{is_refire}}",
+        "traffic_type": "{{traffic_type}}",
+        "session_id": "{{session_id}}"
+      }
+    },
+    {
+      "event": "purchase",
+      "data": {
+        "transaction_id": "{{transaction_id}}",
+        "value": "{{value}}",
+        "currency": "{{currency}}",
+        "shipping": "{{shipping}}",
+        "tax": "{{tax}}",
+        "coupon": "{{coupon}}",
+        "items": "{{items}}",
+        "session_id": "{{session_id}}",
+        "traffic_type": "{{traffic_type}}"
+      }
+    }
+  ]
 
+XDM Mapping: |
+  {
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "{{transaction_id}}",
+        "priceTotal": "{{value}}",
+        "currencyCode": "{{currency}}",
+        "taxAmount": "{{tax}}"
+      },
+      "shipping": {
+        "shippingAmount": "{{shipping}}"
+      }
+    },
+    "productListItems": "{{items}}",
+    "web": {
+      "webInteraction": {
+        "sessionID": "{{session_id}}"
+      }
+    },
+    "search": {
+      "keywords": "{{search_term}}"
+    },
+    "_tenant": {
+      "search": {
+        "searchType": "{{search_type}}",
+        "isRefire": "{{is_refire}}"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "trafficType": "{{traffic_type}}"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH events AS (
+    -- Search and purchase events with their parameters pivoted, keyed to the GA4 session (30-minute timeout)
+    SELECT
+      event_name,
+      event_timestamp,
+      CONCAT(user_pseudo_id, '.', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_key,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'search_term') AS search_term,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'search_type') AS search_type,
+      (SELECT COALESCE(value.string_value, CAST(value.int_value AS STRING)) FROM UNNEST(event_params) WHERE key = 'is_refire') AS is_refire,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'transaction_id') AS transaction_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'currency') AS currency,
+      (SELECT COALESCE(value.double_value, value.float_value, CAST(value.int_value AS FLOAT64)) FROM UNNEST(event_params) WHERE key = 'value') AS value
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name IN ('search', 'purchase')
+  ),
+  
+  clean_events AS (
+    -- Internal and bot traffic removed from both numerator and denominator
+    SELECT * FROM events
+    WHERE COALESCE(LOWER(traffic_type), '') NOT IN ('internal', 'bot')
+  ),
+  
+  search_sessions AS (
+    -- Sessions with at least one qualifying search: non-empty term, not a refire, not a store locator search
+    SELECT DISTINCT session_key
+    FROM clean_events
+    WHERE event_name = 'search'
+      AND TRIM(COALESCE(search_term, '')) != ''
+      AND COALESCE(LOWER(is_refire), 'false') NOT IN ('true', '1')
+      AND COALESCE(LOWER(search_type), '') != 'store_locator'
+  ),
+  
+  purchases AS (
+    -- One row per transaction_id; revenue = GA4 purchase value, which already excludes tax and shipping; refunds not applied
+    SELECT
+      session_key,
+      currency,
+      value AS revenue
+    FROM clean_events
+    WHERE event_name = 'purchase'
+      AND transaction_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1
+  )
+  
+  -- Revenue from search sessions as a share of all purchase revenue, per currency
+  SELECT
+    p.currency,
+    ROUND(100 * SAFE_DIVIDE(SUM(IF(s.session_key IS NOT NULL, p.revenue, 0)), SUM(p.revenue)), 2) AS site_search_revenue_contribution_rate_pct
+  FROM purchases AS p
+  LEFT JOIN search_sessions AS s
+    ON p.session_key = s.session_key
+  GROUP BY p.currency
+  ORDER BY p.currency;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Reporting window: the last 90 complete days
+    SELECT DATE_SUB(CURRENT_DATE, 90) AS start_date, DATE_SUB(CURRENT_DATE, 1) AS end_date
+  ),
+  
+  events AS (
+    -- Search and purchase events with the fields the definition uses, keyed to the web session (30-minute timeout)
+    SELECT
+      e.eventType,
+      e.timestamp,
+      CONCAT(e.identityMap['ECID'][0].id, '.', e.web.webInteraction.sessionID) AS session_key,
+      e.search.keywords AS search_term,
+      e._tenant.search.searchType AS search_type,
+      CAST(e._tenant.search.isRefire AS STRING) AS is_refire,
+      e._experience.analytics.customDimensions.eVars.trafficType AS traffic_type,
+      e.commerce.order.purchaseID AS transaction_id,
+      e.commerce.order.currencyCode AS currency,
+      e.commerce.order.priceTotal AS value
+    FROM aep_web_events_dataset AS e
+    CROSS JOIN params AS p
+    WHERE TO_DATE(e.timestamp) BETWEEN p.start_date AND p.end_date
+      AND e.eventType IN ('search', 'purchase')
+  ),
+  
+  clean_events AS (
+    -- Internal and bot traffic removed from both numerator and denominator
+    SELECT * FROM events
+    WHERE COALESCE(LOWER(traffic_type), '') NOT IN ('internal', 'bot')
+  ),
+  
+  search_sessions AS (
+    -- Sessions with at least one qualifying search: non-empty term, not a refire, not a store locator search
+    SELECT DISTINCT session_key
+    FROM clean_events
+    WHERE eventType = 'search'
+      AND TRIM(COALESCE(search_term, '')) != ''
+      AND COALESCE(LOWER(is_refire), 'false') NOT IN ('true', '1')
+      AND COALESCE(LOWER(search_type), '') != 'store_locator'
+  ),
+  
+  purchases AS (
+    -- One row per transaction_id; revenue = priceTotal (mapped from the purchase value, which already excludes tax and shipping); refunds not applied
+    SELECT session_key, currency, revenue
+    FROM (
+      SELECT
+        session_key,
+        currency,
+        value AS revenue,
+        ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY timestamp) AS rn
+      FROM clean_events
+      WHERE eventType = 'purchase'
+        AND transaction_id IS NOT NULL
+    ) AS t
+    WHERE rn = 1
+  )
+  
+  -- Revenue from search sessions as a share of all purchase revenue, per currency
+  SELECT
+    p.currency,
+    ROUND(100 * SUM(CASE WHEN s.session_key IS NOT NULL THEN p.revenue ELSE 0 END) / NULLIF(SUM(p.revenue), 0), 2) AS site_search_revenue_contribution_rate_pct
+  FROM purchases AS p
+  LEFT JOIN search_sessions AS s
+    ON p.session_key = s.session_key
+  GROUP BY p.currency
+  ORDER BY p.currency;
 
+Calculation Notes: |
+  1️⃣ A session qualifies on any search event with a non-empty search_term; the full order value counts, not only the searched items.,2️⃣ Denominator: purchase revenue from all sessions in the same period, same currency and same revenue definition as the numerator.,3️⃣ Revenue = purchase value excluding tax and shipping; dedupe purchases on transaction_id before summing.,4️⃣ Exclude refired searches (is_refire), store locator searches and internal or bot traffic (traffic_type) from both sides.,5️⃣ Sessions follow the 30-minute inactivity timeout; a purchase in a later session after searching does not count here.,6️⃣ Refunds are left out on both sides; report net-of-refund values only as a separately labelled variant.,7️⃣ Read against Site Search Usage Rate: contribution above the usage share means search sessions out-spend non-search sessions.
 
+Business Use Case: |
+  1️⃣ Merchandising: rate drops two weeks running → review top revenue search terms for ranking and relevance changes.,2️⃣ Site Search team: after a relevance or autocomplete release → compare the rate with the pre-release baseline.,3️⃣ E-commerce Director: search platform renewal → use the rate to size the revenue at stake in the business case.,4️⃣ UX team: rate high but usage rate low → make the search box more prominent on mobile and category pages.
 
+Dependencies:
+  Events: [site-search, purchase]
+  Metrics: [site-searches]
+  Dimensions: [internal-search-term]
+  KPIs: [revenue]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Device Category; Traffic Source; Landing Page Type; Internal Search Term; Page Type
 
+Dashboard Usage: [Site Search Performance, Product Discovery & Merchandising, E-commerce Revenue Overview]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [site-search-usage-rate, search-to-purchase-conversion-rate, search-exit-rate, zero-results-search-rate, autocomplete-click-through-rate, revenue, revenue-per-visit]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +318,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-25T18:03:56.897+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-25T18:04:06.275+00:00
 
