@@ -1,7 +1,7 @@
 # Metric: Search Results Views
-# Generated: 2026-09-25T18:44:34.843Z
+# Generated: 2026-09-25T18:44:43.607Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Search Results Views
 Formula: COUNT(events WHERE event_name = 'view_search_results' AND event_date IN reporting window)
@@ -11,30 +11,198 @@ Description: |
 
 Category: Engagement
 
+Tags: [metric, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: E-commerce
 
+Priority: Medium
 
+Core Area: Discovery
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  view_search_results
 
+Adobe Event: |
+  search:resultsView
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "view_search_results",
+          "eventAction": "search_results_view"
+        },
+        "search": {
+          "searchTerm": "wireless headphones",
+          "searchType": "product",
+          "searchResultsCount": 42,
+          "searchMethod": "initial",
+          "pageNumber": 1
+        },
+        "page": {
+          "pageInfo": {
+            "pageType": "search_results"
+          }
+        },
+        "user": {
+          "trafficType": "external"
+        }
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "view_search_results",
+    "search_term": "wireless headphones",
+    "search_type": "product",
+    "search_results_count": 42,
+    "search_method": "initial",
+    "page_number": 1,
+    "page_type": "search_results",
+    "traffic_type": "external"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "search:resultsView",
+    "search": {
+      "term": "wireless headphones",
+      "type": "product",
+      "resultsCount": 42,
+      "method": "initial",
+      "pageNumber": 1
+    },
+    "page": {
+      "type": "search_results"
+    },
+    "user": {
+      "trafficType": "external"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web": {
+      "webPageDetails": {
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "user": {
+      "trafficType": "external"
+    },
+    "_experience": {
+      "analytics": {
+        "event101": {
+          "value": 1
+        },
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "search_term",
+            "eVar11": "search_type",
+            "eVar12": "search_method"
+          }
+        }
+      }
+    },
+    "search": {
+      "term": "wireless headphones",
+      "type": "product",
+      "resultsCount": 42,
+      "method": "initial",
+      "pageNumber": 1
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Reporting window: trailing 90 complete days
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Pivot search type and traffic type for every results-page view in the window
+  WITH results_views AS (
+    SELECT
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'search_type') AS search_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'view_search_results'
+  )
+  -- Count every view except internal/bot traffic and store locator results; zero-result views stay in
+  SELECT
+    COUNT(*) AS search_results_views
+  FROM results_views
+  WHERE COALESCE(traffic_type, '') NOT IN ('internal', 'bot')
+    AND COALESCE(search_type, '') != 'store_locator';
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window: trailing 90 complete days (same as start_date / end_date in the BigQuery query)
+  -- Search type and traffic type for every results-page view (event101) in the window
+  WITH results_views AS (
+    SELECT
+      search.type AS search_type,
+      user.trafficType AS traffic_type
+    FROM aep_web_events_dataset
+    WHERE timestamp >= CAST(DATE_SUB(CURRENT_DATE, 90) AS TIMESTAMP)
+      AND timestamp < CAST(CURRENT_DATE AS TIMESTAMP)
+      AND _experience.analytics.event101.value = 1
+  )
+  -- Count every view except internal/bot traffic and store locator results; zero-result views stay in
+  SELECT
+    COUNT(*) AS search_results_views
+  FROM results_views
+  WHERE COALESCE(traffic_type, '') NOT IN ('internal', 'bot')
+    AND COALESCE(search_type, '') != 'store_locator';
 
+Calculation Notes: |
+  1️⃣ Count every view_search_results event; each pagination step, sort or filter change and back-button reload adds one view.
+  2️⃣ GA4 enhanced measurement fires it on URLs with a query parameter (q, s, search, query, keyword); register any custom key in stream settings.
+  3️⃣ Results that re-render without a URL change (SPA/AJAX) do not fire it; push view_search_results from the data layer on every render.
+  4️⃣ Not a query count: one search browsed across three result pages is 1 Site Search and 3 Search Results Views.
+  5️⃣ A total below Site Searches points to missing results-page tagging, not low engagement.
+  6️⃣ Exclude internal and bot traffic (traffic_type) and store locator results, which belong to Store Locator Searches.
+  7️⃣ Zero-result pages count as views; segment them by search_results_count = 0 instead of excluding them.
 
+Business Use Case: |
+  1️⃣ Merchandising sees views per search rise for a top term and reworks its ranking so buyers find items on page one.
+  2️⃣ Product team sees views drop below Site Searches after a search release and fixes the missing results-page tag.
+  3️⃣ Merchandising uses it as the Search Exit Rate base and reviews the top exiting search terms weekly.
 
+Dependencies:
+  Events: [site-search]
+  Dimensions: [internal-search-term, page-type]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Internal Search Term; Search Type; Search Results Count; Device Category; Traffic Source
 
+Dashboard Usage: [Site Search Performance, Product Discovery & Merchandising]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [site-searches, unique-searchers, filter-applications, product-view]
 
+Derived KPIs: [search-exit-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +212,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-25T18:44:34.482+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-25T18:44:43.335+00:00
 
