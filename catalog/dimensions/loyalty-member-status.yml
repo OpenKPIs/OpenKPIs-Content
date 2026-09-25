@@ -1,0 +1,193 @@
+# Dimension: Loyalty Member Status
+# Generated: 2026-09-25T19:06:40.959Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Loyalty Member Status
+
+Description: |
+  Whether the customer was an enrolled loyalty program member or a non-member when the event occurred. Distinct from Customer Loyalty Tier, which ranks members within the program.
+
+Category: Retention
+
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV, loyalty]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User, Daily, Monthly
+
+GA4 Event: |
+  login
+
+Adobe Event: |
+  login
+
+W3 Data Layer: |
+  {
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "userId": "cust_98213",
+              "loyaltyMemberStatus": "member"
+            }
+          }
+        ]
+      }
+    ],
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "login",
+          "eventAction": "email"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "login",
+    "method": "email",
+    "user_id": "cust_98213",
+    "user_properties": {
+      "loyalty_member_status": "member"
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "login",
+    "user": {
+      "loginMethod": "email",
+      "userId": "cust_98213",
+      "loyaltyMemberStatus": "member"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar20": "loyalty_member_status"
+          }
+        }
+      }
+    },
+    "_org": {
+      "loyalty": {
+        "memberStatus": "member"
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Daily loyalty CRM reconciliation (note 6) is applied upstream: the sync rewrites the user property, so events already carry the CRM value.
+  -- Point-in-time status: the loyalty_member_status user property as it was on each event at event time
+  WITH events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      user_pseudo_id,
+      user_id,
+      (SELECT MAX(IF(up.key = 'loyalty_member_status', up.value.string_value, NULL))
+         FROM UNNEST(user_properties) AS up) AS raw_status
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+  )
+  -- Classify: no stitched user_id or no status is unknown; member stays member; pending, cancelled or any other value is non_member
+  SELECT
+    event_date,
+    user_pseudo_id,
+    user_id,
+    CASE
+      WHEN user_id IS NULL OR raw_status IS NULL THEN 'unknown'
+      WHEN raw_status = 'member' THEN 'member'
+      ELSE 'non_member'
+    END AS loyalty_member_status
+  FROM events;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Daily loyalty CRM reconciliation (note 6) is applied upstream: the sync rewrites the profile status, so events already carry the CRM value.
+  -- Reporting range: last 90 complete days
+  WITH params AS (
+    SELECT DATE_SUB(CURRENT_DATE(), 90) AS start_date, DATE_SUB(CURRENT_DATE(), 1) AS end_date
+  ),
+  -- Point-in-time status: _org.loyalty.memberStatus as it was on each event at event time
+  events AS (
+    SELECT
+      TO_DATE(e.timestamp) AS event_date,
+      e.identityMap['ECID'][0].id AS ecid,
+      e.identityMap['CRMID'][0].id AS user_id,
+      e._org.loyalty.memberStatus AS raw_status
+    FROM your_aep_web_events_dataset AS e
+    CROSS JOIN params AS p
+    WHERE TO_DATE(e.timestamp) BETWEEN p.start_date AND p.end_date
+  )
+  -- Classify: no stitched user_id or no status is unknown; member stays member; pending, cancelled or any other value is non_member
+  SELECT
+    event_date,
+    ecid,
+    user_id,
+    CASE
+      WHEN user_id IS NULL OR raw_status IS NULL THEN 'unknown'
+      WHEN raw_status = 'member' THEN 'member'
+      ELSE 'non_member'
+    END AS loyalty_member_status
+  FROM events;
+
+Calculation Notes: |
+  1️⃣ Values: member, non_member, unknown. Logged-out traffic with no stitched user_id is unknown, never non_member.,2️⃣ Set as a user property at login and at loyalty enrollment; it carries onto every later event until the status changes.,3️⃣ Point-in-time: report on the value held at event time, so orders placed before enrollment stay non_member.,4️⃣ Pending enrollments (unverified email, awaiting activation) stay non_member until the program activates the account.,5️⃣ Cancelled, opted-out or closed memberships revert to non_member on the next sync; there is no separate lapsed value.,6️⃣ Reconcile daily against the loyalty platform member list; the loyalty/CRM record wins on conflict.,7️⃣ Membership only: tier (Silver, Gold) belongs in Customer Loyalty Tier, which is null for non_member and unknown.
+
+Business Use Case: |
+  1️⃣ CRM team compares member vs non-member AOV and repeat rate monthly to size the program's incremental revenue.,2️⃣ Loyalty manager targets repeat-buying non-members with an enrollment offer after their second order.,3️⃣ Marketing suppresses members from generic discount campaigns when member conversion already beats non-members.,4️⃣ Product team splits checkout conversion by status to test member-only perks such as free shipping.
+
+Dependencies:
+  Events: [loyalty-program-enrollment]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Customer Loyalty Tier; Device Category; Traffic Source; Item Category; Acquisition Cohort
+
+Dashboard Usage: [Loyalty Program Performance, Customer Retention & LTV, Member vs Non-member Revenue]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [customer-loyalty-tier, customer-status, subscription-status, customer-value-tier, churn-risk-segment]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-25T19:03:18.595+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-25T19:06:40.686+00:00
+
