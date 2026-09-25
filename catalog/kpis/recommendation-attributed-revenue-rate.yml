@@ -1,0 +1,449 @@
+# KPI: Recommendation-Attributed Revenue Rate
+# Generated: 2026-09-25T18:06:23.018Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Recommendation-Attributed Revenue Rate
+Formula: (Item Revenue from Recommendation-Attributed Items / Total Item Revenue) × 100
+
+Description: |
+  Share of item revenue from purchased products the shopper selected in an on-site recommendation module. Also known as Recommendation Revenue Share; shows how much sales depend on recommendations.
+
+Category: Monetization
+
+Tags: [kpi, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: [["E-commerce"]]
+
+Priority: Medium
+
+Core Area: Discovery
+
+Scope: Global
+
+Measure Type: Percentage
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "select_item"
+          }
+        },
+        {
+          "eventInfo": {
+            "eventName": "purchase"
+          }
+        },
+        {
+          "eventInfo": {
+            "eventName": "refund"
+          }
+        }
+      ],
+      "listItem": {
+        "listID": "rec_homepage_1",
+        "listName": "Recommended for You",
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU123",
+              "productName": "Wireless Headphones"
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "transactionID": "T12345",
+        "total": {
+          "transactionTotal": 129.97,
+          "currency": "USD"
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU123",
+              "productName": "Wireless Headphones"
+            },
+            "price": {
+              "basePrice": 89.99
+            },
+            "quantity": 1
+          },
+          {
+            "productInfo": {
+              "productID": "SKU456",
+              "productName": "Phone Case"
+            },
+            "price": {
+              "basePrice": 19.99
+            },
+            "quantity": 2
+          }
+        ]
+      },
+      "refund": {
+        "transactionID": "T12345",
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU123",
+              "productName": "Wireless Headphones"
+            }
+          }
+        ]
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  [
+    {
+      "event": "select_item",
+      "items": [
+        {
+          "item_id": "SKU123",
+          "item_name": "Wireless Headphones",
+          "item_list_id": "rec_homepage_1",
+          "item_list_name": "Recommended for You"
+        }
+      ]
+    },
+    {
+      "event": "purchase",
+      "ecommerce": {
+        "transaction_id": "T12345",
+        "value": 129.97,
+        "currency": "USD",
+        "items": [
+          {
+            "item_id": "SKU123",
+            "item_name": "Wireless Headphones",
+            "price": 89.99,
+            "quantity": 1
+          },
+          {
+            "item_id": "SKU456",
+            "item_name": "Phone Case",
+            "price": 19.99,
+            "quantity": 2
+          }
+        ]
+      }
+    },
+    {
+      "event": "refund",
+      "ecommerce": {
+        "transaction_id": "T12345",
+        "items": [
+          {
+            "item_id": "SKU123"
+          }
+        ]
+      }
+    }
+  ]
+
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "select_item",
+      "productListItems": [
+        {
+          "SKU": "SKU123",
+          "name": "Wireless Headphones",
+          "_experience": {
+            "analytics": {
+              "customDimensions": {
+                "eVars": {
+                  "eVar1": "rec_homepage_1",
+                  "eVar2": "Recommended for You"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "event": "purchase",
+      "commerce": {
+        "purchases": {
+          "value": 1
+        },
+        "order": {
+          "purchaseID": "T12345",
+          "priceTotal": 129.97,
+          "currencyCode": "USD"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU123",
+          "name": "Wireless Headphones",
+          "priceTotal": 89.99,
+          "quantity": 1
+        },
+        {
+          "SKU": "SKU456",
+          "name": "Phone Case",
+          "priceTotal": 39.98,
+          "quantity": 2
+        }
+      ]
+    },
+    {
+      "event": "refund",
+      "commerce": {
+        "order": {
+          "purchaseID": "T12345"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU123"
+        }
+      ]
+    }
+  ]
+
+XDM Mapping: |
+  {
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "{ecid}"
+        }
+      ]
+    },
+    "_experience": {
+      "analytics": {
+        "session": {
+          "num": "{session_id}"
+        }
+      }
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "{transaction_id}",
+        "priceTotal": "{value}",
+        "currencyCode": "{currency}"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "{item_id}",
+        "name": "{item_name}",
+        "priceTotal": "{price} × {quantity}",
+        "quantity": "{quantity}",
+        "_experience": {
+          "analytics": {
+            "customDimensions": {
+              "eVars": {
+                "eVar1": "{item_list_id}",
+                "eVar2": "{item_list_name}"
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH events AS (
+    -- select_item, purchase and refund events keyed to the GA4 session; read up to today so later refunds still apply
+    SELECT
+      event_name,
+      PARSE_DATE('%Y%m%d', event_date) AS event_day,
+      event_timestamp,
+      CONCAT(user_pseudo_id, '.', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_key,
+      COALESCE(ecommerce.transaction_id, (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'transaction_id')) AS transaction_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'item_list_id') AS event_list_id,
+      items
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND event_name IN ('select_item', 'purchase', 'refund')
+  ),
+  
+  selects AS (
+    -- Every item selection with the list it came from (item-level item_list_id, else the event-level one)
+    SELECT e.session_key, e.event_timestamp, i.item_id, COALESCE(i.item_list_id, e.event_list_id, '') AS item_list_id
+    FROM events AS e, UNNEST(e.items) AS i
+    WHERE e.event_name = 'select_item'
+  ),
+  
+  purchase_lines AS (
+    -- Purchase item lines in the window; line revenue = price x quantity in USD, which excludes tax and shipping
+    SELECT e.session_key, e.event_timestamp, e.transaction_id, i.item_id, line_pos, i.price_in_usd * i.quantity AS line_revenue
+    FROM events AS e, UNNEST(e.items) AS i WITH OFFSET AS line_pos
+    WHERE e.event_name = 'purchase'
+      AND e.event_day <= end_date
+  ),
+  
+  refunded AS (
+    -- Refunded or cancelled lines (cancellations reach analytics as refund events); a refund without items removes the whole transaction
+    SELECT DISTINCT e.transaction_id, i.item_id
+    FROM events AS e
+    LEFT JOIN UNNEST(e.items) AS i
+    WHERE e.event_name = 'refund'
+  ),
+  
+  attributed AS (
+    -- Last list each purchased item was selected from earlier in the same session (last-touch, item-level)
+    SELECT
+      p.transaction_id,
+      p.item_id,
+      p.line_revenue,
+      ARRAY_AGG(s.item_list_id IGNORE NULLS ORDER BY s.event_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS last_list_id
+    FROM purchase_lines AS p
+    LEFT JOIN selects AS s
+      ON s.session_key = p.session_key
+      AND s.item_id = p.item_id
+      AND s.event_timestamp <= p.event_timestamp
+    GROUP BY p.session_key, p.event_timestamp, p.transaction_id, p.item_id, p.line_pos, p.line_revenue
+  )
+  
+  -- Revenue of lines last selected from a recommendation list (rec_ prefix) as a share of all item revenue, refunded lines removed from both sides
+  SELECT
+    ROUND(100 * SAFE_DIVIDE(SUM(IF(STARTS_WITH(a.last_list_id, 'rec_'), a.line_revenue, 0)), SUM(a.line_revenue)), 2) AS recommendation_attributed_revenue_rate_pct
+  FROM attributed AS a
+  LEFT JOIN refunded AS r
+    ON r.transaction_id = a.transaction_id
+    AND (r.item_id IS NULL OR r.item_id = a.item_id)
+  WHERE r.transaction_id IS NULL;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Reporting window: the last 90 complete days
+    SELECT DATE_SUB(CURRENT_DATE, 90) AS start_date, DATE_SUB(CURRENT_DATE, 1) AS end_date
+  ),
+  
+  events AS (
+    -- select_item, purchase and refund events keyed to the visitor session (ECID + session number); read up to today so later refunds still apply
+    SELECT
+      e.eventType,
+      TO_DATE(e.timestamp) AS event_day,
+      e.timestamp,
+      CONCAT(e.identityMap['ECID'][0].id, '.', CAST(e._experience.analytics.session.num AS STRING)) AS session_key,
+      e.commerce.order.purchaseID AS transaction_id,
+      e.commerce.order.currencyCode AS currency,
+      e.productListItems
+    FROM aep_web_events_dataset AS e
+    CROSS JOIN params AS p
+    WHERE TO_DATE(e.timestamp) BETWEEN p.start_date AND CURRENT_DATE
+      AND e.eventType IN ('select_item', 'purchase', 'refund')
+  ),
+  
+  selects AS (
+    -- Every item selection with the list it came from (productListItems eVar1 = item_list_id, as in xdm_mapping)
+    SELECT e.session_key, e.timestamp, pli.SKU AS item_id, COALESCE(pli._experience.analytics.customDimensions.eVars.eVar1, '') AS item_list_id
+    FROM events AS e
+    LATERAL VIEW explode(e.productListItems) t AS pli
+    WHERE e.eventType = 'select_item'
+  ),
+  
+  purchase_lines AS (
+    -- Purchase item lines in the window; line revenue = priceTotal (price x quantity, excl. tax and shipping) converted to USD at the daily rate
+    SELECT e.session_key, e.timestamp, e.transaction_id, pli.SKU AS item_id, t.line_pos, pli.priceTotal * fx.rate_to_usd AS line_revenue
+    FROM events AS e
+    JOIN aep_fx_rates_dataset AS fx
+      ON fx.currency_code = e.currency
+      AND fx.rate_date = e.event_day
+    CROSS JOIN params AS p
+    LATERAL VIEW posexplode(e.productListItems) t AS line_pos, pli
+    WHERE e.eventType = 'purchase'
+      AND e.event_day <= p.end_date
+  ),
+  
+  refunded AS (
+    -- Refunded or cancelled lines (cancellations reach analytics as refund events); a refund without items removes the whole transaction
+    SELECT DISTINCT e.transaction_id, pli.SKU AS item_id
+    FROM events AS e
+    LATERAL VIEW OUTER explode(e.productListItems) t AS pli
+    WHERE e.eventType = 'refund'
+  ),
+  
+  attributed AS (
+    -- Last list each purchased item was selected from earlier in the same session (last-touch, item-level)
+    SELECT
+      p.transaction_id,
+      p.item_id,
+      p.line_revenue,
+      s.item_list_id AS last_list_id,
+      ROW_NUMBER() OVER (PARTITION BY p.session_key, p.timestamp, p.transaction_id, p.line_pos ORDER BY s.timestamp DESC) AS rn
+    FROM purchase_lines AS p
+    LEFT JOIN selects AS s
+      ON s.session_key = p.session_key
+      AND s.item_id = p.item_id
+      AND s.timestamp <= p.timestamp
+  )
+  
+  -- Revenue of lines last selected from a recommendation list (rec_ prefix) as a share of all item revenue, refunded lines removed from both sides
+  SELECT
+    ROUND(100 * SUM(CASE WHEN SUBSTR(a.last_list_id, 1, 4) = 'rec_' THEN a.line_revenue ELSE 0 END) / NULLIF(SUM(a.line_revenue), 0), 2) AS recommendation_attributed_revenue_rate_pct
+  FROM attributed AS a
+  LEFT JOIN refunded AS r
+    ON r.transaction_id = a.transaction_id
+    AND (r.item_id IS NULL OR r.item_id = a.item_id)
+  WHERE a.rn = 1
+    AND r.transaction_id IS NULL;
+
+Calculation Notes: |
+  1️⃣ Numerator: purchase item revenue (price × quantity) for items whose item_list_id marks a recommendation module.,2️⃣ Attribution is item-level: only the purchased item selected from the module is credited, not the rest of the order.,3️⃣ Credit follows the last list the item was selected from in the same session; a later select from search or PDP removes it.,4️⃣ Denominator: all purchase item revenue in the period, on the same basis as the numerator (excl. tax and shipping).,5️⃣ Recommendation lists are identified by an agreed item_list_id convention (e.g. rec_ prefix); search, category and promo lists excluded.,6️⃣ Remove refunded and cancelled lines from both sides; convert to one reporting currency before summing.,7️⃣ A last-touch share is not incremental lift; measure the causal effect with a recommendation holdout test.
+
+Business Use Case: |
+  1️⃣ Merchandising: rate drops after an algorithm release → roll back and A/B test the new model against the old one.,2️⃣ Personalization team: module has high CTR but low revenue share → retune it toward in-stock, higher-margin items.,3️⃣ E-commerce director: engine contract renewal → weigh attributed revenue against licence cost before signing.
+
+Dependencies:
+  Events: [purchase, product-list-click, refund-issued]
+  KPIs: [item-revenue, recommendation-click-through-rate]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Item List Name; Page Type; Device Category; Item Category; Traffic Source
+
+Dashboard Usage: [Personalization Performance, Merchandising & Product Discovery]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [recommendation-click-through-rate, product-list-click-through-rate, item-revenue, revenue, revenue-per-visit, average-order-value, product-list-conversion-rate, site-search-revenue-contribution-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-25T18:03:34.169+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-25T18:06:22.688+00:00
+
