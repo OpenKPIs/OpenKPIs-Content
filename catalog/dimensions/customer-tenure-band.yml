@@ -1,7 +1,7 @@
 # Dimension: Customer Tenure Band
-# Generated: 2026-09-25T19:02:43.663Z
+# Generated: 2026-09-25T19:02:51.546Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Customer Tenure Band
 
@@ -10,31 +10,237 @@ Description: |
 
 Category: Retention
 
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV, cohort]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Engagement
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: Daily, Monthly, Quarterly
+
+GA4 Event: |
+  login
+
+Adobe Event: |
+  login
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "login"
+        }
+      }
+    ],
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "cust_48213",
+              "loginMethod": "email"
+            },
+            "attributes": {
+              "customerTenureBand": "91-365 days"
+            }
+          }
+        ]
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "login",
+    "method": "email",
+    "user_id": "cust_48213",
+    "user_properties": {
+      "customer_tenure_band": "91-365 days"
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "login",
+    "user": {
+      "id": "cust_48213",
+      "loginMethod": "email",
+      "customerTenureBand": "91-365 days"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "login",
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "ecid_48213-abcd-1234",
+          "primary": true
+        }
+      ],
+      "CRMID": [
+        {
+          "id": "cust_48213"
+        }
+      ]
+    },
+    "_experience": {
+      "analytics": {
+        "customerTenureBand": "91-365 days"
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  
+  WITH
+  -- Shoppers active in the window: a device is registered if it carried a user_id at any point
+  devices AS (
+    SELECT user_pseudo_id, MAX(user_id) AS user_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+    GROUP BY user_pseudo_id
+  ),
+  -- Resolve registered shoppers to the surviving customer ID after merges; unresolved guests keep only their device ID
+  shoppers AS (
+    SELECT DISTINCT
+      COALESCE(m.surviving_customer_id, d.user_id) AS customer_id,
+      IF(d.user_id IS NULL, d.user_pseudo_id, NULL) AS guest_id
+    FROM devices d
+    LEFT JOIN `your-project.crm.customer_id_merges` m ON m.merged_customer_id = d.user_id
+  ),
+  -- Earliest valid order (web, app and store) per surviving customer ID; test, internal and cancelled-before-fulfilment orders excluded, refunded orders kept
+  first_orders AS (
+    SELECT
+      COALESCE(m.surviving_customer_id, o.customer_id) AS customer_id,
+      MIN(DATE(o.order_timestamp)) AS first_order_date
+    FROM `your-project.commerce.orders` o
+    LEFT JOIN `your-project.crm.customer_id_merges` m ON m.merged_customer_id = o.customer_id
+    WHERE o.is_test_order = FALSE
+      AND o.is_internal_account = FALSE
+      AND NOT (o.order_status = 'cancelled' AND o.fulfilled_at IS NULL)
+      AND DATE(o.order_timestamp) <= end_date
+    GROUP BY 1
+  )
+  -- Tenure days from first valid order to the reporting date, banded; Pre-purchase and Unknown for shoppers without an anchor
+  SELECT
+    end_date AS reporting_date,
+    COALESCE(s.customer_id, s.guest_id) AS shopper_id,
+    DATE_DIFF(end_date, f.first_order_date, DAY) AS tenure_days,
+    CASE
+      WHEN s.customer_id IS NULL THEN 'Unknown'
+      WHEN f.first_order_date IS NULL THEN 'Pre-purchase'
+      WHEN DATE_DIFF(end_date, f.first_order_date, DAY) <= 90 THEN '0-90 days'
+      WHEN DATE_DIFF(end_date, f.first_order_date, DAY) <= 365 THEN '91-365 days'
+      WHEN DATE_DIFF(end_date, f.first_order_date, DAY) <= 1095 THEN '1-3 years'
+      ELSE '3+ years'
+    END AS customer_tenure_band
+  FROM shoppers s
+  LEFT JOIN first_orders f ON f.customer_id = s.customer_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH
+  -- Reporting date and activity window, relative to today
+  params AS (
+    SELECT date_sub(current_date(), 1) AS end_date, date_sub(current_date(), 90) AS start_date
+  ),
+  -- Shoppers active in the window: a device (ECID) is registered if it carried a CRM ID at any point
+  devices AS (
+    SELECT e.identityMap['ECID'][0].id AS ecid, MAX(e.identityMap['CRMID'][0].id) AS user_id
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE to_date(e.timestamp) BETWEEN p.start_date AND p.end_date
+    GROUP BY e.identityMap['ECID'][0].id
+  ),
+  -- Resolve registered shoppers to the surviving customer ID after merges; unresolved guests keep only their device ID
+  shoppers AS (
+    SELECT DISTINCT
+      COALESCE(m.surviving_customer_id, d.user_id) AS customer_id,
+      CASE WHEN d.user_id IS NULL THEN d.ecid END AS guest_id
+    FROM devices d
+    LEFT JOIN aep_customer_id_merges_dataset m ON m.merged_customer_id = d.user_id
+  ),
+  -- Earliest valid order (web, app and store) per surviving customer ID; test, internal and cancelled-before-fulfilment orders excluded, refunded orders kept
+  first_orders AS (
+    SELECT
+      COALESCE(m.surviving_customer_id, o.customer_id) AS customer_id,
+      MIN(to_date(o.order_timestamp)) AS first_order_date
+    FROM aep_commerce_orders_dataset o
+    CROSS JOIN params p
+    LEFT JOIN aep_customer_id_merges_dataset m ON m.merged_customer_id = o.customer_id
+    WHERE o.is_test_order = FALSE
+      AND o.is_internal_account = FALSE
+      AND NOT (o.order_status = 'cancelled' AND o.fulfilled_at IS NULL)
+      AND to_date(o.order_timestamp) <= p.end_date
+    GROUP BY COALESCE(m.surviving_customer_id, o.customer_id)
+  )
+  -- Tenure days from first valid order to the reporting date, banded; Pre-purchase and Unknown for shoppers without an anchor
+  SELECT
+    p.end_date AS reporting_date,
+    COALESCE(s.customer_id, s.guest_id) AS shopper_id,
+    datediff(p.end_date, f.first_order_date) AS tenure_days,
+    CASE
+      WHEN s.customer_id IS NULL THEN 'Unknown'
+      WHEN f.first_order_date IS NULL THEN 'Pre-purchase'
+      WHEN datediff(p.end_date, f.first_order_date) <= 90 THEN '0-90 days'
+      WHEN datediff(p.end_date, f.first_order_date) <= 365 THEN '91-365 days'
+      WHEN datediff(p.end_date, f.first_order_date) <= 1095 THEN '1-3 years'
+      ELSE '3+ years'
+    END AS customer_tenure_band
+  FROM shoppers s
+  CROSS JOIN params p
+  LEFT JOIN first_orders f ON f.customer_id = s.customer_id;
+
+Calculation Notes: |
+  1️⃣ Tenure days = reporting date minus first completed order date; bands 0–90, 91–365, 366–1095 and 1096+ days.
+  2️⃣ Anchor is the first valid order across web, app and store for the stitched customer ID, not first visit or sign_up.
+  3️⃣ Band is recalculated at every reporting date.
+  4️⃣ Inactivity does not reset tenure: a lapsed 3+ year customer stays 3+ years. Use Last Purchase Recency Band for lapse.
+  5️⃣ Test orders, internal accounts and orders cancelled before fulfilment never anchor tenure; fully refunded first orders still do.
+  6️⃣ Registered users with no valid order get "Pre-purchase"; unresolved guests get "Unknown", never 0–90 days.
+  7️⃣ On customer ID merges, keep the earliest first-order date; recompute bands after any legacy order-history backfill.
+
+Business Use Case: |
+  1️⃣ CRM team: when 0–90 day repeat rate drops, launches a second-order email series for that band.
+  2️⃣ Finance: splits revenue and retention by tenure band each quarter to check CLV and payback assumptions.
+  3️⃣ Loyalty manager: targets 91–365 day customers with an enrolment offer before their first anniversary.
+  4️⃣ Merchandising: compares category mix of 0–90 day vs 3+ year customers to set new-customer landing assortments.
+
+Dependencies:
+  Events: [purchase]
+
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
+
+Report Attributes: |
+  Traffic Source; First Touch Channel Grouping; Device Category; Item Category; Customer Loyalty Tier
+
+Dashboard Usage: [Customer Retention & Loyalty Dashboard, Customer Lifetime Value Dashboard, CRM Lifecycle Performance]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [acquisition-cohort, last-purchase-recency-band, purchase-count-band, rfm-segment, customer-status, customer-loyalty-tier]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +248,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-25T19:02:43.054+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-25T19:02:51.263+00:00
 
