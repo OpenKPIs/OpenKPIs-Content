@@ -1,0 +1,220 @@
+# KPI: Site Search Usage Rate
+# Generated: 2026-09-25T18:05:51.619Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Site Search Usage Rate
+Formula: (Sessions with at least one Site Search / Total Sessions) × 100
+
+Description: |
+  Percentage of all sessions with at least one on-site product search. Shows how much shoppers rely on search rather than category navigation to find products.
+
+Category: Engagement
+
+Tags: [kpi, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: [["E-commerce"]]
+
+Priority: Medium
+
+Core Area: Discovery
+
+Scope: Session
+
+Measure Type: Percentage
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  search
+
+Adobe Event: |
+  search
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "search",
+          "eventAction": "site_search_submitted"
+        }
+      }
+    ],
+    "search": {
+      "searchTerm": "wireless headphones",
+      "searchType": "product",
+      "resultsCount": 24,
+      "searchSource": "header_search_bar",
+      "isRefire": false
+    },
+    "page": {
+      "pageInfo": {
+        "pageType": "search_results"
+      }
+    },
+    "user": {
+      "trafficType": "customer"
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "search",
+    "search_term": "wireless headphones",
+    "search_type": "product",
+    "search_results_count": 24,
+    "search_source": "header_search_bar",
+    "is_refire": false,
+    "page_type": "search_results",
+    "traffic_type": "customer"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "search",
+    "search_term": "wireless headphones",
+    "search_type": "product",
+    "search_results_count": 24,
+    "search_source": "header_search_bar",
+    "is_refire": false,
+    "page_type": "search_results",
+    "traffic_type": "customer"
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "search",
+    "search": {
+      "term": "search_term",
+      "type": "search_type",
+      "resultsCount": "search_results_count",
+      "source": "search_source",
+      "isRefire": "is_refire"
+    },
+    "web": {
+      "webPageDetails": {
+        "type": "search_results"
+      }
+    },
+    "_tenant": {
+      "traffic_type": "traffic_type"
+    },
+    "_experience": {
+      "analytics": {
+        "event101": "1"
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- One row per event with its session key and the search parameters pivoted out of event_params
+  WITH events AS (
+    SELECT
+      CONCAT(user_pseudo_id, '.', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_key,
+      event_name,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'search_type') AS search_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'search_term') AS search_term,
+      (SELECT LOWER(COALESCE(value.string_value, CAST(value.int_value AS STRING))) FROM UNNEST(event_params) WHERE key = 'is_refire') IN ('true', '1') AS is_refire
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+  ),
+  -- Flag each session: a qualifying product search (non-empty term, not a results-page refire) and bot or internal traffic
+  sessions AS (
+    SELECT
+      session_key,
+      LOGICAL_OR(event_name = 'search' AND search_type = 'product' AND TRIM(IFNULL(search_term, '')) != '' AND IFNULL(is_refire, FALSE) = FALSE) AS has_search,
+      LOGICAL_OR(traffic_type IN ('internal', 'bot')) AS is_excluded
+    FROM events
+    WHERE session_key IS NOT NULL
+    GROUP BY session_key
+  )
+  -- Sessions with at least one qualifying search over all eligible sessions
+  SELECT
+    COUNTIF(has_search) AS sessions_with_search,
+    COUNT(*) AS total_sessions,
+    ROUND(100 * SAFE_DIVIDE(COUNTIF(has_search), COUNT(*)), 2) AS site_search_usage_rate
+  FROM sessions
+  WHERE NOT IFNULL(is_excluded, FALSE);
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Events in the window (90 days back to yesterday) with a 30-minute inactivity session number per visitor
+  WITH events AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS visitor_id,
+      eventType,
+      _tenant.traffic_type AS traffic_type,
+      search.type AS search_type,
+      search.term AS search_term,
+      search.isRefire AS is_refire,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (PARTITION BY endUserIDs._experience.ecid.id ORDER BY timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session
+    FROM aep_web_experience_event_dataset
+    WHERE timestamp >= DATE_SUB(CURRENT_DATE, 90)
+      AND timestamp < CURRENT_DATE
+  ),
+  -- Flag each session: a qualifying product search (non-empty term, not a results-page refire) and bot or internal traffic
+  sessions AS (
+    SELECT
+      visitor_id,
+      session.num AS session_num,
+      BOOL_OR(eventType = 'search' AND search_type = 'product' AND TRIM(COALESCE(search_term, '')) != '' AND COALESCE(is_refire, FALSE) = FALSE) AS has_search,
+      BOOL_OR(traffic_type IN ('internal', 'bot')) AS is_excluded
+    FROM events
+    WHERE visitor_id IS NOT NULL
+    GROUP BY visitor_id, session.num
+  )
+  -- Sessions with at least one qualifying search over all eligible sessions
+  SELECT
+    COUNT(CASE WHEN has_search THEN 1 END) AS sessions_with_search,
+    COUNT(*) AS total_sessions,
+    ROUND(100.0 * COUNT(CASE WHEN has_search THEN 1 END) / NULLIF(COUNT(*), 0), 2) AS site_search_usage_rate
+  FROM sessions
+  WHERE NOT COALESCE(is_excluded, FALSE);
+
+Calculation Notes: |
+  1️⃣ Numerator: distinct sessions with at least one submitted search event; several searches in one session still count once.,2️⃣ Denominator: all sessions in the period, with or without a search. Exclude bot and internal traffic from both sides.,3️⃣ Count product-catalog searches only; store locator and help-centre searches are excluded via search_type.,4️⃣ Empty or whitespace-only search_term submissions do not qualify a session.,5️⃣ Pagination, sort or filter reloads of a results page (is_refire = true) are not new searches.,6️⃣ Session boundary follows the analytics tool: GA4 ends a session after 30 minutes of inactivity.
+
+Business Use Case: |
+  1️⃣ Merchandising: usage jumps after a menu redesign → audit category navigation for missing or mislabelled paths.,2️⃣ Product team: mobile usage lags desktop → test a persistent search bar in the mobile header.,3️⃣ Site search team: usage and zero-results rate rise together → add synonyms and redirects for top failing terms.
+
+Dependencies:
+  Events: [site-search, session-start]
+  Metrics: [site-searches]
+  Dimensions: [internal-search-term]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Device Category; Traffic Source; Page Type; Customer Status
+
+Dashboard Usage: [Site Search Performance, Product Discovery & Merchandising, E-commerce Funnel Overview]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [search-to-purchase-conversion-rate, zero-results-search-rate, search-exit-rate, autocomplete-click-through-rate, product-detail-view-rate, conversion-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-25T17:44:08.994+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-25T18:05:50.466+00:00
+
