@@ -1,0 +1,195 @@
+# Event: Delivery Satisfaction Survey Submission
+# Generated: 2026-09-25T19:07:09.190Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Delivery Satisfaction Survey Submission
+Event Serialization: always
+
+Description: |
+  Fires when a customer submits a post-delivery satisfaction survey rating the delivery of an order or shipment. Carries the rating, scale and shipment context to read delivery CSAT by carrier, tier and SLA status.
+
+Category: Experience
+
+Tags: [event, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Engagement
+
+
+Event Type: standard
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  submit_form
+
+Adobe Event: |
+  form_submit
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "submit_form",
+          "eventAction": "submit_form",
+          "type": "other"
+        }
+      }
+    ],
+    "form": {
+      "formName": "delivery_survey",
+      "formID": "delivery_csat_v2"
+    },
+    "order": {
+      "orderID": "ORD-582931"
+    },
+    "shipment": {
+      "shipmentID": "SHIP-582931-1",
+      "trackingNumber": "1Z999AA10123456784",
+      "carrier": "UPS",
+      "shippingTier": "Standard",
+      "fulfillmentMethod": "ship_to_home"
+    },
+    "survey": {
+      "surveyID": "surv_9f2c4b1a",
+      "rating": 4,
+      "ratingScaleMax": 5,
+      "channel": "email",
+      "daysSinceDelivery": 2,
+      "hasComment": true,
+      "issueReason": null
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_type": "delivery_survey",
+    "form_id": "delivery_csat_v2",
+    "survey_id": "surv_9f2c4b1a",
+    "order_id": "ORD-582931",
+    "shipment_id": "SHIP-582931-1",
+    "tracking_number": "1Z999AA10123456784",
+    "delivery_rating": 4,
+    "rating_scale_max": 5,
+    "survey_channel": "email",
+    "carrier": "UPS",
+    "shipping_tier": "Standard",
+    "fulfillment_method": "ship_to_home",
+    "days_since_delivery": 2,
+    "has_comment": true,
+    "issue_reason": null
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "form_submit",
+    "form_type": "delivery_survey",
+    "form_id": "delivery_csat_v2",
+    "survey_id": "surv_9f2c4b1a",
+    "order_id": "ORD-582931",
+    "shipment_id": "SHIP-582931-1",
+    "tracking_number": "1Z999AA10123456784",
+    "delivery_rating": 4,
+    "rating_scale_max": 5,
+    "survey_channel": "email",
+    "carrier": "UPS",
+    "shipping_tier": "Standard",
+    "fulfillment_method": "ship_to_home",
+    "days_since_delivery": 2,
+    "has_comment": true,
+    "issue_reason": null
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "web": {
+      "formDetails": {
+        "formName": "delivery_survey",
+        "formID": "form_id"
+      }
+    },
+    "_tenant": {
+      "orderInfo": {
+        "orderId": "order_id",
+        "shipmentId": "shipment_id",
+        "trackingNumber": "tracking_number",
+        "carrier": "carrier",
+        "shippingTier": "shipping_tier",
+        "fulfillmentMethod": "fulfillment_method"
+      },
+      "surveyInfo": {
+        "surveyId": "survey_id",
+        "deliveryRating": "delivery_rating",
+        "ratingScaleMax": "rating_scale_max",
+        "surveyChannel": "survey_channel",
+        "daysSinceDelivery": "days_since_delivery",
+        "hasComment": "has_comment",
+        "issueReason": "issue_reason"
+      }
+    }
+  }
+
+Parameters: |
+  {
+    "form_type": "string - Fixed value delivery_survey",
+    "form_id": "string - Survey template identifier",
+    "survey_id": "string - Unique survey response identifier; dedupe key",
+    "order_id": "string - Order the delivery belongs to",
+    "shipment_id": "string - Shipment rated; separates split shipments",
+    "tracking_number": "string - Carrier tracking number of the shipment",
+    "delivery_rating": "integer - Rating given, 1 to rating_scale_max",
+    "rating_scale_max": "integer - Top of the rating scale, e.g. 5",
+    "survey_channel": "string - Where the survey was answered: email, sms, tracking_page, app",
+    "carrier": "string - Carrier that delivered the shipment",
+    "shipping_tier": "string - Shipping method selected at checkout",
+    "fulfillment_method": "string - ship_to_home, ship_to_store or local_delivery",
+    "days_since_delivery": "integer - Days between delivery confirmation and survey submit",
+    "has_comment": "boolean - True when a free-text comment was left",
+    "issue_reason": "string - Selected issue option, e.g. late, damaged, wrong_location"
+  }
+
+Calculation Notes: |
+  ["1️⃣ Fires on a successful survey submit (server 2xx or survey vendor callback); not on survey open, star hover or partial answers.","2️⃣ Serialization always; dedupe on survey_id + shipment_id and keep the first submit. An edited response is an update, not a second hit.","3️⃣ Required: form_type, form_id, survey_id, order_id, shipment_id, delivery_rating, rating_scale_max, days_since_delivery.","4️⃣ Optional: carrier, shipping_tier, fulfillment_method, tracking_number, survey_channel, has_comment, issue_reason.","5️⃣ Send delivery_rating raw with rating_scale_max, never as CSAT %; issue_reason is the preset issue option picked, null when none.","6️⃣ Needs analytics consent; no free text, names or email (has_comment flag only). Email/SMS surveys go server-side via Measurement Protocol.","7️⃣ SLA status and region are not sent: join delivery-confirmation on shipment_id. Never key on order_id alone for split shipments."]
+
+Business Use Case: |
+  ["1️⃣ Logistics Manager: mean delivery_rating for one carrier stays below target for 2 weeks → opens a carrier review.","2️⃣ Customer Service Lead: a shipment is rated 1 or 2 → triggers proactive outreach within 24 hours.","3️⃣ Fulfilment Operations: low ratings cluster on late SLA status in one region → resets promise dates there."]
+
+Dependencies:
+  Events: [delivery-confirmation]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  Carrier; Shipping Tier; Delivery SLA Status; Delivery Region; Fulfillment Method; Survey Channel
+
+    Dashboard Usage: [Delivery Experience Dashboard, Carrier Performance Scorecard, Post-Purchase Customer Experience Dashboard]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [carrier, shipping-tier, delivery-sla-status, delivery-region, fulfillment-method, delivery-time-window]
+
+    
+    
+    
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-25T18:28:41.362+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-25T19:07:08.948+00:00
+
