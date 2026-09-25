@@ -1,7 +1,7 @@
 # KPI: Search Exit Rate
-# Generated: 2026-09-24T13:54:31.646Z
+# Generated: 2026-09-25T17:44:01.749Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Search Exit Rate
 Formula: (Search Exits / Unique Searches) × 100
@@ -11,29 +11,241 @@ Description: |
 
 Category: Experience
 
+Tags: [kpi, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Session
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  search
 
+Adobe Event: |
+  search
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "search",
+            "eventAction": "site search"
+          },
+          "search": {
+            "term": "wireless headphones",
+            "type": "site",
+            "resultsCount": 12,
+            "source": "header_search_bar",
+            "isRefire": false,
+            "scope": "all_products"
+          },
+          "page": {
+            "pageInfo": {
+              "pageType": "search_results"
+            },
+            "trafficType": "external"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "search",
+    "search_term": "wireless headphones",
+    "search_type": "site",
+    "search_results_count": 12,
+    "search_source": "header_search_bar",
+    "is_refire": false,
+    "search_scope": "all_products",
+    "page_type": "search_results",
+    "traffic_type": "external"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "search",
+    "search": {
+      "term": "wireless headphones",
+      "type": "site",
+      "resultsCount": 12,
+      "source": "header_search_bar",
+      "isRefire": false,
+      "scope": "all_products"
+    },
+    "page": {
+      "type": "search_results",
+      "trafficType": "external"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "search",
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "search_term",
+            "eVar2": "search_results_count",
+            "eVar3": "search_source"
+          }
+        }
+      }
+    },
+    "_tenant": {
+      "traffic_type": "external",
+      "page_type": "search_results"
+    },
+    "web": {
+      "webInteraction": {
+        "name": "search",
+        "type": "other"
+      }
+    },
+    "search": {
+      "term": "wireless headphones",
+      "resultsCount": 12,
+      "type": "site",
+      "source": "header_search_bar",
+      "isRefire": false,
+      "scope": "all_products"
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Search and follow-on navigation events with the session key (GA4 30-minute session) and parameters pivoted out of event_params
+  WITH events AS (
+    SELECT
+      CONCAT(user_pseudo_id, '.', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_key,
+      event_name,
+      event_timestamp,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_type') AS page_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'search_term') AS search_term,
+      (SELECT LOWER(COALESCE(value.string_value, CAST(value.int_value AS STRING))) FROM UNNEST(event_params) WHERE key = 'is_refire') IN ('true', '1') AS is_refire
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name IN ('search', 'page_view', 'select_item', 'add_to_cart')
+  ),
+  -- Keep searches that are not reload refires; zero-result searches stay in
+  searches AS (
+    SELECT session_key, event_name, event_timestamp, traffic_type, page_type,
+      IF(event_name = 'search' AND search_term IS NOT NULL AND NOT IFNULL(is_refire, FALSE), search_term, NULL) AS valid_term
+    FROM events
+    WHERE session_key IS NOT NULL
+  ),
+  -- Per session: unique search terms, time of the last search, time of the last navigation away from the results page (page_view of another page type, select_item, add_to_cart), internal or bot flag
+  sessions AS (
+    SELECT
+      session_key,
+      COUNT(DISTINCT valid_term) AS unique_searches,
+      MAX(IF(valid_term IS NOT NULL, event_timestamp, NULL)) AS last_search_ts,
+      MAX(IF(event_name IN ('select_item', 'add_to_cart') OR (event_name = 'page_view' AND IFNULL(page_type, '') != 'search_results'), event_timestamp, NULL)) AS last_nav_ts,
+      LOGICAL_OR(traffic_type IN ('internal', 'bot')) AS is_excluded
+    FROM searches
+    GROUP BY session_key
+  )
+  -- One exit per session whose last search has no later navigation, over all unique searches
+  SELECT
+    COUNTIF(last_nav_ts IS NULL OR last_nav_ts <= last_search_ts) AS search_exits,
+    SUM(unique_searches) AS unique_searches,
+    ROUND(100 * SAFE_DIVIDE(COUNTIF(last_nav_ts IS NULL OR last_nav_ts <= last_search_ts), SUM(unique_searches)), 2) AS search_exit_rate
+  FROM sessions
+  WHERE last_search_ts IS NOT NULL
+    AND NOT IFNULL(is_excluded, FALSE);
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Search and follow-on navigation events in the window (90 days back to yesterday) with a 30-minute inactivity session per visitor
+  WITH events AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS visitor_id,
+      eventType,
+      timestamp,
+      _tenant.traffic_type AS traffic_type,
+      _tenant.page_type AS page_type,
+      search.term AS search_term,
+      search.isRefire AS is_refire,
+      web.webInteraction.name AS interaction_name,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (PARTITION BY endUserIDs._experience.ecid.id ORDER BY timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session
+    FROM aep_web_experience_event_dataset
+    WHERE timestamp >= DATE_SUB(CURRENT_DATE, 90)
+      AND timestamp < CURRENT_DATE
+      AND eventType IN ('search', 'web.webpagedetails.pageViews', 'web.webinteraction.linkClicks', 'commerce.productListAdds')
+  ),
+  -- Keep searches that are not reload refires; zero-result searches stay in
+  searches AS (
+    SELECT visitor_id, session.num AS session_num, eventType, timestamp, traffic_type, page_type, interaction_name,
+      CASE WHEN eventType = 'search' AND search_term IS NOT NULL AND NOT COALESCE(is_refire, FALSE) THEN search_term END AS valid_term
+    FROM events
+    WHERE visitor_id IS NOT NULL
+  ),
+  -- Per session: unique search terms, time of the last search, time of the last navigation away from the results page (page view of another page type, select_item link click, product list add), internal or bot flag
+  sessions AS (
+    SELECT
+      visitor_id,
+      session_num,
+      COUNT(DISTINCT valid_term) AS unique_searches,
+      MAX(CASE WHEN valid_term IS NOT NULL THEN timestamp END) AS last_search_ts,
+      MAX(CASE WHEN eventType = 'commerce.productListAdds'
+        OR (eventType = 'web.webinteraction.linkClicks' AND interaction_name = 'select_item')
+        OR (eventType = 'web.webpagedetails.pageViews' AND COALESCE(page_type, '') <> 'search_results') THEN timestamp END) AS last_nav_ts,
+      BOOL_OR(traffic_type IN ('internal', 'bot')) AS is_excluded
+    FROM searches
+    GROUP BY visitor_id, session_num
+  )
+  -- One exit per session whose last search has no later navigation, over all unique searches
+  SELECT
+    COUNT(CASE WHEN last_nav_ts IS NULL OR last_nav_ts <= last_search_ts THEN 1 END) AS search_exits,
+    SUM(unique_searches) AS unique_searches,
+    ROUND(100.0 * COUNT(CASE WHEN last_nav_ts IS NULL OR last_nav_ts <= last_search_ts THEN 1 END) / NULLIF(SUM(unique_searches), 0), 2) AS search_exit_rate
+  FROM sessions
+  WHERE last_search_ts IS NOT NULL
+    AND NOT COALESCE(is_excluded, FALSE);
 
+Calculation Notes: |
+  1️⃣ Search exit: no later page_view of a non-search-results page, select_item or add_to_cart in the session; paging through results is not leaving.,2️⃣ Denominator is unique searches: the same search_term repeated in one session (pagination, back button, reload) counts once.,3️⃣ When a visitor refines the term and then leaves, only the last search is an exit; the earlier searches in the session are not.,4️⃣ Zero-result searches stay in both numerator and denominator; read them alongside Zero-Results Search Rate.,5️⃣ Sessions close after 30 minutes of inactivity; a return after the timeout starts a new session and does not undo the exit.,6️⃣ Exclude internal and bot traffic and searches refired by a page reload (is_refire = true).
 
+Business Use Case: |
+  1️⃣ Merchandising: a term's exit rate is well above site average → add synonyms, redirects or boost rules for it.,2️⃣ Product team: exit rate rises after a search ranking release → roll the change back and A/B test it.,3️⃣ UX team: mobile exit rate far above desktop → redesign the mobile results page, filters and sort controls.
 
+Dependencies:
+  Events: [site-search, page-view, product-list-click, add-to-cart]
+  Metrics: [site-searches]
+  Dimensions: [internal-search-term]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Internal Search Term; Device Category; Traffic Source; Search Results Count
 
+Dashboard Usage: [Site Search Performance, Product Discovery & Merchandising]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [zero-results-search-rate, search-to-purchase-conversion-rate, bounce-rate, site-search-usage-rate, autocomplete-click-through-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +255,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-24T13:54:31.23+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-25T17:44:01.182+00:00
 
