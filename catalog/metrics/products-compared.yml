@@ -1,0 +1,245 @@
+# Metric: Products Compared
+# Generated: 2026-09-25T19:04:36.882Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Products Compared
+Formula: COUNT(DISTINCT session_id + item_id) across compare_items events in the reporting window
+
+Description: |
+  Count of products shoppers add to a product comparison list from listing, search or product detail pages. Repeat adds of the same product within a session count once; removals are not netted off.
+
+Category: Engagement
+
+Tags: [metric, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Discovery
+
+Scope: Session
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  compare_items
+
+Adobe Event: |
+  compare_items
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "Add to Compare",
+          "eventAction": "compare_items"
+        },
+        "category": {
+          "primaryCategory": "Product Discovery & Merchandising"
+        },
+        "attributes": {
+          "trafficType": "external",
+          "compareAction": "add"
+        },
+        "product": [
+          {
+            "productInfo": {
+              "productID": "SKU_12345",
+              "productName": "Wireless Noise-Cancelling Headphones"
+            },
+            "category": {
+              "primaryCategory": "Electronics"
+            },
+            "attributes": {
+              "itemListName": "Product Listing Page",
+              "pageType": "PLP"
+            }
+          }
+        ]
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "compare_items",
+    "compare_action": "add",
+    "item_list_name": "Product Listing Page",
+    "page_type": "PLP",
+    "traffic_type": "external",
+    "items": [
+      {
+        "item_id": "SKU_12345",
+        "item_name": "Wireless Noise-Cancelling Headphones",
+        "item_category": "Electronics",
+        "item_list_name": "Product Listing Page"
+      }
+    ]
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "compare_items",
+    "trafficType": "external",
+    "compareAction": "add",
+    "compare": {
+      "pageType": "PLP",
+      "itemListName": "Product Listing Page",
+      "items": [
+        {
+          "itemId": "SKU_12345",
+          "itemName": "Wireless Noise-Cancelling Headphones",
+          "itemCategory": "Electronics",
+          "itemListName": "Product Listing Page"
+        }
+      ]
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "compare_items",
+    "_yourtenant": {
+      "trafficType": "external",
+      "compareAction": "add",
+      "pageType": "PLP"
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU_12345",
+        "name": "Wireless Noise-Cancelling Headphones",
+        "productCategories": [
+          {
+            "categoryID": "Electronics"
+          }
+        ]
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "Product Listing Page"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Compare-add actions only (compare_action = 'add'; removals and compare-view opens excluded); table suffix is the event date in the property time zone
+  WITH compare_adds AS (
+    SELECT
+      user_pseudo_id,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type,
+      items
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'compare_items'
+      AND (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'compare_action') = 'add'
+  )
+  -- Item-level count of distinct session + item_id pairs, excluding internal traffic; a reload re-fire repeats the same pair and so counts once
+  SELECT
+    COUNT(DISTINCT CONCAT(user_pseudo_id, '-', CAST(ga_session_id AS STRING), '-', item.item_id)) AS products_compared
+  FROM compare_adds, UNNEST(items) AS item
+  WHERE COALESCE(traffic_type, '') != 'internal'
+    AND ga_session_id IS NOT NULL
+    AND item.item_id IS NOT NULL;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window and property time zone
+  WITH params AS (
+    SELECT
+      date_sub(current_date(), 90) AS start_date,
+      date_sub(current_date(), 1) AS end_date,
+      'America/New_York' AS property_tz
+  ),
+  -- Sessionize every visitor event with a 30-minute inactivity timeout and derive the event date in the property time zone
+  sessionized AS (
+    SELECT
+      e.identityMap['ECID'][0].id AS ecid,
+      e.eventType,
+      e._yourtenant.trafficType AS traffic_type,
+      e._yourtenant.compareAction AS compare_action,
+      e.productListItems,
+      to_date(from_utc_timestamp(e.timestamp, p.property_tz)) AS event_date,
+      SESS_TIMEOUT(e.timestamp, 60 * 30) OVER (
+        PARTITION BY e.identityMap['ECID'][0].id
+        ORDER BY e.timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE e.timestamp >= to_timestamp(date_sub(p.start_date, 1))
+      AND e.timestamp < to_timestamp(date_add(p.end_date, 2))
+  )
+  -- Item-level count of distinct session + SKU pairs on compare-add actions only (compareAction = 'add'), excluding internal traffic; a reload re-fire repeats the same pair and so counts once
+  SELECT
+    COUNT(DISTINCT concat_ws('-', s.ecid, CAST(s.session.num AS STRING), item.SKU)) AS products_compared
+  FROM sessionized s
+  CROSS JOIN params p
+  LATERAL VIEW explode(s.productListItems) items AS item
+  WHERE s.eventType = 'compare_items'
+    AND s.compare_action = 'add'
+    AND s.event_date BETWEEN p.start_date AND p.end_date
+    AND COALESCE(s.traffic_type, '') <> 'internal'
+    AND item.SKU IS NOT NULL;
+
+Calculation Notes: |
+  1️⃣ Count at item level from the items array: one compare-add action carrying three products adds three.
+  2️⃣ The same item_id added again in the same session counts once (session ends after 30 minutes of inactivity).
+  3️⃣ Removing a product or clearing the compare list is not subtracted; count only add actions.
+  4️⃣ Opening the comparison view without adding a product does not count.
+  5️⃣ Exclude only traffic tagged traffic_type = 'internal' (staff/QA, tagged at collection); known bots are dropped by the platform at collection.
+  6️⃣ Report on the event date in the property time zone; item_list_name identifies the source list (PLP, search results, PDP).
+
+Business Use Case: |
+  1️⃣ Merchandising reviews the most-compared products monthly and fills spec gaps on PDPs that lose to rivals.
+  2️⃣ Product team sees compare adds rise with flat add-to-cart in a category and tests a compare-to-cart button.
+  3️⃣ Category managers use frequently compared pairs to plan bundles and side-by-side content on listing pages.
+
+Dependencies:
+  Dimensions: [product-name, item-category, page-type]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Product Name; Item Category; Page Type; Device Category; Traffic Source
+
+Dashboard Usage: [Product Discovery & Merchandising, Category Performance]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [product-view, add-to-cart, wishlist-additions, filter-applications]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-25T18:44:01.865+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-25T19:04:36.593+00:00
+
