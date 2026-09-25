@@ -1,7 +1,7 @@
 # Metric: Reviews Submitted
-# Generated: 2026-09-25T18:44:18.604Z
+# Generated: 2026-09-25T18:44:28.078Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Reviews Submitted
 Formula: COUNT(DISTINCT review_id) WHERE event = product review submission AND submission succeeded AND event_date IN reporting window
@@ -11,30 +11,225 @@ Description: |
 
 Category: Engagement
 
+Tags: [metric, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Discovery
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  submit_form
+
+Adobe Event: |
+  form_submit
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventName": "submit_form",
+          "eventInfo": {
+            "formType": "product_review",
+            "formStatus": "confirmed",
+            "reviewId": "rev_8842991",
+            "rating": 4,
+            "ratingScaleMax": 5,
+            "captureOrigin": "pdp",
+            "trafficType": "customer",
+            "userId": "usr_5591"
+          }
+        }
+      ],
+      "product": [
+        {
+          "productID": "SKU-10293",
+          "productInfo": {
+            "productName": "Wireless Noise-Cancelling Headphones"
+          },
+          "category": {
+            "primaryCategory": "Electronics"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_type": "product_review",
+    "form_status": "confirmed",
+    "review_id": "rev_8842991",
+    "items": [
+      {
+        "item_id": "SKU-10293",
+        "item_name": "Wireless Noise-Cancelling Headphones",
+        "item_category": "Electronics"
+      }
+    ],
+    "rating": 4,
+    "rating_scale_max": 5,
+    "capture_origin": "pdp",
+    "traffic_type": "customer",
+    "user_id": "usr_5591"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "form_submit",
+    "formType": "product_review",
+    "formStatus": "confirmed",
+    "reviewId": "rev_8842991",
+    "items": [
+      {
+        "itemId": "SKU-10293",
+        "itemName": "Wireless Noise-Cancelling Headphones",
+        "itemCategory": "Electronics"
+      }
+    ],
+    "rating": 4,
+    "ratingScaleMax": 5,
+    "captureOrigin": "pdp",
+    "trafficType": "customer",
+    "userId": "usr_5591"
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar10": "reviewId",
+            "eVar11": "formStatus",
+            "eVar12": "captureOrigin"
+          }
+        }
+      }
+    },
+    "commerce": {
+      "productListItems": [
+        {
+          "SKU": "SKU-10293",
+          "name": "Wireless Noise-Cancelling Headphones",
+          "productCategoryId": "Electronics"
+        }
+      ]
+    },
+    "_tenant": {
+      "form": {
+        "formType": "product_review",
+        "formStatus": "confirmed",
+        "reviewId": "rev_8842991",
+        "captureOrigin": "pdp",
+        "trafficType": "customer",
+        "userId": "usr_5591",
+        "rating": 4,
+        "ratingScaleMax": 5
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Product review form submissions, event_params pivoted; event_date is already in the property time zone
+  WITH review_submissions AS (
+    SELECT
+      MAX(IF(ep.key = 'form_type', ep.value.string_value, NULL)) AS form_type,
+      MAX(IF(ep.key = 'form_status', ep.value.string_value, NULL)) AS form_status,
+      MAX(IF(ep.key = 'review_id', ep.value.string_value, NULL)) AS review_id,
+      MAX(IF(ep.key = 'capture_origin', ep.value.string_value, NULL)) AS capture_origin,
+      MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'submit_form'
+    GROUP BY user_pseudo_id, event_timestamp, event_bundle_sequence_id
+  )
+  -- Unique confirmed review_id count excluding internal, test and bot traffic, total plus entry-point breakdown
+  SELECT
+    capture_origin,
+    COUNT(DISTINCT review_id) AS reviews_submitted
+  FROM review_submissions
+  WHERE form_type = 'product_review'
+    AND form_status = 'confirmed'
+    AND review_id IS NOT NULL
+    AND COALESCE(traffic_type, '') NOT IN ('internal', 'test', 'bot')
+  GROUP BY ROLLUP (capture_origin)
+  ORDER BY capture_origin NULLS FIRST;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window and property time zone
+  WITH params AS (
+    SELECT
+      date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 90) AS start_date,
+      date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 1) AS end_date,
+      'America/New_York' AS property_tz
+  ),
+  -- Confirmed product review submissions excluding internal, test and bot traffic, dated by submission time in the property time zone
+  review_submissions AS (
+    SELECT
+      e._tenant.form.reviewId AS review_id,
+      e._tenant.form.captureOrigin AS capture_origin
+    FROM your_aep_web_events_dataset AS e
+    CROSS JOIN params AS p
+    WHERE e.eventType = 'web.formFilledOut'
+      AND e._tenant.form.formType = 'product_review'
+      AND e._tenant.form.formStatus = 'confirmed'
+      AND e._tenant.form.reviewId IS NOT NULL
+      AND COALESCE(e._tenant.form.trafficType, '') NOT IN ('internal', 'test', 'bot')
+      AND to_date(from_utc_timestamp(e.timestamp, p.property_tz)) BETWEEN p.start_date AND p.end_date
+  )
+  -- Unique review_id count, total plus entry-point breakdown (retries and reloads count once)
+  SELECT
+    capture_origin,
+    COUNT(DISTINCT review_id) AS reviews_submitted
+  FROM review_submissions
+  GROUP BY ROLLUP (capture_origin)
+  ORDER BY capture_origin NULLS FIRST;
+
+Calculation Notes: |
+  1️⃣ Count only confirmed submissions (server accepted the review); form opens, star-only clicks and validation failures are excluded.,2️⃣ Deduplicate on review_id so double clicks, page reloads and client retries count once.,3️⃣ Counts submissions before moderation; approved or published review totals come from the review platform and will be lower.,4️⃣ Include PDP, post-purchase email and account-page entry points; report the entry point as a breakdown, not a filter.,5️⃣ Date the review on submission time in the property time zone, not on approval or publish date.,6️⃣ Exclude internal, test and bot traffic via traffic_type.,7️⃣ Review text and reviewer names never enter analytics; only IDs, rating value and product attributes are collected.
+
+Business Use Case: |
+  1️⃣ Merchandising lists top-selling SKUs with few new reviews each month and targets them in review-request emails.,2️⃣ CRM marketing compares reviews submitted per post-purchase email variant and keeps the higher-yield timing.,3️⃣ Product team sees submissions fall after a PDP release and checks the review form for errors.,4️⃣ Merchandising reviews weekly counts by category to prioritise sampling or review-incentive programmes.
+
+Dependencies:
+  Events: [product-review-submission]
+  Dimensions: [item-category, product-name]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  item-category; product-name; device-category; traffic-source; customer-status
+
+Dashboard Usage: [Product Discovery & Merchandising, Customer Reviews & UGC, Post-Purchase Engagement]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [average-product-rating, product-view, wishlist-additions, units-sold]
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +239,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-25T18:44:18.202+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-25T18:44:27.7+00:00
 
