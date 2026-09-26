@@ -1,7 +1,7 @@
 # KPI: Checkout Completion Time
-# Generated: 2026-09-26T10:18:09.055Z
+# Generated: 2026-09-26T10:18:17.780Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Checkout Completion Time
 Formula: SUM(purchase_timestamp − begin_checkout_timestamp) / Completed Checkouts
@@ -11,29 +11,309 @@ Description: |
 
 Category: Experience
 
+Tags: [kpi, E-commerce: Cart & Checkout Funnel Analytics]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Checkout
 
+Scope: Session
 
+Measure Type: Average
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "begin_checkout",
+          "eventAction": "Checkout Started",
+          "timeStamp": "2026-09-26T14:32:05Z"
+        },
+        "cart": {
+          "cartID": "cart_88213",
+          "price": {
+            "cartTotal": 128.5,
+            "currency": "USD"
+          }
+        },
+        "attributes": {
+          "checkoutType": "standard",
+          "sessionID": "10293847"
+        }
+      },
+      {
+        "eventInfo": {
+          "eventName": "purchase",
+          "eventAction": "Checkout Completed",
+          "timeStamp": "2026-09-26T14:34:47Z"
+        },
+        "transaction": {
+          "transactionID": "T-100234",
+          "total": {
+            "transactionTotal": 128.5,
+            "currency": "USD"
+          }
+        },
+        "attributes": {
+          "checkoutType": "standard",
+          "trafficType": "customer",
+          "sessionID": "10293847"
+        }
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "begin_checkout": {
+      "event": "begin_checkout",
+      "session_id": "10293847",
+      "checkout_type": "standard",
+      "ecommerce": {
+        "currency": "USD",
+        "value": 128.5,
+        "cart_id": "cart_88213",
+        "items": [
+          {
+            "item_id": "SKU_4821",
+            "item_name": "Wireless Headphones",
+            "price": 128.5,
+            "quantity": 1
+          }
+        ]
+      }
+    },
+    "purchase": {
+      "event": "purchase",
+      "session_id": "10293847",
+      "traffic_type": "customer",
+      "checkout_type": "standard",
+      "ecommerce": {
+        "transaction_id": "T-100234",
+        "currency": "USD",
+        "value": 128.5,
+        "items": [
+          {
+            "item_id": "SKU_4821",
+            "item_name": "Wireless Headphones",
+            "price": 128.5,
+            "quantity": 1
+          }
+        ]
+      }
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "begin_checkout": {
+      "event": "begin_checkout",
+      "sessionID": "10293847",
+      "checkoutType": "standard",
+      "cartID": "cart_88213",
+      "currency": "USD",
+      "value": 128.5
+    },
+    "purchase": {
+      "event": "purchase",
+      "sessionID": "10293847",
+      "checkoutType": "standard",
+      "trafficType": "customer",
+      "transactionID": "T-100234",
+      "currency": "USD",
+      "value": 128.5
+    }
+  }
 
+XDM Mapping: |
+  {
+    "timestamp": "purchase event_timestamp (ISO 8601); paired with the prior begin_checkout event_timestamp in the same session to derive checkout duration",
+    "eventType": {
+      "begin_checkout": "commerce.checkouts",
+      "purchase": "commerce.purchases"
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "transaction_id",
+        "priceTotal": "value (currency)"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "checkout_type",
+            "eVar2": "traffic_type",
+            "eVar3": "session_id (correlator linking begin_checkout to the completing purchase)"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- begin_checkout and purchase hits with session key, order fields, traffic_type and checkout_type
+  WITH checkout_events AS (
+    SELECT
+      user_pseudo_id,
+      (SELECT COALESCE(value.string_value, CAST(value.int_value AS STRING)) FROM UNNEST(event_params) WHERE key = 'session_id') AS session_id,
+      event_name,
+      event_timestamp,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'transaction_id') AS transaction_id,
+      (SELECT COALESCE(value.double_value, CAST(value.int_value AS FLOAT64)) FROM UNNEST(event_params) WHERE key = 'value') AS order_value,
+      (SELECT LOWER(value.string_value) FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type,
+      (SELECT LOWER(value.string_value) FROM UNNEST(event_params) WHERE key = 'checkout_type') AS checkout_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name IN ('begin_checkout', 'purchase')
+  ),
+  -- One purchase per transaction_id (first hit), with the previous purchase in the same session
+  purchases AS (
+    SELECT
+      * EXCEPT (rn),
+      LAG(event_timestamp) OVER (PARTITION BY user_pseudo_id, session_id ORDER BY event_timestamp) AS prev_purchase_ts
+    FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) AS rn
+      FROM checkout_events
+      WHERE event_name = 'purchase' AND transaction_id IS NOT NULL
+    )
+    WHERE rn = 1
+  ),
+  -- Completed checkouts: first begin_checkout after the previous purchase in the same session, up to the purchase
+  completed_checkouts AS (
+    SELECT
+      p.transaction_id,
+      COALESCE(p.checkout_type, '(not set)') AS checkout_type,
+      (p.event_timestamp - MIN(b.event_timestamp)) / 1e6 AS duration_sec
+    FROM purchases AS p
+    JOIN checkout_events AS b
+      ON b.event_name = 'begin_checkout'
+      AND b.user_pseudo_id = p.user_pseudo_id
+      AND b.session_id = p.session_id
+      AND b.event_timestamp <= p.event_timestamp
+      AND (p.prev_purchase_ts IS NULL OR b.event_timestamp > p.prev_purchase_ts)
+    WHERE COALESCE(p.traffic_type, 'customer') NOT IN ('internal', 'test')
+      AND p.order_value > 0
+    GROUP BY p.transaction_id, p.checkout_type, p.event_timestamp
+  )
+  -- Average checkout duration within 3 to 3,600 seconds, overall and by checkout_type
+  SELECT
+    IFNULL(checkout_type, 'All checkouts') AS checkout_type,
+    COUNT(*) AS completed_checkouts,
+    ROUND(SAFE_DIVIDE(SUM(duration_sec), COUNT(*)), 1) AS checkout_completion_time_sec
+  FROM completed_checkouts
+  WHERE duration_sec BETWEEN 3 AND 3600
+  GROUP BY ROLLUP (checkout_type)
+  ORDER BY completed_checkouts DESC
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- begin_checkout and purchase hits in the last 90 complete days with session key, order fields, traffic_type and checkout_type
+  WITH checkout_events AS (
+    SELECT
+      e.endUserIDs._experience.ecid.id AS visitor_id,
+      e._experience.analytics.customDimensions.eVars.eVar3 AS session_id,
+      CASE WHEN e.eventType = 'commerce.checkouts' THEN 'begin_checkout' ELSE 'purchase' END AS event_name,
+      e.timestamp AS event_ts,
+      e.commerce.order.purchaseID AS transaction_id,
+      e.commerce.order.priceTotal AS order_value,
+      LOWER(e._experience.analytics.customDimensions.eVars.eVar2) AS traffic_type,
+      LOWER(e._experience.analytics.customDimensions.eVars.eVar1) AS checkout_type
+    FROM aep_web_events_dataset AS e
+    WHERE e.eventType IN ('commerce.checkouts', 'commerce.purchases')
+      AND to_date(e.timestamp) BETWEEN date_sub(current_date(), 90) AND date_sub(current_date(), 1)
+  ),
+  -- One purchase per transaction_id (first hit), with the previous purchase in the same session
+  purchases AS (
+    SELECT
+      visitor_id, session_id, event_ts, transaction_id, order_value, traffic_type, checkout_type,
+      LAG(event_ts) OVER (PARTITION BY visitor_id, session_id ORDER BY event_ts) AS prev_purchase_ts
+    FROM (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_ts) AS rn
+      FROM checkout_events
+      WHERE event_name = 'purchase' AND transaction_id IS NOT NULL
+    ) AS d
+    WHERE rn = 1
+  ),
+  -- Completed checkouts: first begin_checkout after the previous purchase in the same session, up to the purchase
+  completed_checkouts AS (
+    SELECT
+      p.transaction_id,
+      COALESCE(p.checkout_type, '(not set)') AS checkout_type,
+      CAST(p.event_ts AS DOUBLE) - CAST(MIN(b.event_ts) AS DOUBLE) AS duration_sec
+    FROM purchases AS p
+    JOIN checkout_events AS b
+      ON b.event_name = 'begin_checkout'
+      AND b.visitor_id = p.visitor_id
+      AND b.session_id = p.session_id
+      AND b.event_ts <= p.event_ts
+      AND (p.prev_purchase_ts IS NULL OR b.event_ts > p.prev_purchase_ts)
+    WHERE COALESCE(p.traffic_type, 'customer') NOT IN ('internal', 'test')
+      AND p.order_value > 0
+    GROUP BY p.transaction_id, p.checkout_type, p.event_ts
+  )
+  -- Average checkout duration within 3 to 3,600 seconds, overall and by checkout_type
+  SELECT
+    COALESCE(checkout_type, 'All checkouts') AS checkout_type,
+    COUNT(*) AS completed_checkouts,
+    ROUND(SUM(duration_sec) / NULLIF(COUNT(*), 0), 1) AS checkout_completion_time_sec
+  FROM completed_checkouts
+  WHERE duration_sec BETWEEN 3 AND 3600
+  GROUP BY ROLLUP (checkout_type)
+  ORDER BY completed_checkouts DESC
 
+Calculation Notes: |
+  1️⃣ Start = first begin_checkout in the session after any earlier purchase; end = the purchase that follows it. Reloads do not reset the clock.
+  2️⃣ Only completed checkouts count; a begin_checkout with no purchase is excluded (it belongs to Checkout Abandonment Rate).
+  3️⃣ Both events must share the same session (30-minute inactivity timeout); purchases completed in a later session are excluded.
+  4️⃣ Dedupe purchases on transaction_id; one transaction contributes one duration.
+  5️⃣ Exclude durations over 3,600 seconds (idle tabs) and under 3 seconds (duplicate or test hits).
+  6️⃣ Exclude internal and test traffic (traffic_type) and purchases with zero value.
+  7️⃣ Read by checkout_type: express and wallet flows are structurally faster, so a mix shift moves the average on its own.
 
+Business Use Case: |
+  1️⃣ Product team: time rises after a checkout release → compare step timings and roll back the slowest form change.
+  2️⃣ Product team: guest checkout far slower than express → move wallet buttons above the address form.
+  3️⃣ E-commerce Director: time up and Checkout Completion Rate down in one week → order a checkout usability audit.
+  4️⃣ Customer Service: mobile time spikes → check payment-provider incidents and brief agents on checkout issues.
 
+Dependencies:
+  Events: [purchase]
+  Metrics: [begin-checkout]
+  Dimensions: [checkout-type]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  device-category; checkout-type; express-checkout-method; payment-method; traffic-source
 
+Dashboard Usage: [Checkout Funnel Performance, Checkout UX Health]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [checkout-completion-rate, checkout-conversion-rate, checkout-abandonment-rate, express-checkout-adoption-rate, cart-to-purchase-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +323,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-26T10:18:08.801+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-26T10:18:17.548+00:00
 
