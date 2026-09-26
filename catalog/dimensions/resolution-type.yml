@@ -1,0 +1,163 @@
+# Dimension: Resolution Type
+# Generated: 2026-09-26T20:17:22.893Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Resolution Type
+
+Description: |
+  Case-closure code the agent records when a support ticket is solved: refund, replacement, exchange, store credit, information provided or no action. One value per ticket.
+
+Category: Operations
+
+Tags: [dimension, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT CURRENT_DATE();
+  
+  -- Tickets opened in the window, excluding merged-away, spam and duplicate tickets
+  WITH tickets AS (
+    SELECT ticket_id, source_system
+    FROM `your-project.crm.support_tickets`
+    WHERE DATE(created_at) BETWEEN start_date AND end_date
+      AND merged_into_ticket_id IS NULL
+      AND NOT is_spam
+      AND NOT is_duplicate
+  ),
+  -- One code per ticket: latest solve/close wins, then remedy precedence, mapped via the governed lookup
+  resolved AS (
+    SELECT
+      s.ticket_id,
+      COALESCE(l.resolution_type, 'unknown') AS resolution_type
+    FROM `your-project.crm.ticket_solve_events` AS s
+    JOIN tickets AS t USING (ticket_id)
+    LEFT JOIN `your-project.crm.resolution_code_lookup` AS l
+      ON l.source_system = t.source_system AND l.source_code = s.resolution_code
+    WHERE s.status IN ('solved', 'closed')
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY s.ticket_id
+      ORDER BY s.solved_at DESC,
+        CASE l.resolution_type
+          WHEN 'refund' THEN 1 WHEN 'replacement' THEN 2 WHEN 'exchange' THEN 3
+          WHEN 'store_credit' THEN 4 WHEN 'information_provided' THEN 5 WHEN 'no_action' THEN 6
+          WHEN 'other' THEN 7 ELSE 8 END
+    ) = 1
+  )
+  -- Resolution type per ticket; tickets never solved or closed carry null
+  SELECT t.ticket_id, r.resolution_type
+  FROM tickets AS t
+  LEFT JOIN resolved AS r USING (ticket_id);
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window: last 90 days
+  WITH params AS (
+    SELECT DATE_SUB(CURRENT_DATE(), 90) AS start_date, CURRENT_DATE() AS end_date
+  ),
+  -- Tickets opened in the window, excluding merged-away, spam and duplicate tickets
+  tickets AS (
+    SELECT st.ticket_id, st.source_system
+    FROM crm_support_tickets AS st
+    CROSS JOIN params AS p
+    WHERE TO_DATE(st.created_at) BETWEEN p.start_date AND p.end_date
+      AND st.merged_into_ticket_id IS NULL
+      AND NOT st.is_spam
+      AND NOT st.is_duplicate
+  ),
+  -- One code per ticket: latest solve/close wins, then remedy precedence, mapped via the governed lookup
+  resolved AS (
+    SELECT ticket_id, resolution_type
+    FROM (
+      SELECT
+        s.ticket_id,
+        COALESCE(l.resolution_type, 'unknown') AS resolution_type,
+        ROW_NUMBER() OVER (
+          PARTITION BY s.ticket_id
+          ORDER BY s.solved_at DESC,
+            CASE l.resolution_type
+              WHEN 'refund' THEN 1 WHEN 'replacement' THEN 2 WHEN 'exchange' THEN 3
+              WHEN 'store_credit' THEN 4 WHEN 'information_provided' THEN 5 WHEN 'no_action' THEN 6
+              WHEN 'other' THEN 7 ELSE 8 END
+        ) AS rn
+      FROM crm_ticket_solve_events AS s
+      JOIN tickets AS t ON t.ticket_id = s.ticket_id
+      LEFT JOIN crm_resolution_code_lookup AS l
+        ON l.source_system = t.source_system AND l.source_code = s.resolution_code
+      WHERE s.status IN ('solved', 'closed')
+    ) AS ranked
+    WHERE rn = 1
+  )
+  -- Resolution type per ticket; tickets never solved or closed carry null
+  SELECT t.ticket_id, r.resolution_type
+  FROM tickets AS t
+  LEFT JOIN resolved AS r ON r.ticket_id = t.ticket_id;
+
+Calculation Notes: |
+  1️⃣ Values: refund, replacement, exchange, store_credit, information_provided, no_action, other; a solved ticket with no code reports as unknown.
+  2️⃣ Set only once ticket status reaches solved or closed; tickets never solved or closed carry null, never unknown.
+  3️⃣ Last value wins: a reopened ticket keeps its prior code until re-solved, then reports the code at the latest solve timestamp.
+  4️⃣ Merged, spam and duplicate tickets are excluded; the surviving ticket of a merge carries the resolution.
+  5️⃣ Multiple remedies on one ticket take the first in precedence: refund, replacement, exchange, store_credit, information_provided, no_action.
+  6️⃣ Distinct from Refund Type (how money goes back) and Return Reason (why the item came back): this is the remedy that closed the case.
+  7️⃣ Helpdesk codes (Zendesk, Salesforce Service Cloud, Gorgias) map to this list via one governed lookup; free-text notes are never parsed.
+
+Business Use Case: |
+  1️⃣ Support lead: if refund share of solved tickets rises week on week, audit agent refund decisions against policy.
+  2️⃣ Finance: each month, reconcile refund and store_credit tickets against refunds issued to catch unlogged concessions.
+  3️⃣ Support ops: when information_provided dominates a contact reason, publish a help article to deflect it.
+  4️⃣ Merchandising: review replacement tickets by SKU monthly and raise defect-prone products with the supplier.
+
+Dependencies:
+  Dimensions: [ticket-status]
+
+Source Data: CRM
+
+Report Attributes: |
+  Support Channel; Return Reason; Agent / Team; Ticket Priority; Item Category
+
+Dashboard Usage: [Customer Service Operations, Returns & Refunds Overview]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [ticket-status, ticket-priority, agent-team, support-channel, refund-type, return-reason, return-method]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-26T20:12:51.583+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-26T20:17:22.609+00:00
+
