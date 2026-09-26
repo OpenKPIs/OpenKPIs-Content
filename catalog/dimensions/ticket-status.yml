@@ -1,0 +1,190 @@
+# Dimension: Ticket Status
+# Generated: 2026-09-26T20:17:50.049Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Ticket Status
+
+Description: |
+  Lifecycle state of a support ticket: New, Open, Pending, On-hold, Solved or Closed, as in Zendesk and Salesforce Service Cloud. One value per ticket at a time, read from the helpdesk.
+
+Category: Operations
+
+Tags: [dimension, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE reporting_tz STRING DEFAULT 'America/New_York';  -- support team reporting time zone
+  DECLARE end_date DATE DEFAULT CURRENT_DATE(reporting_tz);
+  DECLARE start_date DATE DEFAULT DATE_SUB(end_date, INTERVAL 90 DAY);
+  
+  WITH valid_tickets AS (
+    -- Spam, deleted and merged tickets excluded (a merged source ticket never counts as solved)
+    SELECT ticket_id
+    FROM `your-project.crm.support_tickets`
+    WHERE COALESCE(is_spam, FALSE) = FALSE
+      AND COALESCE(is_deleted, FALSE) = FALSE
+      AND merged_into_ticket_id IS NULL
+  ),
+  status_changes AS (
+    -- Audit-log status changes mapped in one lookup onto the governed set; custom labels roll up to their parent category
+    SELECT a.ticket_id, a.changed_at, m.status_category AS ticket_status,
+           COALESCE(m.custom_status_label, m.status_category) AS ticket_status_detail
+    FROM `your-project.crm.ticket_status_audit` a
+    JOIN valid_tickets v ON v.ticket_id = a.ticket_id
+    JOIN `your-project.crm.ticket_status_map` m
+      ON m.source_system = a.source_system AND LOWER(m.raw_status) = LOWER(a.raw_status)
+  ),
+  current_status AS (
+    -- Current status: latest mapped change per ticket, no snapshot cutoff (drives backlog views)
+    SELECT ticket_id, ticket_status, ticket_status_detail
+    FROM status_changes
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY ticket_id ORDER BY changed_at DESC) = 1
+  ),
+  snapshots AS (
+    -- One daily snapshot at 00:00 in the reporting time zone
+    SELECT snapshot_date, TIMESTAMP(snapshot_date, reporting_tz) AS snapshot_ts
+    FROM UNNEST(GENERATE_DATE_ARRAY(start_date, end_date)) AS snapshot_date
+  ),
+  snapshot_status AS (
+    -- Status held at each snapshot: last change at or before 00:00 (reopens from solved to open follow the audit log)
+    SELECT s.snapshot_date, c.ticket_id, c.ticket_status, c.ticket_status_detail
+    FROM snapshots s
+    JOIN status_changes c ON c.changed_at <= s.snapshot_ts
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY s.snapshot_date, c.ticket_id ORDER BY c.changed_at DESC) = 1
+  )
+  -- Both readings, never mixed: status_basis separates current status from daily snapshot status
+  SELECT 'current' AS status_basis, CAST(NULL AS DATE) AS snapshot_date, ticket_id, ticket_status, ticket_status_detail
+  FROM current_status
+  UNION ALL
+  SELECT 'snapshot' AS status_basis, snapshot_date, ticket_id, ticket_status, ticket_status_detail
+  FROM snapshot_status
+  ORDER BY status_basis, snapshot_date, ticket_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Relative window and support team reporting time zone
+    SELECT date_sub(to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')), 90) AS start_date,
+           to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')) AS end_date,
+           'America/New_York' AS reporting_tz
+  ),
+  valid_tickets AS (
+    -- Spam, deleted and merged tickets excluded (a merged source ticket never counts as solved)
+    SELECT ticket_id
+    FROM crm_support_tickets
+    WHERE COALESCE(is_spam, FALSE) = FALSE
+      AND COALESCE(is_deleted, FALSE) = FALSE
+      AND merged_into_ticket_id IS NULL
+  ),
+  status_changes AS (
+    -- Audit-log status changes mapped in one lookup onto the governed set; custom labels roll up to their parent category
+    SELECT a.ticket_id, a.changed_at, m.status_category AS ticket_status,
+           COALESCE(m.custom_status_label, m.status_category) AS ticket_status_detail
+    FROM crm_ticket_status_audit a
+    JOIN valid_tickets v ON v.ticket_id = a.ticket_id
+    JOIN crm_ticket_status_map m
+      ON m.source_system = a.source_system AND LOWER(m.raw_status) = LOWER(a.raw_status)
+  ),
+  current_status AS (
+    -- Current status: latest mapped change per ticket, no snapshot cutoff (drives backlog views)
+    SELECT ticket_id, ticket_status, ticket_status_detail
+    FROM (
+      SELECT ticket_id, ticket_status, ticket_status_detail,
+             ROW_NUMBER() OVER (PARTITION BY ticket_id ORDER BY changed_at DESC) AS rn
+      FROM status_changes
+    ) x
+    WHERE rn = 1
+  ),
+  snapshots AS (
+    -- One daily snapshot at 00:00 in the reporting time zone
+    SELECT snapshot_date, to_utc_timestamp(CAST(snapshot_date AS TIMESTAMP), p.reporting_tz) AS snapshot_ts
+    FROM params p
+    LATERAL VIEW explode(sequence(p.start_date, p.end_date)) d AS snapshot_date
+  ),
+  snapshot_status AS (
+    -- Status held at each snapshot: last change at or before 00:00 (reopens from solved to open follow the audit log)
+    SELECT snapshot_date, ticket_id, ticket_status, ticket_status_detail
+    FROM (
+      SELECT s.snapshot_date, c.ticket_id, c.ticket_status, c.ticket_status_detail,
+             ROW_NUMBER() OVER (PARTITION BY s.snapshot_date, c.ticket_id ORDER BY c.changed_at DESC) AS rn
+      FROM snapshots s
+      JOIN status_changes c ON c.changed_at <= s.snapshot_ts
+    ) y
+    WHERE rn = 1
+  )
+  -- Both readings, never mixed: status_basis separates current status from daily snapshot status
+  SELECT 'current' AS status_basis, CAST(NULL AS DATE) AS snapshot_date, ticket_id, ticket_status, ticket_status_detail
+  FROM current_status
+  UNION ALL
+  SELECT 'snapshot' AS status_basis, snapshot_date, ticket_id, ticket_status, ticket_status_detail
+  FROM snapshot_status
+  ORDER BY status_basis, snapshot_date, ticket_id;
+
+Calculation Notes: |
+  1️⃣ Values: new, open, pending, on_hold, solved, closed (Zendesk set); map Salesforce Case Status and other helpdesks onto it in one lookup.
+  2️⃣ Pending = waiting on the customer; on_hold = waiting on a third party (carrier, warehouse, payment provider). Report both apart from open.
+  3️⃣ Current status (latest value) drives backlog views; daily trends use the status held at snapshot time from the ticket audit log. Never mix the two.
+  4️⃣ Solved reopens to open when the customer replies; closed is terminal and a later reply creates a follow-up ticket.
+  5️⃣ Exclude spam, deleted and merged tickets; a merged source ticket closes into its target and must not count as solved.
+  6️⃣ Custom statuses roll up to their parent status category; report the category and keep the custom label as a sub-value.
+  7️⃣ Snapshots are taken daily at 00:00 in the support team's reporting time zone.
+
+Business Use Case: |
+  1️⃣ Support lead reviews the open and pending backlog each morning and reassigns tickets untouched for 24 hours.
+  2️⃣ Customer Service ops escalates on-hold tickets waiting on a carrier or warehouse for more than 48 hours.
+  3️⃣ CX manager tracks the weekly share of solved tickets reopened, by agent team, to target coaching.
+  4️⃣ Returns team clears open refund and return tickets daily before the refund SLA lapses.
+
+Dependencies:
+  Events: [contact-form-submission]
+
+Source Data: CRM
+
+Report Attributes: |
+  Ticket Priority; Agent / Team; Support Channel; Resolution Type; Return Reason
+
+Dashboard Usage: [Support Backlog, Customer Service Operations, Returns & Refunds Support]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [ticket-priority, resolution-type, agent-team, support-channel, order-status, return-reason, refund-type]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-26T20:13:28.031+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-26T20:17:49.803+00:00
+
