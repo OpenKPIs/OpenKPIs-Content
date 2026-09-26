@@ -1,7 +1,7 @@
 # Metric: Items per Order
-# Generated: 2026-09-26T19:38:28.948Z
+# Generated: 2026-09-26T19:38:39.965Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Items per Order
 Formula: SUM(items.quantity WHERE event_name = 'purchase') / COUNT(DISTINCT transaction_id WHERE event_name = 'purchase')
@@ -11,30 +11,281 @@ Description: |
 
 Category: Monetization
 
+Tags: [metric, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Global
+
+Measure Type: Average
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "transaction": {
+        "transactionID": "T_12345",
+        "total": {
+          "basePrice": 129.97,
+          "currency": "USD",
+          "taxRate": 10.4,
+          "shipping": 5.99
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU_1001",
+              "productName": "Wireless Mouse"
+            },
+            "quantity": 2,
+            "unitPrice": 29.99
+          },
+          {
+            "productInfo": {
+              "productID": "SKU_2002",
+              "productName": "USB-C Hub"
+            },
+            "quantity": 1,
+            "unitPrice": 69.99
+          }
+        ],
+        "attributes": {
+          "paymentType": "credit_card",
+          "fulfillmentMethod": "ship_to_home",
+          "couponCode": "SUMMER10",
+          "checkoutType": "standard",
+          "trafficType": "external"
+        }
+      },
+      "user": [
+        {
+          "profile": [
+            {
+              "profileInfo": {
+                "userID": "u_789456"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "traffic_type": "external",
+    "ecommerce": {
+      "transaction_id": "T_12345",
+      "value": 129.97,
+      "currency": "USD",
+      "tax": 10.4,
+      "shipping": 5.99,
+      "coupon": "SUMMER10",
+      "payment_type": "credit_card",
+      "fulfillment_method": "ship_to_home",
+      "checkout_type": "standard",
+      "items": [
+        {
+          "item_id": "SKU_1001",
+          "item_name": "Wireless Mouse",
+          "price": 29.99,
+          "quantity": 2
+        },
+        {
+          "item_id": "SKU_2002",
+          "item_name": "USB-C Hub",
+          "price": 69.99,
+          "quantity": 1
+        }
+      ]
+    },
+    "user_id": "u_789456",
+    "user_properties": {
+      "customer_type": "returning"
+    },
+    "campaign_source": "email",
+    "campaign_medium": "newsletter"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "transaction_id": "T_12345",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "orderId": "T_12345",
+        "priceTotal": 129.97,
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU_1001",
+        "name": "Wireless Mouse",
+        "priceTotal": 59.98,
+        "quantity": 2
+      },
+      {
+        "SKU": "SKU_2002",
+        "name": "USB-C Hub",
+        "priceTotal": 69.99,
+        "quantity": 1
+      }
+    ],
+    "shipping": 5.99,
+    "tax": 10.4,
+    "coupon": "SUMMER10",
+    "payment_type": "credit_card",
+    "fulfillment_method": "ship_to_home",
+    "checkout_type": "standard",
+    "_yourtenant": {
+      "traffic_type": "external"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "commerce": {
+      "order": {
+        "purchaseID": "transaction_id",
+        "purchaseOrderNumber": "transaction_id",
+        "priceTotal": "value",
+        "currencyCode": "currency",
+        "taxAmount": "tax"
+      },
+      "shipping": {
+        "amount": "shipping"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "items.item_id",
+        "name": "items.item_name",
+        "quantity": "items.quantity",
+        "priceTotal": "items.price * items.quantity"
+      }
+    ],
+    "_yourtenant": {
+      "traffic_type": "traffic_type"
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "paymentType": "payment_type",
+            "fulfillmentMethod": "fulfillment_method",
+            "checkoutType": "checkout_type"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Purchase events with a transaction_id, external traffic only, units summed per event (zero-price lines included)
+  WITH purchases AS (
+    SELECT
+      ecommerce.transaction_id AS transaction_id,
+      event_timestamp,
+      (SELECT SUM(COALESCE(i.quantity, 0)) FROM UNNEST(items) AS i) AS units
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+      AND ecommerce.transaction_id NOT IN ('', '(not set)')
+      AND COALESCE((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type'), '') != 'internal'
+  ),
+  -- Keep the first purchase event per transaction_id so resent hits add no units
+  orders AS (
+    SELECT transaction_id, units
+    FROM purchases
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1
+  )
+  -- Ratio of totals: summed units over distinct orders
+  SELECT
+    SAFE_DIVIDE(SUM(units), COUNT(DISTINCT transaction_id)) AS items_per_order
+  FROM orders;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Purchase events with an order id, external traffic only, dated in the reporting time zone, units summed per event (zero-price lines included)
+  WITH purchases AS (
+    SELECT
+      commerce.order.purchaseID AS transaction_id,
+      timestamp AS event_ts,
+      aggregate(productListItems, 0D, (acc, x) -> acc + COALESCE(x.quantity, 0)) AS units
+    FROM aep_web_events_dataset
+    WHERE commerce.purchases.value > 0
+      AND commerce.order.purchaseID IS NOT NULL
+      AND commerce.order.purchaseID != ''
+      AND COALESCE(_yourtenant.traffic_type, '') != 'internal'
+      AND to_date(from_utc_timestamp(timestamp, 'America/New_York'))
+          BETWEEN date_sub(current_date(), 90) AND date_sub(current_date(), 1)
+  ),
+  -- Keep the first purchase event per transaction_id so resent hits add no units
+  orders AS (
+    SELECT transaction_id, units
+    FROM (
+      SELECT transaction_id, units,
+             ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_ts) AS rn
+      FROM purchases
+    ) ranked
+    WHERE rn = 1
+  )
+  -- Ratio of totals: summed units over distinct orders
+  SELECT
+    SUM(units) / NULLIF(COUNT(DISTINCT transaction_id), 0) AS items_per_order
+  FROM orders;
+
+Calculation Notes: |
+  1️⃣ Numerator sums items.quantity on purchase events; a line with quantity 3 adds 3 units, not 1.,2️⃣ Denominator is COUNT(DISTINCT transaction_id); dedupe purchase events by transaction_id before summing units so resent hits add nothing.,3️⃣ Exclude internal and test traffic (traffic_type = 'internal') and purchase events with no transaction_id.,4️⃣ Gross at order time: refunds and cancellations do not lower it; report net basket depth separately from refund data.,5️⃣ A ratio of totals, not an average of daily ratios; recompute from Units Sold and Orders for every window or segment.,6️⃣ Zero-price gift lines count when present in items; keep the rule identical to Units Sold so both reconcile.,7️⃣ Orders are dated by the purchase event timestamp in the property's reporting time zone.
+
+Business Use Case: |
+  1️⃣ Merchandising sees Items per Order flat while AOV rises and tests bundles and cross-sell slots to add units.,2️⃣ Marketing tests free-shipping thresholds against Items per Order and raises the threshold when basket depth holds.,3️⃣ Product compares Items per Order before and after a cart redesign and reverts if basket depth falls.
+
+Dependencies:
+  Events: [purchase]
+  Metrics: [units-sold]
+  Dimensions: [transaction-id]
+  KPIs: [orders]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  device-category; traffic-source; checkout-type; customer-status; fulfillment-method; coupon-code
+
+Dashboard Usage: [Checkout Funnel Performance, Basket and Order Economics, Merchandising Weekly Review]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [units-sold, average-order-value, cart-value]
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +295,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-26T19:38:28.464+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-26T19:38:39.584+00:00
 
