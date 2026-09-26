@@ -1,7 +1,7 @@
 # KPI: Express Checkout Adoption Rate
-# Generated: 2026-09-26T10:18:24.727Z
+# Generated: 2026-09-26T10:18:33.255Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Express Checkout Adoption Rate
 Formula: (Orders Completed via Express Checkout / Total Completed Orders) × 100
@@ -11,29 +11,247 @@ Description: |
 
 Category: Conversion
 
+Tags: [kpi, E-commerce: Cart & Checkout Funnel Analytics]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Checkout
 
+Scope: Event
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "T1004582",
+      "total": {
+        "transactionTotal": 128.5,
+        "currency": "USD"
+      },
+      "attributes": {
+        "checkoutType": "express",
+        "expressCheckoutMethod": "Apple Pay",
+        "paymentType": "digital_wallet",
+        "fulfillmentMethod": "ship_to_home",
+        "customerType": "returning",
+        "trafficType": "external"
+      }
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "userID": "u_88213"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T1004582",
+      "value": 128.5,
+      "currency": "USD",
+      "checkout_type": "express",
+      "express_checkout_method": "Apple Pay",
+      "payment_type": "digital_wallet",
+      "fulfillment_method": "ship_to_home",
+      "customer_type": "returning",
+      "traffic_type": "external",
+      "items": [
+        {
+          "item_id": "SKU-10293",
+          "item_name": "Wireless Headphones",
+          "price": 128.5,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "transaction_id": "T1004582",
+    "value": 128.5,
+    "currency": "USD",
+    "checkout_type": "express",
+    "express_checkout_method": "Apple Pay",
+    "payment_type": "digital_wallet",
+    "fulfillment_method": "ship_to_home",
+    "customer_type": "returning",
+    "traffic_type": "external",
+    "items": [
+      {
+        "item_id": "SKU-10293",
+        "item_name": "Wireless Headphones",
+        "price": 128.5,
+        "quantity": 1
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "transaction_id",
+        "priceTotal": "value",
+        "currencyCode": "currency",
+        "payments": [
+          {
+            "paymentType": "payment_type"
+          }
+        ]
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "checkout_type",
+            "eVar2": "express_checkout_method",
+            "eVar3": "fulfillment_method",
+            "eVar4": "customer_type",
+            "eVar5": "traffic_type"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Test orders carry no flag in the purchase data layer; exclude them at collection or join a test-order list here.
+  -- Purchase hits in the period (event_date is in the property time zone); refunds and cancellations are kept
+  WITH purchase_hits AS (
+    SELECT
+      event_timestamp,
+      IF(platform = 'WEB', 'web', 'app') AS channel,
+      ecommerce.transaction_id AS transaction_id,
+      LOWER((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'checkout_type')) AS checkout_type,
+      LOWER((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type')) AS traffic_type,
+      (SELECT COALESCE(value.double_value, value.float_value, CAST(value.int_value AS FLOAT64)) FROM UNNEST(event_params) WHERE key = 'value') AS order_value
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+  ),
+  -- One row per transaction_id: the first purchase hit carries the flow the order completed in
+  orders AS (
+    SELECT *
+    FROM purchase_hits
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1
+  )
+  -- Express orders over all completed orders, excluding internal traffic and zero-value orders, web and app separately
+  SELECT
+    channel,
+    COUNTIF(checkout_type = 'express') AS express_orders,
+    COUNT(*) AS total_completed_orders,
+    ROUND(SAFE_DIVIDE(COUNTIF(checkout_type = 'express'), COUNT(*)) * 100, 2) AS express_checkout_adoption_rate_pct
+  FROM orders
+  WHERE COALESCE(traffic_type, '') != 'internal'
+    AND order_value > 0
+  GROUP BY channel
+  ORDER BY channel;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Test orders carry no flag in the purchase data layer; exclude them at collection or join a test-order list here.
+  -- Purchase hits in the last 90 complete days, dated in the property time zone; refunds and cancellations are kept
+  WITH purchase_hits AS (
+    SELECT
+      e.timestamp AS event_ts,
+      CASE WHEN e.environment.type = 'application' THEN 'app' ELSE 'web' END AS channel,
+      e.commerce.order.purchaseID AS transaction_id,
+      LOWER(e._experience.analytics.customDimensions.eVars.eVar1) AS checkout_type,
+      LOWER(e._experience.analytics.customDimensions.eVars.eVar5) AS traffic_type,
+      e.commerce.order.priceTotal AS order_value
+    FROM aep_web_events_dataset AS e
+    WHERE e.commerce.purchases.value > 0
+      AND e.commerce.order.purchaseID IS NOT NULL
+      AND to_date(from_utc_timestamp(e.timestamp, 'America/New_York')) BETWEEN date_sub(current_date(), 90) AND date_sub(current_date(), 1)
+  ),
+  -- One row per transaction_id: the first purchase hit carries the flow the order completed in
+  orders AS (
+    SELECT *
+    FROM (
+      SELECT p.*, ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_ts) AS rn
+      FROM purchase_hits AS p
+    ) AS ranked
+    WHERE rn = 1
+  )
+  -- Express orders over all completed orders, excluding internal traffic and zero-value orders, web and app separately
+  SELECT
+    channel,
+    SUM(CASE WHEN checkout_type = 'express' THEN 1 ELSE 0 END) AS express_orders,
+    COUNT(*) AS total_completed_orders,
+    ROUND(100.0 * SUM(CASE WHEN checkout_type = 'express' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS express_checkout_adoption_rate_pct
+  FROM orders
+  WHERE COALESCE(traffic_type, '') != 'internal'
+    AND order_value > 0
+  GROUP BY channel
+  ORDER BY channel;
 
+Calculation Notes: |
+  1️⃣ Numerator: distinct transaction_id on purchase where checkout_type = express; express-checkout-method names the wallet used.
+  2️⃣ Denominator: all distinct purchase transaction_id in the same period and channels, express and standard together.
+  3️⃣ Classify by the flow the order completed in: an express flow abandoned and finished through standard checkout counts as standard.
+  4️⃣ A wallet picked at the payment step of standard checkout is not express; only accelerated buttons that skip address and shipping steps count.
+  5️⃣ Dedupe purchases on transaction_id; exclude internal traffic (traffic_type) and zero-value replacement orders.
+  6️⃣ Digital orders only; call-center and in-store orders are excluded. Report web and app separately, as wallet availability differs by device.
+  7️⃣ Order date = purchase timestamp in the property time zone; later cancellations and refunds stay in both numerator and denominator.
 
+Business Use Case: |
+  1️⃣ Product (Checkout): rate stalls below target → move express buttons above the fold on cart and product pages.
+  2️⃣ Payments team: one wallet's share drops after an SDK release → check checkout_error by payment_provider, roll back.
+  3️⃣ E-commerce Director: mobile rate lags desktop → A/B test express buttons on the mobile product page.
+  4️⃣ Finance: express share rises → re-forecast wallet processing fees and chargeback reserves.
 
+Dependencies:
+  Events: [purchase]
+  Dimensions: [express-checkout-method, checkout-type, transaction-id]
+  KPIs: [orders]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  express-checkout-method; device-category; payment-method; customer-status; traffic-source
 
+Dashboard Usage: [Checkout Funnel Performance, Payments & Wallet Mix, E-commerce Executive Overview]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [guest-checkout-rate, checkout-conversion-rate, checkout-completion-rate, payment-failure-rate, buy-now-pay-later-adoption-rate, checkout-completion-time]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +261,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-26T10:18:24.479+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-26T10:18:33.042+00:00
 
