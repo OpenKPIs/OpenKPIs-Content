@@ -1,7 +1,7 @@
 # KPI: Buy Now Pay Later Adoption Rate
-# Generated: 2026-09-26T10:17:33.603Z
+# Generated: 2026-09-26T10:17:43.849Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Buy Now Pay Later Adoption Rate
 Formula: (Completed Orders Paid with BNPL / Total Completed Orders) × 100
@@ -11,29 +11,232 @@ Description: |
 
 Category: Monetization
 
+Tags: [kpi, E-commerce: Cart & Checkout Funnel Analytics]
 
+Industry: [["E-commerce"]]
 
+Priority: Medium
 
+Core Area: Checkout
 
+Scope: Event
 
+Measure Type: Percentage
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "transaction": {
+        "transactionID": "T-48213",
+        "total": {
+          "transactionTotal": 189.99,
+          "transactionCurrency": "USD"
+        },
+        "payment": {
+          "type": "klarna_pay_in_4",
+          "financingMethod": "bnpl"
+        },
+        "profile": {
+          "customerType": "returning",
+          "checkoutType": "standard",
+          "fulfillmentMethod": "ship_to_home",
+          "trafficType": "external"
+        }
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "T-48213",
+      "value": 189.99,
+      "currency": "USD",
+      "payment_type": "klarna_pay_in_4",
+      "financing_method": "bnpl",
+      "fulfillment_method": "ship_to_home",
+      "customer_type": "returning",
+      "checkout_type": "standard",
+      "traffic_type": "external",
+      "items": [
+        {
+          "item_id": "SKU-2249",
+          "item_name": "Wireless Headphones",
+          "price": 189.99,
+          "quantity": 1
+        }
+      ]
+    },
+    "user_id": "u_88213"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "purchase": {
+      "transactionID": "T-48213",
+      "value": 189.99,
+      "currency": "USD",
+      "payment_type": "klarna_pay_in_4",
+      "financing_method": "bnpl",
+      "fulfillment_method": "ship_to_home",
+      "customer_type": "returning",
+      "checkout_type": "standard",
+      "traffic_type": "external",
+      "user_id": "u_88213"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "commerce": {
+      "order": {
+        "purchaseID": "{{transaction_id}}",
+        "priceTotal": "{{value}}",
+        "currencyCode": "{{currency}}"
+      },
+      "purchases": {
+        "value": 1
+      },
+      "payments": [
+        {
+          "paymentType": "{{payment_type}}",
+          "paymentAmount": "{{value}}"
+        }
+      ]
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "financing_method": "{{financing_method}}",
+            "fulfillment_method": "{{fulfillment_method}}",
+            "customer_type": "{{customer_type}}",
+            "checkout_type": "{{checkout_type}}",
+            "traffic_type": "{{traffic_type}}"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Test orders carry no dedicated flag in the purchase payload; they are excluded only when tagged traffic_type = 'internal'.
+  -- Maintained lookup of raw payment_type labels that map to a BNPL provider
+  WITH bnpl_lookup AS (
+    SELECT payment_type
+    FROM UNNEST(['klarna', 'klarna_pay_in_4', 'klarna_pay_in_30', 'afterpay', 'affirm', 'affirm_monthly', 'paypal_pay_later', 'paypal_pay_in_4']) AS payment_type
+  ),
+  -- Completed purchase hits with payment_type and traffic_type pivoted from event_params (refunds kept)
+  purchases AS (
+    SELECT
+      ecommerce.transaction_id AS transaction_id,
+      event_timestamp,
+      LOWER(MAX(IF(ep.key = 'payment_type', ep.value.string_value, NULL))) AS payment_type,
+      LOWER(MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL))) AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`, UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+    GROUP BY transaction_id, event_timestamp, user_pseudo_id
+  ),
+  -- Drop internal traffic, then keep one row per transaction_id (its single payment_type, largest tender)
+  orders AS (
+    SELECT transaction_id, payment_type
+    FROM purchases
+    WHERE COALESCE(traffic_type, '') != 'internal'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1
+  )
+  -- BNPL orders over all completed orders
+  SELECT
+    COUNTIF(l.payment_type IS NOT NULL) AS bnpl_orders,
+    COUNT(*) AS total_completed_orders,
+    ROUND(SAFE_DIVIDE(COUNTIF(l.payment_type IS NOT NULL), COUNT(*)) * 100, 2) AS bnpl_adoption_rate_pct
+  FROM orders AS o
+  LEFT JOIN bnpl_lookup AS l ON o.payment_type = l.payment_type;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Test orders carry no dedicated flag in the purchase payload; they are excluded only when tagged traffic_type = 'internal'.
+  -- Maintained lookup of raw payment_type labels that map to a BNPL provider
+  WITH bnpl_lookup AS (
+    SELECT explode(array('klarna', 'klarna_pay_in_4', 'klarna_pay_in_30', 'afterpay', 'affirm', 'affirm_monthly', 'paypal_pay_later', 'paypal_pay_in_4')) AS payment_type
+  ),
+  -- Completed purchase hits with the order's single payment_type and traffic_type (refunds kept)
+  purchases AS (
+    SELECT
+      e.commerce.order.purchaseID AS transaction_id,
+      e.timestamp AS event_timestamp,
+      LOWER(e.commerce.payments[0].paymentType) AS payment_type,
+      LOWER(e._experience.analytics.customDimensions.eVars.traffic_type) AS traffic_type
+    FROM aep_web_events_dataset AS e
+    WHERE e.commerce.purchases.value > 0
+      AND e.commerce.order.purchaseID IS NOT NULL
+      AND e.timestamp >= date_sub(current_date(), 90)
+      AND e.timestamp < current_date()
+  ),
+  -- Drop internal traffic, then keep one row per transaction_id (its single payment_type, largest tender)
+  orders AS (
+    SELECT transaction_id, payment_type
+    FROM (
+      SELECT
+        transaction_id,
+        payment_type,
+        ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) AS rn
+      FROM purchases
+      WHERE COALESCE(traffic_type, '') != 'internal'
+    ) AS ranked
+    WHERE rn = 1
+  )
+  -- BNPL orders over all completed orders
+  SELECT
+    SUM(CASE WHEN l.payment_type IS NOT NULL THEN 1 ELSE 0 END) AS bnpl_orders,
+    COUNT(*) AS total_completed_orders,
+    ROUND(100.0 * SUM(CASE WHEN l.payment_type IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS bnpl_adoption_rate_pct
+  FROM orders AS o
+  LEFT JOIN bnpl_lookup AS l ON o.payment_type = l.payment_type;
 
+Calculation Notes: |
+  1️⃣ Numerator: distinct transaction_id on purchase where payment_type maps to a BNPL provider (Klarna, Afterpay, Affirm, PayPal Pay Later).,2️⃣ Denominator: all completed purchases in the same period across every payment method, deduplicated on transaction_id.,3️⃣ Map raw payment_type values to a BNPL flag through a maintained lookup; labels vary (klarna_pay_in_4, afterpay, affirm_monthly).,4️⃣ One payment_type per order; split-tender orders send the tender covering the largest share of the order total.,5️⃣ Lender declines never fire purchase, so they sit outside both sides; track them with Payment Failure Rate.,6️⃣ Exclude test orders and internal traffic; orders refunded after capture stay in numerator and denominator.,7️⃣ Compare only markets with the same BNPL providers and basket limits; eligibility thresholds differ by country.
 
+Business Use Case: |
+  1️⃣ Payments team: one provider exceeds 60% of BNPL orders → renegotiate its merchant fee or add a second provider.,2️⃣ E-commerce Product: after adding instalment messaging to PDP → compare rate and AOV with the prior baseline.,3️⃣ Finance: BNPL share rises month over month → reforecast payment processing fees and contribution margin.,4️⃣ Merchandising: high-price categories show a low rate → add instalment pricing to those listing and product pages.
 
+Dependencies:
+  Events: [purchase]
+  Dimensions: [payment-method, financing-method, transaction-id]
+  KPIs: [orders]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Payment Method; Financing Method; Device Category; Customer Status; Item Category; Traffic Source
 
+Dashboard Usage: [Checkout Funnel Performance, Payment Mix and Cost, E-commerce Executive Overview]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [express-checkout-adoption-rate, payment-failure-rate, average-order-value, checkout-conversion-rate, guest-checkout-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +246,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-26T10:17:33.162+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-26T10:17:43.453+00:00
 
