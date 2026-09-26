@@ -1,0 +1,202 @@
+# Event: Notification Open
+# Generated: 2026-09-26T20:18:00.178Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Notification Open
+Event Serialization: always
+
+Description: |
+  Fires when a customer opens a promotional or lifecycle message: a push tap, in-app message tap or email open-pixel load. Shipping and other transactional opens use shipment-notification-open.
+
+Category: Retention
+
+Tags: [event, E-commerce: Customer Retention, Loyalty & LTV]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Engagement
+
+
+Event Type: standard
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  notification_open
+
+Adobe Event: |
+  notificationOpen
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "Notification Open",
+          "eventAction": "notification_open",
+          "eventPoints": 0,
+          "timeStamp": "2026-09-26T14:32:00Z"
+        },
+        "message": {
+          "messageID": "msg_9f3c2a",
+          "messageChannel": "push",
+          "messageType": "promotional",
+          "campaignID": "cmp_win_back_0926",
+          "messageName": "Win-Back Push - Cart Reminder",
+          "messageTime": 1790431200,
+          "platform": "web",
+          "machineOpen": false
+        },
+        "user": {
+          "profile": [
+            {
+              "profileInfo": {
+                "userID": "hashed_user_8842f1"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "notification_open",
+    "message_id": "msg_9f3c2a",
+    "message_channel": "push",
+    "message_type": "promotional",
+    "campaign_id": "cmp_win_back_0926",
+    "message_name": "Win-Back Push - Cart Reminder",
+    "message_time": 1790431200,
+    "platform": "web",
+    "machine_open": false,
+    "user_id": "hashed_user_8842f1"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "notificationOpen",
+    "message": {
+      "messageId": "msg_9f3c2a",
+      "messageChannel": "push",
+      "messageType": "promotional",
+      "campaignId": "cmp_win_back_0926",
+      "messageName": "Win-Back Push - Cart Reminder",
+      "messageTime": 1790431200,
+      "platform": "web",
+      "machineOpen": false,
+      "userId": "hashed_user_8842f1"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": {
+      "push": "pushTracking.applicationOpened",
+      "in_app": "message.tracking",
+      "email": "message.tracking"
+    },
+    "_experience": {
+      "customerJourneyManagement": {
+        "messageExecution": {
+          "messageID": "message_id",
+          "campaignID": "campaign_id",
+          "messageExecutionCompletedTimestamp": "message_time (Unix epoch seconds; convert to ISO 8601 string for XDM's date-time schema)"
+        },
+        "messageProfile": {
+          "channel": {
+            "_id": {
+              "push": "https://ns.adobe.com/xdm/channels/push",
+              "in_app": "https://ns.adobe.com/xdm/channels/inapp",
+              "email": "https://ns.adobe.com/xdm/channels/email"
+            }
+          }
+        },
+        "messageInteraction": {
+          "interactionType": "open"
+        }
+      },
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "message_id",
+            "eVar2": "message_type",
+            "eVar3": "campaign_id",
+            "eVar4": "message_name",
+            "eVar5": "platform"
+          },
+          "props": {
+            "prop1": "message_time",
+            "prop2": "machine_open"
+          }
+        }
+      }
+    },
+    "identityMap": {
+      "userid_hashed": [
+        {
+          "id": "user_id",
+          "primary": true
+        }
+      ]
+    }
+  }
+
+Parameters: |
+  {
+    "message_id": "string - Unique ID of the sent message instance; dedupe key with user_id",
+    "message_channel": "string - push, in_app or email",
+    "message_type": "string - promotional or lifecycle; transactional opens fire shipment-notification-open",
+    "campaign_id": "string - CRM or ESP campaign / journey identifier",
+    "message_name": "string - Human-readable message or campaign name",
+    "message_time": "integer - Send time as Unix epoch seconds (Firebase message_time); web and email hits send the same epoch value",
+    "platform": "string - ios, android, web or email_client",
+    "machine_open": "boolean - true when the email open is a privacy-proxy prefetch",
+    "user_id": "string - Hashed customer ID; never an email address or device token"
+  }
+
+Calculation Notes: |
+  ["1️⃣ Fires on push or in-app tap (web push and in-app via gtag/GTM dataLayer) or ESP email open; never on receive, display, dismiss or send.","2️⃣ Serialization always: every open is a hit. Dedupe on message_id + user_id for unique opens; repeat opens of one message are not new openers.","3️⃣ Required: message_id, message_channel, message_type, campaign_id, message_time. Optional: message_name, platform, machine_open, user_id.","4️⃣ Email: ESP open webhook sent server-side via GA4 Measurement Protocol; Apple MPP prefetches get machine_open = true, excluded from rates.","5️⃣ Log only with push opt-in or email marketing consent on record; never send email address or device token, and pass user_id hashed.","6️⃣ App push: Firebase auto-collects message_id/name/time/channel, topic; never log manually. Join campaign_id, message_type, user_id from CRM log.","7️⃣ Value action by industry: E-commerce cart or back-in-stock push; Travel price-drop alert; SaaS feature-update email; Media new-episode push."]
+
+Business Use Case: |
+  ["1️⃣ CRM Manager: win-back push open rate stays below target → tests new copy and send time.","2️⃣ Lifecycle Marketing: human email opens fall for one loyalty tier → shifts that tier's sends to push.","3️⃣ App Product Manager: opens spike without a landing screen view after a release → fixes the broken deep link.","4️⃣ Retention team: customers with no opens in 90 days → move to a sunset flow to protect sender reputation."]
+
+Dependencies:
+  Events: [cookie-preferences-updated, shipment-notification-open]
+  Metrics: [email-clicks]
+  Dimensions: [device-category, customer-loyalty-tier]
+  KPIs: [email-click-to-purchase-conversion-rate]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  message_channel; message_type; campaign_id; message_name; platform; Device Category; Customer Loyalty Tier
+
+    Dashboard Usage: [CRM & Lifecycle Messaging Performance, Customer Retention & Loyalty Overview]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [device-category, customer-loyalty-tier, churn-risk-segment, traffic-source]
+
+    
+    
+    
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-26T20:00:09.037+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-26T20:17:59.865+00:00
+
