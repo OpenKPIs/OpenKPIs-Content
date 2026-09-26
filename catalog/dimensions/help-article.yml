@@ -1,7 +1,7 @@
 # Dimension: Help Article
-# Generated: 2026-09-26T20:12:35.195Z
+# Generated: 2026-09-26T20:12:45.150Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Help Article
 
@@ -10,31 +10,180 @@ Description: |
 
 Category: Experience
 
+Tags: [dimension, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Engagement
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  pageView
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "{{help_article_title}}",
+        "pageType": "help_center"
+      },
+      "category": {
+        "primaryCategory": "help_article"
+      },
+      "attributes": {
+        "content_type": "help_article",
+        "article_id": "{{help_article_id}}",
+        "article_title": "{{help_article_title}}",
+        "traffic_type": "customer"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "content_type": "help_article",
+    "article_id": "{{help_article_id}}",
+    "article_title": "{{help_article_title}}",
+    "page_type": "help_center",
+    "traffic_type": "customer"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "page": {
+      "pageType": "help_center",
+      "content_type": "help_article",
+      "article_id": "{{help_article_id}}",
+      "article_title": "{{help_article_title}}",
+      "traffic_type": "customer"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar30": "help_article",
+            "eVar31": "{{help_article_id}}",
+            "eVar32": "customer"
+          },
+          "props": {
+            "prop30": "{{help_article_title}}"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Help article page views: page_view event_params pivoted per event
+  WITH article_views AS (
+    SELECT
+      event_timestamp,
+      MAX(IF(ep.key = 'content_type', ep.value.string_value, NULL)) AS content_type,
+      MAX(IF(ep.key = 'article_id', ep.value.string_value, NULL)) AS help_article_id,
+      MAX(IF(ep.key = 'article_title', ep.value.string_value, NULL)) AS article_title,
+      MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'page_view'
+    GROUP BY user_pseudo_id, event_timestamp, event_bundle_sequence_id
+  )
+  -- One row per article ID (customer traffic, articles only), labelled with the latest observed title
+  SELECT
+    help_article_id,
+    ARRAY_AGG(article_title IGNORE NULLS ORDER BY event_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS help_article_title
+  FROM article_views
+  WHERE content_type = 'help_article'
+    AND help_article_id IS NOT NULL
+    AND traffic_type = 'customer'
+  GROUP BY help_article_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window: last 90 complete days
+  WITH params AS (
+    SELECT DATE_SUB(CURRENT_DATE(), 90) AS start_date, DATE_SUB(CURRENT_DATE(), 1) AS end_date
+  ),
+  -- Help article page views: eVar30 content type, eVar31 article ID, eVar32 traffic type, prop30 title
+  article_views AS (
+    SELECT
+      e.timestamp,
+      e._experience.analytics.customDimensions.eVars.eVar30 AS content_type,
+      e._experience.analytics.customDimensions.eVars.eVar31 AS help_article_id,
+      e._experience.analytics.customDimensions.props.prop30 AS article_title,
+      e._experience.analytics.customDimensions.eVars.eVar32 AS traffic_type
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE e.eventType = 'pageView'
+      AND TO_DATE(e.timestamp) BETWEEN p.start_date AND p.end_date
+  )
+  -- One row per article ID (customer traffic, articles only), labelled with the latest observed title
+  SELECT
+    help_article_id,
+    MAX_BY(article_title, CASE WHEN article_title IS NOT NULL THEN timestamp END) AS help_article_title
+  FROM article_views
+  WHERE content_type = 'help_article'
+    AND help_article_id IS NOT NULL
+    AND traffic_type = 'customer'
+  GROUP BY help_article_id;
+
+Calculation Notes: |
+  1️⃣ Key on the help-center article ID (Zendesk article ID, Salesforce Knowledge article number); the title is a display label only.
+  2️⃣ Populated on Help Article View events only; null on every other event, never "(not set)" filled with the page title.
+  3️⃣ Localized versions of one article share the article ID; report language separately, not as a separate article.
+  4️⃣ Report the current title via a lookup on article ID so a renamed article keeps one row across history.
+  5️⃣ Help-center home, section, category and search result pages are not articles and carry no value.
+  6️⃣ Exclude agent views from the service console and internal IP ranges; only customer-facing help-center views count.
+  7️⃣ Archived or deleted articles keep their ID and last published title so past periods still resolve.
+
+Business Use Case: |
+  1️⃣ Support content team: weekly, rewrite top-viewed articles most often followed by a contact form in the same session.
+  2️⃣ Returns operations: after a return-policy change, check views of the policy article and fix it if contacts rise.
+  3️⃣ Customer Service lead: when a ticket spike hits, compare it with article views to find missing or unclear content.
+
+Dependencies:
+  Events: [help-article-view]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Support Channel; Return Reason; Device Category; Traffic Source; Page Type
+
+Dashboard Usage: [Self-Service Support Performance, Returns & Refunds Customer Experience]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [support-channel, return-reason, page-type, page-url, resolution-type, ticket-status]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +191,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-26T20:12:34.853+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-26T20:12:44.901+00:00
 
