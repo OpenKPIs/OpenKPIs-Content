@@ -1,0 +1,181 @@
+# Dimension: Ticket Priority
+# Generated: 2026-09-26T20:17:37.505Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Ticket Priority
+
+Description: |
+  Severity level assigned to a support ticket: Low, Normal, High or Urgent, as in Zendesk and Salesforce Service Cloud. Drives SLA targets and queue order; distinct from Ticket Status, which tracks lifecycle stage.
+
+Category: Operations
+
+Tags: [dimension, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT CURRENT_DATE();
+  -- Reporting basis: 'creation' (intake mix), 'current' (backlog) or 'sla_start' (SLA attainment)
+  DECLARE priority_basis STRING DEFAULT 'creation';
+  
+  -- Tickets created in the window, minus spam, test and deleted; merged tickets resolve to the surviving ticket and its timestamp
+  WITH tickets AS (
+    SELECT
+      t.ticket_id,
+      s.ticket_id AS priority_ticket_id,
+      CASE priority_basis
+        WHEN 'creation' THEN s.created_at
+        WHEN 'sla_start' THEN s.sla_started_at
+        ELSE CURRENT_TIMESTAMP()
+      END AS as_of_ts
+    FROM `your-project.crm.support_tickets` t
+    JOIN `your-project.crm.support_tickets` s
+      ON s.ticket_id = COALESCE(t.merged_into_ticket_id, t.ticket_id)
+    WHERE DATE(t.created_at) BETWEEN start_date AND end_date
+      AND NOT t.is_spam AND NOT t.is_test AND NOT t.is_deleted
+      AND (priority_basis <> 'sla_start' OR s.sla_started_at IS NOT NULL)
+  ),
+  -- Priority in force at the chosen timestamp: latest audit-trail value at or before it, one row per ticket
+  priority_at AS (
+    SELECT
+      tk.ticket_id,
+      a.new_priority AS raw_priority,
+      ROW_NUMBER() OVER (PARTITION BY tk.ticket_id ORDER BY a.changed_at DESC) AS rn
+    FROM tickets tk
+    LEFT JOIN `your-project.crm.ticket_priority_audit` a
+      ON a.ticket_id = tk.priority_ticket_id AND a.changed_at <= tk.as_of_ts
+  )
+  -- Normalise to low / normal / high / urgent (Medium to normal, Critical to urgent, blank to unset) and count each ticket once
+  SELECT
+    CASE
+      WHEN LOWER(TRIM(raw_priority)) = 'low' THEN 'low'
+      WHEN LOWER(TRIM(raw_priority)) IN ('normal', 'medium') THEN 'normal'
+      WHEN LOWER(TRIM(raw_priority)) = 'high' THEN 'high'
+      WHEN LOWER(TRIM(raw_priority)) IN ('urgent', 'critical') THEN 'urgent'
+      ELSE 'unset'
+    END AS ticket_priority,
+    COUNT(DISTINCT ticket_id) AS tickets
+  FROM priority_at
+  WHERE rn = 1
+  GROUP BY ticket_priority
+  ORDER BY tickets DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Window and reporting basis: 'creation' (intake mix), 'current' (backlog) or 'sla_start' (SLA attainment)
+  WITH params AS (
+    SELECT
+      DATE_SUB(CURRENT_DATE, 90) AS start_date,
+      CURRENT_DATE AS end_date,
+      'creation' AS priority_basis
+  ),
+  -- Tickets created in the window, minus spam, test and deleted; merged tickets resolve to the surviving ticket and its timestamp
+  tickets AS (
+    SELECT
+      t.ticket_id,
+      s.ticket_id AS priority_ticket_id,
+      CASE p.priority_basis
+        WHEN 'creation' THEN s.created_at
+        WHEN 'sla_start' THEN s.sla_started_at
+        ELSE CURRENT_TIMESTAMP
+      END AS as_of_ts
+    FROM crm_support_tickets t
+    JOIN crm_support_tickets s
+      ON s.ticket_id = COALESCE(t.merged_into_ticket_id, t.ticket_id)
+    CROSS JOIN params p
+    WHERE CAST(t.created_at AS DATE) BETWEEN p.start_date AND p.end_date
+      AND NOT t.is_spam AND NOT t.is_test AND NOT t.is_deleted
+      AND (p.priority_basis <> 'sla_start' OR s.sla_started_at IS NOT NULL)
+  ),
+  -- Priority in force at the chosen timestamp: latest audit-trail value at or before it, one row per ticket
+  priority_at AS (
+    SELECT
+      tk.ticket_id,
+      a.new_priority AS raw_priority,
+      ROW_NUMBER() OVER (PARTITION BY tk.ticket_id ORDER BY a.changed_at DESC) AS rn
+    FROM tickets tk
+    LEFT JOIN crm_ticket_priority_audit a
+      ON a.ticket_id = tk.priority_ticket_id AND a.changed_at <= tk.as_of_ts
+  )
+  -- Normalise to low / normal / high / urgent (Medium to normal, Critical to urgent, blank to unset) and count each ticket once
+  SELECT
+    CASE
+      WHEN LOWER(TRIM(raw_priority)) = 'low' THEN 'low'
+      WHEN LOWER(TRIM(raw_priority)) IN ('normal', 'medium') THEN 'normal'
+      WHEN LOWER(TRIM(raw_priority)) = 'high' THEN 'high'
+      WHEN LOWER(TRIM(raw_priority)) IN ('urgent', 'critical') THEN 'urgent'
+      ELSE 'unset'
+    END AS ticket_priority,
+    COUNT(DISTINCT ticket_id) AS tickets
+  FROM priority_at
+  WHERE rn = 1
+  GROUP BY 1
+  ORDER BY tickets DESC;
+
+Calculation Notes: |
+  1️⃣ Values: low, normal, high, urgent. Salesforce Medium maps to normal and Critical to urgent; a blank priority is unset, never low.
+  2️⃣ Intake mix uses the priority held at ticket creation; backlog views use the current value. Each report states which one it uses.
+  3️⃣ Escalations and downgrades live in the ticket audit trail; a ticket counts once per report, under the value at the chosen timestamp.
+  4️⃣ Merged tickets take the surviving ticket's priority; spam, test and deleted tickets are excluded.
+  5️⃣ Priority set by triggers (VIP tier, order-value or keyword rules) is kept as set; whether an agent or a rule set it is a separate attribute.
+  6️⃣ SLA policies key on priority: read first-reply and resolution targets against the priority in force when the SLA clock started.
+  7️⃣ Priority is never sent from the browser; web contacts join the helpdesk record on the ticket_id captured with submit_form.
+
+Business Use Case: |
+  1️⃣ Support ops lead: when the urgent backlog exceeds target at shift start, moves agents from the normal queue to urgent.
+  2️⃣ Customer Service manager reviews first-reply SLA attainment by priority weekly and resets high/urgent staffing.
+  3️⃣ CX team audits tickets downgraded from urgent each month and tightens the auto-priority trigger rules.
+
+Dependencies:
+  Events: [contact-form-submission]
+
+Source Data: CRM
+
+Report Attributes: |
+  support-channel; ticket-status; agent-team; resolution-type; return-reason; customer-value-tier
+
+Dashboard Usage: [Support Queue & SLA Dashboard, Customer Service Operations Overview]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [ticket-status, support-channel, agent-team, resolution-type, customer-value-tier]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-26T20:13:09.188+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-26T20:17:37.222+00:00
+
