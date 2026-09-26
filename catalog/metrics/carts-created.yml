@@ -1,7 +1,7 @@
 # Metric: Carts Created
-# Generated: 2026-09-26T19:38:07.516Z
+# Generated: 2026-09-26T19:38:18.389Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Carts Created
 Formula: COUNT(DISTINCT cart_id WHERE event_name = 'add_to_cart' AND cart_id IS NOT NULL AND MIN(event_timestamp) per cart_id IN reporting window AND traffic_type != 'internal')
@@ -11,30 +11,257 @@ Description: |
 
 Category: Conversion
 
+Tags: [metric, E-commerce: Cart & Checkout Funnel Analytics]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Checkout
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  add_to_cart
 
+Adobe Event: |
+  scAdd
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "add_to_cart",
+          "add_method": "button",
+          "add_source": "product_page",
+          "page_type": "product_detail",
+          "item_list_id": "related_products",
+          "item_list_name": "Related Products",
+          "traffic_type": "external"
+        }
+      }
+    ],
+    "cart": {
+      "cartID": "cart_8841273",
+      "price": {
+        "cartTotal": "49.99",
+        "currency": "USD"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU_12345",
+            "productName": "Wireless Mouse"
+          },
+          "price": {
+            "unitPrice": "49.99"
+          },
+          "quantity": "1"
+        }
+      ]
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "u_582910"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "add_to_cart",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 49.99,
+      "cart_id": "cart_8841273",
+      "items": [
+        {
+          "item_id": "SKU_12345",
+          "item_name": "Wireless Mouse",
+          "price": 49.99,
+          "quantity": 1
+        }
+      ]
+    },
+    "user_id": "u_582910",
+    "traffic_type": "external",
+    "add_method": "button",
+    "page_type": "product_detail",
+    "add_source": "product_page",
+    "item_list_id": "related_products",
+    "item_list_name": "Related Products"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "scAdd",
+    "cart": {
+      "cartId": "cart_8841273",
+      "currency": "USD",
+      "value": 49.99
+    },
+    "product": [
+      {
+        "items": {
+          "SKU_12345": {
+            "price": 49.99,
+            "quantity": 1
+          }
+        }
+      }
+    ],
+    "user": {
+      "userId": "u_582910",
+      "trafficType": "external"
+    },
+    "page": {
+      "pageType": "product_detail"
+    },
+    "addMethod": "button",
+    "addSource": "product_page",
+    "itemListId": "related_products",
+    "itemListName": "Related Products"
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.productListAdds",
+    "timestamp": "2026-09-26T14:22:00Z",
+    "commerce": {
+      "cart": {
+        "cartID": "cart_8841273"
+      },
+      "productListAdds": {
+        "value": 1,
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU_12345",
+        "name": "Wireless Mouse",
+        "priceTotal": 49.99,
+        "quantity": 1
+      }
+    ],
+    "_tenant": {
+      "trafficType": "external"
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar_add_method": "button",
+            "eVar_add_source": "product_page",
+            "eVar_item_list_id": "related_products",
+            "eVar_item_list_name": "Related Products"
+          }
+        }
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Each cart_id counts as its own cart; a guest cart merged into an account cart at login may count twice.
+  -- add_to_cart events up to end_date (no lower bound, so a cart's true first add is found), params pivoted with UNNEST
+  WITH adds AS (
+    SELECT
+      event_date,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'cart_id') AS cart_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX <= FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'add_to_cart'
+  ),
+  -- drop null/empty cart_id and internal traffic, then date each cart to its first add_to_cart
+  first_adds AS (
+    SELECT cart_id, PARSE_DATE('%Y%m%d', MIN(event_date)) AS first_add_date
+    FROM adds
+    WHERE NULLIF(TRIM(cart_id), '') IS NOT NULL
+      AND COALESCE(traffic_type, '') != 'internal'
+    GROUP BY cart_id
+  )
+  -- carts whose first add falls in the reporting window
+  SELECT COUNT(*) AS carts_created
+  FROM first_adds
+  WHERE first_add_date BETWEEN start_date AND end_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Each cartID counts as its own cart; a guest cart merged into an account cart at login may count twice.
+  -- reporting window: the last 90 complete days
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  ),
+  -- productListAdds events up to end_date (no lower bound, so a cart's true first add is found)
+  adds AS (
+    SELECT
+      e.timestamp,
+      e.commerce.cart.cartID AS cart_id,
+      e._tenant.trafficType AS traffic_type
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE e.eventType = 'commerce.productListAdds'
+      AND to_date(e.timestamp) <= p.end_date
+  ),
+  -- drop null/empty cartID and internal traffic, then date each cart to its first add
+  first_adds AS (
+    SELECT cart_id, to_date(MIN(timestamp)) AS first_add_date
+    FROM adds
+    WHERE NULLIF(TRIM(cart_id), '') IS NOT NULL
+      AND COALESCE(traffic_type, '') != 'internal'
+    GROUP BY cart_id
+  )
+  -- carts whose first add falls in the reporting window
+  SELECT COUNT(*) AS carts_created
+  FROM first_adds f
+  CROSS JOIN params p
+  WHERE f.first_add_date BETWEEN p.start_date AND p.end_date;
 
+Calculation Notes: |
+  1️⃣ A cart counts once, in the window of its first add_to_cart; later adds, removals and re-adds to the same cart_id never count again.,2️⃣ A cart emptied and refilled keeps its cart_id and is not new; a new cart_id issued after purchase or cart expiry counts as a new cart.,3️⃣ Exclude add_to_cart events with a null or empty cart_id; a missing cart_id is an instrumentation gap to fix, not a cart.,4️⃣ Exclude internal traffic (traffic_type = 'internal').,5️⃣ Each cart_id sent in the data layer counts as its own cart; a guest cart merged into an account cart at login may count twice.,6️⃣ Additive across periods: each cart is dated to its first add, so daily counts sum to the weekly and monthly totals.,7️⃣ The Adobe counterpart is the Carts metric (scOpen), which is not used here; this item counts the first scAdd per cartID.
 
+Business Use Case: |
+  1️⃣ Merchandising sees Carts Created fall against Unique Visitors and reviews add-to-cart placement on product pages.,2️⃣ Product tracks adds per cart created after a mini-cart release and keeps the change if adds per cart rise.,3️⃣ Marketing sizes abandoned-cart email volume from Carts Created by traffic source before setting send budgets.
 
+Dependencies:
+  Events: [add-to-cart]
+  Metrics: [add-to-cart]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Device Category; Traffic Source; Page Type; Customer Status
 
+Dashboard Usage: [Cart & Checkout Funnel, Daily Trading Report]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [add-to-cart, cart-removals, begin-checkout, unique-visitors, cart-value]
 
+Derived KPIs: [cart-abandonment-rate, cart-to-checkout-rate, cart-to-purchase-rate, cart-conversion-rate, abandoned-cart-recovery-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +271,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-26T19:38:06.838+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-26T19:38:17.978+00:00
 
