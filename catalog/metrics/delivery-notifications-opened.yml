@@ -1,7 +1,7 @@
 # Metric: Delivery Notifications Opened
-# Generated: 2026-09-27T16:08:06.410Z
+# Generated: 2026-09-27T16:08:16.283Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Delivery Notifications Opened
 Formula: COUNT(DISTINCT message_id WHERE event_name = 'notification_open' AND notification_type IN ('shipped', 'out_for_delivery', 'delivered', 'delayed') AND machine_open != true)
@@ -11,30 +11,206 @@ Description: |
 
 Category: Operations
 
+Tags: [metric, E-commerce: Post-Purchase Logistics & Fulfillment]
 
+Industry: E-commerce
 
+Priority: Medium
 
+Core Area: Engagement
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  notification_open
 
+Adobe Event: |
+  notificationOpen
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "notification_open",
+          "type": "notificationOpen",
+          "timeStamp": "2026-09-27T09:15:00Z"
+        },
+        "attributes": {
+          "message_id": "msg_8842217",
+          "notification_type": "out_for_delivery",
+          "message_channel": "email",
+          "machine_open": false,
+          "message_time": "2026-09-27T09:15:00Z",
+          "traffic_type": "customer",
+          "carrier": "UPS"
+        }
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "notification_open",
+    "message_id": "msg_8842217",
+    "notification_type": "out_for_delivery",
+    "message_channel": "email",
+    "machine_open": false,
+    "message_time": "2026-09-27T09:15:00Z",
+    "traffic_type": "customer",
+    "carrier": "UPS"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "notificationOpen",
+    "notification": {
+      "message_id": "msg_8842217",
+      "notification_type": "out_for_delivery",
+      "message_channel": "email",
+      "machine_open": false,
+      "message_time": "2026-09-27T09:15:00Z",
+      "traffic_type": "customer",
+      "carrier": "UPS"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "notification.open",
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "msg_8842217",
+            "eVar2": "out_for_delivery",
+            "eVar3": "email",
+            "eVar4": "UPS"
+          }
+        }
+      }
+    },
+    "_openkpis": {
+      "notification": {
+        "messageId": "msg_8842217",
+        "notificationType": "out_for_delivery",
+        "messageChannel": "email",
+        "machineOpen": false,
+        "messageTime": "2026-09-27T09:15:00Z",
+        "trafficType": "customer",
+        "carrier": "UPS"
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Pivot notification_open parameters; scan 7 days past end_date so late opens of in-window sends are kept
+  WITH opens AS (
+    SELECT
+      TIMESTAMP_MICROS(event_timestamp) AS open_ts,
+      MAX(IF(ep.key = 'message_id', ep.value.string_value, NULL)) AS message_id,
+      MAX(IF(ep.key = 'notification_type', ep.value.string_value, NULL)) AS notification_type,
+      MAX(IF(ep.key = 'message_channel', ep.value.string_value, NULL)) AS message_channel,
+      MAX(IF(ep.key = 'machine_open', LOWER(COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING))), NULL)) AS machine_open,
+      MAX(IF(ep.key = 'message_time', SAFE_CAST(ep.value.string_value AS TIMESTAMP), NULL)) AS message_ts,
+      MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`, UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL 7 DAY))
+      AND event_name = 'notification_open'
+    GROUP BY user_pseudo_id, event_timestamp, event_bundle_sequence_id
+  )
+  -- Unique delivery-status notifications opened (email and push, human opens, within 7 days of send), dated by send date
+  SELECT
+    DATE(message_ts) AS send_date,
+    COUNT(DISTINCT message_id) AS delivery_notifications_opened
+  FROM opens
+  WHERE message_id IS NOT NULL
+    AND notification_type IN ('shipped', 'out_for_delivery', 'delivered', 'delayed')
+    AND message_channel IN ('email', 'push')
+    AND COALESCE(machine_open, 'false') NOT IN ('true', '1')
+    AND COALESCE(traffic_type, '') != 'internal'
+    AND DATE(message_ts) BETWEEN start_date AND end_date
+    AND open_ts <= TIMESTAMP_ADD(message_ts, INTERVAL 7 DAY)
+  GROUP BY send_date
+  ORDER BY send_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window
+  WITH params AS (
+    SELECT
+      DATE_SUB(CURRENT_DATE(), 90) AS start_date,
+      DATE_SUB(CURRENT_DATE(), 1) AS end_date
+  ),
+  -- Notification open fields; scan 7 days past end_date so late opens of in-window sends are kept
+  opens AS (
+    SELECT
+      e.timestamp AS open_ts,
+      e._openkpis.notification.messageId AS message_id,
+      e._openkpis.notification.notificationType AS notification_type,
+      e._openkpis.notification.messageChannel AS message_channel,
+      e._openkpis.notification.machineOpen AS machine_open,
+      TO_TIMESTAMP(e._openkpis.notification.messageTime) AS message_ts,
+      e._openkpis.notification.trafficType AS traffic_type
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE e.eventType = 'notification.open'
+      AND TO_DATE(e.timestamp) BETWEEN p.start_date AND DATE_ADD(p.end_date, 7)
+  )
+  -- Unique delivery-status notifications opened (email and push, human opens, within 7 days of send), dated by send date
+  SELECT
+    TO_DATE(o.message_ts) AS send_date,
+    COUNT(DISTINCT o.message_id) AS delivery_notifications_opened
+  FROM opens o
+  CROSS JOIN params p
+  WHERE o.message_id IS NOT NULL
+    AND o.notification_type IN ('shipped', 'out_for_delivery', 'delivered', 'delayed')
+    AND o.message_channel IN ('email', 'push')
+    AND COALESCE(o.machine_open, false) = false
+    AND COALESCE(o.traffic_type, '') != 'internal'
+    AND TO_DATE(o.message_ts) BETWEEN p.start_date AND p.end_date
+    AND o.open_ts <= o.message_ts + INTERVAL 7 DAYS
+  GROUP BY TO_DATE(o.message_ts)
+  ORDER BY send_date;
 
+Calculation Notes: |
+  1️⃣ Count each message_id once; repeat opens of the same notification and resent notification_open hits add nothing.,2️⃣ In scope: shipped, out_for_delivery, delivered and delayed notifications. Order confirmations and pickup-ready alerts are excluded.,3️⃣ Exclude machine opens (machine_open = true, e.g. Apple Mail Privacy Protection prefetch); track them separately, never in this count.,4️⃣ Email counts tracking-pixel opens, push counts notification taps. SMS has no open signal and is left out.,5️⃣ Date each open to its notification's send date (message_time) so the count lines up with Delivery Notifications Sent for the same window.,6️⃣ Opens more than 7 days after send are dropped; the shipment status they reported is no longer current.,7️⃣ Exclude internal and seed-list sends (traffic_type = 'internal') and open events with no message_id.
 
+Business Use Case: |
+  1️⃣ Customer Service sees opens drop after a template change and restores the prior subject line to cut WISMO contacts.,2️⃣ Product compares opens by channel for out_for_delivery alerts and moves the alert to the channel customers open more.,3️⃣ Customer Service reviews opens by carrier when WISMO Rate climbs to find the shipment updates customers are not reading.
 
+Dependencies:
+  Events: [notification-open]
+  Metrics: [delivery-notifications-sent]
+  Dimensions: [carrier, shipment-status]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Notification Type; Message Channel; Carrier; Shipment Status; Fulfillment Method; Device Category
 
+Dashboard Usage: [Post-Purchase Communications, Delivery Experience Overview, WISMO Deflection]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [delivery-notifications-sent, order-status-checks, pickup-notifications-sent]
 
+Derived KPIs: [delivery-notification-open-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +220,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-27T16:08:05.721+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-27T16:08:15.956+00:00
 
