@@ -1,7 +1,7 @@
 # KPI: Delivery Satisfaction Score
-# Generated: 2026-09-27T14:56:54.683Z
+# Generated: 2026-09-27T14:57:04.433Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Delivery Satisfaction Score
 Formula: SUM(Rating / Rating Scale Max × 5) / Delivery Survey Responses
@@ -11,29 +11,197 @@ Description: |
 
 Category: Experience
 
+Tags: [kpi, E-commerce: Post-Purchase Logistics & Fulfillment]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Generic
 
+Scope: Event
 
+Measure Type: Average
 
+Aggregation Window: Weekly, Monthly, Quarterly
 
+GA4 Event: |
+  submit_form
 
+Adobe Event: |
+  form_submit
 
+W3 Data Layer: |
+  {
+    "form": {
+      "formName": "Delivery Satisfaction Survey",
+      "formID": "{{form_id}}",
+      "attributes": {
+        "formType": "delivery_survey",
+        "formStatus": "submitted",
+        "orderID": "{{order_id}}",
+        "rating": "{{rating}}",
+        "ratingScaleMax": "{{rating_scale_max}}",
+        "fulfillmentMethod": "{{fulfillment_method}}",
+        "trafficType": "{{traffic_type}}"
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_type": "delivery_survey",
+    "form_id": "{{form_id}}",
+    "form_status": "submitted",
+    "order_id": "{{order_id}}",
+    "rating": "{{rating}}",
+    "rating_scale_max": "{{rating_scale_max}}",
+    "fulfillment_method": "{{fulfillment_method}}",
+    "traffic_type": "{{traffic_type}}"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "form_submit",
+    "form": {
+      "formType": "delivery_survey",
+      "formId": "{{form_id}}",
+      "formStatus": "submitted",
+      "orderId": "{{order_id}}",
+      "rating": "{{rating}}",
+      "ratingScaleMax": "{{rating_scale_max}}",
+      "fulfillmentMethod": "{{fulfillment_method}}",
+      "trafficType": "{{traffic_type}}"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "_experience": {
+      "analytics": {
+        "custom1": "form_type",
+        "custom2": "rating",
+        "custom3": "rating_scale_max",
+        "custom4": "order_id"
+      }
+    },
+    "_tenant": {
+      "traffic_type": "traffic_type"
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH responses AS (
+    -- Delivery survey submissions in the period (by submission date), parameters pivoted per event
+    SELECT
+      event_timestamp,
+      MAX(IF(ep.key = 'order_id', ep.value.string_value, NULL)) AS order_id,
+      MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type,
+      MAX(IF(ep.key = 'rating', COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64), SAFE_CAST(ep.value.string_value AS FLOAT64)), NULL)) AS rating,
+      MAX(IF(ep.key = 'rating_scale_max', COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64), SAFE_CAST(ep.value.string_value AS FLOAT64)), NULL)) AS rating_scale_max
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'submit_form'
+      AND EXISTS (SELECT 1 FROM UNNEST(event_params) f WHERE f.key = 'form_type' AND f.value.string_value = 'delivery_survey')
+    GROUP BY user_pseudo_id, event_timestamp, event_bundle_sequence_id
+  ),
+  latest_valid AS (
+    -- Valid, non-internal responses; keep only the latest submission per order_id
+    SELECT order_id, rating, rating_scale_max
+    FROM responses
+    WHERE order_id IS NOT NULL
+      AND COALESCE(traffic_type, '') != 'internal'
+      AND rating IS NOT NULL
+      AND rating >= 1
+      AND rating <= rating_scale_max
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY event_timestamp DESC) = 1
+  )
+  -- Average rating normalised to a 5-point scale
+  SELECT
+    COUNT(*) AS delivery_survey_responses,
+    ROUND(AVG(rating / rating_scale_max * 5), 2) AS delivery_satisfaction_score
+  FROM latest_valid;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), 90);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), 1);
+  
+  WITH responses AS (
+    -- Delivery survey submissions in the period (by submission date)
+    SELECT
+      timestamp,
+      _experience.analytics.custom4 AS order_id,
+      _tenant.traffic_type AS traffic_type,
+      CAST(_experience.analytics.custom2 AS DOUBLE) AS rating,
+      CAST(_experience.analytics.custom3 AS DOUBLE) AS rating_scale_max
+    FROM aep_web_events_dataset
+    WHERE CAST(timestamp AS DATE) BETWEEN start_date AND end_date
+      AND eventType = 'form_submit'
+      AND _experience.analytics.custom1 = 'delivery_survey'
+  ),
+  latest_valid AS (
+    -- Valid, non-internal responses; keep only the latest submission per order_id
+    SELECT order_id, rating, rating_scale_max
+    FROM (
+      SELECT
+        r.*,
+        ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY timestamp DESC) AS rn
+      FROM responses r
+      WHERE order_id IS NOT NULL
+        AND COALESCE(traffic_type, '') != 'internal'
+        AND rating IS NOT NULL
+        AND rating >= 1
+        AND rating <= rating_scale_max
+    ) ranked
+    WHERE rn = 1
+  )
+  -- Average rating normalised to a 5-point scale
+  SELECT
+    COUNT(*) AS delivery_survey_responses,
+    ROUND(AVG(rating / rating_scale_max * 5), 2) AS delivery_satisfaction_score
+  FROM latest_valid;
 
+Calculation Notes: |
+  1️⃣ Responses: submit_form where form_type = delivery_survey (Delivery Satisfaction Survey Submission), keyed on order_id.
+  2️⃣ One response per order_id; when a customer resubmits, keep the latest submission only.
+  3️⃣ Normalise to 5 points: rating / rating_scale_max × 5, so 10-point and 5-point surveys roll up together.
+  4️⃣ Drop responses with a null rating, rating below 1 or above rating_scale_max, or a missing order_id.
+  5️⃣ Exclude traffic_type = internal; period is the survey submission date.
+  6️⃣ Split shipments share one order-level rating; a per-shipment question, if asked, is not part of this score.
+  7️⃣ Carrier, region, shipping-tier and SLA-status splits join on order_id to shipment data; the headline score needs no join.
 
+Business Use Case: |
+  1️⃣ Logistics Operations: one carrier's score drops → review its SLA and move volume to the better-rated carrier.
+  2️⃣ Customer Service: low scores cluster on late orders → send proactive delay messages before the promise date.
+  3️⃣ E-commerce Director: score falls while on-time rate holds → audit packaging damage and driver handover.
 
+Dependencies:
+  Events: [delivery-satisfaction-survey-submission]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  carrier; shipping-tier; fulfillment-method; delivery-region; delivery-sla-status
 
+Dashboard Usage: [Post-Purchase Experience, Carrier Performance Scorecard, Fulfillment Operations Overview]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [shipment-on-time-delivery-rate, failed-delivery-rate, delivery-exception-rate, wismo-rate, delivery-accuracy-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +211,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-27T14:56:54.307+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-27T14:57:04.179+00:00
 
