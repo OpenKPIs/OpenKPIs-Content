@@ -1,7 +1,7 @@
 # Dimension: BOPIS Pickup Status
-# Generated: 2026-09-27T15:29:13.318Z
+# Generated: 2026-09-27T15:29:23.821Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: BOPIS Pickup Status
 
@@ -10,31 +10,195 @@ Description: |
 
 Category: Operations
 
+Tags: [dimension, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: Retail
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase / commerce.purchases
+
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "ORD-2025-114302",
+      "attributes": {
+        "fulfillmentMethod": "bopis"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "transaction_id": "ORD-2025-114302",
+    "fulfillment_method": "bopis"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "order": {
+      "transactionID": "ORD-2025-114302",
+      "fulfillmentMethod": "bopis"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "commerce": {
+      "order": {
+        "purchaseID": "string - order transaction ID, read from the purchase event"
+      }
+    },
+    "_tenant": {
+      "orderFulfillment": {
+        "fulfillmentMethod": "string - bopis | curbside | ship_to_store | ship_to_home, read from the purchase event",
+        "bopisPickupStatus": "string - pending | ready_for_pickup | picked_up | expired | cancelled, set by the order management system; joined from the OMS order line status history at query time, not present on the purchase event"
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Web orders in the window with their fulfillment method, pivoted from purchase
+  WITH orders AS (
+    SELECT
+      MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) AS transaction_id,
+      MAX(IF(ep.key = 'fulfillment_method', ep.value.string_value, NULL)) AS fulfillment_method
+    FROM `your-project.analytics_123456789.events_*`, UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+    GROUP BY user_pseudo_id, event_timestamp, event_bundle_sequence_id
+  ),
+  -- Current OMS status per order line (latest status change), mapped onto the governed values in one lookup
+  line_status AS (
+    SELECT
+      h.order_id,
+      m.bopis_pickup_status
+    FROM `your-project.oms.order_line_status_history` AS h
+    JOIN `your-project.oms.pickup_status_map` AS m ON m.oms_status = h.oms_status
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY h.order_id, h.order_line_id ORDER BY h.status_changed_at DESC) = 1
+  ),
+  -- Order-level value: the least advanced line status
+  order_status AS (
+    SELECT
+      order_id,
+      CASE MIN(CASE bopis_pickup_status
+        WHEN 'pending' THEN 1 WHEN 'ready_for_pickup' THEN 2 WHEN 'picked_up' THEN 3
+        WHEN 'expired' THEN 4 WHEN 'cancelled' THEN 5 END)
+        WHEN 1 THEN 'pending' WHEN 2 THEN 'ready_for_pickup' WHEN 3 THEN 'picked_up'
+        WHEN 4 THEN 'expired' WHEN 5 THEN 'cancelled' END AS bopis_pickup_status
+    FROM line_status
+    GROUP BY order_id
+  )
+  -- Pickup status per order; null unless the order is bopis or curbside
+  SELECT DISTINCT
+    o.transaction_id,
+    IF(LOWER(o.fulfillment_method) IN ('bopis', 'curbside'), s.bopis_pickup_status, NULL) AS bopis_pickup_status
+  FROM orders AS o
+  LEFT JOIN order_status AS s ON s.order_id = o.transaction_id
+  WHERE o.transaction_id IS NOT NULL;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Web orders in the window with their fulfillment method, from purchase
+  WITH orders AS (
+    SELECT DISTINCT
+      commerce.order.purchaseID AS transaction_id,
+      _tenant.orderFulfillment.fulfillmentMethod AS fulfillment_method
+    FROM aep_web_events_dataset
+    WHERE eventType = 'commerce.purchases'
+      AND timestamp >= DATE_SUB(CURRENT_DATE, 90)
+      AND timestamp < CURRENT_DATE
+      AND commerce.order.purchaseID IS NOT NULL
+  ),
+  -- Current OMS status per order line (latest status change), mapped onto the governed values in one lookup
+  line_status AS (
+    SELECT order_id, bopis_pickup_status
+    FROM (
+      SELECT
+        h.order_id,
+        m.bopis_pickup_status,
+        ROW_NUMBER() OVER (PARTITION BY h.order_id, h.order_line_id ORDER BY h.status_changed_at DESC) AS rn
+      FROM aep_oms_order_line_status_history AS h
+      JOIN aep_oms_pickup_status_map AS m ON m.oms_status = h.oms_status
+    ) t
+    WHERE rn = 1
+  ),
+  -- Order-level value: the least advanced line status
+  order_status AS (
+    SELECT
+      order_id,
+      CASE MIN(CASE bopis_pickup_status
+        WHEN 'pending' THEN 1 WHEN 'ready_for_pickup' THEN 2 WHEN 'picked_up' THEN 3
+        WHEN 'expired' THEN 4 WHEN 'cancelled' THEN 5 END)
+        WHEN 1 THEN 'pending' WHEN 2 THEN 'ready_for_pickup' WHEN 3 THEN 'picked_up'
+        WHEN 4 THEN 'expired' WHEN 5 THEN 'cancelled' END AS bopis_pickup_status
+    FROM line_status
+    GROUP BY order_id
+  )
+  -- Pickup status per order; null unless the order is bopis or curbside
+  SELECT
+    o.transaction_id,
+    CASE WHEN LOWER(o.fulfillment_method) IN ('bopis', 'curbside') THEN s.bopis_pickup_status END AS bopis_pickup_status
+  FROM orders AS o
+  LEFT JOIN order_status AS s ON s.order_id = o.transaction_id;
+
+Calculation Notes: |
+  1️⃣ Values: pending, ready_for_pickup, picked_up, expired, cancelled. Map each OMS's pickup states onto them in one lookup.
+  2️⃣ Populated only when fulfillment_method is bopis or curbside; every other order carries null, never pending.
+  3️⃣ ready_for_pickup starts when the store marks the order picked and notifies the customer; picked_up when handover is confirmed.
+  4️⃣ expired = not collected within the hold period (typically 3–7 days) and auto-cancelled; cancelled = cancelled before that.
+  5️⃣ Held per line; order value is the least advanced line. Once all lines resolve: picked_up if any line was, else expired, else cancelled.
+  6️⃣ Backlog views use the current value; daily trends use the status held at snapshot time in the OMS status history.
+  7️⃣ Stamp the ready_for_pickup and picked_up transitions in store local time; the gap feeds pickup wait reporting.
+
+Business Use Case: |
+  1️⃣ Store operations manager calls customers each morning whose orders sit in ready_for_pickup over 48 hours.
+  2️⃣ Omnichannel lead reviews the weekly expired share by store and adds pickup reminders where it exceeds target.
+  3️⃣ Customer Service agent checks the status on a pickup inquiry and resends the ready notification if needed.
+
+Dependencies:
+  Events: [purchase, pickup-scheduling-completion, order-pickup]
+  Metrics: [bopis-orders]
+  Dimensions: [fulfillment-method]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics) + Order Management (reconciliation)
+
+Report Attributes: |
+  Store Name; Pickup Location Type; Fulfillment Method; Pickup Window; Order Date
+
+Dashboard Usage: [BOPIS Operations, Store Fulfillment Performance]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [fulfillment-method, pickup-window, order-status, store-inventory-status, pickup-location-type, store-name]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +206,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-27T15:29:12.632+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-27T15:29:23.505+00:00
 
