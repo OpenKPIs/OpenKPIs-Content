@@ -1,0 +1,340 @@
+# Dimension: Pickup Location Type
+# Generated: 2026-09-27T15:39:49.693Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Pickup Location Type
+
+Description: |
+  Store handover point for a pickup order: in_store_counter, curbside or pickup_locker. One value, chosen at checkout; refines Fulfillment Method's pickup values, and curbside fulfillment always maps to curbside.
+
+Category: Operations
+
+Tags: [dimension, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: Retail
+
+Priority: Medium
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  add_shipping_info
+
+Adobe Event: |
+  scCheckout
+
+W3 Data Layer: |
+  {
+    "cart": {
+      "cartID": "CART-88214",
+      "attributes": {
+        "fulfillmentMethod": "bopis",
+        "pickupLocationType": "curbside",
+        "storeId": "STORE-4512"
+      }
+    },
+    "transaction": {
+      "transactionID": "ORD-2025-114302",
+      "attributes": {
+        "fulfillmentMethod": "bopis",
+        "pickupLocationType": "curbside",
+        "storeId": "STORE-4512"
+      }
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "Add Shipping Info",
+          "type": "add_shipping_info"
+        }
+      },
+      {
+        "eventInfo": {
+          "eventName": "Purchase",
+          "type": "purchase"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  [
+    {
+      "event": "add_shipping_info",
+      "fulfillment_method": "bopis",
+      "pickup_location_type": "curbside",
+      "store_id": "STORE-4512",
+      "ecommerce": {
+        "currency": "USD",
+        "value": 64.99,
+        "shipping_tier": "pickup",
+        "items": [
+          {
+            "item_id": "SKU_44210",
+            "item_name": "Cordless Drill",
+            "quantity": 1
+          }
+        ]
+      }
+    },
+    {
+      "event": "purchase",
+      "fulfillment_method": "bopis",
+      "pickup_location_type": "curbside",
+      "store_id": "STORE-4512",
+      "ecommerce": {
+        "currency": "USD",
+        "value": 64.99,
+        "transaction_id": "ORD-2025-114302",
+        "items": [
+          {
+            "item_id": "SKU_44210",
+            "item_name": "Cordless Drill",
+            "quantity": 1
+          }
+        ]
+      }
+    }
+  ]
+
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "scCheckout",
+      "checkout": {
+        "checkoutStep": 2,
+        "checkoutStepName": "shipping",
+        "fulfillmentMethod": "bopis",
+        "pickupLocationType": "curbside",
+        "storeId": "STORE-4512"
+      },
+      "cart": {
+        "cartID": "CART-88214"
+      }
+    },
+    {
+      "event": "purchase",
+      "purchase": {
+        "transactionID": "ORD-2025-114302",
+        "fulfillmentMethod": "bopis",
+        "pickupLocationType": "curbside",
+        "storeId": "STORE-4512"
+      }
+    }
+  ]
+
+XDM Mapping: |
+  {
+    "commerce": {
+      "order": {
+        "fulfillment": {
+          "fulfillmentMethod": "string - bopis | curbside | ship_to_store | ship_to_home, read on add_shipping_info and purchase",
+          "pickupLocationType": "string - in_store_counter | curbside | pickup_locker, selected at add_shipping_info/purchase or actual from order-pickup",
+          "storeId": "string - store the order is picked up at, from add_shipping_info/purchase or the order pickup record"
+        }
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar3": "pickup_location_type"
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Pivot fulfillment method, pickup location type and store from add_shipping_info and purchase event params
+  WITH checkout_events AS (
+    SELECT
+      user_pseudo_id,
+      event_name,
+      event_timestamp,
+      ecommerce.transaction_id,
+      LOWER(TRIM(MAX(IF(ep.key = 'fulfillment_method', ep.value.string_value, NULL)))) AS fulfillment_method,
+      LOWER(TRIM(MAX(IF(ep.key = 'pickup_location_type', ep.value.string_value, NULL)))) AS pickup_location_type,
+      MAX(IF(ep.key = 'store_id', ep.value.string_value, NULL)) AS store_id
+    FROM `your-project.analytics_123456789.events_*`, UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name IN ('add_shipping_info', 'purchase')
+    GROUP BY user_pseudo_id, event_name, event_timestamp, event_bundle_sequence_id, ecommerce.transaction_id
+  ),
+  -- Selected value and store per pickup order: the purchase payload, else the latest add_shipping_info before it; curbside fulfillment forces curbside
+  selected_orders AS (
+    SELECT
+      p.transaction_id,
+      COALESCE(p.store_id, s.store_id) AS store_id,
+      IF(p.fulfillment_method = 'curbside', 'curbside', COALESCE(p.pickup_location_type, s.pickup_location_type)) AS selected_type
+    FROM checkout_events AS p
+    LEFT JOIN checkout_events AS s
+      ON s.event_name = 'add_shipping_info'
+      AND s.user_pseudo_id = p.user_pseudo_id
+      AND s.event_timestamp <= p.event_timestamp
+      AND s.pickup_location_type IS NOT NULL
+    WHERE p.event_name = 'purchase'
+      AND p.fulfillment_method IN ('bopis', 'curbside', 'ship_to_store')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY p.transaction_id ORDER BY p.event_timestamp DESC, s.event_timestamp DESC) = 1
+  ),
+  -- Selected and actual values as rows; selected keeps every order with its checkout store, actual comes from the pickup record and skips cancelled or uncollected orders
+  order_types AS (
+    SELECT o.transaction_id, o.store_id, 'selected' AS stage, o.selected_type AS raw_type
+    FROM selected_orders AS o
+    UNION ALL
+    SELECT o.transaction_id, pk.store_id, 'actual' AS stage, LOWER(TRIM(pk.pickup_location_type)) AS raw_type
+    FROM selected_orders AS o
+    JOIN `your-project.commerce.order_pickups` AS pk USING (transaction_id)
+    WHERE COALESCE(LOWER(pk.pickup_status), '') NOT IN ('cancelled', 'uncollected')
+  ),
+  -- Governed value set: pickup towers and kiosks become pickup_locker; anything else is unknown
+  mapped AS (
+    SELECT
+      transaction_id,
+      store_id,
+      stage,
+      CASE
+        WHEN raw_type IN ('in_store_counter', 'curbside', 'pickup_locker') THEN raw_type
+        WHEN raw_type IN ('pickup_tower', 'kiosk', 'self_service_kiosk') THEN 'pickup_locker'
+      END AS mapped_type
+    FROM order_types
+  )
+  -- Pickup location type per order and stage; unknown, free-text or not-enabled values become unset; with no known store the mapped value stays
+  SELECT
+    m.transaction_id,
+    m.stage,
+    COALESCE(IF(m.store_id IS NULL, m.mapped_type, sv.pickup_location_type), 'unset') AS pickup_location_type
+  FROM mapped AS m
+  LEFT JOIN `your-project.commerce.store_pickup_services` AS sv
+    ON sv.store_id = m.store_id
+    AND sv.pickup_location_type = m.mapped_type
+    AND sv.is_enabled;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Fulfillment method, pickup location type and store from checkout (add_shipping_info) and purchase events
+  WITH checkout_events AS (
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      eventType,
+      timestamp,
+      commerce.order.purchaseID AS transaction_id,
+      LOWER(TRIM(commerce.order.fulfillment.fulfillmentMethod)) AS fulfillment_method,
+      LOWER(TRIM(commerce.order.fulfillment.pickupLocationType)) AS pickup_location_type,
+      commerce.order.fulfillment.storeId AS store_id
+    FROM aep_web_events_dataset
+    WHERE eventType IN ('commerce.checkouts', 'commerce.purchases')
+      AND timestamp >= DATE_SUB(CURRENT_DATE, 90)
+      AND timestamp < CURRENT_DATE
+  ),
+  -- Selected value and store per pickup order: the purchase payload, else the latest checkout before it; curbside fulfillment forces curbside
+  ranked_orders AS (
+    SELECT
+      p.transaction_id,
+      COALESCE(p.store_id, s.store_id) AS store_id,
+      CASE WHEN p.fulfillment_method = 'curbside' THEN 'curbside' ELSE COALESCE(p.pickup_location_type, s.pickup_location_type) END AS selected_type,
+      ROW_NUMBER() OVER (PARTITION BY p.transaction_id ORDER BY p.timestamp DESC, s.timestamp DESC) AS rn
+    FROM checkout_events AS p
+    LEFT JOIN checkout_events AS s
+      ON s.eventType = 'commerce.checkouts'
+      AND s.ecid = p.ecid
+      AND s.timestamp <= p.timestamp
+      AND s.pickup_location_type IS NOT NULL
+    WHERE p.eventType = 'commerce.purchases'
+      AND p.fulfillment_method IN ('bopis', 'curbside', 'ship_to_store')
+  ),
+  selected_orders AS (
+    SELECT transaction_id, store_id, selected_type FROM ranked_orders WHERE rn = 1
+  ),
+  -- Selected and actual values as rows; selected keeps every order with its checkout store, actual comes from the pickup record and skips cancelled or uncollected orders
+  order_types AS (
+    SELECT o.transaction_id, o.store_id, 'selected' AS stage, o.selected_type AS raw_type
+    FROM selected_orders AS o
+    UNION ALL
+    SELECT o.transaction_id, pk.store_id, 'actual' AS stage, LOWER(TRIM(pk.pickup_location_type)) AS raw_type
+    FROM selected_orders AS o
+    JOIN order_pickups_dataset AS pk ON pk.transaction_id = o.transaction_id
+    WHERE COALESCE(LOWER(pk.pickup_status), '') NOT IN ('cancelled', 'uncollected')
+  ),
+  -- Governed value set: pickup towers and kiosks become pickup_locker; anything else is unknown
+  mapped AS (
+    SELECT
+      transaction_id,
+      store_id,
+      stage,
+      CASE
+        WHEN raw_type IN ('in_store_counter', 'curbside', 'pickup_locker') THEN raw_type
+        WHEN raw_type IN ('pickup_tower', 'kiosk', 'self_service_kiosk') THEN 'pickup_locker'
+      END AS mapped_type
+    FROM order_types
+  )
+  -- Pickup location type per order and stage; unknown, free-text or not-enabled values become unset; with no known store the mapped value stays
+  SELECT
+    m.transaction_id,
+    m.stage,
+    COALESCE(CASE WHEN m.store_id IS NULL THEN m.mapped_type ELSE sv.pickup_location_type END, 'unset') AS pickup_location_type
+  FROM mapped AS m
+  LEFT JOIN store_pickup_services_dataset AS sv
+    ON sv.store_id = m.store_id
+    AND sv.pickup_location_type = m.mapped_type
+    AND sv.is_enabled = TRUE;
+
+Calculation Notes: |
+  1️⃣ Values: in_store_counter, curbside, pickup_locker. Pickup towers and self-service kiosks map to pickup_locker; ship-to-home orders stay null.
+  2️⃣ Set only for pickup orders (BOPIS, curbside, ship-to-store); a curbside fulfillment_method always carries curbside here.
+  3️⃣ Selected value is read from add_shipping_info and purchase; the actual value comes from the order pickup record and may differ.
+  4️⃣ Each report states whether it uses selected or actual: mix views default to selected, handover and wait-time views to actual.
+  5️⃣ Cancelled or uncollected orders keep the selected value and have no actual value; exclude them from actual handover mix.
+  6️⃣ Validate against the store's enabled pickup services; unknown or free-text values map to unset, never to in_store_counter.
+
+Business Use Case: |
+  1️⃣ Store ops manager: when curbside share exceeds the staffing plan, adds curbside runners to peak pickup windows.
+  2️⃣ Omnichannel lead reviews selected vs actual type monthly, flags stores where curbside orders end at the counter.
+  3️⃣ Store planning team uses locker pickup volume per store to decide where to install or expand pickup lockers.
+
+Dependencies:
+  Events: [add-shipping-info, purchase, order-pickup]
+  Dimensions: [fulfillment-method]
+
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
+
+Report Attributes: |
+  store_name; fulfillment_method; pickup_window; bopis_pickup_status; device_category
+
+Dashboard Usage: [BOPIS & Curbside Operations, Omnichannel Fulfillment Mix, Store Pickup Performance]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [fulfillment-method, pickup-window, store-name, bopis-pickup-status, store-inventory-status, delivery-location]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-27T15:29:30.164+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-27T15:39:49.365+00:00
+
