@@ -1,7 +1,7 @@
 # KPI: Delivery Exception Rate
-# Generated: 2026-09-27T14:56:39.149Z
+# Generated: 2026-09-27T14:56:47.794Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Delivery Exception Rate
 Formula: (Shipments with ≥1 Delivery Exception / Total Shipments Handed to Carrier) × 100
@@ -11,6 +11,19 @@ Description: |
 
 Category: Operations
 
+Tags: [kpi, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: Percentage
+
+Aggregation Window: Daily, Weekly, Monthly
 
 
 
@@ -18,22 +31,113 @@ Category: Operations
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Counted from the order management carrier scan feed: the order-status page_view only records exceptions a customer happened to view
+  -- Re-run daily over the whole window so the last 14 days restate as late exception scans arrive
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  DECLARE start_date DATE DEFAULT DATE_SUB(end_date, INTERVAL 90 DAY);
+  
+  -- One row per package (tracking_number): first carrier scan, return (RMA) label flag, and whether any scan maps to an exception
+  -- (carrier codes map to one taxonomy; unmapped codes and merchant-requested holds are not exceptions; weather and capacity delays stay in)
+  WITH shipments AS (
+    SELECT
+      s.tracking_number,
+      MIN(s.scan_timestamp) AS first_scan_ts,
+      LOGICAL_OR(s.label_type = 'return') AS is_return_label,
+      LOGICAL_OR(m.exception_type IS NOT NULL AND m.exception_type != 'merchant_hold') AS has_exception
+    FROM `your-project.erp.shipment_scans` s
+    LEFT JOIN `your-project.erp.carrier_exception_map` m
+      ON m.carrier = s.carrier AND m.carrier_status_code = s.carrier_status_code
+    GROUP BY s.tracking_number
+  )
+  
+  -- Per first-scan cohort day: packages with at least one exception over all non-RMA packages first scanned that day (labels never scanned have no scan row)
+  SELECT
+    DATE(first_scan_ts) AS first_scan_date,
+    COUNT(*) AS shipments_handed_to_carrier,
+    COUNTIF(has_exception) AS shipments_with_exception,
+    ROUND(SAFE_DIVIDE(COUNTIF(has_exception), COUNT(*)) * 100, 2) AS delivery_exception_rate_pct
+  FROM shipments
+  WHERE DATE(first_scan_ts) BETWEEN start_date AND end_date
+    AND NOT is_return_label
+  GROUP BY first_scan_date
+  ORDER BY first_scan_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Counted from the order management carrier scan feed: the order-status page_view only records exceptions a customer happened to view
+  -- Re-run daily over the whole window so the last 14 days restate as late exception scans arrive
+  WITH params AS (
+    SELECT
+      date_sub(current_date(), 1) AS end_date,
+      date_sub(current_date(), 91) AS start_date
+  ),
+  
+  -- One row per package (tracking_number): first carrier scan, return (RMA) label flag, and whether any scan maps to an exception
+  -- (carrier codes map to one taxonomy; unmapped codes and merchant-requested holds are not exceptions; weather and capacity delays stay in)
+  shipments AS (
+    SELECT
+      s.tracking_number,
+      MIN(s.scan_timestamp) AS first_scan_ts,
+      MAX(CASE WHEN s.label_type = 'return' THEN 1 ELSE 0 END) AS is_return_label,
+      MAX(CASE WHEN m.exception_type IS NOT NULL AND m.exception_type <> 'merchant_hold' THEN 1 ELSE 0 END) AS has_exception
+    FROM aep_backend_dataset.shipment_scans s
+    LEFT JOIN aep_backend_dataset.carrier_exception_map m
+      ON m.carrier = s.carrier AND m.carrier_status_code = s.carrier_status_code
+    GROUP BY s.tracking_number
+  )
+  
+  -- Per first-scan cohort day: packages with at least one exception over all non-RMA packages first scanned that day (labels never scanned have no scan row)
+  SELECT
+    CAST(sh.first_scan_ts AS DATE) AS first_scan_date,
+    COUNT(*) AS shipments_handed_to_carrier,
+    SUM(sh.has_exception) AS shipments_with_exception,
+    ROUND(100.0 * SUM(sh.has_exception) / NULLIF(COUNT(*), 0), 2) AS delivery_exception_rate_pct
+  FROM shipments sh
+  CROSS JOIN params p
+  WHERE CAST(sh.first_scan_ts AS DATE) BETWEEN p.start_date AND p.end_date
+    AND sh.is_return_label = 0
+  GROUP BY CAST(sh.first_scan_ts AS DATE)
+  ORDER BY first_scan_date;
 
+Calculation Notes: |
+  1️⃣ Numerator: distinct tracking_number with at least one delivery-exception-occurrence, whatever the delivery-exception-type.
+  2️⃣ Denominator: distinct tracking_number with a first carrier scan in the period; labels created but never scanned are excluded.
+  3️⃣ Cohort by first carrier scan date, not exception date; restate the last 14 days as late exceptions arrive.
+  4️⃣ A shipment counts once however many exception scans it logs; breakdowns use its first exception type.
+  5️⃣ Split orders: each package counts on its own, so one exception on a two-package order is 1 of 2.
+  6️⃣ RMA labels are excluded from the base; merchant-requested holds stay in the base but are not exceptions; weather and capacity delays count.
+  7️⃣ Map carrier status codes (UPS, FedEx, USPS, DHL) to one exception taxonomy before counting; unmapped codes are not exceptions.
 
+Business Use Case: |
+  1️⃣ Operations: one carrier's rate breaks SLA on a lane → shift that lane's volume to the backup carrier.
+  2️⃣ Operations: damage exceptions rise for one SKU group → review packaging spec with the warehouse.
+  3️⃣ Customer Service: address-issue exceptions spike → send proactive address-fix messages before WISMO contacts.
+  4️⃣ Finance: exception rate by carrier at quarterly review → file SLA credits and renegotiate rates.
 
+Dependencies:
+  Events: [delivery-exception-occurrence]
+  Metrics: [shipment-volume]
+  Dimensions: [delivery-exception-type, shipment-status, carrier]
 
+Source Data: ERP
 
+Report Attributes: |
+  carrier; delivery-exception-type; shipment-mode; shipping-tier; delivery-region; fulfillment-method
 
+Dashboard Usage: [Post-Purchase Logistics Dashboard, Carrier Performance Scorecard, Customer Service Contact Drivers]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [failed-delivery-rate, shipment-on-time-delivery-rate, wismo-rate, split-shipment-rate, return-to-origin-rate, delivery-satisfaction-score]
 
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +147,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-27T14:56:38.512+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-27T14:56:47.436+00:00
 
