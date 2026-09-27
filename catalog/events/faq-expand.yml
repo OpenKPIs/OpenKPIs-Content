@@ -1,0 +1,165 @@
+# Event: FAQ Expand
+# Generated: 2026-09-27T16:54:33.036Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: FAQ Expand
+Event Serialization: always
+
+Description: |
+  Fires when a shopper expands an FAQ entry to read its answer, on the FAQ page or an inline accordion on PDP, cart or order pages. Full help articles use help-article-view.
+
+Category: Experience
+
+Tags: [event, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Engagement
+
+
+Event Type: standard
+
+Aggregation Window: Event, Session, Daily
+
+GA4 Event: |
+  select_content
+
+Adobe Event: |
+  select_content
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "select_content",
+          "eventAction": "FAQ Entry Expand"
+        },
+        "attributes": {
+          "content_type": "faq",
+          "item_id": "faq-1042",
+          "faq_question": "How do I return an item?",
+          "faq_category": "returns",
+          "faq_position": 3,
+          "page_location": "https://www.example.com/help/faq",
+          "page_type": "faq",
+          "content_group": "Customer Support",
+          "search_term": "return policy"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "select_content",
+    "content_type": "faq",
+    "item_id": "faq-1042",
+    "faq_question": "How do I return an item?",
+    "faq_category": "returns",
+    "faq_position": 3,
+    "page_location": "https://www.example.com/help/faq",
+    "page_type": "faq",
+    "content_group": "Customer Support",
+    "search_term": "return policy"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "select_content",
+    "content_type": "faq",
+    "item_id": "faq-1042",
+    "faq_question": "How do I return an item?",
+    "faq_category": "returns",
+    "faq_position": 3,
+    "page_location": "https://www.example.com/help/faq",
+    "page_type": "faq",
+    "content_group": "Customer Support",
+    "search_term": "return policy"
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "web": {
+      "webPageDetails": {
+        "URL": "page_location",
+        "siteSection": "content_group"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "item_id",
+            "eVar2": "faq_category",
+            "eVar3": "page_type"
+          },
+          "props": {
+            "prop1": "faq_question",
+            "prop2": "faq_position",
+            "prop3": "content_type"
+          }
+        }
+      }
+    },
+    "search": {
+      "keywords": "search_term"
+    }
+  }
+
+Parameters: |
+  {
+    "content_type": "string - type of content selected, always 'faq' for this event",
+    "item_id": "string - stable CMS identifier of the FAQ entry",
+    "faq_question": "string - question text as published in the CMS",
+    "faq_category": "string - FAQ topic group, e.g. returns, shipping, payments, sizing",
+    "faq_position": "number - 1-based position of the entry in its list",
+    "page_location": "string - full URL of the page showing the FAQ",
+    "page_type": "string - page template, e.g. faq, product, cart, order_status",
+    "content_group": "string - site section the page belongs to",
+    "search_term": "string - site-search query that led to the entry, when present"
+  }
+
+Calculation Notes: |
+  ["1️⃣ Fires on a user-initiated expand of one FAQ entry; never on page load, on collapse, or for entries rendered already open.","2️⃣ Serialization always: every expand is a hit. Dedupe on item_id within a session to count unique questions viewed.","3️⃣ Required: content_type, item_id, faq_question, faq_category, page_location. Optional: faq_position, page_type, content_group, search_term.","4️⃣ item_id is the stable CMS key; localized question text never serves as the id, so one question reports as one row across languages.","5️⃣ No PII: faq_question is CMS text. Strip emails and order numbers from search_term; send only under analytics consent.","6️⃣ Common mistake: one listener on the whole accordion fires a hit per entry on a single click; bind it to each entry's toggle."]
+
+Business Use Case: |
+  ["1️⃣ Customer Service: returns-policy FAQ views jump after a policy change → rewrite the answer and watch return contacts.","2️⃣ Support Content Manager: an FAQ view is often followed by a contact form in-session → rewrite that answer.","3️⃣ Help Center Product Manager: top-viewed FAQs sit low by faq_position → move them to the top of the list."]
+
+Dependencies:
+  Events: [page-view]
+  Dimensions: [page-type]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  content_type; item_id; faq_question; faq_category; faq_position; page_type; device_category
+
+    Dashboard Usage: [Self-Service Support Performance, Help Center Content Engagement]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [help-article, page-type, page-url, internal-search-term, device-category]
+
+    
+    
+    
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-27T15:55:34.259+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-27T16:54:32.67+00:00
+
