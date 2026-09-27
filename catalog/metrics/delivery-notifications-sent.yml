@@ -1,0 +1,126 @@
+# Metric: Delivery Notifications Sent
+# Generated: 2026-09-27T16:53:50.473Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Delivery Notifications Sent
+Formula: COUNT(DISTINCT message_id) WHERE message_category = 'delivery_notification' AND send_status = 'sent'
+
+Description: |
+  Count of shipment status notifications (shipped, out for delivery, delivered, exception) dispatched to customers by email, SMS or push. Denominator of Delivery Notification Open Rate.
+
+Category: Operations
+
+Tags: [metric, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Engagement
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT CURRENT_DATE();
+  DECLARE reporting_tz STRING DEFAULT 'America/New_York';
+  
+  -- Delivery notifications sent per day: one per message_id per channel, dated by send timestamp in the reporting timezone
+  SELECT
+    DATE(sent_at, reporting_tz) AS send_date,
+    COUNT(DISTINCT CONCAT(message_id, '|', channel)) AS delivery_notifications_sent
+  FROM `your-project.crm.message_sends`
+  WHERE message_category = 'delivery_notification'
+    -- In-scope shipment status templates only
+    AND template_status IN ('shipped', 'out_for_delivery', 'delivered', 'delivery_exception')
+    -- Counted at dispatch: suppressed, opted-out and failed-at-send rows excluded; later bounces stay in
+    AND send_status = 'sent'
+    AND channel IN ('email', 'sms', 'push')
+    -- Exclude seed/test recipients and internal test orders
+    AND is_seed_recipient = FALSE
+    AND is_test_order = FALSE
+    AND DATE(sent_at, reporting_tz) BETWEEN start_date AND end_date
+  GROUP BY send_date
+  ORDER BY send_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window and reporting timezone
+  WITH params AS (
+    SELECT
+      DATE_SUB(CURRENT_DATE(), 90) AS start_date,
+      CURRENT_DATE() AS end_date,
+      'America/New_York' AS reporting_tz
+  )
+  -- Delivery notifications sent per day: one per message_id per channel, dated by send timestamp in the reporting timezone
+  SELECT
+    TO_DATE(FROM_UTC_TIMESTAMP(s.sent_at, p.reporting_tz)) AS send_date,
+    COUNT(DISTINCT CONCAT(s.message_id, '|', s.channel)) AS delivery_notifications_sent
+  FROM aep_backend_dataset s
+  CROSS JOIN params p
+  WHERE s.message_category = 'delivery_notification'
+    -- In-scope shipment status templates only
+    AND s.template_status IN ('shipped', 'out_for_delivery', 'delivered', 'delivery_exception')
+    -- Counted at dispatch: suppressed, opted-out and failed-at-send rows excluded; later bounces stay in
+    AND s.send_status = 'sent'
+    AND s.channel IN ('email', 'sms', 'push')
+    -- Exclude seed/test recipients and internal test orders
+    AND s.is_seed_recipient = FALSE
+    AND s.is_test_order = FALSE
+    AND TO_DATE(FROM_UTC_TIMESTAMP(s.sent_at, p.reporting_tz)) BETWEEN p.start_date AND p.end_date
+  GROUP BY TO_DATE(FROM_UTC_TIMESTAMP(s.sent_at, p.reporting_tz))
+  ORDER BY send_date;
+
+Calculation Notes: |
+  1️⃣ One count per message_id per channel; provider retries and replayed send webhooks for the same message add nothing.,2️⃣ In scope: shipped, out for delivery, delivered and delivery exception templates. Order confirmation, pickup-ready and marketing sends are excluded.,3️⃣ Counted at dispatch: suppressed, opted-out and failed-at-send messages are excluded; later bounces stay in and are reported as delivered separately.,4️⃣ Email, SMS and push each count; one status update sent on two channels counts 2.,5️⃣ Split shipments send per package, so the count can exceed orders shipped; divide by shipments, not orders, for sends per shipment.,6️⃣ Dated by send timestamp in the reporting timezone, not by order or delivery date.,7️⃣ Exclude seed and test recipients and messages triggered by internal test orders.
+
+Business Use Case: |
+  1️⃣ Customer Service sees WISMO contacts rise while sends per shipment fall and gets the missing status trigger restored.,2️⃣ Customer Service reviews sends by channel before moving shipped updates from SMS to push to cut messaging cost.,3️⃣ Customer Service compares sends to carrier scans after onboarding a carrier and flags statuses that trigger no message.
+
+Dependencies:
+  Dimensions: [shipment-status]
+
+Source Data: CRM
+
+Report Attributes: |
+  Notification Channel; Shipment Status; Carrier; Delivery Region; Fulfillment Method
+
+Dashboard Usage: [Post-Purchase Communications, Delivery Experience Overview, WISMO Deflection]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [delivery-notifications-opened, pickup-notifications-sent, order-status-checks, shipment-volume]
+
+Derived KPIs: [delivery-notification-open-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-27T16:08:22.403+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-27T16:53:50.069+00:00
+
