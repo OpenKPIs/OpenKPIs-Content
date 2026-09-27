@@ -1,0 +1,151 @@
+# KPI: Return to Origin Rate
+# Generated: 2026-09-27T15:39:18.455Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Return to Origin Rate
+Formula: (Shipments Returned to Origin / Shipments Dispatched) × 100
+
+Description: |
+  Share of shipments dispatched in the period that the carrier sent back to the seller undelivered, after failed attempts or refusal. Each RTO costs forward and reverse freight with no sale.
+
+Category: Operations
+
+Tags: [kpi, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: Percentage
+
+Aggregation Window: Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Dispatch cohort ends 21 days ago so every shipment in it has matured
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 21 DAY);
+  DECLARE start_date DATE DEFAULT DATE_SUB(end_date, INTERVAL 90 DAY);
+  
+  -- One row per shipment (tracking number): first pickup scan, first RTO scan, lost/damaged flag
+  WITH shipments AS (
+    SELECT
+      tracking_number,
+      ANY_VALUE(payment_method) AS payment_method,
+      MIN(IF(scan_status = 'picked_up', scan_timestamp, NULL)) AS dispatch_ts,
+      MIN(IF(scan_status = 'rto_initiated', scan_timestamp, NULL)) AS first_rto_ts,
+      LOGICAL_OR(scan_status IN ('lost', 'damaged')) AS is_lost_or_damaged
+    FROM `your-project.erp.shipment_scans`
+    WHERE scan_timestamp >= TIMESTAMP(start_date)
+    GROUP BY tracking_number
+  )
+  
+  -- RTO shipments over all dispatched shipments, COD and prepaid reported separately
+  -- (a pickup scan is required, so orders cancelled before dispatch never enter; customer returns after delivery carry no RTO scan)
+  SELECT
+    IF(payment_method = 'cod', 'COD', 'Prepaid') AS payment_group,
+    COUNT(*) AS shipments_dispatched,
+    COUNTIF(first_rto_ts IS NOT NULL) AS shipments_returned_to_origin,
+    ROUND(SAFE_DIVIDE(COUNTIF(first_rto_ts IS NOT NULL), COUNT(*)) * 100, 2) AS rto_rate_pct
+  FROM shipments
+  WHERE DATE(dispatch_ts) BETWEEN start_date AND end_date
+    AND NOT is_lost_or_damaged
+  GROUP BY payment_group
+  ORDER BY payment_group;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Dispatch cohort ends 21 days ago so every shipment in it has matured
+  WITH params AS (
+    SELECT
+      date_sub(current_date(), 21) AS end_date,
+      date_sub(current_date(), 111) AS start_date
+  ),
+  
+  -- One row per shipment (tracking number): first pickup scan, first RTO scan, lost/damaged flag
+  shipments AS (
+    SELECT
+      s.tracking_number,
+      MAX(s.payment_method) AS payment_method,
+      MIN(CASE WHEN s.scan_status = 'picked_up' THEN s.scan_timestamp END) AS dispatch_ts,
+      MIN(CASE WHEN s.scan_status = 'rto_initiated' THEN s.scan_timestamp END) AS first_rto_ts,
+      MAX(CASE WHEN s.scan_status IN ('lost', 'damaged') THEN 1 ELSE 0 END) AS is_lost_or_damaged
+    FROM aep_backend_dataset.shipment_scans s
+    CROSS JOIN params p
+    WHERE s.scan_timestamp >= CAST(p.start_date AS TIMESTAMP)
+    GROUP BY s.tracking_number
+  )
+  
+  -- RTO shipments over all dispatched shipments, COD and prepaid reported separately
+  -- (a pickup scan is required, so orders cancelled before dispatch never enter; customer returns after delivery carry no RTO scan)
+  SELECT
+    CASE WHEN sh.payment_method = 'cod' THEN 'COD' ELSE 'Prepaid' END AS payment_group,
+    COUNT(*) AS shipments_dispatched,
+    SUM(CASE WHEN sh.first_rto_ts IS NOT NULL THEN 1 ELSE 0 END) AS shipments_returned_to_origin,
+    ROUND(100.0 * SUM(CASE WHEN sh.first_rto_ts IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS rto_rate_pct
+  FROM shipments sh
+  CROSS JOIN params p
+  WHERE CAST(sh.dispatch_ts AS DATE) BETWEEN p.start_date AND p.end_date
+    AND sh.is_lost_or_damaged = 0
+  GROUP BY CASE WHEN sh.payment_method = 'cod' THEN 'COD' ELSE 'Prepaid' END
+  ORDER BY payment_group;
+
+Calculation Notes: |
+  1️⃣ Numerator: shipments whose carrier status reaches RTO initiated; count each once, at the first RTO scan, even if RTO delivered follows.
+  2️⃣ Denominator: every shipment with a carrier pickup scan in the dispatch cohort, delivered or not.
+  3️⃣ Cohort by dispatch date and report after a 21-day maturity window, so shipments still in transit do not understate the rate.
+  4️⃣ Exclude customer returns after delivery (Return Initiated) and orders cancelled before dispatch; neither is RTO.
+  5️⃣ Count at shipment (tracking number) level: an order with one of two parcels sent back is one RTO out of two shipments.
+  6️⃣ Failed attempts that end in delivery are not RTO (see Failed Delivery Rate); shipments lost or damaged in transit are excluded.
+  7️⃣ Report cash-on-delivery and prepaid orders separately; refusals and RTO concentrate in COD.
+
+Business Use Case: |
+  1️⃣ Logistics team: one carrier's RTO above target in a region → move that postcode range to the better-performing carrier.
+  2️⃣ Finance: COD RTO rising → require partial prepayment or turn off COD for high-risk postcodes.
+  3️⃣ Customer Service: refusal-driven RTO up → add a pre-dispatch confirmation message for COD orders.
+  4️⃣ Operations: address-related RTO up → enforce address validation at add_shipping_info before dispatch.
+
+Dependencies:
+  Metrics: [shipment-volume]
+  Dimensions: [carrier, shipment-status, payment-method, delivery-region]
+
+Source Data: ERP
+
+Report Attributes: |
+  carrier; delivery-region; payment-method; shipment-mode; delivery-exception-type
+
+Dashboard Usage: [Last-Mile Delivery Performance, Carrier Scorecard, COD Risk & Logistics Cost]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [failed-delivery-rate, delivery-exception-rate, shipment-on-time-delivery-rate, wismo-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-27T14:57:10.312+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-27T15:39:18.075+00:00
+
