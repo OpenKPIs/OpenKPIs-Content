@@ -1,0 +1,283 @@
+# Dimension: Store Name
+# Generated: 2026-09-27T15:40:04.722Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Store Name
+
+Description: |
+  Display name of the physical store tied to an interaction or order, e.g. selected, pickup or fulfilling store. It is the readable label for Store ID; the ID stays the join key.
+
+Category: Operations
+
+Tags: [dimension, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: Retail
+
+Priority: Medium
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  prodView
+
+W3 Data Layer: |
+  {
+    "product": [
+      {
+        "productInfo": {
+          "productID": "SKU-10293",
+          "productName": "Wireless Earbuds"
+        }
+      }
+    ],
+    "attributes": {
+      "storeId": "STORE-0452",
+      "storeName": "Downtown Flagship",
+      "storeSelectionMethod": "my_store",
+      "fulfillmentMethod": "bopis"
+    },
+    "transaction": {
+      "transactionID": "T-88213",
+      "attributes": {
+        "storeId": "STORE-0452",
+        "storeName": "Downtown Flagship",
+        "fulfillmentMethod": "bopis"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-10293",
+            "productName": "Wireless Earbuds"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "view_item": {
+      "event": "view_item",
+      "items": [
+        {
+          "item_id": "SKU-10293",
+          "item_name": "Wireless Earbuds"
+        }
+      ],
+      "currency": "USD",
+      "value": 79.99,
+      "store_id": "STORE-0452",
+      "store_name": "Downtown Flagship",
+      "store_selection_method": "my_store",
+      "fulfillment_method": "bopis",
+      "user_id": "12345"
+    },
+    "purchase": {
+      "event": "purchase",
+      "transaction_id": "T-88213",
+      "items": [
+        {
+          "item_id": "SKU-10293",
+          "item_name": "Wireless Earbuds"
+        }
+      ],
+      "currency": "USD",
+      "value": 79.99,
+      "store_id": "STORE-0452",
+      "store_name": "Downtown Flagship",
+      "fulfillment_method": "bopis",
+      "user_id": "12345"
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "prodView": {
+      "event": "prodView",
+      "storeId": "STORE-0452",
+      "storeName": "Downtown Flagship",
+      "storeSelectionMethod": "my_store",
+      "fulfillmentMethod": "bopis",
+      "product": {
+        "sku": "SKU-10293",
+        "name": "Wireless Earbuds"
+      }
+    },
+    "purchase": {
+      "event": "purchase",
+      "transactionId": "T-88213",
+      "storeId": "STORE-0452",
+      "storeName": "Downtown Flagship",
+      "fulfillmentMethod": "bopis",
+      "product": {
+        "sku": "SKU-10293",
+        "name": "Wireless Earbuds"
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "productView": {
+      "commerce": {
+        "productListItems": [
+          {
+            "SKU": "SKU-10293",
+            "name": "Wireless Earbuds"
+          }
+        ]
+      },
+      "_experience": {
+        "analytics": {
+          "customDimensions": {
+            "eVars": {
+              "storeId": "STORE-0452",
+              "storeName": "Downtown Flagship",
+              "storeSelectionMethod": "my_store",
+              "fulfillmentMethod": "bopis"
+            }
+          }
+        }
+      }
+    },
+    "purchase": {
+      "commerce": {
+        "purchases": {
+          "value": 1
+        },
+        "order": {
+          "purchaseID": "T-88213"
+        }
+      },
+      "_experience": {
+        "analytics": {
+          "customDimensions": {
+            "eVars": {
+              "storeId": "STORE-0452",
+              "storeName": "Downtown Flagship",
+              "fulfillmentMethod": "bopis"
+            }
+          }
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- One row per event date and store id from browse (selected store) and purchase (fulfilling store) events, with the captured name as fallback
+  WITH hits AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_dt,
+      NULLIF((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'store_id'), '') AS store_id,
+      MAX((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'store_name')) AS captured_store_name
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name IN ('view_item', 'purchase')
+    GROUP BY event_dt, store_id
+  )
+  -- One row per store_id and event_dt: current master name, name valid on that date (type 2), captured name as fallback, (not set) when no store, closed flag kept
+  SELECT
+    h.store_id,
+    h.event_dt,
+    IF(h.store_id IS NULL, '(not set)', COALESCE(cur.store_name, h.captured_store_name)) AS store_name,
+    IF(h.store_id IS NULL, '(not set)', COALESCE(hist.store_name, h.captured_store_name)) AS store_name_at_event,
+    cur.store_status = 'closed' AS is_closed
+  FROM hits AS h
+  LEFT JOIN `your-project.retail.store_master` AS cur
+    ON cur.store_id = h.store_id AND cur.is_current
+  LEFT JOIN `your-project.retail.store_master` AS hist
+    ON hist.store_id = h.store_id
+    AND h.event_dt >= hist.valid_from
+    AND (hist.valid_to IS NULL OR h.event_dt < hist.valid_to);
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- One row per event date and store id from browse (selected store) and purchase (fulfilling store) events, last 90 days to yesterday, with the captured name as fallback
+  WITH hits AS (
+    SELECT
+      CAST(timestamp AS DATE) AS event_dt,
+      NULLIF(_experience.analytics.customDimensions.eVars.storeId, '') AS store_id,
+      MAX(_experience.analytics.customDimensions.eVars.storeName) AS captured_store_name
+    FROM aep_web_events_dataset
+    WHERE eventType IN ('commerce.productViews', 'commerce.purchases')
+      AND timestamp >= DATE_SUB(CURRENT_DATE, 90)
+      AND timestamp < CURRENT_DATE
+    GROUP BY CAST(timestamp AS DATE), NULLIF(_experience.analytics.customDimensions.eVars.storeId, '')
+  )
+  -- One row per store_id and event_dt: current master name, name valid on that date (type 2), captured name as fallback, (not set) when no store, closed flag kept
+  SELECT
+    h.store_id,
+    h.event_dt,
+    IF(h.store_id IS NULL, '(not set)', COALESCE(cur.store_name, h.captured_store_name)) AS store_name,
+    IF(h.store_id IS NULL, '(not set)', COALESCE(hist.store_name, h.captured_store_name)) AS store_name_at_event,
+    cur.store_status = 'closed' AS is_closed
+  FROM hits AS h
+  LEFT JOIN store_master_dataset AS cur
+    ON cur.store_id = h.store_id AND cur.is_current
+  LEFT JOIN store_master_dataset AS hist
+    ON hist.store_id = h.store_id
+    AND h.event_dt >= hist.valid_from
+    AND (hist.valid_to IS NULL OR h.event_dt < hist.valid_to);
+
+Calculation Notes: |
+  1️⃣ Resolve the name from the store master by store_id; the captured store_name parameter is a fallback when the lookup misses.
+  2️⃣ Group and join on store_id, never on name: names repeat across banners and change on rebrand or relocation.
+  3️⃣ Report the store's current master name; history uses the name valid on the event date (type 2 store master).
+  4️⃣ Web and app interactions with no selected store report as (not set); do not default to the nearest store.
+  5️⃣ Order lines take the fulfilling store; browse events take the selected (My Store) value at event time.
+  6️⃣ Closed stores keep their name with a closed flag so historical orders still attribute.
+
+Business Use Case: |
+  1️⃣ Store ops manager ranks stores weekly by BOPIS orders and follows up with the bottom decile on pickup staffing.
+  2️⃣ Merchandising reviews out-of-stock views by store and moves allocation to stores losing local demand.
+  3️⃣ Customer Service checks the pickup store on WISMO contacts and routes the case to that store's team.
+
+Dependencies:
+  Events: [product-view, purchase]
+  Dimensions: [store-zip-code-local-market]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  store-zip-code-local-market; fulfillment-method; store-inventory-status; pickup-window; bopis-pickup-status; pickup-location-type
+
+Dashboard Usage: [Omnichannel Store Performance, BOPIS Operations, Local Inventory Availability]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [store-zip-code-local-market, fulfillment-method, store-inventory-status, pickup-window, bopis-pickup-status, pickup-location-type]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-27T15:29:46.464+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-27T15:40:04.374+00:00
+
