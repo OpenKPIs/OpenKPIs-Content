@@ -1,0 +1,200 @@
+# Event: Reserve and Collect Request
+# Generated: 2026-09-28T16:53:50.919Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Reserve and Collect Request
+Event Serialization: always
+
+Description: |
+  Records a reserve-and-collect request once the store system accepts it, confirming the hold and returning a reservation_id; no online payment. Rejected requests are not recorded; collection is order-pickup.
+
+Category: Conversion
+
+Tags: [event, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: Retail
+
+Priority: Medium
+
+Core Area: Checkout
+
+
+Event Type: standard
+
+Aggregation Window: Event, Daily, Weekly
+
+GA4 Event: |
+  generate_lead
+
+Adobe Event: |
+  generate_lead
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "generate_lead",
+          "eventAction": "Reserve and Collect Request"
+        },
+        "attributes": {
+          "reservation_id": "RSV-48219",
+          "store_id": "ST-1042",
+          "store_name": "Downtown Flagship Store",
+          "fulfillment_method": "reserve_collect",
+          "store_inventory_status": "in_stock",
+          "value": 89.99,
+          "currency": "USD",
+          "user_id": "f47ac10b58cc4372"
+        },
+        "product": [
+          {
+            "productInfo": {
+              "productID": "SKU-77213",
+              "productName": "Cast Iron Dutch Oven 6-Quart",
+              "category": "Home & Kitchen"
+            },
+            "price": {
+              "basePrice": 89.99
+            },
+            "quantity": 1
+          }
+        ]
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "generate_lead",
+    "reservation_id": "RSV-48219",
+    "store_id": "ST-1042",
+    "store_name": "Downtown Flagship Store",
+    "items": [
+      {
+        "item_id": "SKU-77213",
+        "item_name": "Cast Iron Dutch Oven 6-Quart",
+        "item_category": "Home & Kitchen",
+        "price": 89.99,
+        "quantity": 1
+      }
+    ],
+    "value": 89.99,
+    "currency": "USD",
+    "fulfillment_method": "reserve_collect",
+    "store_inventory_status": "in_stock",
+    "user_id": "f47ac10b58cc4372"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "generate_lead",
+    "reservation": {
+      "reservation_id": "RSV-48219",
+      "store_id": "ST-1042",
+      "store_name": "Downtown Flagship Store",
+      "value": 89.99,
+      "currency": "USD",
+      "fulfillment_method": "reserve_collect",
+      "store_inventory_status": "in_stock",
+      "user_id": "f47ac10b58cc4372",
+      "items": [
+        {
+          "item_id": "SKU-77213",
+          "item_name": "Cast Iron Dutch Oven 6-Quart",
+          "item_category": "Home & Kitchen",
+          "price": 89.99,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "productListItems": [
+      {
+        "SKU": "items.item_id",
+        "name": "items.item_name",
+        "_category": "items.item_category",
+        "priceTotal": "items.price * items.quantity",
+        "quantity": "items.quantity"
+      }
+    ],
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "reservation_id": "reservation_id",
+          "store_id": "store_id",
+          "store_name": "store_name",
+          "fulfillment_method": "fulfillment_method",
+          "store_inventory_status": "store_inventory_status",
+          "value": "value",
+          "currency": "currency"
+        }
+      }
+    },
+    "identityMap": {
+      "userid": [
+        {
+          "id": "user_id"
+        }
+      ]
+    }
+  }
+
+Parameters: |
+  {
+    "reservation_id": "string - Unique hold identifier returned by the order or store system; dedupe key",
+    "store_id": "string - Identifier of the store holding the items",
+    "store_name": "string - Display name of the store holding the items",
+    "items": "array - Reserved items with item_id, item_name, item_category, price, quantity",
+    "value": "number - Total price of the reserved items; unpaid, not revenue",
+    "currency": "string - ISO 4217 currency code of value",
+    "fulfillment_method": "string - Fixed value reserve_collect",
+    "store_inventory_status": "string - Stock status shown for the store when the hold was placed",
+    "user_id": "string - Hashed customer identifier; sent only with analytics consent"
+  }
+
+Calculation Notes: |
+  ["1️⃣ Fires once the store system accepts the request and returns a reservation_id; a rejected request, store pick or stock check sends nothing.","2️⃣ Serialization always: each confirmed reservation is a hit. Dedupe on reservation_id to drop reload and retry double fires.","3️⃣ Required: reservation_id, store_id, items, value, currency, fulfillment_method. Optional: store_name, store_inventory_status, user_id.","4️⃣ fulfillment_method is reserve_collect; value is the unpaid reserved amount and never counts as revenue or a purchase.","5️⃣ Name, email and phone for the hold notice stay in the order system; send only a hashed user_id, and only with analytics consent.","6️⃣ Common mistakes: sending purchase instead, firing before the hold is confirmed, and one hit per item instead of one items array."]
+
+Business Use Case: |
+  ["1️⃣ Store Operations: one store's daily reservations outgrow its hold shelf → add shelf space and pickup staff there.","2️⃣ Merchandising: one category takes most reservations → keep deeper stock of it at pickup stores.","3️⃣ Omnichannel PM: reservations placed on low-stock status climb → refresh store inventory feeds more often.","4️⃣ CRM Manager: reservation_id has no order-pickup match a day before expiry → send a pickup reminder."]
+
+Dependencies:
+  Events: [product-view]
+  Dimensions: [store-inventory-status]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  Store Name; Fulfillment Method; Store Inventory Status; Item Category; Device Category
+
+    Dashboard Usage: [Omnichannel Fulfillment Dashboard, Store Pickup Performance]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [store-inventory-status, pickup-location-type, pickup-window, bopis-pickup-status]
+
+    Derived Dimensions: [fulfillment-method, store-name]
+
+    
+    
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-28T15:32:03.34+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-28T16:53:50.532+00:00
+
