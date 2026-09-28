@@ -1,0 +1,238 @@
+# Dimension: Referrer
+# Generated: 2026-09-28T15:20:11.604Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Referrer
+
+Description: |
+  Referrer URL of the session's first page_view: page_referrer (GA4) or Referrer (Adobe), query string and fragment stripped. Referring domain and Traffic Source are rollups of it.
+
+Category: Acquisition
+
+Tags: [dimension, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Discovery
+
+Scope: Session
+
+Data Type: string
+
+Aggregation Window: Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  pageView
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "Product Detail Page",
+        "pageURL": "https://www.example.com/product/123",
+        "referringURL": "https://www.google.com/search?q=example+product",
+        "sysEnv": "desktop"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_location": "https://www.example.com/product/123",
+    "page_referrer": "https://www.google.com/search?q=example+product",
+    "page_title": "Product Detail Page",
+    "page_type": "product_detail"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "page": {
+      "pageInfo": {
+        "pageName": "Product Detail Page",
+        "referringURL": "https://www.google.com/search?q=example+product",
+        "pageType": "product_detail"
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "web": {
+      "webPageDetails": {
+        "name": "Product Detail Page",
+        "URL": "https://www.example.com/product/123"
+      },
+      "webReferrer": {
+        "URL": "https://www.google.com/search?q=example+product",
+        "type": "search_engine"
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH page_views AS (
+    -- page_view hits with their session key and page_referrer (empty = direct or stripped)
+    SELECT
+      CONCAT(user_pseudo_id, '.', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_key,
+      event_timestamp,
+      COALESCE((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_referrer'), '') AS page_referrer
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'page_view'
+  ),
+  session_referrer AS (
+    -- Session referrer: page_referrer of the first page_view in the session, query string and fragment stripped
+    SELECT
+      session_key,
+      REGEXP_REPLACE(ARRAY_AGG(page_referrer ORDER BY event_timestamp LIMIT 1)[OFFSET(0)], r'[?#].*$', '') AS referrer
+    FROM page_views
+    WHERE session_key IS NOT NULL
+    GROUP BY session_key
+  ),
+  referring_host AS (
+    -- Referrer host: lowercased, leading www. removed
+    SELECT
+      session_key,
+      referrer,
+      REGEXP_REPLACE(NULLIF(REGEXP_EXTRACT(LOWER(referrer), r'^[a-z][a-z0-9+.-]*://([^/?#:]+)'), ''), r'^www[.]', '') AS host
+    FROM session_referrer
+  ),
+  unwanted_referral AS (
+    -- Sessions whose referrer is an own domain or payment gateway (PayPal, Klarna, 3-D Secure) on the unwanted-referral list, host or subdomain
+    SELECT DISTINCT r.session_key
+    FROM referring_host AS r
+    JOIN `your-project.reference.unwanted_referral_hosts` AS u
+      ON r.host = u.host OR ENDS_WITH(r.host, CONCAT('.', u.host))
+  )
+  -- One row per session: stripped referrer and referring domain (android-app:// and AMP cache hosts mapped); empty or unwanted referrals report as (direct)
+  SELECT
+    r.session_key,
+    IF(x.session_key IS NOT NULL OR r.referrer = '', '(direct)', r.referrer) AS referrer,
+    IF(x.session_key IS NOT NULL OR r.referrer = '', '(direct)', COALESCE(m.mapped_domain, r.host, '(direct)')) AS referring_domain
+  FROM referring_host AS r
+  LEFT JOIN unwanted_referral AS x
+    ON x.session_key = r.session_key
+  LEFT JOIN `your-project.reference.referrer_domain_map` AS m
+    ON m.referrer_host = r.host;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Relative reporting window: last 90 complete days
+    SELECT
+      CAST(CURRENT_DATE - INTERVAL '90' DAY AS DATE) AS start_date,
+      CAST(CURRENT_DATE - INTERVAL '1' DAY AS DATE) AS end_date
+  ),
+  page_views AS (
+    -- Page views with ECID, 30-minute-inactivity session number and web.webReferrer.URL (empty = direct or stripped)
+    SELECT
+      e.identityMap['ECID'][0].id AS ecid,
+      e.timestamp,
+      COALESCE(e.web.webReferrer.URL, '') AS page_referrer,
+      SESS_TIMEOUT(e.timestamp, 60 * 30) OVER (
+        PARTITION BY e.identityMap['ECID'][0].id
+        ORDER BY e.timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM aep_web_events_dataset AS e
+    CROSS JOIN params AS p
+    WHERE e.eventType = 'web.webpagedetails.pageViews'
+      AND CAST(e.timestamp AS DATE) BETWEEN p.start_date AND p.end_date
+  ),
+  session_referrer AS (
+    -- Session referrer: referrer of the first page view in the session, query string and fragment stripped
+    SELECT
+      CONCAT(ecid, '.', CAST(session.num AS STRING)) AS session_key,
+      REGEXP_REPLACE(page_referrer, '[?#].*$', '') AS referrer,
+      ROW_NUMBER() OVER (PARTITION BY ecid, session.num ORDER BY timestamp) AS rn
+    FROM page_views
+    WHERE ecid IS NOT NULL
+  ),
+  referring_host AS (
+    -- Referrer host: lowercased, leading www. removed
+    SELECT
+      session_key,
+      referrer,
+      REGEXP_REPLACE(NULLIF(REGEXP_EXTRACT(LOWER(referrer), '^[a-z][a-z0-9+.-]*://([^/?#:]+)', 1), ''), '^www[.]', '') AS host
+    FROM session_referrer
+    WHERE rn = 1
+  ),
+  unwanted_referral AS (
+    -- Sessions whose referrer is an own domain or payment gateway (PayPal, Klarna, 3-D Secure) on the unwanted-referral list, host or subdomain
+    SELECT DISTINCT r.session_key
+    FROM referring_host AS r
+    JOIN unwanted_referral_hosts AS u
+      ON r.host = u.host OR r.host LIKE CONCAT('%.', u.host)
+  )
+  -- One row per session: stripped referrer and referring domain (android-app:// and AMP cache hosts mapped); empty or unwanted referrals report as (direct)
+  SELECT
+    r.session_key,
+    CASE WHEN x.session_key IS NOT NULL OR r.referrer = '' THEN '(direct)' ELSE r.referrer END AS referrer,
+    CASE WHEN x.session_key IS NOT NULL OR r.referrer = '' THEN '(direct)' ELSE COALESCE(m.mapped_domain, r.host, '(direct)') END AS referring_domain
+  FROM referring_host AS r
+  LEFT JOIN unwanted_referral AS x
+    ON x.session_key = r.session_key
+  LEFT JOIN referrer_domain_map AS m
+    ON m.referrer_host = r.host;
+
+Calculation Notes: |
+  1️⃣ Source: page_referrer on page_view (GA4) or Adobe Referrer, both filled from document.referrer. Empty value = direct or stripped referrer.
+  2️⃣ Session referrer = page_referrer of the first page_view in the session; later hits carry internal URLs and belong to Previous Page.
+  3️⃣ Referrer hosts or subdomains on the unwanted-referral list (own domains, PayPal, Klarna, 3-D Secure pages) are reported as (direct).
+  4️⃣ Stored value: scheme, host and path only; query string and fragment always stripped, as referrer URLs can carry emails or reset tokens.
+  5️⃣ Referring domain is a rollup, not the value: hostname lowercased, leading www. removed; used for top-N and partner views.
+  6️⃣ Browsers default to strict-origin-when-cross-origin, so most external referrers arrive as origin only; do not expect full paths cross-site.
+  7️⃣ android-app:// referrers and AMP cache hosts map to the source app or publisher domain in one lookup table, applied at the domain rollup.
+
+Business Use Case: |
+  1️⃣ Affiliate manager: when a partner domain's sessions drop week over week, checks its linking pages and asks for fixes.
+  2️⃣ SEO and content team reviews top converting referring domains monthly and targets similar sites for outreach.
+  3️⃣ Marketing ops: when own-domain or gateway referrers appear in reports, adds them to the unwanted-referral list.
+
+Dependencies:
+  Events: [page-view, session-start]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
+
+Report Attributes: |
+  Referring Domain; Landing Page; Device Category; Session Default Channel Group; Date
+
+Dashboard Usage: [Acquisition Overview, Referral & Affiliate Performance, SEO & Content Partnerships]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [previous-page, page-url, device-category]
+
+Derived Dimensions: [traffic-source, first-touch-channel-grouping]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-28T15:16:41.045+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-28T15:20:11.232+00:00
+
