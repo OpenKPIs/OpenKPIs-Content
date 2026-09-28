@@ -1,7 +1,7 @@
 # Dimension: Ad Network Type
-# Generated: 2026-09-28T15:15:45.261Z
+# Generated: 2026-09-28T15:15:56.395Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Ad Network Type
 
@@ -10,31 +10,248 @@ Description: |
 
 Category: Acquisition
 
+Tags: [dimension, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Discovery
+
+Scope: Session
+
+Data Type: string
+
+Aggregation Window: Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  session_start
+
+Adobe Event: |
+  sessionStart
+
+W3 Data Layer: |
+  {
+    "session": {
+      "sessionID": "1734213456.987654321",
+      "trafficSource": {
+        "source": "google",
+        "adNetworkType": "Google Search",
+        "traffic_type": "external"
+      },
+      "page_location": "https://www.example.com/shoes/running?gclid=Cj0KCQiA1234567890abcdEFGhijklmno"
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "session_start",
+    "session_id": "1734213456.987654321",
+    "source": "google",
+    "ad_network_type": "Google Search",
+    "traffic_type": "external",
+    "page_location": "https://www.example.com/shoes/running?gclid=Cj0KCQiA1234567890abcdEFGhijklmno"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "sessionStart",
+    "sessionID": "1734213456.987654321",
+    "trafficSource": {
+      "source": "google",
+      "adNetworkType": "Google Search",
+      "traffic_type": "external"
+    },
+    "page_location": "https://www.example.com/shoes/running?gclid=Cj0KCQiA1234567890abcdEFGhijklmno"
+  }
+
+XDM Mapping: |
+  {
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar1": "ad_network_type"
+          }
+        }
+      }
+    },
+    "_your_tenant": {
+      "sessionID": "session_id",
+      "trafficSource": {
+        "source": "source"
+      },
+      "traffic_type": "traffic_type"
+    },
+    "web": {
+      "webPageDetails": {
+        "URL": "page_location"
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  DECLARE start_date DATE DEFAULT DATE_SUB(end_date, INTERVAL 89 DAY);
+  DECLARE lookback_days INT64 DEFAULT 90;
+  
+  -- Session starts of the period plus the lookback, parameters pivoted, gclid parsed from the landing URL
+  WITH session_starts AS (
+    SELECT
+      e.user_pseudo_id,
+      PARSE_DATE('%Y%m%d', e.event_date) AS session_date,
+      e.event_timestamp,
+      NULLIF(REGEXP_EXTRACT(MAX(IF(ep.key = 'page_location', ep.value.string_value, NULL)), r'[?&]gclid=([^&#]+)'), '') AS gclid,
+      MAX(IF(ep.key = 'session_id', ep.value.string_value, NULL)) AS session_id,
+      MAX(IF(ep.key = 'source', ep.value.string_value, NULL)) AS source,
+      MAX(IF(ep.key = 'ad_network_type', ep.value.string_value, NULL)) AS ad_network_type,
+      MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type
+    FROM `your-project.analytics_123456789.events_*` AS e, UNNEST(e.event_params) AS ep
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL lookback_days DAY)) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND e.event_name = 'session_start'
+    GROUP BY e.user_pseudo_id, e.event_date, e.event_timestamp
+  ),
+  -- Drop internal and developer traffic; flag direct sessions; map the network (ValueTrack codes included) only when auto-tagged
+  classified AS (
+    SELECT
+      user_pseudo_id,
+      session_date,
+      event_timestamp,
+      CONCAT(user_pseudo_id, '.', session_id) AS session_key,
+      COALESCE(source, '(direct)') = '(direct)' AS is_direct,
+      IF(gclid IS NULL, NULL,
+        CASE
+          WHEN LOWER(ad_network_type) IN ('g', 'google search') THEN 'Google Search'
+          WHEN LOWER(ad_network_type) IN ('s', 'search partners') THEN 'Search partners'
+          WHEN LOWER(ad_network_type) IN ('d', 'google display network') THEN 'Google Display Network'
+          WHEN LOWER(ad_network_type) IN ('ytv', 'youtube') THEN 'YouTube'
+          WHEN LOWER(ad_network_type) IN ('vp', 'video partners') THEN 'Video partners'
+          WHEN LOWER(ad_network_type) IN ('x', 'cross-network') THEN 'Cross-network'
+        END) AS network
+    FROM session_starts
+    WHERE COALESCE(traffic_type, '') NOT IN ('internal', 'developer')
+  ),
+  -- Last non-direct click: a direct session inherits the most recent earlier non-direct session of the same user
+  attributed AS (
+    SELECT
+      session_date,
+      session_key,
+      event_timestamp,
+      IF(is_direct,
+        LAST_VALUE(IF(is_direct, NULL, STRUCT(event_timestamp AS ts, network))) IGNORE NULLS
+          OVER (PARTITION BY user_pseudo_id ORDER BY event_timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),
+        STRUCT(event_timestamp AS ts, network)) AS click
+    FROM classified
+  )
+  -- Network per session in the period; an inherited click older than the lookback and every non-Google-Ads session stay as (not set)
+  SELECT
+    session_key,
+    COALESCE(IF((event_timestamp - click.ts) / 1000000 <= lookback_days * 86400, click.network, NULL), '(not set)') AS ad_network_type
+  FROM attributed
+  WHERE session_date BETWEEN start_date AND end_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window (last 90 complete days) and the 90-day lookback
+  WITH params AS (
+    SELECT DATE_SUB(CURRENT_DATE, 90) AS start_date, DATE_SUB(CURRENT_DATE, 1) AS end_date, 90 AS lookback_days
+  ),
+  -- Session starts of the period plus the lookback, gclid parsed from the auto-tagged landing URL
+  session_starts AS (
+    SELECT
+      e.endUserIDs._experience.ecid.id AS ecid,
+      CAST(e.timestamp AS DATE) AS session_date,
+      e.timestamp,
+      NULLIF(REGEXP_EXTRACT(e.web.webPageDetails.URL, '[?&]gclid=([^&#]+)', 1), '') AS gclid,
+      e._your_tenant.sessionID AS session_id,
+      e._your_tenant.trafficSource.source AS source,
+      e._experience.analytics.customDimensions.eVars.eVar1 AS ad_network_type,
+      e._your_tenant.traffic_type AS traffic_type
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE e.eventType = 'sessionStart'
+      AND CAST(e.timestamp AS DATE) BETWEEN DATE_SUB(p.start_date, p.lookback_days) AND p.end_date
+  ),
+  -- Drop internal and developer traffic; flag direct sessions; map the network (ValueTrack codes included) only when auto-tagged
+  classified AS (
+    SELECT
+      ecid,
+      session_date,
+      timestamp,
+      CONCAT(ecid, '.', session_id) AS session_key,
+      COALESCE(source, '(direct)') = '(direct)' AS is_direct,
+      CASE WHEN gclid IS NOT NULL THEN
+        CASE
+          WHEN LOWER(ad_network_type) IN ('g', 'google search') THEN 'Google Search'
+          WHEN LOWER(ad_network_type) IN ('s', 'search partners') THEN 'Search partners'
+          WHEN LOWER(ad_network_type) IN ('d', 'google display network') THEN 'Google Display Network'
+          WHEN LOWER(ad_network_type) IN ('ytv', 'youtube') THEN 'YouTube'
+          WHEN LOWER(ad_network_type) IN ('vp', 'video partners') THEN 'Video partners'
+          WHEN LOWER(ad_network_type) IN ('x', 'cross-network') THEN 'Cross-network'
+        END
+      END AS network
+    FROM session_starts
+    WHERE COALESCE(traffic_type, '') NOT IN ('internal', 'developer')
+  ),
+  -- Last non-direct click: a direct session inherits the most recent earlier non-direct session of the same visitor
+  attributed AS (
+    SELECT
+      session_date,
+      session_key,
+      timestamp,
+      CASE WHEN is_direct
+        THEN LAST_VALUE(CASE WHEN NOT is_direct THEN named_struct('ts', timestamp, 'network', network) END, true)
+          OVER (PARTITION BY ecid ORDER BY timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
+        ELSE named_struct('ts', timestamp, 'network', network)
+      END AS click
+    FROM classified
+  )
+  -- Network per session in the period; an inherited click older than the lookback and every non-Google-Ads session stay as (not set)
+  SELECT
+    a.session_key,
+    COALESCE(CASE WHEN unix_timestamp(a.timestamp) - unix_timestamp(a.click.ts) <= p.lookback_days * 86400 THEN a.click.network END, '(not set)') AS ad_network_type
+  FROM attributed a
+  CROSS JOIN params p
+  WHERE a.session_date BETWEEN p.start_date AND p.end_date;
+
+Calculation Notes: |
+  1️⃣ Values: Google Search, Search partners, Google Display Network, YouTube, Video partners, Cross-network (ValueTrack g, s, d, ytv, vp, x).
+  2️⃣ Collected as ad_network_type via final URL suffix network={network}; only sessions with a gclid on the landing URL count, the rest are (not set).
+  3️⃣ Session scope under last non-direct click: a direct return visit inherits the prior Google Ads network within the lookback window.
+  4️⃣ Performance Max reports as Cross-network. Keep it as its own value; never reallocate it to Search or YouTube.
+  5️⃣ (not set) stays in totals so the network shares sum to all sessions; drop it only when the view is filtered to Google Ads traffic.
+  6️⃣ Exclude traffic_type 'internal' and 'developer' before the breakdown; GA4 already filters known bots at collection.
+
+Business Use Case: |
+  1️⃣ Paid search manager: when Search partners conversion rate trails Google Search, opts that campaign out of partners.
+  2️⃣ Performance lead reviews weekly ROAS by network; shifts budget from Display to Search when Display misses target.
+  3️⃣ Marketing analyst compares Cross-network and Search brand revenue monthly to check Performance Max cannibalisation.
+
+Dependencies:
+  Events: [session-start]
+  Dimensions: [traffic-source]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Session Google Ads Campaign; Device Category; Landing Page; Session Default Channel Group
+
+Dashboard Usage: [Paid Media Performance, Google Ads Network Mix, Acquisition Overview]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [traffic-source, first-touch-channel-grouping, device-category, ad-content]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +259,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-28T15:15:44.881+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-28T15:15:56.021+00:00
 
