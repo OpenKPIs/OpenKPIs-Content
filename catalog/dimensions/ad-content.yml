@@ -1,0 +1,208 @@
+# Dimension: Ad Content
+# Generated: 2026-09-28T15:19:02.715Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Ad Content
+
+Description: |
+  Creative or link variant within a campaign, taken from the utm_content parameter (GA4 Manual ad content). Separates ads, banners or email links that share the same source, medium and campaign.
+
+Category: Acquisition
+
+Tags: [dimension, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Generic
+
+Scope: Session
+
+Data Type: string
+
+Aggregation Window: Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  session_start
+
+Adobe Event: |
+  sessionStart
+
+W3 Data Layer: |
+  {
+    "campaign": {
+      "campaignID": "spring_sale_2026",
+      "campaignName": "Spring Sale 2026",
+      "mediaID": "banner_300x250_blue_v2",
+      "mediaName": "banner_300x250_blue_v2"
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "session_start",
+    "source": "google",
+    "medium": "cpc",
+    "campaign": "spring_sale_2026",
+    "content": "banner_300x250_blue_v2"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "sessionStart",
+    "campaign": {
+      "source": "google",
+      "medium": "cpc",
+      "name": "spring_sale_2026",
+      "content": "banner_300x250_blue_v2"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "marketing": {
+      "campaignName": "spring_sale_2026",
+      "trackingCode": "banner_300x250_blue_v2"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- ESP subscriber IDs follow no common pattern and cannot be detected; only email addresses (plain or %40-encoded) are rejected
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Session manual ad content (GA4 last non-direct click), lower-cased and trimmed, on every event of the period
+  WITH session_events AS (
+    SELECT
+      user_pseudo_id,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      NULLIF(LOWER(TRIM(session_traffic_source_last_click.manual_campaign.manual_content)), '') AS ad_content
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+  ),
+  -- One row per session
+  sessions AS (
+    SELECT user_pseudo_id, ga_session_id, MAX(ad_content) AS ad_content
+    FROM session_events
+    WHERE ga_session_id IS NOT NULL
+    GROUP BY user_pseudo_id, ga_session_id
+  )
+  -- Blank, missing or email-bearing values report as (not set); sessions per ad content
+  SELECT
+    CASE
+      WHEN ad_content IS NULL
+        OR REGEXP_CONTAINS(ad_content, r'[a-z0-9._%+-]+(@|%40)[a-z0-9-]+\.[a-z0-9.-]+') THEN '(not set)'
+      ELSE ad_content
+    END AS ad_content,
+    COUNT(*) AS sessions
+  FROM sessions
+  GROUP BY 1
+  ORDER BY sessions DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- ESP subscriber IDs follow no common pattern and cannot be detected; only email addresses (plain or %40-encoded) are rejected
+  WITH params AS (
+    -- Reporting period: last 90 days up to yesterday
+    SELECT DATE_SUB(CURRENT_DATE, 90) AS start_date, DATE_SUB(CURRENT_DATE, 1) AS end_date
+  ),
+  -- Events of the period with lower-cased, trimmed utm_content (marketing.trackingCode) and a 30-minute-inactivity session per visitor
+  events AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS ecid,
+      timestamp,
+      NULLIF(LOWER(TRIM(marketing.trackingCode)), '') AS ad_content,
+      NULLIF(web.webReferrer.URL, '') AS referrer,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY endUserIDs._experience.ecid.id ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session
+    FROM aep_web_events_dataset
+    CROSS JOIN params
+    WHERE timestamp >= CAST(params.start_date AS TIMESTAMP)
+      AND timestamp < CAST(DATE_ADD(params.end_date, 1) AS TIMESTAMP)
+  ),
+  -- One row per session: its first ad content and entry referrer; no tracking code and no referrer = direct
+  sessions AS (
+    SELECT
+      ecid,
+      MIN(timestamp) AS session_start,
+      MIN(IF(ad_content IS NOT NULL, NAMED_STRUCT('ts', timestamp, 'content', ad_content), NULL)).content AS entry_content,
+      MIN(NAMED_STRUCT('ts', timestamp, 'referrer', referrer)).referrer AS entry_referrer
+    FROM events
+    GROUP BY ecid, session.num
+  ),
+  -- Last non-direct click: a direct session takes the ad content of the visitor's latest earlier non-direct session
+  attributed AS (
+    SELECT
+      CASE
+        WHEN entry_content IS NULL AND entry_referrer IS NULL THEN NULLIF(LAST(
+          IF(entry_content IS NULL AND entry_referrer IS NULL, NULL, NAMED_STRUCT('content', COALESCE(entry_content, ''))), TRUE)
+          OVER (PARTITION BY ecid ORDER BY session_start ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING).content, '')
+        ELSE entry_content
+      END AS ad_content
+    FROM sessions
+  )
+  -- Blank, missing or email-bearing values report as (not set); sessions per ad content
+  SELECT
+    CASE
+      WHEN ad_content IS NULL
+        OR ad_content RLIKE '[a-z0-9._%+-]+(@|%40)[a-z0-9-]+\\.[a-z0-9.-]+' THEN '(not set)'
+      ELSE ad_content
+    END AS ad_content,
+    COUNT(*) AS sessions
+  FROM attributed
+  GROUP BY 1
+  ORDER BY sessions DESC;
+
+Calculation Notes: |
+  1️⃣ Source: utm_content on the landing URL. GA4 reports it as Session manual ad content and, for acquisition, First user manual ad content.
+  2️⃣ BigQuery export: raw value in collected_traffic_source.manual_content; session_traffic_source_last_click applies GA4's last non-direct click rule.
+  3️⃣ Normalise with lower-case and trim; a blank or missing value reports as (not set) and is never merged into a real variant.
+  4️⃣ Google Ads auto-tagged clicks (gclid) usually carry no utm_content; read creative from the Google Ads ad dimensions instead.
+  5️⃣ One controlled naming pattern (e.g. format_size_variant) set in the campaign URL builder; free-text values break trend reporting.
+  6️⃣ Adobe Analytics: store utm_content in a campaign eVar with the tracking code's allocation and expiry, or classify it from the tracking code.
+  7️⃣ Reject values carrying email addresses or subscriber IDs that ESPs append to links; the dimension holds no PII.
+
+Business Use Case: |
+  1️⃣ Paid social team reviews conversion rate by ad content weekly and pauses creatives 30% below the campaign average.
+  2️⃣ Email marketing manager compares clicks and revenue by link variant after each send and keeps the winning CTA.
+  3️⃣ Marketing ops checks the (not set) share of tagged campaign sessions monthly and fixes URL builder entries.
+
+Dependencies:
+  Events: [session-start, page-view]
+  Dimensions: [traffic-source]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Session Source / Medium; Session Campaign; Landing Page; Device Category
+
+Dashboard Usage: [Campaign Performance, Creative A/B Testing, Email Marketing Performance]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [traffic-source, first-touch-channel-grouping, ad-network-type, referrer, device-category]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-28T15:15:26.831+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-28T15:19:02.348+00:00
+
