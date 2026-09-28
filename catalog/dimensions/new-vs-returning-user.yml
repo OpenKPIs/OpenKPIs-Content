@@ -1,7 +1,7 @@
 # Dimension: New vs Returning User
-# Generated: 2026-09-28T15:16:25.053Z
+# Generated: 2026-09-28T15:16:34.457Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: New vs Returning User
 
@@ -10,31 +10,171 @@ Description: |
 
 Category: Acquisition
 
+Tags: [dimension, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Session
+
+Data Type: string
+
+Aggregation Window: Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  session_start
+
+Adobe Event: |
+  sessionStart
+
+W3 Data Layer: |
+  {
+    "user": {
+      "profile": [
+        {
+          "profileInfo": {
+            "profileID": "{{client_id}}"
+          },
+          "attributes": {
+            "visitNumber": 1
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "session_start",
+    "client_id": "{{client_id}}",
+    "ga_session_id": "{{ga_session_id}}",
+    "ga_session_number": 1
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "sessionStart",
+    "visitorID": "{{visitor_id}}",
+    "visitNumber": 1
+  }
+
+XDM Mapping: |
+  {
+    "timestamp": "{{event_timestamp}}",
+    "endUserIDs": {
+      "_experience": {
+        "ecid": {
+          "id": "{{ecid}}"
+        }
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "session": {
+          "num": 1
+        }
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- One row per session (device cookie + ga_session_id) with the lifetime session number GA4 stamps on its events
+  WITH sessions AS (
+    SELECT
+      user_pseudo_id,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      MAX((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_number')) AS ga_session_number
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+    GROUP BY user_pseudo_id, ga_session_id
+  )
+  -- Session number 1 = new, any later number = returning (numbering spans all history, not the range); missing number = (not set)
+  SELECT
+    user_pseudo_id,
+    ga_session_id,
+    CASE
+      WHEN ga_session_number = 1 THEN 'new'
+      WHEN ga_session_number > 1 THEN 'returning'
+      ELSE '(not set)'
+    END AS user_type
+  FROM sessions;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Events in the period (last 90 days to yesterday) with the ECID, the lifetime visit number and a 30-minute-inactivity session per visitor
+  WITH events AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS ecid,
+      _experience.analytics.session.num AS visit_number,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (PARTITION BY endUserIDs._experience.ecid.id ORDER BY timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS sess
+    FROM aep_web_events_dataset
+    WHERE CAST(timestamp AS DATE) BETWEEN DATE_SUB(CURRENT_DATE, 90) AND DATE_SUB(CURRENT_DATE, 1)
+  ),
+  -- One row per session (ECID + session) with its visit number
+  sessions AS (
+    SELECT
+      ecid,
+      sess.num AS session_num,
+      MAX(visit_number) AS visit_number
+    FROM events
+    GROUP BY ecid, sess.num
+  )
+  -- Visit number 1 = new, any later number = returning (numbering spans all history, not the range); missing number = (not set)
+  SELECT
+    ecid,
+    session_num,
+    CASE
+      WHEN visit_number = 1 THEN 'new'
+      WHEN visit_number > 1 THEN 'returning'
+      ELSE '(not set)'
+    END AS user_type
+  FROM sessions;
+
+Calculation Notes: |
+  1️⃣ Values: new, returning, (not set). New = session with ga_session_number = 1 (the session carrying first_visit); every later session is returning.
+  2️⃣ Set per session: a user with a first and a later session in the range appears under both values, so user counts by value sum above total users.
+  3️⃣ Identity is the device cookie (client_id). Cleared cookies, a new browser or Safari ITP expiry turn a returning user into a new one.
+  4️⃣ History runs from the property's first data, not the report range: a user first seen months ago is returning in a 7-day report.
+  5️⃣ Sessions without ga_session_number (cookieless consent-mode pings, Measurement Protocol hits) go to (not set), never to new.
+  6️⃣ Adobe Analytics: Visit Number = 1 maps to new, > 1 to returning; the same cookie limits apply to the ECID.
+  7️⃣ Visit-based, not purchase-based: a first-time buyer on a third visit is returning here. Use Customer Status for new vs repeat buyers.
+
+Business Use Case: |
+  1️⃣ Acquisition marketing: when the new-user share of paid sessions drops, moves budget from retargeting to prospecting.
+  2️⃣ CRO team splits funnel conversion by new vs returning and aims first-visit tests at landing and product pages.
+  3️⃣ CRM team: when returning sessions fall month over month, reviews email and push cadence for lapsed visitors.
+
+Dependencies:
+  Events: [first-visit, session-start]
+  Metrics: [new-users, unique-visitors]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Session Default Channel Group; Device Category; Landing Page; Country / Region
+
+Dashboard Usage: [Acquisition Overview, Funnel Conversion by User Type, Returning Visitor Trends]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [customer-status, acquisition-cohort, first-touch-channel-grouping, traffic-source, device-category, country]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +182,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-28T15:16:24.678+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-28T15:16:34.132+00:00
 
