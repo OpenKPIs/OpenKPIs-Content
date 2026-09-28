@@ -1,7 +1,7 @@
 # Event: Curbside Pickup Check-In
-# Generated: 2026-09-28T15:31:46.445Z
+# Generated: 2026-09-28T15:31:56.568Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Event Name: Curbside Pickup Check-In
 Event Serialization: always
@@ -11,38 +11,154 @@ Description: |
 
 Category: Operations
 
+Tags: [event, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: Retail
+
+Priority: Medium
+
+Core Area: Generic
+
+
+Event Type: custom
+
+Aggregation Window: Event, Daily, Weekly
+
+GA4 Event: |
+  submit_form
+
+Adobe Event: |
+  form_submit
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "submit_form",
+          "eventAction": "Curbside Pickup Check-In",
+          "timeStamp": "2026-09-28T15:00:12Z"
+        },
+        "attributes": {
+          "form_type": "curbside_check_in",
+          "transaction_id": "ORD-2026-0913-4471",
+          "store_id": "STORE-4521",
+          "fulfillment_method": "curbside",
+          "check_in_method": "app",
+          "parking_spot": "B12",
+          "order_ready_status": "ready",
+          "pickup_window_start": "2026-09-28T15:00:00Z"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_type": "curbside_check_in",
+    "transaction_id": "ORD-2026-0913-4471",
+    "store_id": "STORE-4521",
+    "fulfillment_method": "curbside",
+    "check_in_method": "app",
+    "parking_spot": "B12",
+    "order_ready_status": "ready",
+    "pickup_window_start": "2026-09-28T15:00:00Z"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "form_submit",
+    "data": {
+      "form_type": "curbside_check_in",
+      "transaction_id": "ORD-2026-0913-4471",
+      "store_id": "STORE-4521",
+      "fulfillment_method": "curbside",
+      "check_in_method": "app",
+      "parking_spot": "B12",
+      "order_ready_status": "ready",
+      "pickup_window_start": "2026-09-28T15:00:00Z"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "web": {
+      "formDetails": {
+        "formType": "curbside_check_in"
+      }
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-2026-0913-4471"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVar": {
+            "eVar10": "STORE-4521",
+            "eVar11": "curbside"
+          }
+        }
+      }
+    },
+    "_openkpis": {
+      "curbsidePickup": {
+        "checkInMethod": "app",
+        "parkingSpot": "B12",
+        "orderReadyStatus": "ready",
+        "pickupWindowStart": "2026-09-28T15:00:00Z"
+      }
+    }
+  }
+
+Parameters: |
+  {
+    "form_type": "string - always curbside_check_in for this event",
+    "transaction_id": "string - order ID the customer is collecting; joins to purchase and order-pickup",
+    "store_id": "string - store where the customer checked in",
+    "fulfillment_method": "string - always curbside for this event",
+    "check_in_method": "string - app, web, sms or geofence",
+    "parking_spot": "string - optional bay number entered by the customer",
+    "order_ready_status": "string - optional order state at check-in: ready or not_ready",
+    "pickup_window_start": "string - optional ISO 8601 start of the booked pickup window"
+  }
 
 
 
+Dependencies:
+  Events: [purchase]
+  Dimensions: [fulfillment-method]
 
+Source Data: Digital Analytics (GA4)
 
+    Report Attributes: |
+  store_name; check_in_method; fulfillment_method; pickup_window; order_ready_status
 
+    Dashboard Usage: [Curbside Operations, BOPIS Fulfillment Performance]
 
+    Segment Eligibility: |
+  true
 
+    Related Dimensions: [fulfillment-method, pickup-window, pickup-location-type, bopis-pickup-status, store-name]
 
-
-
-
-
-
-
-
-
+    Derived Dimensions: [bopis-pickup-status]
 
     
     
-    
-    
-    
-    
-    
-    
-    
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
     Status: draft
 
     Contributed By: devyendarm
 
     Created At: 2026-09-28T15:31:45.812+00:00
 
-    
-    
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-28T15:31:56.223+00:00
+
