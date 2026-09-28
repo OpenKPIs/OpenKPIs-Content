@@ -1,0 +1,207 @@
+# Dimension: Country
+# Generated: 2026-09-28T15:19:38.474Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Country
+
+Description: |
+  Visitor country (ISO 3166-1) resolved from the request IP, as in GA4 Country, with region (ISO 3166-2) as a drill-down sub-level. Reported per session; distinct from Delivery Region (ship-to address).
+
+Category: Acquisition
+
+Tags: [dimension, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Session
+
+Data Type: string
+
+Aggregation Window: Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  session_start
+
+Adobe Event: |
+  sessionStart
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "session_start"
+        },
+        "attributes": {
+          "ga_session_id": "1695912345",
+          "traffic_type": "external"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "session_start",
+    "ga_session_id": "1695912345",
+    "traffic_type": "external"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "sessionStart",
+    "ga_session_id": "1695912345",
+    "traffic_type": "external"
+  }
+
+XDM Mapping: |
+  {
+    "placeContext": {
+      "geo": {
+        "countryCode": "US",
+        "stateProvince": "US-CA"
+      }
+    },
+    "timestamp": "2023-09-28T15:04:00Z",
+    "endUserIDs": {
+      "_experience": {
+        "ecid": {
+          "id": "12345678901234567890123456789012345"
+        }
+      }
+    },
+    "_your_tenant": {
+      "traffic_type": "external",
+      "ga_session_id": "1695912345"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Events in the period with their session key, IP-derived geo (English names) and traffic_type
+  WITH events AS (
+    SELECT
+      CONCAT(user_pseudo_id, '.', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_key,
+      event_timestamp,
+      geo.country AS country_name,
+      geo.region AS region_name,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+  ),
+  -- One row per session carrying the geo of its first event; sessions with internal traffic excluded
+  sessions AS (
+    SELECT
+      session_key,
+      ARRAY_AGG(STRUCT(country_name, region_name) ORDER BY event_timestamp LIMIT 1)[OFFSET(0)] AS geo
+    FROM events
+    WHERE session_key IS NOT NULL
+    GROUP BY session_key
+    HAVING NOT LOGICAL_OR(COALESCE(traffic_type, '') = 'internal')
+  )
+  -- Sessions by ISO 3166-1 alpha-2 country and ISO 3166-2 region; unresolved locations kept as (not set)
+  SELECT
+    COALESCE(c.country_code, '(not set)') AS country,
+    COALESCE(r.region_code, '(not set)') AS region,
+    COUNT(*) AS sessions
+  FROM sessions AS s
+  LEFT JOIN `your-project.reference.iso_3166_1` AS c
+    ON c.country_name = s.geo.country_name
+  LEFT JOIN `your-project.reference.iso_3166_2` AS r
+    ON r.country_code = c.country_code
+    AND r.region_name = s.geo.region_name
+  GROUP BY country, region
+  ORDER BY sessions DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Events in the period (last 90 days to yesterday) with IP-derived geo (already ISO codes in XDM), traffic_type and a 30-minute-inactivity session per visitor
+  WITH events AS (
+    SELECT
+      endUserIDs._experience.ecid.id AS ecid,
+      timestamp,
+      NULLIF(UPPER(placeContext.geo.countryCode), '') AS country_code,
+      NULLIF(UPPER(placeContext.geo.stateProvince), '') AS region_code,
+      _your_tenant.traffic_type AS traffic_type,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (PARTITION BY endUserIDs._experience.ecid.id ORDER BY timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session
+    FROM aep_web_events_dataset
+    WHERE CAST(timestamp AS DATE) BETWEEN DATE_SUB(CURRENT_DATE, 90) AND DATE_SUB(CURRENT_DATE, 1)
+  ),
+  -- One row per session carrying the geo of its first event; sessions with internal traffic excluded
+  sessions AS (
+    SELECT
+      ecid,
+      session.num AS session_num,
+      MIN_BY(country_code, timestamp) AS country_code,
+      MIN_BY(region_code, timestamp) AS region_code
+    FROM events
+    WHERE ecid IS NOT NULL
+    GROUP BY ecid, session.num
+    HAVING NOT BOOL_OR(COALESCE(traffic_type, '') = 'internal')
+  )
+  -- Sessions by ISO 3166-1 alpha-2 country and ISO 3166-2 region; unresolved locations kept as (not set)
+  SELECT
+    COALESCE(country_code, '(not set)') AS country,
+    COALESCE(region_code, '(not set)') AS region,
+    COUNT(*) AS sessions
+  FROM sessions
+  GROUP BY COALESCE(country_code, '(not set)'), COALESCE(region_code, '(not set)')
+  ORDER BY sessions DESC;
+
+Calculation Notes: |
+  1️⃣ Country follows ISO 3166-1; GA4 exports the English name, so map it to the alpha-2 code in one lookup. Region is the ISO 3166-2 subdivision (US-CA).
+  2️⃣ IPs that cannot be resolved, and regions where granular location collection is disabled, report (not set). Keep them as a row; never drop them.
+  3️⃣ A session takes the country and region of its first event; a mid-session change (travel, VPN switch) does not split or reassign the session.
+  4️⃣ VPN, proxy and privacy-relay traffic resolves to the exit node, so the value is approximate. Never use it for tax, pricing or shipping rules.
+  5️⃣ Exclude sessions with traffic_type = internal before the breakdown; office IPs inflate the home market. GA4 drops known bots at collection.
+  6️⃣ IP location, not ship-to address: order geography comes from the checkout address and is reported under Delivery Region.
+  7️⃣ GA4 discards the raw IP at collection. Adobe keeps it unless IP obfuscation is enabled; turn it on so only derived geo is stored (no PII).
+
+Business Use Case: |
+  1️⃣ Growth marketing: when sessions from a country rise without paid spend, launches a localized test campaign there.
+  2️⃣ Paid media team reviews ROAS by country weekly and moves budget out of countries below target.
+  3️⃣ Merchandising: when conversion in a region trails the site average, reviews shipping cost and payment options there.
+  4️⃣ E-commerce lead uses country demand share to prioritize the next storefront language and currency rollout.
+
+Dependencies:
+  Events: [session-start, page-view]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Device Category; Traffic Source; New vs Returning User; Currency
+
+Dashboard Usage: [Acquisition Overview, International Performance, Paid Media ROAS by Market]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [delivery-region, delivery-location, currency, device-category, traffic-source, new-vs-returning-user]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-28T15:16:05.214+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-28T15:19:38.096+00:00
+
