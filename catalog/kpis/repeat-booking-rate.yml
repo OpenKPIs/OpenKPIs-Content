@@ -1,0 +1,177 @@
+# KPI: Repeat Booking Rate
+# Generated: 2026-09-29T05:46:17.244Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Repeat Booking Rate
+Formula: 100 × eligible bookings from customers with an earlier eligible booking in the preceding 24 months / all eligible bookings from identified customers
+
+Description: |
+  Measures the percentage of eligible direct-channel bookings made by identified customers with an earlier eligible booking in the preceding 24 months. It quantifies returning-customer demand.
+
+Category: Retention
+
+Tags: [kpi, travel, retention, repeat-booking]
+
+Industry: [["Travel & Hospitality"]]
+
+Priority: High
+
+Core Area: Customer Retention
+
+Scope: User
+
+Measure Type: Percentage
+
+Aggregation Window: Time based - Monthly, Monthly, Quarterly, Yearly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT DATE_SUB(CURRENT_DATE(), INTERVAL 36 MONTH) AS history_start_date, DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH) AS measurement_start_date, CURRENT_TIMESTAMP() AS as_of_timestamp
+  ),
+  first_confirmation AS (
+    SELECT h.booking_id, MIN(h.status_effective_at) AS confirmed_at
+    FROM `your-project.reservations.booking_status_history` AS h CROSS JOIN parameters AS p
+    WHERE NULLIF(TRIM(CAST(h.booking_id AS STRING)), '') IS NOT NULL
+      AND h.status_effective_at <= p.as_of_timestamp
+      AND LOWER(TRIM(COALESCE(h.reservation_status, ''))) IN ('confirmed', 'booked', 'reserved', 'ticketed', 'guaranteed')
+    GROUP BY h.booking_id
+  ),
+  ranked_bookings AS (
+    SELECT b.booking_id, b.customer_id, c.confirmed_at, LOWER(TRIM(b.booking_channel)) AS booking_channel, LOWER(TRIM(b.booking_status)) AS booking_status,
+      COALESCE(b.is_test_booking, FALSE) AS is_test_booking, COALESCE(b.is_internal_booking, FALSE) AS is_internal_booking,
+      COALESCE(b.is_fraudulent, FALSE) AS is_fraudulent, COALESCE(b.is_fully_cancelled, FALSE) AS is_fully_cancelled,
+      COALESCE(b.is_fully_refunded, FALSE) AS is_fully_refunded,
+      ROW_NUMBER() OVER (PARTITION BY b.booking_id ORDER BY b.record_updated_at DESC, b.source_ingested_at DESC) AS record_rank
+    FROM `your-project.reservations.booking_fact` AS b
+    JOIN first_confirmation AS c USING (booking_id)
+    CROSS JOIN parameters AS p
+    WHERE NULLIF(TRIM(CAST(b.booking_id AS STRING)), '') IS NOT NULL
+      AND DATE(c.confirmed_at) >= p.history_start_date AND c.confirmed_at <= p.as_of_timestamp
+      AND b.record_updated_at <= p.as_of_timestamp
+  ),
+  eligible AS (
+    SELECT * FROM ranked_bookings
+    WHERE record_rank = 1 AND NULLIF(TRIM(CAST(customer_id AS STRING)), '') IS NOT NULL
+      AND booking_channel IN ('web', 'app', 'mobile_app')
+      AND booking_status IN ('confirmed', 'booked', 'reserved', 'ticketed', 'guaranteed', 'completed', 'fulfilled', 'flown', 'stayed', 'checked_out', 'traveled', 'travelled') AND is_test_booking = FALSE AND is_internal_booking = FALSE
+      AND is_fraudulent = FALSE AND is_fully_cancelled = FALSE AND is_fully_refunded = FALSE
+  ),
+  measurement_bookings AS (
+    SELECT e.* FROM eligible AS e CROSS JOIN parameters AS p WHERE DATE(e.confirmed_at) >= p.measurement_start_date
+  ),
+  classified AS (
+    SELECT m.*, EXISTS (SELECT 1 FROM eligible AS h WHERE h.customer_id = m.customer_id
+      AND h.confirmed_at < m.confirmed_at
+      AND DATE(h.confirmed_at) >= DATE_SUB(DATE(m.confirmed_at), INTERVAL 24 MONTH)) AS is_repeat_booking
+    FROM measurement_bookings AS m
+  )
+  SELECT DATE_TRUNC(DATE(confirmed_at), MONTH) AS booking_month, booking_channel, COUNT(*) AS eligible_identified_bookings,
+    COUNTIF(is_repeat_booking) AS repeat_bookings, ROUND(100 * SAFE_DIVIDE(COUNTIF(is_repeat_booking), COUNT(*)), 2) AS repeat_booking_rate_pct
+  FROM classified
+  GROUP BY booking_month, booking_channel
+  ORDER BY booking_month DESC, booking_channel;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT ADD_MONTHS(CURRENT_DATE, -36) AS history_start_date, ADD_MONTHS(CURRENT_DATE, -12) AS measurement_start_date, CURRENT_TIMESTAMP AS as_of_timestamp
+  ),
+  first_confirmation AS (
+    SELECT h.booking_id, MIN(h.status_effective_at) AS confirmed_at
+    FROM booking_status_history_dataset AS h CROSS JOIN parameters AS p
+    WHERE NULLIF(TRIM(CAST(h.booking_id AS VARCHAR)), '') IS NOT NULL
+      AND h.status_effective_at <= p.as_of_timestamp
+      AND LOWER(TRIM(COALESCE(h.reservation_status, ''))) IN ('confirmed', 'booked', 'reserved', 'ticketed', 'guaranteed')
+    GROUP BY h.booking_id
+  ),
+  ranked_bookings AS (
+    SELECT b.booking_id, b.customer_id, c.confirmed_at, LOWER(TRIM(b.booking_channel)) AS booking_channel, LOWER(TRIM(b.booking_status)) AS booking_status,
+      COALESCE(b.is_test_booking, FALSE) AS is_test_booking, COALESCE(b.is_internal_booking, FALSE) AS is_internal_booking,
+      COALESCE(b.is_fraudulent, FALSE) AS is_fraudulent, COALESCE(b.is_fully_cancelled, FALSE) AS is_fully_cancelled,
+      COALESCE(b.is_fully_refunded, FALSE) AS is_fully_refunded,
+      ROW_NUMBER() OVER (PARTITION BY b.booking_id ORDER BY b.record_updated_at DESC, b.source_ingested_at DESC) AS record_rank
+    FROM booking_fact_dataset AS b
+    JOIN first_confirmation AS c ON c.booking_id = b.booking_id
+    CROSS JOIN parameters AS p
+    WHERE NULLIF(TRIM(CAST(b.booking_id AS VARCHAR)), '') IS NOT NULL
+      AND CAST(c.confirmed_at AS DATE) >= p.history_start_date AND c.confirmed_at <= p.as_of_timestamp
+      AND b.record_updated_at <= p.as_of_timestamp
+  ),
+  eligible AS (
+    SELECT * FROM ranked_bookings
+    WHERE record_rank = 1 AND NULLIF(TRIM(CAST(customer_id AS VARCHAR)), '') IS NOT NULL
+      AND booking_channel IN ('web', 'app', 'mobile_app')
+      AND booking_status IN ('confirmed', 'booked', 'reserved', 'ticketed', 'guaranteed', 'completed', 'fulfilled', 'flown', 'stayed', 'checked_out', 'traveled', 'travelled') AND is_test_booking = FALSE AND is_internal_booking = FALSE
+      AND is_fraudulent = FALSE AND is_fully_cancelled = FALSE AND is_fully_refunded = FALSE
+  ),
+  measurement_bookings AS (
+    SELECT e.* FROM eligible AS e CROSS JOIN parameters AS p WHERE CAST(e.confirmed_at AS DATE) >= p.measurement_start_date
+  ),
+  classified AS (
+    SELECT m.*, CASE WHEN EXISTS (SELECT 1 FROM eligible AS h WHERE h.customer_id = m.customer_id
+      AND h.confirmed_at < m.confirmed_at
+      AND CAST(h.confirmed_at AS DATE) >= ADD_MONTHS(CAST(m.confirmed_at AS DATE), -24)) THEN 1 ELSE 0 END AS is_repeat_booking
+    FROM measurement_bookings AS m
+  )
+  SELECT CAST(DATE_TRUNC('month', confirmed_at) AS DATE) AS booking_month, booking_channel, COUNT(*) AS eligible_identified_bookings,
+    SUM(is_repeat_booking) AS repeat_bookings, ROUND(100.0 * SUM(is_repeat_booking) / NULLIF(COUNT(*), 0), 2) AS repeat_booking_rate_pct
+  FROM classified
+  GROUP BY CAST(DATE_TRUNC('month', confirmed_at) AS DATE), booking_channel
+  ORDER BY booking_month DESC, booking_channel;
+
+Calculation Notes: |
+  1️⃣ Count each canonical booking ID once at its earliest successful confirmation timestamp.
+  2️⃣ Include only direct web or app bookings linked to a stable governed customer ID.
+  3️⃣ A booking is repeat only when that customer has an earlier eligible booking within 24 months.
+  4️⃣ Exclude anonymous, test, internal, fraudulent, fully cancelled, and fully refunded bookings.
+  5️⃣ A customer may contribute multiple eligible bookings during the measurement period.
+  6️⃣ Report aggregated results only; never expose the customer identifier in dashboards.
+
+Business Use Case: |
+  1️⃣ Loyalty teams compare repeat demand by membership tier and target weak cohorts.
+  2️⃣ CRM teams time win-back journeys using the 24-month booking history.
+  3️⃣ Product teams compare repeat booking performance across web and app.
+  4️⃣ Revenue Management forecasts demand using the returning-customer share.
+
+Dependencies:
+  Events: [purchase]
+  Dimensions: [booking-acquisition-channel]
+
+Source Data: Backend reservation and customer-identity databases with governed booking-channel and final-status history
+
+Report Attributes: |
+  Booking Month; Booking Channel; Platform; Booking Acquisition Channel; Destination; Travel Product Type; Rate Plan; Customer Loyalty Tier; Customer Tenure Band; Booking Lead-Time Band
+
+Dashboard Usage: [Digital Customer Retention Dashboard, Executive Loyalty Performance Dashboard, Web and App Commerce Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [customer-retention-rate, customer-lifetime-value, purchase-frequency, time-between-purchases, new-vs-returning-customer-ratio]
+
+Data Sensitivity: Restricted
+
+Contains PII: Yes
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-13T19:30:10.338541+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-29T05:46:16.742+00:00
+
