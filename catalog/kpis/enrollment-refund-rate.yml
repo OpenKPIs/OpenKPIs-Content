@@ -1,0 +1,236 @@
+# KPI: Enrollment Refund Rate
+# Generated: 2026-09-29T05:46:49.900Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Enrollment Refund Rate
+Formula: 100 × COUNT(DISTINCT eligible paid enrollment IDs with at least one qualifying settled refund) / COUNT(DISTINCT eligible paid enrollment IDs in matured cohorts)
+
+Description: |
+  Measures the percentage of eligible paid enrollments with at least one settled positive refund during the governing refund window. It tracks enrollment-level reversal, not refunded value.
+
+Category: Monetization
+
+Tags: [kpi, education, refunds, revenue-quality]
+
+Industry: [["Education"]]
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Global
+
+Measure Type: Percentage
+
+Aggregation Window: Time based - Daily, reported by weekly and monthly enrollment cohort, Monthly, Quarterly, Yearly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH), MONTH) AS cohort_start_date,
+      CURRENT_TIMESTAMP() AS as_of_timestamp
+  ),
+  payment_lifecycle AS (
+    SELECT p.enrollment_id, p.provider_transaction_id,
+      MIN(IF(LOWER(p.transaction_type) IN ('charge', 'capture', 'payment')
+        AND LOWER(p.status) IN ('succeeded', 'settled', 'completed', 'captured')
+        AND p.amount > 0, p.processed_at, NULL)) AS payment_settled_at,
+      MIN(IF(LOWER(p.status) IN ('reversed', 'voided', 'chargeback', 'payment_reversal'), p.processed_at, NULL)) AS lifecycle_reversed_at,
+      MIN(p.reversed_at) AS recorded_reversed_at
+    FROM `your-project.billing.payment_transactions` AS p
+    CROSS JOIN parameters AS x
+    WHERE NULLIF(TRIM(CAST(p.provider_transaction_id AS STRING)), '') IS NOT NULL
+      AND NULLIF(TRIM(CAST(p.enrollment_id AS STRING)), '') IS NOT NULL
+      AND p.processed_at <= x.as_of_timestamp
+    GROUP BY p.enrollment_id, p.provider_transaction_id
+  ),
+  valid_settlements AS (
+    SELECT l.enrollment_id, l.provider_transaction_id, l.payment_settled_at
+    FROM payment_lifecycle AS l
+    CROSS JOIN parameters AS x
+    WHERE l.payment_settled_at IS NOT NULL
+      AND (l.lifecycle_reversed_at IS NULL OR l.lifecycle_reversed_at > x.as_of_timestamp)
+      AND (l.recorded_reversed_at IS NULL OR l.recorded_reversed_at > x.as_of_timestamp)
+  ),
+  ranked_first_settlements AS (
+    SELECT s.*, ROW_NUMBER() OVER (PARTITION BY s.enrollment_id ORDER BY s.payment_settled_at, s.provider_transaction_id) AS settlement_rank
+    FROM valid_settlements AS s
+  ),
+  eligible_paid_enrollments AS (
+    SELECT e.enrollment_id, e.course_id, s.payment_settled_at, e.refund_window_end_at
+    FROM `your-project.commerce.enrollments` AS e
+    JOIN ranked_first_settlements AS s ON s.enrollment_id = e.enrollment_id AND s.settlement_rank = 1
+    CROSS JOIN parameters AS x
+    WHERE DATE(s.payment_settled_at) >= x.cohort_start_date
+      AND s.payment_settled_at <= x.as_of_timestamp
+      AND COALESCE(e.is_test, FALSE) = FALSE
+      AND COALESCE(e.is_complimentary, FALSE) = FALSE
+      AND LOWER(COALESCE(e.enrollment_status, 'unknown')) NOT IN ('draft', 'test', 'fraudulent', 'void')
+      AND e.refund_window_end_at IS NOT NULL
+  ),
+  ranked_refunds AS (
+    SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.refund_id ORDER BY r.record_updated_at DESC, r.source_version DESC, r.source_ingested_at DESC, r.refund_record_id DESC) AS refund_rank
+    FROM `your-project.billing.refund_transactions` AS r
+    CROSS JOIN parameters AS x
+    WHERE NULLIF(TRIM(CAST(r.refund_id AS STRING)), '') IS NOT NULL
+      AND NULLIF(TRIM(CAST(r.enrollment_id AS STRING)), '') IS NOT NULL
+      AND r.record_updated_at <= x.as_of_timestamp
+  ),
+  qualifying_refunds AS (
+    SELECT e.enrollment_id, COUNT(DISTINCT r.refund_id) AS qualifying_refund_count
+    FROM eligible_paid_enrollments AS e
+    JOIN ranked_refunds AS r ON r.enrollment_id = e.enrollment_id AND r.refund_rank = 1
+    CROSS JOIN parameters AS x
+    WHERE LOWER(r.status) IN ('succeeded', 'settled', 'completed')
+      AND r.amount > 0
+      AND r.processed_at >= e.payment_settled_at
+      AND r.processed_at <= e.refund_window_end_at
+      AND r.processed_at <= x.as_of_timestamp
+      AND LOWER(COALESCE(r.refund_type, 'unknown')) NOT IN ('chargeback', 'payment_reversal', 'tax_only', 'fee_only')
+      AND (r.reversed_at IS NULL OR r.reversed_at > x.as_of_timestamp)
+    GROUP BY e.enrollment_id
+  )
+  SELECT DATE_TRUNC(DATE(e.payment_settled_at), MONTH) AS enrollment_cohort_month,
+    COUNT(DISTINCT e.enrollment_id) AS eligible_matured_enrollments,
+    COUNT(DISTINCT IF(COALESCE(r.qualifying_refund_count, 0) > 0, e.enrollment_id, NULL)) AS refunded_enrollments,
+    ROUND(100.0 * SAFE_DIVIDE(COUNT(DISTINCT IF(COALESCE(r.qualifying_refund_count, 0) > 0, e.enrollment_id, NULL)), COUNT(DISTINCT e.enrollment_id)), 2) AS enrollment_refund_rate_pct
+  FROM eligible_paid_enrollments AS e
+  LEFT JOIN qualifying_refunds AS r ON r.enrollment_id = e.enrollment_id
+  CROSS JOIN parameters AS x
+  WHERE e.refund_window_end_at <= x.as_of_timestamp
+  GROUP BY enrollment_cohort_month
+  ORDER BY enrollment_cohort_month;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT CAST(DATE_TRUNC('month', CURRENT_DATE - INTERVAL '12 months') AS DATE) AS cohort_start_date,
+      CURRENT_TIMESTAMP AS as_of_timestamp
+  ),
+  payment_lifecycle AS (
+    SELECT p.enrollment_id, p.provider_transaction_id,
+      MIN(CASE WHEN LOWER(p.transaction_type) IN ('charge', 'capture', 'payment')
+        AND LOWER(p.status) IN ('succeeded', 'settled', 'completed', 'captured')
+        AND p.amount > 0 THEN p.processed_at END) AS payment_settled_at,
+      MIN(CASE WHEN LOWER(p.status) IN ('reversed', 'voided', 'chargeback', 'payment_reversal') THEN p.processed_at END) AS lifecycle_reversed_at,
+      MIN(p.reversed_at) AS recorded_reversed_at
+    FROM billing_payment_transactions_backend_dataset AS p
+    CROSS JOIN parameters AS x
+    WHERE NULLIF(TRIM(CAST(p.provider_transaction_id AS VARCHAR)), '') IS NOT NULL
+      AND NULLIF(TRIM(CAST(p.enrollment_id AS VARCHAR)), '') IS NOT NULL
+      AND p.processed_at <= x.as_of_timestamp
+    GROUP BY p.enrollment_id, p.provider_transaction_id
+  ),
+  valid_settlements AS (
+    SELECT l.enrollment_id, l.provider_transaction_id, l.payment_settled_at
+    FROM payment_lifecycle AS l
+    CROSS JOIN parameters AS x
+    WHERE l.payment_settled_at IS NOT NULL
+      AND (l.lifecycle_reversed_at IS NULL OR l.lifecycle_reversed_at > x.as_of_timestamp)
+      AND (l.recorded_reversed_at IS NULL OR l.recorded_reversed_at > x.as_of_timestamp)
+  ),
+  ranked_first_settlements AS (
+    SELECT s.*, ROW_NUMBER() OVER (PARTITION BY s.enrollment_id ORDER BY s.payment_settled_at, s.provider_transaction_id) AS settlement_rank
+    FROM valid_settlements AS s
+  ),
+  eligible_paid_enrollments AS (
+    SELECT e.enrollment_id, e.course_id, s.payment_settled_at, e.refund_window_end_at
+    FROM commerce_enrollments_backend_dataset AS e
+    JOIN ranked_first_settlements AS s ON s.enrollment_id = e.enrollment_id AND s.settlement_rank = 1
+    CROSS JOIN parameters AS x
+    WHERE CAST(s.payment_settled_at AS DATE) >= x.cohort_start_date
+      AND s.payment_settled_at <= x.as_of_timestamp
+      AND COALESCE(e.is_test, FALSE) = FALSE
+      AND COALESCE(e.is_complimentary, FALSE) = FALSE
+      AND LOWER(COALESCE(e.enrollment_status, 'unknown')) NOT IN ('draft', 'test', 'fraudulent', 'void')
+      AND e.refund_window_end_at IS NOT NULL
+  ),
+  ranked_refunds AS (
+    SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.refund_id ORDER BY r.record_updated_at DESC, r.source_version DESC, r.source_ingested_at DESC, r.refund_record_id DESC) AS refund_rank
+    FROM billing_refund_transactions_backend_dataset AS r
+    CROSS JOIN parameters AS x
+    WHERE NULLIF(TRIM(CAST(r.refund_id AS VARCHAR)), '') IS NOT NULL
+      AND NULLIF(TRIM(CAST(r.enrollment_id AS VARCHAR)), '') IS NOT NULL
+      AND r.record_updated_at <= x.as_of_timestamp
+  ),
+  qualifying_refunds AS (
+    SELECT e.enrollment_id, COUNT(DISTINCT r.refund_id) AS qualifying_refund_count
+    FROM eligible_paid_enrollments AS e
+    JOIN ranked_refunds AS r ON r.enrollment_id = e.enrollment_id AND r.refund_rank = 1
+    CROSS JOIN parameters AS x
+    WHERE LOWER(r.status) IN ('succeeded', 'settled', 'completed')
+      AND r.amount > 0
+      AND r.processed_at >= e.payment_settled_at
+      AND r.processed_at <= e.refund_window_end_at
+      AND r.processed_at <= x.as_of_timestamp
+      AND LOWER(COALESCE(r.refund_type, 'unknown')) NOT IN ('chargeback', 'payment_reversal', 'tax_only', 'fee_only')
+      AND (r.reversed_at IS NULL OR r.reversed_at > x.as_of_timestamp)
+    GROUP BY e.enrollment_id
+  )
+  SELECT CAST(DATE_TRUNC('month', e.payment_settled_at) AS DATE) AS enrollment_cohort_month,
+    COUNT(DISTINCT e.enrollment_id) AS eligible_matured_enrollments,
+    COUNT(DISTINCT CASE WHEN COALESCE(r.qualifying_refund_count, 0) > 0 THEN e.enrollment_id END) AS refunded_enrollments,
+    ROUND(100.0 * COUNT(DISTINCT CASE WHEN COALESCE(r.qualifying_refund_count, 0) > 0 THEN e.enrollment_id END) / NULLIF(COUNT(DISTINCT e.enrollment_id), 0), 2) AS enrollment_refund_rate_pct
+  FROM eligible_paid_enrollments AS e
+  LEFT JOIN qualifying_refunds AS r ON r.enrollment_id = e.enrollment_id
+  CROSS JOIN parameters AS x
+  WHERE e.refund_window_end_at <= x.as_of_timestamp
+  GROUP BY CAST(DATE_TRUNC('month', e.payment_settled_at) AS DATE)
+  ORDER BY enrollment_cohort_month;
+
+Calculation Notes: |
+  1️⃣ Cohort enrollments by the first successful payment-settlement date.
+  2️⃣ Include paid, non-test, non-complimentary enrollments whose refund windows have matured.
+  3️⃣ Count an enrollment once when a positive full or partial refund settles within its refund window.
+  4️⃣ Exclude declined, voided, reversed, chargeback, tax-only, and fee-only transactions.
+  5️⃣ Remove an enrollment from the numerator when every qualifying refund is reversed by the cutoff.
+  6️⃣ Mark immature cohorts provisional and exclude them from the published KPI.
+  7️⃣ Emit no KPI row when the matured denominator is empty.
+
+Business Use Case: |
+  1️⃣ Finance reviews matured monthly cohorts; a target breach triggers reserve and forecast updates.
+  2️⃣ Growth compares acquisition campaigns and pauses sources with persistently high refund rates.
+  3️⃣ Product investigates courses with high rates and corrects promise, pricing, or onboarding gaps.
+  4️⃣ Billing segments by payment plan and refund reason to address avoidable policy friction.
+
+Dependencies:
+  Metrics: [refund-amount]
+  Dimensions: [refund-type, payment-method, enrollment-cohort]
+
+Source Data: Backend learning commerce, order management, payment processor, refund workflow, and Finance ERP or revenue-subledger tables
+
+Report Attributes: |
+  Enrollment Cohort Month; Cohort Maturity Status; Course; Program; Subject Category; Acquisition Channel; Campaign; Learner Country or Region; Payment Method; Payment Plan; Promotion or Coupon; Refund Type; Refund Reason; Full or Partial Refund; Days from Payment to Refund
+
+Dashboard Usage: [Executive Revenue and Enrollment Health, Enrollment Conversion and Refund Funnel, Billing and Payments Operations, Acquisition Cohort Profitability]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [refund-rate, payment-failure-rate, course-completion-rate, enrollment-to-learning-start-rate]
+
+Data Sensitivity: Restricted
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-12T20:30:09.528563+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-29T05:46:49.554+00:00
+
