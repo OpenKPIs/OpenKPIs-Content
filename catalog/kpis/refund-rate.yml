@@ -1,0 +1,223 @@
+# KPI: Refund Rate
+# Generated: 2026-09-29T05:46:58.929Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Refund Rate
+Formula: 100 × refunded merchandise value for orders in the matured cohort / gross merchandise value of those orders
+
+Description: |
+  Measures refunded merchandise value as a percentage of gross merchandise value for matured order cohorts. Both amounts exclude shipping and tax and use the original order currency.
+
+Category: Monetization
+
+Tags: [kpi, e-commerce, refunds, revenue-quality]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Revenue Quality
+
+Scope: Global
+
+Measure Type: Percentage
+
+Aggregation Window: Monthly, Quarterly, Yearly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH), MONTH) AS cohort_start_date,
+      CURRENT_TIMESTAMP() AS as_of_timestamp
+  ),
+  ranked_orders AS (
+    SELECT o.transaction_id, o.order_placed_at, DATE(o.order_placed_at) AS order_date, o.purchase_finalized_at, o.return_window_end_at,
+      o.currency, o.order_status, o.is_test, COALESCE(o.original_merchandise_amount, 0) AS gross_merchandise_value,
+      ROW_NUMBER() OVER (PARTITION BY o.transaction_id ORDER BY o.last_updated_at DESC, o.source_version DESC, o.source_ingested_at DESC, o.order_record_id DESC) AS order_rank
+    FROM `your-project.finance.commerce_order_ledger` AS o
+    CROSS JOIN parameters AS x
+    WHERE NULLIF(TRIM(CAST(o.transaction_id AS STRING)), '') IS NOT NULL
+      AND o.last_updated_at <= x.as_of_timestamp
+  ),
+  cohort_orders AS (
+    SELECT o.transaction_id, o.order_placed_at, o.order_date, o.return_window_end_at, o.currency, o.gross_merchandise_value
+    FROM ranked_orders AS o
+    CROSS JOIN parameters AS x
+    WHERE o.order_rank = 1
+      AND o.order_placed_at <= x.as_of_timestamp
+      AND o.order_date >= x.cohort_start_date
+      AND o.purchase_finalized_at IS NOT NULL
+      AND o.purchase_finalized_at <= x.as_of_timestamp
+      AND o.return_window_end_at IS NOT NULL
+      AND o.return_window_end_at <= x.as_of_timestamp
+      AND COALESCE(o.is_test, FALSE) = FALSE
+      AND LOWER(COALESCE(o.order_status, 'unknown')) NOT IN ('draft', 'test', 'fraudulent', 'void', 'pre_capture_cancelled')
+      AND o.gross_merchandise_value > 0
+  ),
+  ranked_refunds AS (
+    SELECT r.refund_id, r.transaction_id, r.settled_at, r.currency, r.refund_scope, r.refund_tender, r.adjustment_class,
+      r.refund_status, COALESCE(r.merchandise_amount, 0) AS refunded_merchandise_value, r.reversed_at,
+      ROW_NUMBER() OVER (PARTITION BY r.refund_id ORDER BY r.last_updated_at DESC, r.source_version DESC, r.source_ingested_at DESC, r.refund_record_id DESC) AS refund_rank
+    FROM `your-project.finance.commerce_refund_ledger` AS r
+    CROSS JOIN parameters AS x
+    WHERE NULLIF(TRIM(CAST(r.refund_id AS STRING)), '') IS NOT NULL
+      AND NULLIF(TRIM(CAST(r.transaction_id AS STRING)), '') IS NOT NULL
+      AND r.last_updated_at <= x.as_of_timestamp
+  ),
+  qualifying_refunds AS (
+    SELECT r.*
+    FROM ranked_refunds AS r
+    CROSS JOIN parameters AS x
+    WHERE r.refund_rank = 1
+      AND LOWER(COALESCE(r.refund_status, 'unknown')) IN ('settled', 'completed')
+      AND r.settled_at <= x.as_of_timestamp
+      AND r.refunded_merchandise_value > 0
+      AND LOWER(COALESCE(r.refund_scope, 'unknown')) IN ('full refund', 'partial refund')
+      AND LOWER(COALESCE(r.refund_tender, 'unknown')) IN ('original payment method', 'store credit', 'gift card')
+      AND LOWER(COALESCE(r.adjustment_class, 'unknown')) IN ('return', 'price_adjustment', 'goodwill_credit', 'post_capture_cancellation')
+      AND (r.reversed_at IS NULL OR r.reversed_at > x.as_of_timestamp)
+  ),
+  refunds_by_order AS (
+    SELECT o.transaction_id, SUM(r.refunded_merchandise_value) AS refunded_merchandise_value
+    FROM cohort_orders AS o
+    JOIN qualifying_refunds AS r ON r.transaction_id = o.transaction_id
+      AND r.currency = o.currency
+      AND r.settled_at BETWEEN o.order_placed_at AND o.return_window_end_at
+    GROUP BY o.transaction_id
+  )
+  SELECT DATE_TRUNC(o.order_date, MONTH) AS cohort_month, o.currency,
+    ROUND(SUM(COALESCE(o.gross_merchandise_value, 0)), 2) AS gross_merchandise_value,
+    ROUND(SUM(COALESCE(r.refunded_merchandise_value, 0)), 2) AS refunded_merchandise_value,
+    ROUND(100.0 * SAFE_DIVIDE(SUM(COALESCE(r.refunded_merchandise_value, 0)), SUM(COALESCE(o.gross_merchandise_value, 0))), 2) AS refund_rate_pct
+  FROM cohort_orders AS o
+  LEFT JOIN refunds_by_order AS r ON r.transaction_id = o.transaction_id
+  GROUP BY cohort_month, o.currency
+  ORDER BY cohort_month, o.currency;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT CAST(DATE_TRUNC('month', CURRENT_DATE - INTERVAL '12 months') AS DATE) AS cohort_start_date,
+      CURRENT_TIMESTAMP AS as_of_timestamp
+  ),
+  ranked_orders AS (
+    SELECT o.transaction_id, o.order_placed_at, CAST(o.order_placed_at AS DATE) AS order_date, o.purchase_finalized_at, o.return_window_end_at,
+      o.currency, o.order_status, o.is_test, COALESCE(o.original_merchandise_amount, 0) AS gross_merchandise_value,
+      ROW_NUMBER() OVER (PARTITION BY o.transaction_id ORDER BY o.last_updated_at DESC, o.source_version DESC, o.source_ingested_at DESC, o.order_record_id DESC) AS order_rank
+    FROM commerce_order_ledger_backend_dataset AS o
+    CROSS JOIN parameters AS x
+    WHERE NULLIF(TRIM(CAST(o.transaction_id AS VARCHAR)), '') IS NOT NULL
+      AND o.last_updated_at <= x.as_of_timestamp
+  ),
+  cohort_orders AS (
+    SELECT o.transaction_id, o.order_placed_at, o.order_date, o.return_window_end_at, o.currency, o.gross_merchandise_value
+    FROM ranked_orders AS o
+    CROSS JOIN parameters AS x
+    WHERE o.order_rank = 1
+      AND o.order_placed_at <= x.as_of_timestamp
+      AND o.order_date >= x.cohort_start_date
+      AND o.purchase_finalized_at IS NOT NULL
+      AND o.purchase_finalized_at <= x.as_of_timestamp
+      AND o.return_window_end_at IS NOT NULL
+      AND o.return_window_end_at <= x.as_of_timestamp
+      AND COALESCE(o.is_test, FALSE) = FALSE
+      AND LOWER(COALESCE(o.order_status, 'unknown')) NOT IN ('draft', 'test', 'fraudulent', 'void', 'pre_capture_cancelled')
+      AND o.gross_merchandise_value > 0
+  ),
+  ranked_refunds AS (
+    SELECT r.refund_id, r.transaction_id, r.settled_at, r.currency, r.refund_scope, r.refund_tender, r.adjustment_class,
+      r.refund_status, COALESCE(r.merchandise_amount, 0) AS refunded_merchandise_value, r.reversed_at,
+      ROW_NUMBER() OVER (PARTITION BY r.refund_id ORDER BY r.last_updated_at DESC, r.source_version DESC, r.source_ingested_at DESC, r.refund_record_id DESC) AS refund_rank
+    FROM commerce_refund_ledger_backend_dataset AS r
+    CROSS JOIN parameters AS x
+    WHERE NULLIF(TRIM(CAST(r.refund_id AS VARCHAR)), '') IS NOT NULL
+      AND NULLIF(TRIM(CAST(r.transaction_id AS VARCHAR)), '') IS NOT NULL
+      AND r.last_updated_at <= x.as_of_timestamp
+  ),
+  qualifying_refunds AS (
+    SELECT r.*
+    FROM ranked_refunds AS r
+    CROSS JOIN parameters AS x
+    WHERE r.refund_rank = 1
+      AND LOWER(COALESCE(r.refund_status, 'unknown')) IN ('settled', 'completed')
+      AND r.settled_at <= x.as_of_timestamp
+      AND r.refunded_merchandise_value > 0
+      AND LOWER(COALESCE(r.refund_scope, 'unknown')) IN ('full refund', 'partial refund')
+      AND LOWER(COALESCE(r.refund_tender, 'unknown')) IN ('original payment method', 'store credit', 'gift card')
+      AND LOWER(COALESCE(r.adjustment_class, 'unknown')) IN ('return', 'price_adjustment', 'goodwill_credit', 'post_capture_cancellation')
+      AND (r.reversed_at IS NULL OR r.reversed_at > x.as_of_timestamp)
+  ),
+  refunds_by_order AS (
+    SELECT o.transaction_id, SUM(r.refunded_merchandise_value) AS refunded_merchandise_value
+    FROM cohort_orders AS o
+    JOIN qualifying_refunds AS r ON r.transaction_id = o.transaction_id
+      AND r.currency = o.currency
+      AND r.settled_at BETWEEN o.order_placed_at AND o.return_window_end_at
+    GROUP BY o.transaction_id
+  )
+  SELECT CAST(DATE_TRUNC('month', o.order_date) AS DATE) AS cohort_month, o.currency,
+    ROUND(SUM(COALESCE(o.gross_merchandise_value, 0)), 2) AS gross_merchandise_value,
+    ROUND(SUM(COALESCE(r.refunded_merchandise_value, 0)), 2) AS refunded_merchandise_value,
+    ROUND(100.0 * SUM(COALESCE(r.refunded_merchandise_value, 0)) / NULLIF(SUM(COALESCE(o.gross_merchandise_value, 0)), 0), 2) AS refund_rate_pct
+  FROM cohort_orders AS o
+  LEFT JOIN refunds_by_order AS r ON r.transaction_id = o.transaction_id
+  GROUP BY CAST(DATE_TRUNC('month', o.order_date) AS DATE), o.currency
+  ORDER BY cohort_month, o.currency;
+
+Calculation Notes: |
+  1️⃣ Cohort finalized purchases by order date after the exact governed return-window timestamp passes.
+  2️⃣ Use governed original merchandise amount, excluding gift cards, shipping, tax, duties, and handling.
+  3️⃣ Count a partial refund at its actual refunded merchandise value, not full order value.
+  4️⃣ Include settled returns, price adjustments, goodwill credits, and post-capture cancellations.
+  5️⃣ Capture refund scope as Full/Partial and tender as Original Payment Method, Store Credit, or Gift Card.
+  6️⃣ Exclude chargebacks, payment reversals, and fraud cancellations; deduplicate ledger records deterministically.
+  7️⃣ Calculate by currency unless Finance applies one governed order-date conversion method.
+
+Business Use Case: |
+  1️⃣ Finance reviews matured cohorts; a forecast breach triggers a refund-reserve update.
+  2️⃣ Merchandising fixes product quality or content when a category exceeds its benchmark.
+  3️⃣ Customer Service reviews goodwill refunds and adjusts agent credit policies.
+  4️⃣ Revenue Management retires promotions that create excessive refund leakage.
+
+Dependencies:
+  Events: [purchase, refund-issued]
+  Metrics: [refund-amount]
+  Dimensions: [refund-type, return-reason, return-method]
+
+Source Data: Authoritative finalized commerce order snapshots and refund ledgers reconciled to the Finance ERP or revenue subledger
+
+Report Attributes: |
+  Order Cohort Month; Currency; Refund Type; Return Reason; Product Category; Return Method; Order Channel; Customer Segment
+
+Dashboard Usage: [Returns & Refunds Performance, Revenue Quality & Leakage, Finance Monthly Close Review, Merchandising Category Scorecard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [enrollment-refund-rate, return-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-20T19:59:43.959+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-29T05:46:58.546+00:00
+
