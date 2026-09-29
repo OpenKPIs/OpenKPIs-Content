@@ -1,0 +1,601 @@
+# KPI: Net Revenue Retention
+# Generated: 2026-09-29T12:54:14.377Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Net Revenue Retention
+Formula: ((Starting Cohort MRR + Expansion MRR - Contraction MRR - Churned MRR) / Starting Cohort MRR) × 100
+
+Description: |
+  Recurring subscription revenue kept from subscribers active at period start, after expansion, contraction and churn, as a share of their starting revenue. New subscribers and one-time orders are excluded.
+
+Category: Retention
+
+Tags: [kpi, E-commerce: Customer Retention, Loyalty & LTV]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Global
+
+Measure Type: Percentage
+
+Aggregation Window: Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "purchase"
+          }
+        },
+        {
+          "eventInfo": {
+            "eventName": "refund"
+          },
+          "attributes": {
+            "transactionID": "txn-1",
+            "subscriptionID": "sub-1",
+            "item": [
+              {
+                "productInfo": {
+                  "productID": "SKU-1"
+                },
+                "quantity": 1,
+                "price": {
+                  "basePrice": 100,
+                  "currency": "USD"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "eventInfo": {
+            "eventName": "subscription_update"
+          },
+          "attributes": {
+            "subscriptionID": "sub-1",
+            "status": "cancelled",
+            "billingCycle": "monthly",
+            "userID": "user-1"
+          }
+        }
+      ],
+      "transaction": {
+        "transactionID": "txn-1",
+        "total": {
+          "transactionTotal": 100,
+          "currency": "USD"
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU-1",
+              "productName": "item"
+            },
+            "quantity": 1,
+            "price": {
+              "basePrice": 100
+            }
+          }
+        ],
+        "attributes": {
+          "subscription": {
+            "subscriptionID": "sub-1",
+            "status": "active",
+            "billingCycle": "monthly"
+          }
+        }
+      },
+      "user": [
+        {
+          "profile": [
+            {
+              "profileInfo": {
+                "profileID": "user-1"
+              },
+              "attributes": {
+                "customerType": "returning"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  [
+    {
+      "event": "purchase",
+      "ecommerce": {
+        "transaction_id": "txn-1",
+        "value": 100,
+        "currency": "USD",
+        "items": [
+          {
+            "item_id": "SKU-1",
+            "item_name": "item",
+            "item_category": "subscription",
+            "price": 100,
+            "quantity": 1
+          }
+        ]
+      },
+      "user_id": "user-1",
+      "customer_type": "returning",
+      "subscription_id": "sub-1",
+      "subscription_status": "active",
+      "billing_cycle": "monthly"
+    },
+    {
+      "event": "refund",
+      "ecommerce": {
+        "transaction_id": "txn-1",
+        "value": 100,
+        "currency": "USD",
+        "items": [
+          {
+            "item_id": "SKU-1",
+            "price": 100,
+            "quantity": 1
+          }
+        ]
+      },
+      "user_id": "user-1",
+      "subscription_id": "sub-1"
+    },
+    {
+      "event": "subscription_update",
+      "user_id": "user-1",
+      "subscription_id": "sub-1",
+      "subscription_status": "cancelled",
+      "billing_cycle": "monthly"
+    }
+  ]
+
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "purchase",
+      "commerce": {
+        "order": {
+          "purchaseID": "txn-1",
+          "priceTotal": 100,
+          "currencyCode": "USD"
+        },
+        "purchases": {
+          "value": 1
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "name": "item",
+          "priceTotal": 100,
+          "quantity": 1
+        }
+      ],
+      "subscription": {
+        "subscriptionID": "sub-1",
+        "status": "active",
+        "billingCycle": "monthly"
+      },
+      "user": {
+        "userID": "user-1",
+        "customerType": "returning"
+      }
+    },
+    {
+      "event": "refund",
+      "commerce": {
+        "order": {
+          "purchaseID": "txn-1",
+          "currencyCode": "USD"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "priceTotal": 100,
+          "quantity": 1
+        }
+      ],
+      "subscription": {
+        "subscriptionID": "sub-1"
+      }
+    },
+    {
+      "event": "subscription_update",
+      "subscription": {
+        "subscriptionID": "sub-1",
+        "status": "cancelled",
+        "billingCycle": "monthly"
+      },
+      "user": {
+        "userID": "user-1"
+      }
+    }
+  ]
+
+XDM Mapping: |
+  [
+    {
+      "eventType": "commerce.purchases",
+      "identityMap": {
+        "userID": [
+          {
+            "id": "user-1",
+            "authenticatedState": "authenticated",
+            "primary": true
+          }
+        ]
+      },
+      "commerce": {
+        "order": {
+          "purchaseID": "txn-1",
+          "priceTotal": 100,
+          "currencyCode": "USD"
+        },
+        "purchases": {
+          "value": 1
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "name": "item",
+          "priceTotal": 100,
+          "quantity": 1
+        }
+      ],
+      "_tenantId": {
+        "subscription": {
+          "subscriptionID": "sub-1",
+          "status": "active",
+          "billingCycle": "monthly"
+        }
+      }
+    },
+    {
+      "eventType": "refund",
+      "identityMap": {
+        "userID": [
+          {
+            "id": "user-1",
+            "authenticatedState": "authenticated",
+            "primary": true
+          }
+        ]
+      },
+      "commerce": {
+        "order": {
+          "purchaseID": "txn-1",
+          "currencyCode": "USD"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "priceTotal": 100,
+          "quantity": 1
+        }
+      ],
+      "_tenantId": {
+        "subscription": {
+          "subscriptionID": "sub-1"
+        }
+      }
+    },
+    {
+      "eventType": "subscription_update",
+      "identityMap": {
+        "userID": [
+          {
+            "id": "user-1",
+            "authenticatedState": "authenticated",
+            "primary": true
+          }
+        ]
+      },
+      "_tenantId": {
+        "subscription": {
+          "subscriptionID": "sub-1",
+          "status": "cancelled",
+          "billingCycle": "monthly"
+        }
+      }
+    }
+  ]
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Run one calendar month per execution; never average monthly results into an annual NRR.
+  DECLARE start_date DATE DEFAULT DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH), MONTH);
+  DECLARE end_date DATE DEFAULT LAST_DAY(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH));
+  DECLARE dunning_grace_days INT64 DEFAULT 30;
+  
+  WITH
+  -- Events from one annual cycle plus grace before period start to period end, subscription fields pivoted from event_params
+  sub_events AS (
+    SELECT
+      event_name,
+      user_id,
+      PARSE_DATE('%Y%m%d', event_date) AS event_day,
+      event_timestamp,
+      ecommerce.transaction_id AS transaction_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'subscription_id') AS subscription_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'subscription_status') AS subscription_status,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'billing_cycle') AS billing_cycle,
+      -- ecommerce.currency lands in the export as the 'currency' event parameter; the export's ecommerce record has no currency column
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'currency') AS currency,
+      (SELECT SUM(i.item_revenue) FROM UNNEST(items) i) AS item_revenue,
+      (SELECT SUM(i.item_refund) FROM UNNEST(items) i) AS item_refund
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL 365 + dunning_grace_days DAY)) AND FORMAT_DATE('%Y%m%d', end_date)
+  ),
+  -- The two snapshot dates: period start (cohort) and period end
+  as_of_dates AS (
+    SELECT 'start' AS snapshot, start_date AS as_of
+    UNION ALL
+    SELECT 'end' AS snapshot, end_date AS as_of
+  ),
+  -- Latest subscription charge on or before each snapshot (purchase with a subscription_id; one-time orders excluded; item revenue only, so shipping and tax drop out; every billing/delivery cycle mapped to its cycle length and monthly factor)
+  last_charge AS (
+    SELECT
+      d.snapshot,
+      d.as_of,
+      c.user_id,
+      c.subscription_id,
+      c.transaction_id,
+      c.event_day AS charge_date,
+      c.currency,
+      c.item_revenue,
+      CASE c.billing_cycle WHEN 'weekly' THEN 7 WHEN 'biweekly' THEN 14 WHEN 'monthly' THEN 31 WHEN 'bimonthly' THEN 62 WHEN 'quarterly' THEN 92 WHEN 'semiannual' THEN 183 WHEN 'annual' THEN 365 END AS cycle_days,
+      CASE c.billing_cycle WHEN 'weekly' THEN 52 / 12.0 WHEN 'biweekly' THEN 26 / 12.0 WHEN 'monthly' THEN 1.0 WHEN 'bimonthly' THEN 1 / 2.0 WHEN 'quarterly' THEN 1 / 3.0 WHEN 'semiannual' THEN 1 / 6.0 WHEN 'annual' THEN 1 / 12.0 END AS monthly_factor
+    FROM sub_events c
+    JOIN as_of_dates d ON c.event_day <= d.as_of
+    WHERE c.event_name = 'purchase'
+      AND c.subscription_id IS NOT NULL
+      AND c.user_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY d.snapshot, c.user_id, c.subscription_id ORDER BY c.event_timestamp DESC) = 1
+  ),
+  -- Subscription status from the latest purchase or subscription_update event carrying it on or before each snapshot
+  last_status AS (
+    SELECT d.snapshot, s.subscription_id, s.subscription_status
+    FROM sub_events s
+    JOIN as_of_dates d ON s.event_day <= d.as_of
+    WHERE s.event_name IN ('purchase', 'subscription_update')
+      AND s.subscription_id IS NOT NULL
+      AND s.subscription_status IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY d.snapshot, s.subscription_id ORDER BY s.event_timestamp DESC) = 1
+  ),
+  -- Refunded item revenue per transaction dated on or before each snapshot
+  refunds AS (
+    SELECT d.snapshot, r.transaction_id, SUM(r.item_refund) AS refunded_revenue
+    FROM sub_events r
+    JOIN as_of_dates d ON r.event_day <= d.as_of
+    WHERE r.event_name = 'refund'
+    GROUP BY d.snapshot, r.transaction_id
+  ),
+  -- Subscription state and MRR per snapshot: active = status 'active' and paid within cycle plus dunning grace, so cancelled by the snapshot counts as churn even when paid through; MRR net of refunds to that snapshot, normalised monthly, at the cohort-start FX rate
+  sub_state AS (
+    SELECT
+      lc.snapshot,
+      lc.user_id,
+      ls.subscription_status,
+      ls.subscription_status = 'active'
+        AND DATE_ADD(lc.charge_date, INTERVAL lc.cycle_days + dunning_grace_days DAY) >= lc.as_of AS is_active,
+      GREATEST(lc.item_revenue - IFNULL(r.refunded_revenue, 0), 0) * lc.monthly_factor * fx.rate_to_reporting AS mrr
+    FROM last_charge lc
+    JOIN last_status ls ON ls.snapshot = lc.snapshot AND ls.subscription_id = lc.subscription_id
+    LEFT JOIN refunds r ON r.snapshot = lc.snapshot AND r.transaction_id = lc.transaction_id
+    JOIN `your-project.finance.fx_rates` fx ON fx.currency = lc.currency AND fx.rate_date = start_date
+  ),
+  -- Subscriber MRR at period start and end; subscriptions paused at period end flagged
+  subscriber_mrr AS (
+    SELECT
+      user_id,
+      SUM(IF(snapshot = 'start' AND is_active, mrr, 0)) AS start_mrr,
+      SUM(IF(snapshot = 'end' AND is_active, mrr, 0)) AS end_mrr,
+      LOGICAL_OR(snapshot = 'end' AND subscription_status = 'paused') AS has_paused_at_end
+    FROM sub_state
+    GROUP BY user_id
+  ),
+  -- Starting cohort only; churn = full starting MRR when nothing is active or paused at period end (cancelled or past grace), otherwise the MRR change is expansion or contraction (paused counts as contraction)
+  movements AS (
+    SELECT
+      start_mrr,
+      IF(end_mrr = 0 AND NOT has_paused_at_end, start_mrr, 0) AS churned_mrr,
+      IF(end_mrr > 0 OR has_paused_at_end, GREATEST(end_mrr - start_mrr, 0), 0) AS expansion_mrr,
+      IF(end_mrr > 0 OR has_paused_at_end, GREATEST(start_mrr - end_mrr, 0), 0) AS contraction_mrr
+    FROM subscriber_mrr
+    WHERE start_mrr > 0
+  )
+  -- Net Revenue Retention = (starting MRR + expansion - contraction - churn) / starting MRR x 100
+  SELECT
+    ROUND(SAFE_DIVIDE(SUM(start_mrr) + SUM(expansion_mrr) - SUM(contraction_mrr) - SUM(churned_mrr), SUM(start_mrr)) * 100, 2) AS net_revenue_retention_pct
+  FROM movements;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Run one calendar month per execution; never average monthly results into an annual NRR.
+  WITH
+  -- Reporting period and dunning grace (relative dates)
+  params AS (
+    SELECT
+      trunc(add_months(current_date(), -1), 'MM') AS start_date,
+      last_day(add_months(current_date(), -1)) AS end_date,
+      30 AS dunning_grace_days
+  ),
+  -- Events from one annual cycle plus grace before period start to period end, with subscription fields
+  sub_events AS (
+    SELECT
+      e.eventType AS event_type,
+      e.identityMap['userID'][0].id AS user_id,
+      to_date(e.timestamp) AS event_day,
+      e.timestamp AS event_ts,
+      e.commerce.order.purchaseID AS transaction_id,
+      e._tenantId.subscription.subscriptionID AS subscription_id,
+      e._tenantId.subscription.status AS subscription_status,
+      e._tenantId.subscription.billingCycle AS billing_cycle,
+      e.commerce.order.currencyCode AS currency,
+      aggregate(e.productListItems, CAST(0 AS DOUBLE), (acc, x) -> acc + coalesce(x.priceTotal, 0)) AS item_revenue
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE to_date(e.timestamp) BETWEEN date_sub(p.start_date, 365 + p.dunning_grace_days) AND p.end_date
+  ),
+  -- The two snapshot dates: period start (cohort) and period end
+  as_of_dates AS (
+    SELECT 'start' AS snapshot, start_date AS as_of FROM params
+    UNION ALL
+    SELECT 'end' AS snapshot, end_date AS as_of FROM params
+  ),
+  -- Latest subscription charge on or before each snapshot (purchase with a subscription ID; one-time orders excluded; item revenue only, so shipping and tax drop out; every billing/delivery cycle mapped to its cycle length and monthly factor)
+  last_charge AS (
+    SELECT * FROM (
+      SELECT
+        d.snapshot,
+        d.as_of,
+        c.user_id,
+        c.subscription_id,
+        c.transaction_id,
+        c.event_day AS charge_date,
+        c.currency,
+        c.item_revenue,
+        CASE c.billing_cycle WHEN 'weekly' THEN 7 WHEN 'biweekly' THEN 14 WHEN 'monthly' THEN 31 WHEN 'bimonthly' THEN 62 WHEN 'quarterly' THEN 92 WHEN 'semiannual' THEN 183 WHEN 'annual' THEN 365 END AS cycle_days,
+        CASE c.billing_cycle WHEN 'weekly' THEN 52 / 12.0 WHEN 'biweekly' THEN 26 / 12.0 WHEN 'monthly' THEN 1.0 WHEN 'bimonthly' THEN 1 / 2.0 WHEN 'quarterly' THEN 1 / 3.0 WHEN 'semiannual' THEN 1 / 6.0 WHEN 'annual' THEN 1 / 12.0 END AS monthly_factor,
+        row_number() OVER (PARTITION BY d.snapshot, c.user_id, c.subscription_id ORDER BY c.event_ts DESC) AS rn
+      FROM sub_events c
+      JOIN as_of_dates d ON c.event_day <= d.as_of
+      WHERE c.event_type = 'commerce.purchases'
+        AND c.subscription_id IS NOT NULL
+        AND c.user_id IS NOT NULL
+    ) t
+    WHERE rn = 1
+  ),
+  -- Subscription status from the latest purchase or subscription_update event carrying it on or before each snapshot
+  last_status AS (
+    SELECT snapshot, subscription_id, subscription_status FROM (
+      SELECT
+        d.snapshot,
+        s.subscription_id,
+        s.subscription_status,
+        row_number() OVER (PARTITION BY d.snapshot, s.subscription_id ORDER BY s.event_ts DESC) AS rn
+      FROM sub_events s
+      JOIN as_of_dates d ON s.event_day <= d.as_of
+      WHERE s.event_type IN ('commerce.purchases', 'subscription_update')
+        AND s.subscription_id IS NOT NULL
+        AND s.subscription_status IS NOT NULL
+    ) t
+    WHERE rn = 1
+  ),
+  -- Refunded item revenue per transaction dated on or before each snapshot
+  refunds AS (
+    SELECT d.snapshot, r.transaction_id, SUM(r.item_revenue) AS refunded_revenue
+    FROM sub_events r
+    JOIN as_of_dates d ON r.event_day <= d.as_of
+    WHERE r.event_type = 'refund'
+    GROUP BY d.snapshot, r.transaction_id
+  ),
+  -- Subscription state and MRR per snapshot: active = status 'active' and paid within cycle plus dunning grace, so cancelled by the snapshot counts as churn even when paid through; MRR net of refunds to that snapshot, normalised monthly, at the cohort-start FX rate
+  sub_state AS (
+    SELECT
+      lc.snapshot,
+      lc.user_id,
+      ls.subscription_status,
+      ls.subscription_status = 'active'
+        AND date_add(lc.charge_date, lc.cycle_days + p.dunning_grace_days) >= lc.as_of AS is_active,
+      greatest(lc.item_revenue - coalesce(r.refunded_revenue, 0), 0) * lc.monthly_factor * fx.rate_to_reporting AS mrr
+    FROM last_charge lc
+    CROSS JOIN params p
+    JOIN last_status ls ON ls.snapshot = lc.snapshot AND ls.subscription_id = lc.subscription_id
+    LEFT JOIN refunds r ON r.snapshot = lc.snapshot AND r.transaction_id = lc.transaction_id
+    JOIN fx_rates_dataset fx ON fx.currency = lc.currency AND fx.rate_date = p.start_date
+  ),
+  -- Subscriber MRR at period start and end; subscriptions paused at period end flagged
+  subscriber_mrr AS (
+    SELECT
+      user_id,
+      SUM(CASE WHEN snapshot = 'start' AND is_active THEN mrr ELSE 0 END) AS start_mrr,
+      SUM(CASE WHEN snapshot = 'end' AND is_active THEN mrr ELSE 0 END) AS end_mrr,
+      bool_or(snapshot = 'end' AND subscription_status = 'paused') AS has_paused_at_end
+    FROM sub_state
+    GROUP BY user_id
+  ),
+  -- Starting cohort only; churn = full starting MRR when nothing is active or paused at period end (cancelled or past grace), otherwise the MRR change is expansion or contraction (paused counts as contraction)
+  movements AS (
+    SELECT
+      start_mrr,
+      CASE WHEN end_mrr = 0 AND NOT has_paused_at_end THEN start_mrr ELSE 0 END AS churned_mrr,
+      CASE WHEN end_mrr > 0 OR has_paused_at_end THEN greatest(end_mrr - start_mrr, 0) ELSE 0 END AS expansion_mrr,
+      CASE WHEN end_mrr > 0 OR has_paused_at_end THEN greatest(start_mrr - end_mrr, 0) ELSE 0 END AS contraction_mrr
+    FROM subscriber_mrr
+    WHERE start_mrr > 0
+  )
+  -- Net Revenue Retention = (starting MRR + expansion - contraction - churn) / starting MRR x 100
+  SELECT
+    round((SUM(start_mrr) + SUM(expansion_mrr) - SUM(contraction_mrr) - SUM(churned_mrr)) / NULLIF(SUM(start_mrr), 0) * 100, 2) AS net_revenue_retention_pct
+  FROM movements;
+
+Calculation Notes: |
+  1️⃣ Cohort: subscribers with active MRR on day 1 of the calendar month; later sign-ups excluded. Never average months into an annual NRR.
+  2️⃣ Recurring revenue is normalised monthly value (MRR): annual plans ÷ 12. Exclude one-time add-on orders, shipping and tax.
+  3️⃣ Expansion: MRR added by cohort subscribers through plan upgrades, higher quantity, more frequent delivery or extra subscribed SKUs.
+  4️⃣ Contraction: MRR lost to downgrades, lower quantity, less frequent delivery or lasting discounts. Paused subscriptions count here until resumed.
+  5️⃣ Churned MRR: full starting MRR of cohort subscribers cancelled, or unpaid past the dunning grace period (e.g. 30 days), by period end.
+  6️⃣ Use net revenue after refunds and discounts, in one reporting currency at the cohort-start FX rate, so currency moves do not read as expansion.
+  7️⃣ Renewals, dunning failures and cancellations are sent server-side by the subscription platform (GA4 Measurement Protocol / AEP server API).
+
+Business Use Case: |
+  1️⃣ Finance: NRR below 100% for two quarters → lower the subscription revenue forecast and review discount depth.
+  2️⃣ Retention Marketing: churned MRR rising on one plan → send pause and skip offers ahead of cancellation.
+  3️⃣ Merchandising: expansion MRR flat → add upsell SKUs and bundle upgrades to the subscription portal.
+  4️⃣ Revenue Management: downgrade contraction rising → narrow the price gap between entry and mid plan tiers.
+
+Dependencies:
+  Events: [purchase, refund-issued]
+  Dimensions: [subscription-status]
+
+Source Data: Digital Analytics (GA4) + Adobe Analytics / AEP
+
+Report Attributes: |
+  Subscription Plan; Acquisition Cohort; Subscription Status; Customer Value Tier; First Touch Channel Grouping; Country / Region
+
+Dashboard Usage: [Subscription Revenue Health, Customer Retention & LTV, Executive Finance Overview]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [customer-retention-rate, customer-lifetime-value, subscriber-retention-rate, ltv-cac-ratio, revenue]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-29T10:16:51.228+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-29T12:54:13.902+00:00
+
