@@ -1,0 +1,187 @@
+# Dimension: Traveler Lifecycle Stage
+# Generated: 2026-09-29T05:47:21.586Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Traveler Lifecycle Stage
+
+Description: |
+  Records the authoritative traveler lifecycle stage assigned for each reporting date by the governed lifecycle classifier. This dimension reports classifier output without rederiving its rules.
+
+Category: Engagement
+
+Tags: [dimension, travel, lifecycle, journey-stage]
+
+Industry: Travel & Hospitality
+
+Priority: High
+
+Core Area: Customer Lifecycle
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User (evaluated at each event with a daily current-state snapshot), Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH reporting_dates AS (
+    SELECT calendar_date AS snapshot_date
+    FROM `your-project.reference.calendar_date`
+    WHERE calendar_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 89 DAY) AND CURRENT_DATE()
+  ),
+  source_rows AS (
+    SELECT d.snapshot_date,
+      NULLIF(TRIM(CAST(h.traveler_analytics_key AS STRING)), '') AS traveler_partition_key,
+      h.stage_code, h.previous_stage_code, h.rule_version, h.effective_from_date,
+      h.classifier_updated_at, h.classifier_record_id
+    FROM reporting_dates d
+    JOIN `your-project.warehouse.traveler_lifecycle_stage_history` h
+      ON d.snapshot_date >= h.effective_from_date
+     AND (h.effective_to_date IS NULL OR d.snapshot_date < h.effective_to_date)
+    WHERE NULLIF(TRIM(CAST(h.traveler_analytics_key AS STRING)), '') IS NOT NULL
+  ),
+  stage_candidates AS (
+    SELECT source_rows.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY snapshot_date, traveler_partition_key
+        ORDER BY effective_from_date DESC, classifier_updated_at DESC, classifier_record_id DESC
+      ) AS stage_rank
+    FROM source_rows
+  ),
+  normalized AS (
+    SELECT snapshot_date,
+      REGEXP_REPLACE(LOWER(TRIM(stage_code)), r'[\s-]+', '_') AS stage_code,
+      REGEXP_REPLACE(LOWER(TRIM(previous_stage_code)), r'[\s-]+', '_') AS previous_stage_code,
+      COALESCE(NULLIF(TRIM(rule_version), ''), 'unknown') AS rule_version
+    FROM stage_candidates
+    WHERE stage_rank = 1
+  ),
+  classified AS (
+    SELECT snapshot_date, rule_version,
+      CASE
+        WHEN NULLIF(stage_code, '') IS NULL THEN 'unknown'
+        WHEN stage_code IN ('anonymous_visitor', 'known_visitor', 'active_planner', 'booking_started', 'booked_pre_trip', 'in_trip', 'post_trip', 'repeat_traveler', 'lapsed_traveler', 'unknown') THEN stage_code
+        ELSE 'unmapped'
+      END AS traveler_lifecycle_stage,
+      CASE
+        WHEN NULLIF(previous_stage_code, '') IS NULL THEN 'unknown'
+        WHEN previous_stage_code IN ('anonymous_visitor', 'known_visitor', 'active_planner', 'booking_started', 'booked_pre_trip', 'in_trip', 'post_trip', 'repeat_traveler', 'lapsed_traveler', 'unknown') THEN previous_stage_code
+        ELSE 'unmapped'
+      END AS previous_traveler_lifecycle_stage
+    FROM normalized
+  )
+  SELECT snapshot_date, traveler_lifecycle_stage, previous_traveler_lifecycle_stage, rule_version, COUNT(*) AS traveler_count
+  FROM classified
+  GROUP BY snapshot_date, traveler_lifecycle_stage, previous_traveler_lifecycle_stage, rule_version
+  ORDER BY snapshot_date, traveler_lifecycle_stage, previous_traveler_lifecycle_stage;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH reporting_dates AS (
+    SELECT calendar_date AS snapshot_date
+    FROM enterprise_calendar
+    WHERE calendar_date BETWEEN CURRENT_DATE - INTERVAL '89' DAY AND CURRENT_DATE
+  ),
+  source_rows AS (
+    SELECT d.snapshot_date,
+      NULLIF(TRIM(CAST(h.traveler_analytics_key AS VARCHAR)), '') AS traveler_partition_key,
+      h.stage_code, h.previous_stage_code, h.rule_version, h.effective_from_date,
+      h.classifier_updated_at, h.classifier_record_id
+    FROM reporting_dates d
+    JOIN traveler_lifecycle_stage_history h
+      ON d.snapshot_date >= h.effective_from_date
+     AND (h.effective_to_date IS NULL OR d.snapshot_date < h.effective_to_date)
+    WHERE NULLIF(TRIM(CAST(h.traveler_analytics_key AS VARCHAR)), '') IS NOT NULL
+  ),
+  stage_candidates AS (
+    SELECT source_rows.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY snapshot_date, traveler_partition_key
+        ORDER BY effective_from_date DESC, classifier_updated_at DESC, classifier_record_id DESC
+      ) AS stage_rank
+    FROM source_rows
+  ),
+  normalized AS (
+    SELECT snapshot_date,
+      REGEXP_REPLACE(LOWER(TRIM(stage_code)), '[ -]+', '_') AS stage_code,
+      REGEXP_REPLACE(LOWER(TRIM(previous_stage_code)), '[ -]+', '_') AS previous_stage_code,
+      COALESCE(NULLIF(TRIM(rule_version), ''), 'unknown') AS rule_version
+    FROM stage_candidates
+    WHERE stage_rank = 1
+  ),
+  classified AS (
+    SELECT snapshot_date, rule_version,
+      CASE
+        WHEN stage_code IS NULL OR stage_code = '' THEN 'unknown'
+        WHEN stage_code IN ('anonymous_visitor', 'known_visitor', 'active_planner', 'booking_started', 'booked_pre_trip', 'in_trip', 'post_trip', 'repeat_traveler', 'lapsed_traveler', 'unknown') THEN stage_code
+        ELSE 'unmapped'
+      END AS traveler_lifecycle_stage,
+      CASE
+        WHEN previous_stage_code IS NULL OR previous_stage_code = '' THEN 'unknown'
+        WHEN previous_stage_code IN ('anonymous_visitor', 'known_visitor', 'active_planner', 'booking_started', 'booked_pre_trip', 'in_trip', 'post_trip', 'repeat_traveler', 'lapsed_traveler', 'unknown') THEN previous_stage_code
+        ELSE 'unmapped'
+      END AS previous_traveler_lifecycle_stage
+    FROM normalized
+  )
+  SELECT snapshot_date, traveler_lifecycle_stage, previous_traveler_lifecycle_stage, rule_version, COUNT(*) AS traveler_count
+  FROM classified
+  GROUP BY snapshot_date, traveler_lifecycle_stage, previous_traveler_lifecycle_stage, rule_version
+  ORDER BY snapshot_date, traveler_lifecycle_stage, previous_traveler_lifecycle_stage;
+
+Calculation Notes: |
+  1️⃣ Require one nonblank stable analytics key for each pseudonymous or anonymous traveler.
+  2️⃣ Read the stage assigned by the authoritative classifier for each reporting date.
+  3️⃣ Preserve historical snapshots; never backfill a later stage onto an earlier date.
+  4️⃣ Resolve overlaps by latest effective start, classifier update, then stable record ID.
+  5️⃣ Use unknown for a missing stage and unmapped for a nonempty unrecognized code.
+  6️⃣ Treat rule precedence, time windows, and exclusions as upstream classifier controls.
+  7️⃣ Return aggregate traveler counts only; never expose traveler identifiers.
+
+Business Use Case: |
+  1️⃣ Lifecycle marketers size planner and booking-stage cohorts before launching recovery journeys.
+  2️⃣ Product teams compare daily stage mix and investigate unexpected transition shifts.
+  3️⃣ Revenue teams plan pre-trip ancillary offers from governed cohort counts.
+  4️⃣ Data stewards monitor unknown, unmapped, and stale classifier versions each week.
+
+Dependencies:
+  Dimensions: [customer-status]
+
+Source Data: Central Reservation System, Property Management System, Internet Booking Engine, Mobile Booking Platform, Call Center Reservation Platform, Channel Manager, and Enterprise Data Warehouse
+
+Report Attributes: |
+  Snapshot Date; Traveler Lifecycle Stage; Previous Lifecycle Stage; Classifier Rule Version
+
+Dashboard Usage: [Digital Traveler Lifecycle, Traveler Journey Progression, Booking Funnel Performance, Lifecycle Audience Health]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [booking-acquisition-channel, booking-journey-entry-channel, booking-lead-time-band, traveler-acquisition-channel, customer-status, device-category, country, default-channel-grouping]
+
+
+Data Sensitivity: Restricted
+
+Contains PII: Yes
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T23:30:39.463573+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-29T05:47:20.951+00:00
+
