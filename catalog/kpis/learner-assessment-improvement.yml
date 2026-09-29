@@ -1,0 +1,213 @@
+# KPI: Learner Assessment Improvement
+# Generated: 2026-09-29T05:46:41.796Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Learner Assessment Improvement
+Formula: (1 / |L|) × Σ[l∈L] ((1 / |P_l|) × Σ[p∈P_l] 100 × (N_post,lp − N_pre,lp)), where N = (raw_score − scale_min) / (scale_max − scale_min)
+
+Description: |
+  Measures the average percentage-point change between normalized pre- and post-assessment scores for learners completing a qualifying intervention. Each eligible learner receives equal weight.
+
+Category: Performance
+
+Tags: [kpi, education, assessment, learning-outcomes]
+
+Industry: [["Education"]]
+
+Priority: High
+
+Core Area: Learning Outcomes
+
+Scope: User
+
+Measure Type: Average
+
+Aggregation Window: Time based - Monthly, Monthly, Quarterly, Yearly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH eligible_interventions AS (
+    SELECT intervention_id, enrollment_id, learner_id, course_id, intervention_started_at, intervention_completed_at
+    FROM `your-project.learning_warehouse.learning_interventions`
+    WHERE LOWER(completion_status) = 'completed'
+      AND intervention_started_at IS NOT NULL
+      AND intervention_completed_at IS NOT NULL
+      AND intervention_completed_at >= TIMESTAMP(DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH), MONTH))
+      AND TIMESTAMP_ADD(intervention_completed_at, INTERVAL 30 DAY) <= CURRENT_TIMESTAMP()
+  ),
+  valid_attempts AS (
+    SELECT i.intervention_id, i.enrollment_id, i.learner_id, i.course_id, i.intervention_started_at, i.intervention_completed_at,
+      a.attempt_id, a.assessment_completed_at, LOWER(c.assessment_role) AS assessment_role, c.assessment_equivalency_group_id,
+      100.0 * SAFE_DIVIDE(a.raw_score - a.minimum_possible_score, a.maximum_possible_score - a.minimum_possible_score) AS normalized_score_pct
+    FROM eligible_interventions AS i
+    JOIN `your-project.learning_warehouse.assessment_attempts` AS a
+      ON a.learner_id = i.learner_id
+      AND a.enrollment_id = i.enrollment_id
+      AND a.intervention_id = i.intervention_id
+    JOIN `your-project.learning_warehouse.assessment_catalog` AS c ON c.assessment_id = a.assessment_id
+    WHERE LOWER(a.attempt_status) = 'completed'
+      AND LOWER(a.attempt_validity_status) = 'valid'
+      AND COALESCE(a.is_practice, FALSE) = FALSE
+      AND a.assessment_completed_at IS NOT NULL
+      AND a.raw_score IS NOT NULL
+      AND a.minimum_possible_score IS NOT NULL
+      AND a.maximum_possible_score > a.minimum_possible_score
+      AND a.raw_score BETWEEN a.minimum_possible_score AND a.maximum_possible_score
+      AND c.assessment_equivalency_group_id IS NOT NULL
+      AND LOWER(c.assessment_role) IN ('pre', 'post')
+      AND ((LOWER(c.assessment_role) = 'pre' AND a.assessment_completed_at BETWEEN TIMESTAMP_SUB(i.intervention_started_at, INTERVAL 30 DAY) AND i.intervention_started_at)
+        OR (LOWER(c.assessment_role) = 'post' AND a.assessment_completed_at BETWEEN i.intervention_completed_at AND TIMESTAMP_ADD(i.intervention_completed_at, INTERVAL 30 DAY)))
+  ),
+  selected_pre AS (
+    SELECT * FROM valid_attempts WHERE assessment_role = 'pre'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY learner_id, enrollment_id, intervention_id, assessment_equivalency_group_id ORDER BY assessment_completed_at DESC, attempt_id DESC) = 1
+  ),
+  selected_post AS (
+    SELECT * FROM valid_attempts WHERE assessment_role = 'post'
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY learner_id, enrollment_id, intervention_id, assessment_equivalency_group_id ORDER BY assessment_completed_at, attempt_id) = 1
+  ),
+  matched_pairs AS (
+    SELECT post.learner_id, post.course_id, post.intervention_id, post.intervention_completed_at,
+      post.normalized_score_pct - pre.normalized_score_pct AS improvement_pp
+    FROM selected_post AS post
+    JOIN selected_pre AS pre ON pre.learner_id = post.learner_id
+      AND pre.enrollment_id = post.enrollment_id
+      AND pre.intervention_id = post.intervention_id
+      AND pre.assessment_equivalency_group_id = post.assessment_equivalency_group_id
+    WHERE pre.assessment_completed_at < post.assessment_completed_at
+  ),
+  learner_gains AS (
+    SELECT DATE_TRUNC(DATE(intervention_completed_at), MONTH) AS completion_month, course_id, learner_id,
+      AVG(improvement_pp) AS learner_improvement_pp
+    FROM matched_pairs
+    GROUP BY completion_month, course_id, learner_id
+  )
+  SELECT completion_month, course_id, COUNT(*) AS eligible_learners,
+    ROUND(AVG(learner_improvement_pp), 2) AS learner_assessment_improvement_pp
+  FROM learner_gains
+  GROUP BY completion_month, course_id
+  HAVING COUNT(*) >= 30
+  ORDER BY completion_month, course_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH eligible_interventions AS (
+    SELECT intervention_id, enrollment_id, learner_id, course_id, intervention_started_at, intervention_completed_at
+    FROM learning_interventions_backend_dataset
+    WHERE LOWER(completion_status) = 'completed'
+      AND intervention_started_at IS NOT NULL
+      AND intervention_completed_at IS NOT NULL
+      AND intervention_completed_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '12 months')
+      AND intervention_completed_at + INTERVAL '30 days' <= CURRENT_TIMESTAMP
+  ),
+  valid_attempts AS (
+    SELECT i.intervention_id, i.enrollment_id, i.learner_id, i.course_id, i.intervention_started_at, i.intervention_completed_at,
+      a.attempt_id, a.assessment_completed_at, LOWER(c.assessment_role) AS assessment_role, c.assessment_equivalency_group_id,
+      100.0 * (a.raw_score - a.minimum_possible_score) / NULLIF(a.maximum_possible_score - a.minimum_possible_score, 0) AS normalized_score_pct
+    FROM eligible_interventions AS i
+    JOIN assessment_attempts_backend_dataset AS a
+      ON a.learner_id = i.learner_id
+      AND a.enrollment_id = i.enrollment_id
+      AND a.intervention_id = i.intervention_id
+    JOIN assessment_catalog_backend_dataset AS c ON c.assessment_id = a.assessment_id
+    WHERE LOWER(a.attempt_status) = 'completed'
+      AND LOWER(a.attempt_validity_status) = 'valid'
+      AND COALESCE(a.is_practice, FALSE) = FALSE
+      AND a.assessment_completed_at IS NOT NULL
+      AND a.raw_score IS NOT NULL
+      AND a.minimum_possible_score IS NOT NULL
+      AND a.maximum_possible_score > a.minimum_possible_score
+      AND a.raw_score BETWEEN a.minimum_possible_score AND a.maximum_possible_score
+      AND c.assessment_equivalency_group_id IS NOT NULL
+      AND LOWER(c.assessment_role) IN ('pre', 'post')
+      AND ((LOWER(c.assessment_role) = 'pre' AND a.assessment_completed_at BETWEEN i.intervention_started_at - INTERVAL '30 days' AND i.intervention_started_at)
+        OR (LOWER(c.assessment_role) = 'post' AND a.assessment_completed_at BETWEEN i.intervention_completed_at AND i.intervention_completed_at + INTERVAL '30 days'))
+  ),
+  ranked_pre AS (
+    SELECT v.*, ROW_NUMBER() OVER (PARTITION BY learner_id, enrollment_id, intervention_id, assessment_equivalency_group_id ORDER BY assessment_completed_at DESC, attempt_id DESC) AS attempt_rank
+    FROM valid_attempts AS v WHERE assessment_role = 'pre'
+  ),
+  ranked_post AS (
+    SELECT v.*, ROW_NUMBER() OVER (PARTITION BY learner_id, enrollment_id, intervention_id, assessment_equivalency_group_id ORDER BY assessment_completed_at, attempt_id) AS attempt_rank
+    FROM valid_attempts AS v WHERE assessment_role = 'post'
+  ),
+  matched_pairs AS (
+    SELECT post.learner_id, post.course_id, post.intervention_id, post.intervention_completed_at,
+      post.normalized_score_pct - pre.normalized_score_pct AS improvement_pp
+    FROM ranked_post AS post
+    JOIN ranked_pre AS pre ON pre.learner_id = post.learner_id
+      AND pre.enrollment_id = post.enrollment_id
+      AND pre.intervention_id = post.intervention_id
+      AND pre.assessment_equivalency_group_id = post.assessment_equivalency_group_id
+    WHERE post.attempt_rank = 1 AND pre.attempt_rank = 1
+      AND pre.assessment_completed_at < post.assessment_completed_at
+  ),
+  learner_gains AS (
+    SELECT CAST(DATE_TRUNC('month', intervention_completed_at) AS DATE) AS completion_month, course_id, learner_id,
+      AVG(improvement_pp) AS learner_improvement_pp
+    FROM matched_pairs
+    GROUP BY CAST(DATE_TRUNC('month', intervention_completed_at) AS DATE), course_id, learner_id
+  )
+  SELECT completion_month, course_id, COUNT(*) AS eligible_learners,
+    ROUND(AVG(learner_improvement_pp), 2) AS learner_assessment_improvement_pp
+  FROM learner_gains
+  GROUP BY completion_month, course_id
+  HAVING COUNT(*) >= 30
+  ORDER BY completion_month, course_id;
+
+Calculation Notes: |
+  1️⃣ Include completed interventions only after the 30-day post-assessment window has closed.
+  2️⃣ Use the latest valid pre-assessment within 30 days before start and earliest valid post-assessment within 30 days after completion.
+  3️⃣ Match pairs by learner, enrollment, intervention, and assessment-equivalency group.
+  4️⃣ Normalize each score using its documented scale minimum and maximum.
+  5️⃣ Exclude practice, unscored, invalid, non-comparable attempts and zero-width score scales.
+  6️⃣ Retain zero and negative gains; average pairs per learner before cohort averaging.
+  7️⃣ Suppress breakdowns with fewer than 30 eligible learners.
+
+Business Use Case: |
+  1️⃣ Learning Product reviews monthly course gains; a negative result triggers an assessment-equivalency check.
+  2️⃣ Curriculum teams revise weak learning objectives when mature cohorts remain below the approved target.
+  3️⃣ Instructors compare delivery formats and adjust instruction when improvement gaps persist.
+  4️⃣ Assessment owners investigate anomalous form gains before results inform program decisions.
+
+Dependencies:
+  Metrics: [average-assessment-score]
+  Dimensions: [assessment-type, learning-delivery-format, enrollment-cohort]
+
+Source Data: Backend LMS and assessment databases: attempt, assessment catalog, enrollment, intervention, and completion records
+
+Report Attributes: |
+  Post-Assessment Month; Course; Program; Learning Objective; Assessment Type; Assessment Equivalency Group; Instructor; Learner Cohort; Learning Delivery Format; Enrollment Type; Baseline Proficiency Band; Organization or Institution
+
+Dashboard Usage: [Executive Learning Outcomes Dashboard, Course Effectiveness Dashboard, Assessment Quality Dashboard, Curriculum Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [assessment-proficiency-rate, course-completion-rate, learning-outcome-attainment-rate, active-learner-retention-rate]
+
+Data Sensitivity: Restricted
+
+Contains PII: Yes
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-03T13:30:28.585349+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-29T05:46:41.398+00:00
+
