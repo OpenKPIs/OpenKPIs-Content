@@ -1,0 +1,155 @@
+# Metric: Average Customer Tenure
+# Generated: 2026-09-29T12:54:41.464Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Average Customer Tenure
+Formula: AVG(DATE_DIFF(period_end_date, first_order_date, DAY)) over customers with >= 1 completed order in the 365 days ending period_end_date
+
+Description: |
+  Mean days from each active customer's first completed order to the period end date. Active means a completed order in the trailing 365 days; this is the continuous value behind Customer Tenure Band.
+
+Category: Retention
+
+Tags: [metric, E-commerce: Customer Retention, Loyalty & LTV]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Engagement
+
+Scope: User
+
+Measure Type: Average
+
+Aggregation Window: Monthly, Quarterly, Yearly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Source: backend commerce-platform order table, since store orders and guest hashed emails are not in the web events export
+  -- Period end = last closed day; active window = the 365 days ending on it
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  DECLARE start_date DATE DEFAULT DATE_SUB(end_date, INTERVAL 364 DAY);
+  
+  -- Registered customer per hashed email, used to attach guest orders
+  WITH email_map AS (
+    SELECT hashed_email, MIN(customer_id) AS customer_id
+    FROM `your-project.commerce.orders`
+    WHERE customer_id IS NOT NULL AND hashed_email IS NOT NULL
+    GROUP BY hashed_email
+  ),
+  -- Web, app and store orders up to period end (full history) minus cancelled, test and pre-shipment full refunds; unmatched guests stay separate
+  completed_orders AS (
+    SELECT
+      COALESCE(o.customer_id, m.customer_id, CONCAT('guest-', o.order_id)) AS customer_id,
+      o.order_date
+    FROM `your-project.commerce.orders` o
+    LEFT JOIN email_map m ON o.customer_id IS NULL AND o.hashed_email = m.hashed_email
+    WHERE o.order_date <= end_date
+      AND o.order_status != 'cancelled'
+      AND COALESCE(o.traffic_type, '') != 'test'
+      AND NOT (COALESCE(o.refund_type, '') = 'full' AND (o.shipped_at IS NULL OR o.refunded_at < o.shipped_at))
+  ),
+  -- First and latest completed order per stitched customer
+  customers AS (
+    SELECT customer_id, MIN(order_date) AS first_order_date, MAX(order_date) AS last_order_date
+    FROM completed_orders
+    GROUP BY customer_id
+  )
+  -- Mean whole days from first completed order to period end, over customers active in the 365-day window
+  SELECT
+    end_date AS period_end_date,
+    AVG(DATE_DIFF(end_date, first_order_date, DAY)) AS average_customer_tenure_days
+  FROM customers
+  WHERE last_order_date >= start_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Source: backend commerce-platform order table, since store orders and guest hashed emails are not in the web events dataset
+  -- Period end = last closed day; active window = the 365 days ending on it
+  WITH params AS (
+    SELECT date_sub(current_date(), 1) AS end_date, date_sub(current_date(), 365) AS start_date
+  ),
+  -- Registered customer per hashed email, used to attach guest orders
+  email_map AS (
+    SELECT hashed_email, MIN(customer_id) AS customer_id
+    FROM aep_backend_dataset
+    WHERE customer_id IS NOT NULL AND hashed_email IS NOT NULL
+    GROUP BY hashed_email
+  ),
+  -- Web, app and store orders up to period end (full history) minus cancelled, test and pre-shipment full refunds; unmatched guests stay separate
+  completed_orders AS (
+    SELECT
+      COALESCE(o.customer_id, m.customer_id, concat('guest-', o.order_id)) AS customer_id,
+      o.order_date
+    FROM aep_backend_dataset o
+    LEFT JOIN email_map m ON o.customer_id IS NULL AND o.hashed_email = m.hashed_email
+    CROSS JOIN params
+    WHERE o.order_date <= params.end_date
+      AND o.order_status != 'cancelled'
+      AND COALESCE(o.traffic_type, '') != 'test'
+      AND NOT (COALESCE(o.refund_type, '') = 'full' AND (o.shipped_at IS NULL OR o.refunded_at < o.shipped_at))
+  ),
+  -- First and latest completed order per stitched customer
+  customers AS (
+    SELECT customer_id, MIN(order_date) AS first_order_date, MAX(order_date) AS last_order_date
+    FROM completed_orders
+    GROUP BY customer_id
+  )
+  -- Mean whole days from first completed order to period end, over customers active in the 365-day window
+  SELECT
+    params.end_date AS period_end_date,
+    AVG(datediff(params.end_date, first_order_date)) AS average_customer_tenure_days
+  FROM customers
+  CROSS JOIN params
+  WHERE last_order_date >= params.start_date
+  GROUP BY params.end_date;
+
+Calculation Notes: |
+  1️⃣ Tenure = period end date minus first completed order date, in whole days; a first order placed on the end date counts as 0.,2️⃣ Population: customers with a completed order in the 365 days to period end. Lapsed customers are excluded, not averaged in.,3️⃣ First order date = earliest completed order in the backend order table (web, app, store) for the stitched customer ID, not signup date.,4️⃣ Cancelled, test and pre-shipment fully refunded orders never set the first order date; later partial returns do not reset it.,5️⃣ Guest orders attach to a customer by hashed email match; unmatched guest orders count as separate customers and pull the average down.,6️⃣ Point-in-time snapshot at period end: never sum or average monthly values into a quarter; recompute at the quarter end date.,7️⃣ Tenure is truncated at the earliest order date loaded; backfill full order history before trending, or older cohorts read short.
+
+Business Use Case: |
+  1️⃣ CRM Marketing sees tenure fall after an acquisition push and moves budget into second-order onboarding flows.,2️⃣ Loyalty team compares member vs non-member tenure before renewing the programme's annual reward budget.,3️⃣ Finance uses tenure by acquisition cohort to set the customer lifespan assumption in CLV forecasts.,4️⃣ Merchandising checks tenure by first-purchase category to decide which entry categories to promote to new buyers.
+
+Dependencies:
+  Events: [purchase]
+
+Source Data: CRM
+
+Report Attributes: |
+  Acquisition Cohort; First Touch Channel Grouping; Customer Loyalty Tier; Customer Value Tier; Customer Tenure Band
+
+Dashboard Usage: [Customer Retention & Loyalty, Customer Lifetime Value Overview]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [time-to-first-purchase, days-since-last-purchase, average-subscription-duration, churned-customers, average-order-value]
+
+Derived KPIs: [customer-lifetime-value]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-29T11:46:54.14+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-29T12:54:40.915+00:00
+
