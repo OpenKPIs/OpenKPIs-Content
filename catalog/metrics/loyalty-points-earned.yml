@@ -1,7 +1,7 @@
 # Metric: Loyalty Points Earned
-# Generated: 2026-09-29T11:48:01.889Z
+# Generated: 2026-09-29T11:48:10.350Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Loyalty Points Earned
 Formula: SUM(points) WHERE ledger_type = 'earn' − SUM(points) WHERE ledger_type = 'earn_reversal', by posting date in the reporting period
@@ -11,6 +11,19 @@ Description: |
 
 Category: Retention
 
+Tags: [metric, E-commerce: Customer Retention, Loyalty & LTV]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Engagement
+
+Scope: User
+
+Measure Type: Sum
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
 
 
 
@@ -18,23 +31,83 @@ Category: Retention
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Posted earn and earn-reversal entries by posting date, excluding goodwill, transfers, migration imports and test/internal members
+  WITH posted_entries AS (
+    SELECT
+      l.ledger_type,
+      l.points
+    FROM `your-project.crm.loyalty_points_ledger` AS l
+    JOIN `your-project.crm.loyalty_members` AS m
+      ON m.member_id = l.member_id
+    WHERE l.posting_status = 'posted'
+      AND DATE(l.posted_at) BETWEEN start_date AND end_date
+      AND l.ledger_type IN ('earn', 'earn_reversal')
+      AND COALESCE(l.earn_source, '') NOT IN ('manual_goodwill', 'member_transfer', 'migration_import')
+      AND NOT COALESCE(m.is_test_account, FALSE)
+      AND NOT COALESCE(m.is_internal_account, FALSE)
+  )
+  -- Net points earned: earns minus reversals posted in the period
+  SELECT
+    SUM(IF(ledger_type = 'earn', points, 0))
+      - SUM(IF(ledger_type = 'earn_reversal', points, 0)) AS loyalty_points_earned
+  FROM posted_entries;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Posted earn and earn-reversal entries by posting date (last 90 days to yesterday), excluding goodwill, transfers, migration imports and test/internal members
+  WITH posted_entries AS (
+    SELECT
+      l.ledger_type,
+      l.points
+    FROM crm_loyalty_points_ledger AS l
+    JOIN crm_loyalty_members AS m
+      ON m.member_id = l.member_id
+    WHERE l.posting_status = 'posted'
+      AND CAST(l.posted_at AS DATE) BETWEEN DATE_SUB(CURRENT_DATE, 90) AND DATE_SUB(CURRENT_DATE, 1)
+      AND l.ledger_type IN ('earn', 'earn_reversal')
+      AND COALESCE(l.earn_source, '') NOT IN ('manual_goodwill', 'member_transfer', 'migration_import')
+      AND NOT COALESCE(m.is_test_account, FALSE)
+      AND NOT COALESCE(m.is_internal_account, FALSE)
+  )
+  -- Net points earned: earns minus reversals posted in the period
+  SELECT
+    SUM(CASE WHEN ledger_type = 'earn' THEN points ELSE 0 END)
+      - SUM(CASE WHEN ledger_type = 'earn_reversal' THEN points ELSE 0 END) AS loyalty_points_earned
+  FROM posted_entries;
+
+Calculation Notes: |
+  1️⃣ Counted on the ledger posting date; pending points (e.g. held until the return window closes) count only once posted to the balance.,2️⃣ Reversals from returns, cancellations and fraud clawbacks are netted in the period they post, not restated to the original earn period.,3️⃣ Includes base, bonus and promotional multiplier points plus non-purchase earns such as enrollment, reviews and referrals.,4️⃣ Excludes manual goodwill adjustments, member-to-member transfers and balances imported from a program migration.,5️⃣ Online and in-store earns both count from the one member ledger; channel is kept as a breakdown, not a filter.,6️⃣ Expired and redeemed points are separate flows and are never subtracted here; test and internal accounts are excluded.,7️⃣ Reported in points; convert to currency at the program's cost per point only for liability and margin views.
+
+Business Use Case: |
+  1️⃣ Finance books the monthly loyalty liability accrual from points earned × cost per point, less expected breakage.,2️⃣ Marketing sees bonus points spike after a multiplier promo and checks incremental sales against the points cost.,3️⃣ Marketing compares points earned per member by loyalty tier before changing tier earn rates.,4️⃣ Finance sees reversals rise against earns and reviews whether points should post only after the return window.
+
+Dependencies:
+  Events: [purchase, loyalty-program-enrollment]
+  Dimensions: [loyalty-member-status, customer-loyalty-tier]
+
+Source Data: CRM
+
+Report Attributes: |
+  Customer Loyalty Tier; Loyalty Member Status; Earn Type (base / bonus / non-purchase); Channel (online / store); Promotion ID
+
+Dashboard Usage: [Loyalty Program Performance, Loyalty Points Liability, Customer Retention Overview]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [reviews-submitted]
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +117,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-29T11:48:01.533+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-29T11:48:10.082+00:00
 
