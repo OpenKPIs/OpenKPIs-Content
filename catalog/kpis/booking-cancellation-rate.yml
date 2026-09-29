@@ -1,0 +1,246 @@
+# KPI: Booking Cancellation Rate
+# Generated: 2026-09-29T05:45:50.303Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Booking Cancellation Rate
+Formula: 100 × distinct eligible confirmed bookings whose eligible items were all cancelled before the booking-level first service start / distinct eligible confirmed bookings whose first service start has passed
+
+Description: |
+  Measures the percentage of eligible confirmed bookings fully cancelled before the booking's first scheduled service starts. Mature cohorts prevent future trips from understating the rate.
+
+Category: Operations
+
+Tags: [kpi, travel, booking, cancellation]
+
+Industry: [["Travel & Hospitality"]]
+
+Priority: High
+
+Core Area: Revenue Management
+
+Scope: Global
+
+Measure Type: Percentage
+
+Aggregation Window: Time based - Daily/Weekly/Monthly/Yearly, Daily, Weekly, Monthly, Quarterly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT CURRENT_TIMESTAMP() AS as_of_timestamp, DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH) AS cohort_start_date
+  ),
+  confirmed AS (
+    SELECT h.booking_id, MIN(h.status_effective_at) AS confirmed_at
+    FROM `your-project.reservations.booking_status_history` AS h CROSS JOIN parameters AS p
+    WHERE h.status_effective_at <= p.as_of_timestamp
+      AND LOWER(h.reservation_status) IN ('confirmed', 'booked', 'reserved', 'ticketed', 'guaranteed')
+    GROUP BY h.booking_id
+  ),
+  ranked_bookings AS (
+    SELECT b.*, c.confirmed_at, ROW_NUMBER() OVER (PARTITION BY b.booking_id ORDER BY b.record_updated_at DESC, b.source_ingested_at DESC) AS record_rank
+    FROM `your-project.reservations.booking_fact` AS b
+    JOIN confirmed AS c USING (booking_id)
+    CROSS JOIN parameters AS p
+    WHERE DATE(b.booking_created_at) >= p.cohort_start_date AND b.record_updated_at <= p.as_of_timestamp
+  ),
+  bookings AS (
+    SELECT booking_id, confirmed_at, booking_created_at, booking_channel, property_id
+    FROM ranked_bookings
+    WHERE record_rank = 1 AND COALESCE(is_test_booking, FALSE) = FALSE
+      AND COALESCE(is_internal_booking, FALSE) = FALSE AND COALESCE(is_fraudulent, FALSE) = FALSE
+      AND LOWER(COALESCE(booking_status, 'unknown')) NOT IN ('void', 'inactive', 'deleted', 'superseded', 'fraudulent', 'test')
+  ),
+  ranked_items AS (
+    SELECT i.*, ROW_NUMBER() OVER (PARTITION BY i.booking_id, i.booking_item_id ORDER BY i.record_updated_at DESC, i.source_ingested_at DESC) AS record_rank
+    FROM `your-project.reservations.booking_item_fact` AS i
+    JOIN bookings AS b USING (booking_id)
+    CROSS JOIN parameters AS p
+    WHERE i.record_updated_at <= p.as_of_timestamp
+  ),
+  items AS (
+    SELECT booking_id, booking_item_id, service_start_at
+    FROM ranked_items
+    WHERE record_rank = 1 AND service_start_at IS NOT NULL AND COALESCE(is_test_item, FALSE) = FALSE
+      AND LOWER(COALESCE(item_record_status, 'active')) NOT IN ('void', 'inactive', 'deleted', 'superseded')
+  ),
+  booking_level AS (
+    SELECT booking_id, MIN(service_start_at) AS first_service_start_at, COUNT(*) AS eligible_item_count
+    FROM items GROUP BY booking_id
+  ),
+  ranked_item_status AS (
+    SELECT s.booking_id, s.booking_item_id, LOWER(TRIM(COALESCE(s.item_status, ''))) AS item_status, s.status_effective_at,
+      ROW_NUMBER() OVER (PARTITION BY s.booking_id, s.booking_item_id ORDER BY s.status_effective_at DESC, s.record_updated_at DESC) AS status_rank
+    FROM `your-project.reservations.booking_item_status_history` AS s
+    JOIN items AS i USING (booking_id, booking_item_id)
+    CROSS JOIN parameters AS p
+    WHERE s.status_effective_at <= p.as_of_timestamp
+  ),
+  first_qualifying_cancellation AS (
+    SELECT s.booking_id, s.booking_item_id, MIN(s.status_effective_at) AS first_cancelled_at
+    FROM ranked_item_status AS s JOIN bookings AS b USING (booking_id)
+    WHERE s.item_status IN ('cancelled', 'canceled') AND s.status_effective_at >= b.confirmed_at
+    GROUP BY s.booking_id, s.booking_item_id
+  ),
+  latest_item_outcome AS (
+    SELECT booking_id, booking_item_id, item_status AS final_item_status
+    FROM ranked_item_status WHERE status_rank = 1
+  ),
+  cancellation_outcomes AS (
+    SELECT c.booking_id, c.booking_item_id, c.first_cancelled_at, f.final_item_status,
+      COUNTIF(s.status_effective_at > c.first_cancelled_at AND s.item_status IN ('reinstated', 'active', 'confirmed', 'booked', 'reserved', 'ticketed', 'checked_in', 'checked-in', 'fulfilled', 'completed', 'consumed', 'used', 'flown', 'stayed')) > 0 AS has_reinstated_or_fulfilled
+    FROM first_qualifying_cancellation AS c
+    JOIN latest_item_outcome AS f USING (booking_id, booking_item_id)
+    LEFT JOIN ranked_item_status AS s USING (booking_id, booking_item_id)
+    GROUP BY c.booking_id, c.booking_item_id, c.first_cancelled_at, f.final_item_status
+  ),
+  outcomes AS (
+    SELECT b.booking_id, DATE(b.booking_created_at) AS booking_cohort_date,
+      COALESCE(NULLIF(b.booking_channel, ''), 'unknown') AS booking_channel, COALESCE(NULLIF(b.property_id, ''), 'unknown') AS property_id,
+      bl.first_service_start_at, bl.eligible_item_count,
+      COUNTIF(c.first_cancelled_at < bl.first_service_start_at
+        AND c.has_reinstated_or_fulfilled = FALSE AND c.final_item_status NOT IN ('reinstated', 'active', 'confirmed', 'booked', 'reserved', 'ticketed', 'checked_in', 'checked-in', 'fulfilled', 'completed', 'consumed', 'used', 'flown', 'stayed')) AS timely_cancelled_item_count
+    FROM bookings AS b JOIN booking_level AS bl USING (booking_id) JOIN items AS i USING (booking_id)
+    LEFT JOIN cancellation_outcomes AS c USING (booking_id, booking_item_id)
+    GROUP BY b.booking_id, booking_cohort_date, booking_channel, property_id, bl.first_service_start_at, bl.eligible_item_count
+  ),
+  eligible AS (
+    SELECT o.*, o.timely_cancelled_item_count = o.eligible_item_count AS is_fully_cancelled
+    FROM outcomes AS o CROSS JOIN parameters AS p WHERE o.first_service_start_at <= p.as_of_timestamp
+  )
+  SELECT booking_cohort_date, booking_channel, property_id, COUNT(*) AS eligible_confirmed_bookings,
+    COUNTIF(is_fully_cancelled) AS fully_cancelled_bookings,
+    ROUND(100 * SAFE_DIVIDE(COUNTIF(is_fully_cancelled), COUNT(*)), 2) AS booking_cancellation_rate_pct
+  FROM eligible GROUP BY booking_cohort_date, booking_channel, property_id
+  ORDER BY booking_cohort_date DESC, booking_channel, property_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT CURRENT_TIMESTAMP AS as_of_timestamp, CURRENT_DATE - INTERVAL '12' MONTH AS cohort_start_date
+  ),
+  confirmed AS (
+    SELECT h.booking_id, MIN(h.status_effective_at) AS confirmed_at
+    FROM booking_status_history_dataset AS h CROSS JOIN parameters AS p
+    WHERE h.status_effective_at <= p.as_of_timestamp
+      AND LOWER(h.reservation_status) IN ('confirmed', 'booked', 'reserved', 'ticketed', 'guaranteed')
+    GROUP BY h.booking_id
+  ),
+  ranked_bookings AS (
+    SELECT b.*, c.confirmed_at, ROW_NUMBER() OVER (PARTITION BY b.booking_id ORDER BY b.record_updated_at DESC, b.source_ingested_at DESC) AS record_rank
+    FROM booking_fact_dataset AS b JOIN confirmed AS c ON c.booking_id = b.booking_id CROSS JOIN parameters AS p
+    WHERE CAST(b.booking_created_at AS DATE) >= p.cohort_start_date AND b.record_updated_at <= p.as_of_timestamp
+  ),
+  bookings AS (
+    SELECT booking_id, confirmed_at, booking_created_at, booking_channel, property_id FROM ranked_bookings
+    WHERE record_rank = 1 AND COALESCE(is_test_booking, FALSE) = FALSE AND COALESCE(is_internal_booking, FALSE) = FALSE
+      AND COALESCE(is_fraudulent, FALSE) = FALSE AND LOWER(COALESCE(booking_status, 'unknown')) NOT IN ('void', 'inactive', 'deleted', 'superseded', 'fraudulent', 'test')
+  ),
+  ranked_items AS (
+    SELECT i.*, ROW_NUMBER() OVER (PARTITION BY i.booking_id, i.booking_item_id ORDER BY i.record_updated_at DESC, i.source_ingested_at DESC) AS record_rank
+    FROM booking_item_fact_dataset AS i JOIN bookings AS b ON b.booking_id = i.booking_id CROSS JOIN parameters AS p
+    WHERE i.record_updated_at <= p.as_of_timestamp
+  ),
+  items AS (
+    SELECT booking_id, booking_item_id, service_start_at FROM ranked_items
+    WHERE record_rank = 1 AND service_start_at IS NOT NULL AND COALESCE(is_test_item, FALSE) = FALSE
+      AND LOWER(COALESCE(item_record_status, 'active')) NOT IN ('void', 'inactive', 'deleted', 'superseded')
+  ),
+  booking_level AS (
+    SELECT booking_id, MIN(service_start_at) AS first_service_start_at, COUNT(*) AS eligible_item_count FROM items GROUP BY booking_id
+  ),
+  ranked_item_status AS (
+    SELECT s.booking_id, s.booking_item_id, LOWER(TRIM(COALESCE(s.item_status, ''))) AS item_status, s.status_effective_at,
+      ROW_NUMBER() OVER (PARTITION BY s.booking_id, s.booking_item_id ORDER BY s.status_effective_at DESC, s.record_updated_at DESC) AS status_rank
+    FROM booking_item_status_history_dataset AS s JOIN items AS i ON i.booking_id = s.booking_id AND i.booking_item_id = s.booking_item_id
+    CROSS JOIN parameters AS p WHERE s.status_effective_at <= p.as_of_timestamp
+  ),
+  first_qualifying_cancellation AS (
+    SELECT s.booking_id, s.booking_item_id, MIN(s.status_effective_at) AS first_cancelled_at
+    FROM ranked_item_status AS s JOIN bookings AS b ON b.booking_id = s.booking_id
+    WHERE s.item_status IN ('cancelled', 'canceled') AND s.status_effective_at >= b.confirmed_at
+    GROUP BY s.booking_id, s.booking_item_id
+  ),
+  latest_item_outcome AS (
+    SELECT booking_id, booking_item_id, item_status AS final_item_status
+    FROM ranked_item_status WHERE status_rank = 1
+  ),
+  cancellation_outcomes AS (
+    SELECT c.booking_id, c.booking_item_id, c.first_cancelled_at, f.final_item_status,
+      MAX(CASE WHEN s.status_effective_at > c.first_cancelled_at AND s.item_status IN ('reinstated', 'active', 'confirmed', 'booked', 'reserved', 'ticketed', 'checked_in', 'checked-in', 'fulfilled', 'completed', 'consumed', 'used', 'flown', 'stayed') THEN 1 ELSE 0 END) AS has_reinstated_or_fulfilled
+    FROM first_qualifying_cancellation AS c
+    JOIN latest_item_outcome AS f ON f.booking_id = c.booking_id AND f.booking_item_id = c.booking_item_id
+    LEFT JOIN ranked_item_status AS s ON s.booking_id = c.booking_id AND s.booking_item_id = c.booking_item_id
+    GROUP BY c.booking_id, c.booking_item_id, c.first_cancelled_at, f.final_item_status
+  ),
+  outcomes AS (
+    SELECT b.booking_id, CAST(b.booking_created_at AS DATE) AS booking_cohort_date,
+      COALESCE(NULLIF(b.booking_channel, ''), 'unknown') AS booking_channel, COALESCE(NULLIF(b.property_id, ''), 'unknown') AS property_id,
+      bl.first_service_start_at, bl.eligible_item_count,
+      SUM(CASE WHEN c.first_cancelled_at < bl.first_service_start_at
+        AND c.has_reinstated_or_fulfilled = 0 AND c.final_item_status NOT IN ('reinstated', 'active', 'confirmed', 'booked', 'reserved', 'ticketed', 'checked_in', 'checked-in', 'fulfilled', 'completed', 'consumed', 'used', 'flown', 'stayed') THEN 1 ELSE 0 END) AS timely_cancelled_item_count
+    FROM bookings AS b JOIN booking_level AS bl ON bl.booking_id = b.booking_id JOIN items AS i ON i.booking_id = b.booking_id
+    LEFT JOIN cancellation_outcomes AS c ON c.booking_id = i.booking_id AND c.booking_item_id = i.booking_item_id
+    GROUP BY b.booking_id, CAST(b.booking_created_at AS DATE), booking_channel, property_id, bl.first_service_start_at, bl.eligible_item_count
+  ),
+  eligible AS (
+    SELECT o.*, CASE WHEN o.timely_cancelled_item_count = o.eligible_item_count THEN 1 ELSE 0 END AS is_fully_cancelled
+    FROM outcomes AS o CROSS JOIN parameters AS p WHERE o.first_service_start_at <= p.as_of_timestamp
+  )
+  SELECT booking_cohort_date, booking_channel, property_id, COUNT(*) AS eligible_confirmed_bookings,
+    SUM(is_fully_cancelled) AS fully_cancelled_bookings,
+    ROUND(100.0 * SUM(is_fully_cancelled) / NULLIF(COUNT(*), 0), 2) AS booking_cancellation_rate_pct
+  FROM eligible GROUP BY booking_cohort_date, booking_channel, property_id
+  ORDER BY booking_cohort_date DESC, booking_channel, property_id;
+
+Calculation Notes: |
+  1️⃣ Count each canonical booking ID once after resolving the latest booking record.
+  2️⃣ Include confirmed bookings only after the booking-level first service start has passed.
+  3️⃣ Qualify when every item was first cancelled before service and no later status reinstates or fulfills it.
+  4️⃣ Exclude void, inactive, deleted, superseded, test, internal, and fraudulent records.
+  5️⃣ Emit no rate row when no eligible matured bookings exist.
+
+Business Use Case: |
+  1️⃣ Revenue Management reviews channel spikes and adjusts deposit or guarantee rules.
+  2️⃣ Operations investigates supplier, property, and cancellation-reason outliers.
+  3️⃣ Marketing suppresses campaigns that produce unusually unstable bookings.
+
+Dependencies:
+  Events: [purchase, order-cancellation]
+
+Source Data: Backend reservation, booking, and property-management databases with effective-dated booking and item status history
+
+Report Attributes: |
+  Booking Cohort Date; Booking Channel; Property or Supplier; Market; Travel Product Type; Rate Plan; Refundability; Cancellation Initiator; Cancellation Reason; Booking Lead-Time Band; Customer Loyalty Tier
+
+Dashboard Usage: [Executive Booking Performance Dashboard, Revenue Management Dashboard, Cancellation Operations Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [refund-rate, guest-no-show-rate, customer-retention-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-03T12:30:18.014849+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-29T05:45:49.617+00:00
+
