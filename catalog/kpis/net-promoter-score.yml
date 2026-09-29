@@ -1,0 +1,261 @@
+# KPI: Net Promoter Score
+# Generated: 2026-09-29T12:54:01.367Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Net Promoter Score
+Formula: ((Promoter Responses − Detractor Responses) / Valid Survey Responses) × 100
+
+Description: |
+  Promoters (9–10) minus Detractors (0–6) as a share of all answers to the 0–10 likelihood-to-recommend question, from −100 to +100. Measures loyalty and advocacy, unlike CSAT, which rates one interaction.
+
+Category: Experience
+
+Tags: [kpi, E-commerce: Customer Retention, Loyalty & LTV]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Measure Type: Percentage
+
+Aggregation Window: Monthly, Quarterly
+
+GA4 Event: |
+  submit_form
+
+Adobe Event: |
+  form_submit
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "NPS Survey Submitted",
+          "eventAction": "submit_form",
+          "type": "other"
+        },
+        "attributes": {
+          "formName": "NPS Survey",
+          "formID": "nps_survey_form",
+          "formType": "nps_survey",
+          "rating": 9,
+          "ratingScaleMax": 10,
+          "surveyType": "relationship",
+          "trafficType": "external"
+        }
+      }
+    ],
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "USER_ID"
+            }
+          }
+        ]
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_type": "nps_survey",
+    "form_id": "nps_survey_form",
+    "form_name": "NPS Survey",
+    "rating": 9,
+    "rating_scale_max": 10,
+    "survey_type": "relationship",
+    "traffic_type": "external",
+    "user_id": "USER_ID"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "form_submit",
+    "formData": {
+      "formType": "nps_survey",
+      "formId": "nps_survey_form",
+      "formName": "NPS Survey",
+      "rating": 9,
+      "ratingScaleMax": 10,
+      "surveyType": "relationship",
+      "trafficType": "external"
+    },
+    "user": {
+      "userId": "USER_ID"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "web": {
+      "formDetails": {
+        "formType": "nps_survey",
+        "formID": "nps_survey_form",
+        "formName": "NPS Survey"
+      }
+    },
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "ECID-1",
+          "authenticatedState": "authenticated",
+          "primary": true
+        }
+      ]
+    },
+    "_tenant": {
+      "formData": {
+        "rating": 9,
+        "ratingScaleMax": 10,
+        "surveyType": "relationship",
+        "trafficType": "external"
+      },
+      "user": {
+        "userId": "USER_ID"
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- NPS survey submissions, dated by submission; the survey wave is the submission month (no wave id is collected)
+  WITH nps_submissions AS (
+    SELECT
+      COALESCE(user_id, (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'user_id')) AS user_id,
+      event_timestamp,
+      DATE_TRUNC(PARSE_DATE('%Y%m%d', event_date), MONTH) AS survey_month,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'survey_type') AS survey_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type,
+      (SELECT COALESCE(CAST(value.int_value AS FLOAT64), value.double_value, value.float_value, SAFE_CAST(value.string_value AS FLOAT64))
+         FROM UNNEST(event_params) WHERE key = 'rating') AS rating
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'submit_form'
+      AND (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'form_type') = 'nps_survey'
+  ),
+  -- Valid integer 0-10 ratings from non-internal users; latest response per user, survey type and wave
+  latest_responses AS (
+    SELECT survey_month, survey_type, rating
+    FROM nps_submissions
+    WHERE user_id IS NOT NULL
+      AND rating IS NOT NULL
+      AND rating = TRUNC(rating)
+      AND rating BETWEEN 0 AND 10
+      AND COALESCE(traffic_type, '') NOT IN ('internal', 'employee', 'test')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY user_id, survey_type, survey_month ORDER BY event_timestamp DESC) = 1
+  )
+  -- NPS per wave and survey type (relationship and transactional kept apart), suppressed below 100 valid responses
+  SELECT
+    survey_month,
+    survey_type,
+    IF(COUNT(*) < 100, NULL,
+       CAST(ROUND(100 * (COUNTIF(rating >= 9) - COUNTIF(rating <= 6)) / COUNT(*)) AS INT64)) AS net_promoter_score
+  FROM latest_responses
+  GROUP BY survey_month, survey_type
+  ORDER BY survey_month, survey_type;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- NPS survey submissions (last 90 days to yesterday), dated by submission; the survey wave is the submission month (no wave id is collected)
+  WITH nps_submissions AS (
+    SELECT
+      _tenant.user.userId AS user_id,
+      timestamp AS event_timestamp,
+      DATE_TRUNC('month', timestamp) AS survey_month,
+      _tenant.formData.surveyType AS survey_type,
+      _tenant.formData.trafficType AS traffic_type,
+      CAST(_tenant.formData.rating AS DOUBLE) AS rating
+    FROM aep_web_events_dataset
+    WHERE CAST(timestamp AS DATE) BETWEEN DATE_SUB(CURRENT_DATE, 90) AND DATE_SUB(CURRENT_DATE, 1)
+      AND eventType = 'web.formFilledOut'
+      AND web.formDetails.formType = 'nps_survey'
+  ),
+  -- Valid integer 0-10 ratings from non-internal users; latest response per user, survey type and wave
+  latest_responses AS (
+    SELECT survey_month, survey_type, rating
+    FROM (
+      SELECT
+        survey_month,
+        survey_type,
+        rating,
+        ROW_NUMBER() OVER (PARTITION BY user_id, survey_type, survey_month ORDER BY event_timestamp DESC) AS rn
+      FROM nps_submissions
+      WHERE user_id IS NOT NULL
+        AND rating IS NOT NULL
+        AND rating = FLOOR(rating)
+        AND rating BETWEEN 0 AND 10
+        AND COALESCE(traffic_type, '') NOT IN ('internal', 'employee', 'test')
+    ) AS ranked
+    WHERE rn = 1
+  )
+  -- NPS per wave and survey type (relationship and transactional kept apart), suppressed below 100 valid responses
+  SELECT
+    survey_month,
+    survey_type,
+    CASE WHEN COUNT(*) < 100 THEN NULL
+         ELSE CAST(ROUND(100.0 * (SUM(CASE WHEN rating >= 9 THEN 1 ELSE 0 END) - SUM(CASE WHEN rating <= 6 THEN 1 ELSE 0 END)) / COUNT(*)) AS INT)
+    END AS net_promoter_score
+  FROM latest_responses
+  GROUP BY survey_month, survey_type
+  ORDER BY survey_month, survey_type;
+
+Calculation Notes: |
+  1️⃣ Responses: submit_form where form_type = nps_survey, keyed on user_id; rating is the 0–10 likelihood-to-recommend answer.
+  2️⃣ Promoters score 9–10, Passives 7–8, Detractors 0–6. Passives count in the denominator only.
+  3️⃣ One response per user_id and survey type per submission calendar month; keep the latest. Drop null, non-integer or out-of-range ratings.
+  4️⃣ Reported in points from −100 to +100, rounded to a whole number; suppress the value when valid responses fall below 100.
+  5️⃣ Relationship NPS (periodic, all customers) and transactional NPS (post-order) are separate series; never blend them in one figure.
+  6️⃣ Exclude employee, internal and test accounts. Attribute each response to its submission date, not the order or invite date.
+
+Business Use Case: |
+  1️⃣ CX Lead: detractor share rises after a fulfilment change → send detractor comments to Operations for root cause.
+  2️⃣ Customer Service: a detractor response arrives → call the customer back within 48 hours to close the loop.
+  3️⃣ Marketing: promoter list refreshed after each wave → invite promoters to the referral and review programmes.
+  4️⃣ Loyalty team: NPS drops for one loyalty tier → review that tier's benefits before the next programme cycle.
+
+Dependencies:
+  Dimensions: [customer-loyalty-tier, customer-tenure-band, fulfillment-method, device-category, first-touch-channel-grouping]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Survey Type (Relationship / Transactional); Customer Loyalty Tier; Customer Tenure Band; Fulfillment Method; Device Category; First Touch Channel Grouping
+
+Dashboard Usage: [Customer Experience Scorecard, Customer Retention & Loyalty Dashboard, Executive E-commerce Overview]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [delivery-satisfaction-score, guest-satisfaction-score, customer-retention-rate, customer-lifetime-value]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-29T10:16:35.731+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-29T12:54:01.018+00:00
+
