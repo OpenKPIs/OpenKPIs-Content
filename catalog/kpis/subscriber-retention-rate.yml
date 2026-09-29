@@ -1,0 +1,177 @@
+# KPI: Subscriber Retention Rate
+# Generated: 2026-09-29T12:54:27.190Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Subscriber Retention Rate
+Formula: ((Active Subscribers at Period End - New Subscribers in Period) / Active Subscribers at Period Start) × 100
+
+Description: |
+  E-commerce specialisation of Customer Retention Rate: share of subscribers active at period start who are still active at period end. Read from subscription status, not order history.
+
+Category: Retention
+
+Tags: [kpi, E-commerce: Customer Retention, Loyalty & LTV]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Measure Type: Percentage
+
+Aggregation Window: Monthly, Quarterly, Yearly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH), MONTH);
+  DECLARE end_date DATE DEFAULT LAST_DAY(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH));
+  DECLARE store_tz STRING DEFAULT 'America/New_York';
+  
+  -- Status snapshots at 00:00 store time on the first day of the period and the day after it ends
+  WITH snapshots AS (
+    SELECT 'start' AS snapshot, TIMESTAMP(start_date, store_tz) AS snapshot_ts
+    UNION ALL
+    SELECT 'end', TIMESTAMP(DATE_ADD(end_date, INTERVAL 1 DAY), store_tz)
+  ),
+  -- Customers with any active, paused or in-dunning paid subscription at each snapshot, excluding test/employee accounts and unconverted trials
+  active_customers AS (
+    SELECT DISTINCT
+      s.snapshot,
+      h.customer_id
+    FROM `your-project.crm.subscription_status_history` AS h
+    JOIN snapshots AS s
+      ON h.valid_from <= s.snapshot_ts
+     AND (h.valid_to IS NULL OR h.valid_to > s.snapshot_ts)
+    JOIN `your-project.crm.customers` AS c
+      ON c.customer_id = h.customer_id
+    WHERE (h.status IN ('active', 'paused')
+           OR (h.status = 'past_due' AND h.dunning_final_retry_at > s.snapshot_ts))
+      AND NOT (COALESCE(h.is_trial, FALSE)
+               AND (h.first_paid_order_at IS NULL OR h.first_paid_order_at > s.snapshot_ts))
+      AND NOT COALESCE(c.is_test_account, FALSE)
+      AND NOT COALESCE(c.is_employee, FALSE)
+  ),
+  -- One row per customer: active at period start, active at period end
+  customer_flags AS (
+    SELECT
+      customer_id,
+      LOGICAL_OR(snapshot = 'start') AS active_start,
+      LOGICAL_OR(snapshot = 'end') AS active_end
+    FROM active_customers
+    GROUP BY customer_id
+  )
+  -- ((Active at end - New in period) / Active at start) x 100
+  SELECT
+    COUNTIF(active_start) AS active_subscribers_start,
+    COUNTIF(active_end) AS active_subscribers_end,
+    COUNTIF(active_end AND NOT active_start) AS new_subscribers,
+    ROUND(SAFE_DIVIDE(
+      COUNTIF(active_end) - COUNTIF(active_end AND NOT active_start),
+      COUNTIF(active_start)) * 100, 2) AS subscriber_retention_rate
+  FROM customer_flags;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Status snapshots at 00:00 store time on the first day of the previous calendar month and the day after it ends
+  WITH snapshots AS (
+    SELECT 'start' AS snapshot,
+           to_utc_timestamp(CAST(trunc(add_months(CURRENT_DATE, -1), 'MM') AS TIMESTAMP), 'America/New_York') AS snapshot_ts
+    UNION ALL
+    SELECT 'end',
+           to_utc_timestamp(CAST(date_add(last_day(add_months(CURRENT_DATE, -1)), 1) AS TIMESTAMP), 'America/New_York')
+  ),
+  -- Customers with any active, paused or in-dunning paid subscription at each snapshot, excluding test/employee accounts and unconverted trials
+  active_customers AS (
+    SELECT DISTINCT
+      s.snapshot,
+      h.customer_id
+    FROM crm_subscription_status_history AS h
+    JOIN snapshots AS s
+      ON h.valid_from <= s.snapshot_ts
+     AND (h.valid_to IS NULL OR h.valid_to > s.snapshot_ts)
+    JOIN crm_customers AS c
+      ON c.customer_id = h.customer_id
+    WHERE (h.status IN ('active', 'paused')
+           OR (h.status = 'past_due' AND h.dunning_final_retry_at > s.snapshot_ts))
+      AND NOT (COALESCE(h.is_trial, FALSE)
+               AND (h.first_paid_order_at IS NULL OR h.first_paid_order_at > s.snapshot_ts))
+      AND NOT COALESCE(c.is_test_account, FALSE)
+      AND NOT COALESCE(c.is_employee, FALSE)
+  ),
+  -- One row per customer: active at period start, active at period end
+  customer_flags AS (
+    SELECT
+      customer_id,
+      MAX(CASE WHEN snapshot = 'start' THEN 1 ELSE 0 END) AS active_start,
+      MAX(CASE WHEN snapshot = 'end' THEN 1 ELSE 0 END) AS active_end
+    FROM active_customers
+    GROUP BY customer_id
+  )
+  -- ((Active at end - New in period) / Active at start) x 100
+  SELECT
+    SUM(active_start) AS active_subscribers_start,
+    SUM(active_end) AS active_subscribers_end,
+    SUM(CASE WHEN active_end = 1 AND active_start = 0 THEN 1 ELSE 0 END) AS new_subscribers,
+    ROUND((SUM(active_end) - SUM(CASE WHEN active_end = 1 AND active_start = 0 THEN 1 ELSE 0 END))
+          * 100.0 / NULLIF(SUM(active_start), 0), 2) AS subscriber_retention_rate
+  FROM customer_flags;
+
+Calculation Notes: |
+  1️⃣ Active = subscription status active or paused; cancelled, expired and churned-after-dunning are not active.
+  2️⃣ Count subscribers by customer_id, not subscriptions: a customer with two plans counts once and is retained if any plan is active.
+  3️⃣ New Subscribers = everyone active at end but not at start: first-time sign-ups and win-backs reactivated mid-period.
+  4️⃣ Past-due subscriptions in dunning stay active until the retry window closes; churn is dated to the final failed retry.
+  5️⃣ Plan swaps, frequency changes and skipped deliveries count as retained; they are not cancellations.
+  6️⃣ Exclude test and employee accounts, and free trials not yet converted to a paid first order.
+  7️⃣ Snapshots at 00:00 store time: first day of the period and the day after it ends. Rates from different window lengths are not comparable.
+
+Business Use Case: |
+  1️⃣ Retention Marketing: monthly rate falls below target → send skip and pause offers to at-risk subscribers before renewal.
+  2️⃣ Merchandising: one replenishment product retains worse → review its default delivery frequency and bundle.
+  3️⃣ Finance: rate trend shifts → update the subscription revenue forecast and CAC payback assumptions.
+  4️⃣ Customer Service: churn clusters after failed payments → extend dunning retries and add card-update emails.
+
+Dependencies:
+  Dimensions: [subscription-status]
+  KPIs: [customer-retention-rate]
+
+Source Data: CRM
+
+Report Attributes: |
+  Subscription Plan; Delivery Frequency; Acquisition Cohort; Acquisition Channel; Customer Tenure Band
+
+Dashboard Usage: [Subscription Health, Customer Retention & LTV]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [customer-retention-rate, net-revenue-retention, customer-lifetime-value, ltv-cac-ratio]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-29T10:17:05.733+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-29T12:54:26.687+00:00
+
