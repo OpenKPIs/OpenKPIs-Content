@@ -1,7 +1,7 @@
 # KPI: LTV-CAC Ratio
-# Generated: 2026-09-29T10:16:20.106Z
+# Generated: 2026-09-29T10:16:29.852Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: LTV-CAC Ratio
 Formula: (Cohort Contribution Margin over LTV Horizon / New Customers in Cohort) / (Acquisition Spend in Cohort Period / New Customers in Cohort)
@@ -11,29 +11,446 @@ Description: |
 
 Category: Acquisition
 
+Tags: [kpi, E-commerce: Customer Retention, Loyalty & LTV]
 
+Industry: [["E-commerce"]]
 
+Priority: High
 
+Core Area: Monetization
 
+Scope: Global
 
+Measure Type: Ratio
 
+Aggregation Window: Monthly, Quarterly, Yearly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "txn-1",
+      "profile": {
+        "profileInfo": {
+          "profileID": "user-1"
+        }
+      },
+      "total": {
+        "transactionTotal": 100,
+        "currency": "USD"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-1",
+            "productName": "item"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 100
+          }
+        }
+      ],
+      "attributes": {
+        "customerType": "new",
+        "firstTouchSource": "google",
+        "firstTouchMedium": "cpc"
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "txn-1",
+      "value": 100,
+      "currency": "USD",
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "price": 100,
+          "quantity": 1
+        }
+      ]
+    },
+    "user_id": "user-1",
+    "customer_type": "new",
+    "first_touch_source": "google",
+    "first_touch_medium": "cpc"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "purchase": {
+      "transactionID": "txn-1",
+      "value": 100,
+      "currency": "USD",
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "price": 100,
+          "quantity": 1
+        }
+      ]
+    },
+    "user_id": "user-1",
+    "customer_type": "new",
+    "first_touch_source": "google",
+    "first_touch_medium": "cpc"
+  }
 
+XDM Mapping: |
+  {
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "ECID-1",
+          "authenticatedState": "ambiguous",
+          "primary": true
+        }
+      ]
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "txn-1",
+        "priceTotal": 100,
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "name": "item",
+        "priceTotal": 100,
+        "quantity": 1
+      }
+    ],
+    "_tenantId": {
+      "userId": "user-1",
+      "customerType": "new",
+      "firstTouch": {
+        "source": "google",
+        "medium": "cpc"
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- One LTV horizon for every cohort; cohorts are the 12 latest calendar months whose horizon has fully elapsed, so LTV is realised, never projected
+  DECLARE horizon_months INT64 DEFAULT 12;
+  DECLARE end_date DATE DEFAULT LAST_DAY(DATE_SUB(CURRENT_DATE(), INTERVAL horizon_months + 1 MONTH));
+  DECLARE start_date DATE DEFAULT DATE_TRUNC(DATE_SUB(end_date, INTERVAL 11 MONTH), MONTH);
+  
+  -- The spend table's channel column carries the same first-touch source / medium key as the purchase event's first_touch_source / first_touch_medium
+  WITH orders_raw AS (
+    -- Commerce platform orders with contribution margin net of refunds, COGS, shipping and payment fees
+    SELECT
+      order_id,
+      user_id,
+      email_sha256,
+      order_timestamp,
+      discount_amount,
+      net_revenue - refund_amount - cogs - shipping_cost - payment_fees AS contribution_margin
+    FROM `your-project.commerce.orders`
+    WHERE DATE(order_timestamp) < CURRENT_DATE()
+  ),
+  email_to_user AS (
+    -- Hashed email mapped to the resolved user_id that owns it, so guest orders join that account
+    SELECT email_sha256, MIN(user_id) AS user_id
+    FROM orders_raw
+    WHERE user_id IS NOT NULL AND email_sha256 IS NOT NULL
+    GROUP BY email_sha256
+  ),
+  orders AS (
+    -- One customer key per order: user_id, else the user_id stitched by hashed email, else the hashed email
+    SELECT
+      o.order_id,
+      o.order_timestamp,
+      o.discount_amount,
+      o.contribution_margin,
+      COALESCE(o.user_id, e.user_id, o.email_sha256) AS customer_key
+    FROM orders_raw o
+    LEFT JOIN email_to_user e ON o.email_sha256 = e.email_sha256
+    WHERE COALESCE(o.user_id, e.user_id, o.email_sha256) IS NOT NULL
+  ),
+  first_orders AS (
+    -- First purchase per customer across all history; customers whose first purchase falls in the cohort window are new
+    SELECT
+      customer_key,
+      first_order.order_id AS first_order_id,
+      first_order.order_timestamp AS first_order_ts,
+      first_order.discount_amount AS first_order_discount
+    FROM (
+      SELECT customer_key, ARRAY_AGG(STRUCT(order_id, order_timestamp, discount_amount) ORDER BY order_timestamp, order_id LIMIT 1)[OFFSET(0)] AS first_order
+      FROM orders
+      GROUP BY customer_key
+    )
+    WHERE DATE(first_order.order_timestamp) BETWEEN start_date AND end_date
+  ),
+  first_touch AS (
+    -- First-touch source / medium carried as event params on the purchase event of each first order
+    SELECT
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'transaction_id') AS transaction_id,
+      MIN(CONCAT(
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'first_touch_source'), ' / ',
+        (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'first_touch_medium'))) AS channel
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL 1 DAY))
+      AND event_name = 'purchase'
+    GROUP BY transaction_id
+  ),
+  customers AS (
+    -- New customers with cohort month, first-touch channel, first-order discount and contribution margin within the horizon
+    SELECT
+      f.customer_key,
+      DATE_TRUNC(DATE(f.first_order_ts), MONTH) AS cohort_month,
+      t.channel,
+      f.first_order_discount,
+      SUM(o.contribution_margin) AS ltv_margin
+    FROM first_orders f
+    JOIN orders o
+      ON o.customer_key = f.customer_key
+      AND o.order_timestamp >= f.first_order_ts
+      AND DATE(o.order_timestamp) < DATE_ADD(DATE(f.first_order_ts), INTERVAL horizon_months MONTH)
+    LEFT JOIN first_touch t ON t.transaction_id = f.first_order_id
+    GROUP BY f.customer_key, cohort_month, t.channel, f.first_order_discount
+  ),
+  cohort_customers AS (
+    -- New customers, cohort margin and first-order discounts per channel, plus a blended row that keeps customers with no channel
+    SELECT cohort_month, channel, COUNT(*) AS new_customers, SUM(ltv_margin) AS cohort_margin, SUM(first_order_discount) AS first_order_discounts
+    FROM customers
+    WHERE channel IS NOT NULL
+    GROUP BY cohort_month, channel
+    UNION ALL
+    SELECT cohort_month, 'All channels', COUNT(*), SUM(ltv_margin), SUM(first_order_discount)
+    FROM customers
+    GROUP BY cohort_month
+  ),
+  cohort_spend AS (
+    -- Paid media and affiliate commissions per cohort month by channel, plus a blended row that keeps spend with no channel
+    SELECT DATE_TRUNC(spend_date, MONTH) AS cohort_month, channel, SUM(amount) AS spend
+    FROM `your-project.marketing.acquisition_spend`
+    WHERE spend_type IN ('paid_media', 'affiliate_commission')
+      AND spend_date BETWEEN start_date AND end_date
+      AND channel IS NOT NULL
+    GROUP BY cohort_month, channel
+    UNION ALL
+    SELECT DATE_TRUNC(spend_date, MONTH), 'All channels', SUM(amount)
+    FROM `your-project.marketing.acquisition_spend`
+    WHERE spend_type IN ('paid_media', 'affiliate_commission')
+      AND spend_date BETWEEN start_date AND end_date
+    GROUP BY 1
+  ),
+  cohort_totals AS (
+    -- Customers, margin and total acquisition cost (spend + first-order discounts) per cohort and channel
+    SELECT
+      COALESCE(c.cohort_month, s.cohort_month) AS cohort_month,
+      COALESCE(c.channel, s.channel) AS first_touch_channel,
+      COALESCE(c.new_customers, 0) AS new_customers,
+      c.cohort_margin,
+      COALESCE(s.spend, 0) + COALESCE(c.first_order_discounts, 0) AS acquisition_cost
+    FROM cohort_customers c
+    FULL OUTER JOIN cohort_spend s ON c.cohort_month = s.cohort_month AND c.channel = s.channel
+  )
+  -- LTV per new customer over CAC per new customer as x:1; null on zero new customers or zero spend; low-volume flag under 100 customers
+  SELECT
+    cohort_month,
+    first_touch_channel,
+    new_customers,
+    ROUND(SAFE_DIVIDE(cohort_margin, new_customers), 2) AS ltv,
+    ROUND(SAFE_DIVIDE(acquisition_cost, new_customers), 2) AS cac,
+    IF(new_customers = 0 OR acquisition_cost = 0, NULL, ROUND((cohort_margin / new_customers) / (acquisition_cost / new_customers), 2)) AS ltv_cac_ratio,
+    IF(new_customers = 0 OR acquisition_cost = 0, NULL, CONCAT(FORMAT('%.1f', (cohort_margin / new_customers) / (acquisition_cost / new_customers)), ':1')) AS ltv_cac_label,
+    new_customers < 100 AS low_volume
+  FROM cohort_totals
+  ORDER BY cohort_month, first_touch_channel;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- The spend table's channel column carries the same first-touch source / medium key as the purchase hit's _tenantId.firstTouch.source / medium
+  WITH params AS (
+    -- One LTV horizon for every cohort; cohorts are the 12 latest calendar months whose horizon has fully elapsed, so LTV is realised, never projected
+    SELECT horizon_months, end_date, trunc(add_months(end_date, -11), 'MM') AS start_date
+    FROM (
+      SELECT horizon_months, last_day(add_months(current_date(), -(horizon_months + 1))) AS end_date
+      FROM (SELECT 12 AS horizon_months) h
+    ) e
+  ),
+  orders_raw AS (
+    -- Commerce platform orders with contribution margin net of refunds, COGS, shipping and payment fees
+    SELECT
+      order_id,
+      user_id,
+      email_sha256,
+      order_timestamp,
+      discount_amount,
+      net_revenue - refund_amount - cogs - shipping_cost - payment_fees AS contribution_margin
+    FROM commerce_orders
+    WHERE to_date(order_timestamp) < current_date()
+  ),
+  email_to_user AS (
+    -- Hashed email mapped to the resolved user_id that owns it, so guest orders join that account
+    SELECT email_sha256, MIN(user_id) AS user_id
+    FROM orders_raw
+    WHERE user_id IS NOT NULL AND email_sha256 IS NOT NULL
+    GROUP BY email_sha256
+  ),
+  orders AS (
+    -- One customer key per order: user_id, else the user_id stitched by hashed email, else the hashed email
+    SELECT
+      o.order_id,
+      o.order_timestamp,
+      o.discount_amount,
+      o.contribution_margin,
+      COALESCE(o.user_id, e.user_id, o.email_sha256) AS customer_key
+    FROM orders_raw o
+    LEFT JOIN email_to_user e ON o.email_sha256 = e.email_sha256
+    WHERE COALESCE(o.user_id, e.user_id, o.email_sha256) IS NOT NULL
+  ),
+  first_orders AS (
+    -- First purchase per customer across all history; customers whose first purchase falls in the cohort window are new
+    SELECT customer_key, order_id AS first_order_id, order_timestamp AS first_order_ts, discount_amount AS first_order_discount
+    FROM (
+      SELECT o.*, ROW_NUMBER() OVER (PARTITION BY customer_key ORDER BY order_timestamp, order_id) AS rn
+      FROM orders o
+    ) r
+    CROSS JOIN params
+    WHERE rn = 1
+      AND to_date(order_timestamp) BETWEEN params.start_date AND params.end_date
+  ),
+  first_touch AS (
+    -- First-touch source / medium carried in _tenantId.firstTouch on the purchase hit of each first order
+    SELECT
+      commerce.order.purchaseID AS transaction_id,
+      MIN(concat(_tenantId.firstTouch.source, ' / ', _tenantId.firstTouch.medium)) AS channel
+    FROM aep_web_events_dataset
+    CROSS JOIN params
+    WHERE commerce.purchases.value = 1
+      AND to_date(timestamp) BETWEEN params.start_date AND date_add(params.end_date, 1)
+    GROUP BY commerce.order.purchaseID
+  ),
+  customers AS (
+    -- New customers with cohort month, first-touch channel, first-order discount and contribution margin within the horizon
+    SELECT
+      f.customer_key,
+      trunc(to_date(f.first_order_ts), 'MM') AS cohort_month,
+      t.channel,
+      f.first_order_discount,
+      SUM(o.contribution_margin) AS ltv_margin
+    FROM first_orders f
+    CROSS JOIN params
+    JOIN orders o
+      ON o.customer_key = f.customer_key
+      AND o.order_timestamp >= f.first_order_ts
+      AND to_date(o.order_timestamp) < add_months(to_date(f.first_order_ts), params.horizon_months)
+    LEFT JOIN first_touch t ON t.transaction_id = f.first_order_id
+    GROUP BY f.customer_key, trunc(to_date(f.first_order_ts), 'MM'), t.channel, f.first_order_discount
+  ),
+  cohort_customers AS (
+    -- New customers, cohort margin and first-order discounts per channel, plus a blended row that keeps customers with no channel
+    SELECT cohort_month, channel, COUNT(*) AS new_customers, SUM(ltv_margin) AS cohort_margin, SUM(first_order_discount) AS first_order_discounts
+    FROM customers
+    WHERE channel IS NOT NULL
+    GROUP BY cohort_month, channel
+    UNION ALL
+    SELECT cohort_month, 'All channels', COUNT(*), SUM(ltv_margin), SUM(first_order_discount)
+    FROM customers
+    GROUP BY cohort_month
+  ),
+  cohort_spend AS (
+    -- Paid media and affiliate commissions per cohort month by channel, plus a blended row that keeps spend with no channel
+    SELECT trunc(s.spend_date, 'MM') AS cohort_month, s.channel, SUM(s.amount) AS spend
+    FROM acquisition_spend s
+    CROSS JOIN params
+    WHERE s.spend_type IN ('paid_media', 'affiliate_commission')
+      AND s.spend_date BETWEEN params.start_date AND params.end_date
+      AND s.channel IS NOT NULL
+    GROUP BY trunc(s.spend_date, 'MM'), s.channel
+    UNION ALL
+    SELECT trunc(s.spend_date, 'MM'), 'All channels', SUM(s.amount)
+    FROM acquisition_spend s
+    CROSS JOIN params
+    WHERE s.spend_type IN ('paid_media', 'affiliate_commission')
+      AND s.spend_date BETWEEN params.start_date AND params.end_date
+    GROUP BY trunc(s.spend_date, 'MM')
+  ),
+  cohort_totals AS (
+    -- Customers, margin and total acquisition cost (spend + first-order discounts) per cohort and channel
+    SELECT
+      COALESCE(c.cohort_month, s.cohort_month) AS cohort_month,
+      COALESCE(c.channel, s.channel) AS first_touch_channel,
+      COALESCE(c.new_customers, 0) AS new_customers,
+      c.cohort_margin,
+      COALESCE(s.spend, 0) + COALESCE(c.first_order_discounts, 0) AS acquisition_cost
+    FROM cohort_customers c
+    FULL OUTER JOIN cohort_spend s ON c.cohort_month = s.cohort_month AND c.channel = s.channel
+  )
+  -- LTV per new customer over CAC per new customer as x:1; null on zero new customers or zero spend; low-volume flag under 100 customers
+  SELECT
+    cohort_month,
+    first_touch_channel,
+    new_customers,
+    ROUND(cohort_margin / NULLIF(new_customers, 0), 2) AS ltv,
+    ROUND(acquisition_cost / NULLIF(new_customers, 0), 2) AS cac,
+    CASE WHEN new_customers = 0 OR acquisition_cost = 0 THEN NULL
+         ELSE ROUND((cohort_margin / new_customers) / (acquisition_cost / new_customers), 2) END AS ltv_cac_ratio,
+    CASE WHEN new_customers = 0 OR acquisition_cost = 0 THEN NULL
+         ELSE concat(format_number((cohort_margin / new_customers) / (acquisition_cost / new_customers), 1), ':1') END AS ltv_cac_label,
+    new_customers < 100 AS low_volume
+  FROM cohort_totals
+  ORDER BY cohort_month, first_touch_channel;
 
+Calculation Notes: |
+  1️⃣ LTV: cohort contribution margin per new customer (net of refunds, COGS, shipping and payment fees), on the Customer Lifetime Value basis.
+  2️⃣ CAC: paid media, affiliate commissions and first-order discounts in the period, divided by customers whose first purchase falls in it.
+  3️⃣ New customer: first purchase by a resolved user_id; guest orders are stitched by hashed email so returning buyers are not counted as new.
+  4️⃣ Use one horizon for every cohort (12 months standard, 36 to match CLV); label projected LTV and never mix it with realised LTV.
+  5️⃣ Channel ratios key spend and customers on first-touch source / medium; spend or customers with none stay in the blended total only.
+  6️⃣ Return null when a cohort has zero new customers or zero spend; flag cohorts under 100 new customers as low volume.
+  7️⃣ Report as x:1. 3:1 is the common benchmark; well above 5:1 usually means acquisition is under-funded.
 
+Business Use Case: |
+  1️⃣ Marketing: a channel's ratio falls below 3:1 → cut its budget and shift spend to channels above target.
+  2️⃣ Finance: blended ratio drops two quarters running → lower the CAC cap in the next budget cycle.
+  3️⃣ CRM team: a cohort's LTV lags plan at month 6 → launch a second-purchase program for that cohort.
+  4️⃣ Marketing: ratio above 5:1 on a channel with headroom → raise bids until the ratio nears 3:1.
 
+Dependencies:
+  Events: [purchase]
+  Metrics: [ad-spend]
+  Dimensions: [acquisition-cohort, traffic-source]
+  KPIs: [customer-lifetime-value]
 
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
 
+Report Attributes: |
+  Acquisition Cohort; First-Touch Source / Medium
 
+Dashboard Usage: [Customer Acquisition Efficiency, Executive Unit Economics, Marketing Budget Allocation]
 
+Segment Eligibility: |
+  false
 
+Related KPIs: [customer-lifetime-value, customer-acquisition-cost-payback-period, marketing-return-on-investment, return-on-ad-spend, marketing-sourced-new-customer-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +460,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-29T10:16:19.78+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-29T10:16:29.629+00:00
 
