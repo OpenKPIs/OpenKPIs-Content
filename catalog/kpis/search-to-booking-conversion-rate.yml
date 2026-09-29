@@ -1,0 +1,174 @@
+# KPI: Search-to-Booking Conversion Rate
+# Generated: 2026-09-29T05:46:31.118Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Search-to-Booking Conversion Rate
+Formula: 100 × distinct eligible governed search sessions with a later confirmed booking in the same session / distinct eligible governed search sessions
+
+Description: |
+  Measures the percentage of eligible travel-search sessions that produce a confirmed booking later in the same governed session. It shows how effectively search demand converts.
+
+Category: Conversion
+
+Tags: [kpi, travel, search, booking-conversion]
+
+Industry: [["Travel & Hospitality"]]
+
+Priority: High
+
+Core Area: Search and Booking Funnel
+
+Scope: Session
+
+Measure Type: Percentage
+
+Aggregation Window: Time based - Daily, Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY) AS start_date, CURRENT_TIMESTAMP() AS as_of_timestamp
+  ),
+  ranked_search_sessions AS (
+    SELECT s.*, ROW_NUMBER() OVER (PARTITION BY s.session_key ORDER BY s.record_updated_at DESC, s.source_ingested_at DESC) AS record_rank
+    FROM `your-project.travel_analytics.search_session_fact` AS s CROSS JOIN parameters AS p
+    WHERE NULLIF(TRIM(CAST(s.session_key AS STRING)), '') IS NOT NULL
+      AND s.first_search_at >= TIMESTAMP(p.start_date) AND s.first_search_at <= p.as_of_timestamp
+  ),
+  eligible_sessions AS (
+    SELECT session_key, DATE(first_search_at) AS search_date, first_search_at, session_end_at,
+      COALESCE(NULLIF(origin_code, ''), 'unknown') AS origin_code, COALESCE(NULLIF(destination_code, ''), 'unknown') AS destination_code,
+      COALESCE(NULLIF(LOWER(search_type), ''), 'unknown') AS search_type,
+      CASE WHEN results_count = 0 THEN 'zero_results'
+        WHEN results_count > 0 THEN 'results_available' ELSE 'unknown' END AS results_availability
+    FROM ranked_search_sessions CROSS JOIN parameters AS p
+    WHERE record_rank = 1 AND NULLIF(TRIM(CAST(session_key AS STRING)), '') IS NOT NULL AND first_search_at IS NOT NULL
+      AND session_end_at IS NOT NULL AND session_end_at <= p.as_of_timestamp
+      AND LOWER(TRIM(COALESCE(session_status, ''))) IN ('completed', 'expired')
+      AND session_eligible = TRUE AND is_bot = FALSE AND is_test = FALSE AND is_internal = FALSE
+  ),
+  ranked_bookings AS (
+    SELECT b.*, ROW_NUMBER() OVER (PARTITION BY b.booking_id ORDER BY b.record_updated_at DESC, b.source_ingested_at DESC) AS record_rank
+    FROM `your-project.travel_analytics.booking_attribution_fact` AS b CROSS JOIN parameters AS p
+    WHERE NULLIF(TRIM(CAST(b.booking_id AS STRING)), '') IS NOT NULL
+      AND NULLIF(TRIM(CAST(b.session_key AS STRING)), '') IS NOT NULL
+      AND b.confirmed_at >= TIMESTAMP(p.start_date) AND b.confirmed_at <= p.as_of_timestamp
+  ),
+  confirmed_bookings AS (
+    SELECT booking_id, session_key, confirmed_at FROM ranked_bookings
+    WHERE record_rank = 1 AND NULLIF(TRIM(CAST(booking_id AS STRING)), '') IS NOT NULL
+      AND NULLIF(TRIM(CAST(session_key AS STRING)), '') IS NOT NULL
+      AND LOWER(booking_status) IN ('confirmed', 'completed', 'ticketed')
+      AND is_test = FALSE AND is_internal = FALSE AND is_fraudulent = FALSE
+  ),
+  scored AS (
+    SELECT s.*, EXISTS (SELECT 1 FROM confirmed_bookings AS b WHERE b.session_key = s.session_key AND b.confirmed_at > s.first_search_at AND b.confirmed_at <= s.session_end_at) AS converted
+    FROM eligible_sessions AS s
+  )
+  SELECT search_date, origin_code, destination_code, search_type, results_availability,
+    COUNT(*) AS eligible_search_sessions, COUNTIF(converted) AS converted_search_sessions,
+    ROUND(100 * SAFE_DIVIDE(COUNTIF(converted), COUNT(*)), 2) AS search_to_booking_conversion_rate_pct
+  FROM scored GROUP BY search_date, origin_code, destination_code, search_type, results_availability
+  ORDER BY search_date DESC, origin_code, destination_code, search_type, results_availability;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH parameters AS (
+    SELECT CURRENT_DATE - INTERVAL '90' DAY AS start_date, CURRENT_TIMESTAMP AS as_of_timestamp
+  ),
+  ranked_search_sessions AS (
+    SELECT s.*, ROW_NUMBER() OVER (PARTITION BY s.session_key ORDER BY s.record_updated_at DESC, s.source_ingested_at DESC) AS record_rank
+    FROM search_session_fact_backend_dataset AS s CROSS JOIN parameters AS p
+    WHERE NULLIF(TRIM(CAST(s.session_key AS VARCHAR)), '') IS NOT NULL
+      AND s.first_search_at >= CAST(p.start_date AS TIMESTAMP) AND s.first_search_at <= p.as_of_timestamp
+  ),
+  eligible_sessions AS (
+    SELECT session_key, CAST(first_search_at AS DATE) AS search_date, first_search_at, session_end_at,
+      COALESCE(NULLIF(origin_code, ''), 'unknown') AS origin_code, COALESCE(NULLIF(destination_code, ''), 'unknown') AS destination_code,
+      COALESCE(NULLIF(LOWER(search_type), ''), 'unknown') AS search_type,
+      CASE WHEN results_count = 0 THEN 'zero_results'
+        WHEN results_count > 0 THEN 'results_available' ELSE 'unknown' END AS results_availability
+    FROM ranked_search_sessions CROSS JOIN parameters AS p
+    WHERE record_rank = 1 AND NULLIF(TRIM(CAST(session_key AS VARCHAR)), '') IS NOT NULL AND first_search_at IS NOT NULL
+      AND session_end_at IS NOT NULL AND session_end_at <= p.as_of_timestamp
+      AND LOWER(TRIM(COALESCE(session_status, ''))) IN ('completed', 'expired')
+      AND session_eligible = TRUE AND is_bot = FALSE AND is_test = FALSE AND is_internal = FALSE
+  ),
+  ranked_bookings AS (
+    SELECT b.*, ROW_NUMBER() OVER (PARTITION BY b.booking_id ORDER BY b.record_updated_at DESC, b.source_ingested_at DESC) AS record_rank
+    FROM booking_attribution_fact_backend_dataset AS b CROSS JOIN parameters AS p
+    WHERE NULLIF(TRIM(CAST(b.booking_id AS VARCHAR)), '') IS NOT NULL
+      AND NULLIF(TRIM(CAST(b.session_key AS VARCHAR)), '') IS NOT NULL
+      AND b.confirmed_at >= CAST(p.start_date AS TIMESTAMP) AND b.confirmed_at <= p.as_of_timestamp
+  ),
+  confirmed_bookings AS (
+    SELECT booking_id, session_key, confirmed_at FROM ranked_bookings
+    WHERE record_rank = 1 AND NULLIF(TRIM(CAST(booking_id AS VARCHAR)), '') IS NOT NULL
+      AND NULLIF(TRIM(CAST(session_key AS VARCHAR)), '') IS NOT NULL
+      AND LOWER(booking_status) IN ('confirmed', 'completed', 'ticketed')
+      AND is_test = FALSE AND is_internal = FALSE AND is_fraudulent = FALSE
+  ),
+  scored AS (
+    SELECT s.*, CASE WHEN EXISTS (SELECT 1 FROM confirmed_bookings AS b WHERE b.session_key = s.session_key AND b.confirmed_at > s.first_search_at AND b.confirmed_at <= s.session_end_at) THEN 1 ELSE 0 END AS converted
+    FROM eligible_sessions AS s
+  )
+  SELECT search_date, origin_code, destination_code, search_type, results_availability,
+    COUNT(*) AS eligible_search_sessions, SUM(converted) AS converted_search_sessions,
+    ROUND(100.0 * SUM(converted) / NULLIF(COUNT(*), 0), 2) AS search_to_booking_conversion_rate_pct
+  FROM scored GROUP BY search_date, origin_code, destination_code, search_type, results_availability
+  ORDER BY search_date DESC, origin_code, destination_code, search_type, results_availability;
+
+Calculation Notes: |
+  1️⃣ Use the governed visitor-plus-session key from the search-session fact.
+  2️⃣ Count each completed or expired eligible session once, including zero-result sessions.
+  3️⃣ Require first search < confirmation timestamp ≤ governed session end.
+  4️⃣ Exclude internal, bot, test, and ineligible traffic from both numerator and denominator.
+  5️⃣ Do not attribute bookings across sessions or through a multi-day lookback window.
+
+Business Use Case: |
+  1️⃣ Product teams investigate device or market segments with falling conversion.
+  2️⃣ Search teams compare zero-result and inventory-constrained sessions.
+  3️⃣ Revenue Management tests availability and merchandising changes.
+  4️⃣ Engineering isolates search-to-checkout defects by platform and app version.
+
+Dependencies:
+  Events: [travel-search, purchase, session-start]
+  Dimensions: [device-category, booking-acquisition-channel]
+
+Source Data: Backend travel-search session and booking-attribution tables populated by governed web and app collection pipelines
+
+Report Attributes: |
+  Search Date; Market; Origin; Destination; Search Type; Travel Product Type; Device Category; Platform; App Version; Booking Acquisition Channel; Search Results Availability
+
+Dashboard Usage: [Search and Discovery Performance Dashboard, Booking Funnel Optimization Dashboard, Mobile App Conversion Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [zero-results-search-rate, search-to-purchase-conversion-rate, purchase-conversion-rate, site-search-usage-rate]
+
+Data Sensitivity: Restricted
+
+Contains PII: Yes
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T18:30:32.836475+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-29T05:46:30.593+00:00
+
