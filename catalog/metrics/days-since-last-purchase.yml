@@ -1,0 +1,363 @@
+# Metric: Days Since Last Purchase
+# Generated: 2026-09-29T12:55:27.730Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Days Since Last Purchase
+Formula: Per customer: DATE_DIFF(reporting_date, MAX(purchase_date), DAY); rolled up across customers as MEDIAN(days_since_last_purchase), with AVG(days_since_last_purchase) reported beside it
+
+Description: |
+  Whole days from a customer's most recent completed purchase to the reporting date. It is the Recency (R) input to RFM segmentation and lapse-based win-back triggers.
+
+Category: Retention
+
+Tags: [metric, E-commerce: Customer Retention, Loyalty & LTV]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Measure Type: Average
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "transaction": {
+        "transactionID": "txn-1",
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "user-1"
+            }
+          }
+        ],
+        "total": {
+          "transactionTotal": 100,
+          "currency": "USD",
+          "shipping": 5,
+          "tax": 8
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU-1"
+            },
+            "quantity": 1,
+            "price": {
+              "basePrice": 100
+            }
+          }
+        ],
+        "attributes": {
+          "traffic_type": "production"
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "refund"
+          },
+          "attributes": {
+            "transaction_id": "txn-1",
+            "refund_type": "full",
+            "traffic_type": "production"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  [
+    {
+      "event": "purchase",
+      "user_id": "user-1",
+      "traffic_type": "production",
+      "ecommerce": {
+        "transaction_id": "txn-1",
+        "value": 100,
+        "currency": "USD",
+        "shipping": 5,
+        "tax": 8,
+        "items": [
+          {
+            "item_id": "SKU-1",
+            "item_name": "item",
+            "price": 100,
+            "quantity": 1
+          }
+        ]
+      }
+    },
+    {
+      "event": "refund",
+      "user_id": "user-1",
+      "refund_type": "full",
+      "traffic_type": "production",
+      "ecommerce": {
+        "transaction_id": "txn-1",
+        "value": 100,
+        "currency": "USD"
+      }
+    }
+  ]
+
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "purchase",
+      "user": {
+        "user_id": "user-1"
+      },
+      "transaction": {
+        "transaction_id": "txn-1",
+        "value": 100,
+        "currency": "USD",
+        "shipping": 5,
+        "tax": 8,
+        "traffic_type": "production",
+        "items": [
+          {
+            "item_id": "SKU-1",
+            "price": 100,
+            "quantity": 1
+          }
+        ]
+      }
+    },
+    {
+      "event": "refund",
+      "user": {
+        "user_id": "user-1"
+      },
+      "transaction": {
+        "transaction_id": "txn-1",
+        "refund_type": "full",
+        "value": 100,
+        "currency": "USD",
+        "traffic_type": "production"
+      }
+    }
+  ]
+
+XDM Mapping: |
+  [
+    {
+      "eventType": "commerce.purchases",
+      "timestamp": "2026-01-01T12:00:00Z",
+      "identityMap": {
+        "userId": [
+          {
+            "id": "user-1",
+            "authenticatedState": "authenticated",
+            "primary": true
+          }
+        ]
+      },
+      "commerce": {
+        "purchases": {
+          "value": 1
+        },
+        "order": {
+          "purchaseID": "txn-1",
+          "priceTotal": 100,
+          "currencyCode": "USD"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "quantity": 1,
+          "priceTotal": 100
+        }
+      ],
+      "_tenant": {
+        "traffic_type": "production"
+      }
+    },
+    {
+      "eventType": "refund",
+      "timestamp": "2026-01-02T12:00:00Z",
+      "identityMap": {
+        "userId": [
+          {
+            "id": "user-1",
+            "authenticatedState": "authenticated",
+            "primary": true
+          }
+        ]
+      },
+      "commerce": {
+        "order": {
+          "purchaseID": "txn-1",
+          "priceTotal": 100,
+          "currencyCode": "USD"
+        }
+      },
+      "_tenant": {
+        "refund_type": "full",
+        "traffic_type": "production"
+      }
+    }
+  ]
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Reporting period grain: 'DAY', 'WEEK' or 'MONTH'
+  DECLARE period_grain STRING DEFAULT 'MONTH';
+  -- Reporting date = last day of the latest closed period in the property time zone (event_date is already in it)
+  DECLARE end_date DATE DEFAULT CASE period_grain
+    WHEN 'DAY' THEN DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 1 DAY)
+    WHEN 'WEEK' THEN DATE_SUB(DATE_TRUNC(CURRENT_DATE('America/New_York'), WEEK(MONDAY)), INTERVAL 1 DAY)
+    ELSE DATE_SUB(DATE_TRUNC(CURRENT_DATE('America/New_York'), MONTH), INTERVAL 1 DAY)
+  END;
+  -- Population window: customers with a completed purchase in the 24 months up to the reporting date
+  DECLARE start_date DATE DEFAULT DATE_SUB(end_date, INTERVAL 24 MONTH);
+  
+  -- Cancelled orders have no event of their own in events_*; they are excluded through the full refund issued on cancellation
+  WITH purchases AS (
+    -- Purchases by identified customers, with order parameters pivoted from event_params
+    SELECT
+      user_id,
+      PARSE_DATE('%Y%m%d', event_date) AS purchase_date,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'transaction_id') AS transaction_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+      AND user_id IS NOT NULL
+  ),
+  full_refunds AS (
+    -- Orders fully refunded or cancelled; partial refunds keep the order
+    SELECT DISTINCT (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'transaction_id') AS transaction_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'refund'
+      AND (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'refund_type') = 'full'
+  ),
+  last_purchase AS (
+    -- Latest completed purchase date per customer, ignoring test and fully refunded orders
+    SELECT p.user_id, MAX(p.purchase_date) AS last_purchase_date
+    FROM purchases p
+    LEFT JOIN full_refunds r ON p.transaction_id = r.transaction_id
+    WHERE r.transaction_id IS NULL
+      AND COALESCE(p.traffic_type, '') != 'test'
+    GROUP BY p.user_id
+  )
+  -- Median days since last purchase across customers, with the mean shown beside it
+  SELECT
+    end_date AS reporting_date,
+    APPROX_QUANTILES(DATE_DIFF(end_date, last_purchase_date, DAY), 100)[OFFSET(50)] AS median_days_since_last_purchase,
+    ROUND(AVG(DATE_DIFF(end_date, last_purchase_date, DAY)), 1) AS mean_days_since_last_purchase
+  FROM last_purchase;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Cancelled orders have no event of their own in the web dataset; they are excluded through the full refund issued on cancellation
+  WITH params AS (
+    -- Reporting date = last day of the latest closed period (grain 'DAY', 'WEEK' or 'MONTH') in the property time zone; population window = 24 months up to it
+    SELECT end_date, add_months(end_date, -24) AS start_date
+    FROM (
+      SELECT CASE period_grain
+        WHEN 'DAY' THEN date_sub(today, 1)
+        WHEN 'WEEK' THEN date_sub(to_date(date_trunc('WEEK', today)), 1)
+        ELSE date_sub(trunc(today, 'MM'), 1)
+      END AS end_date
+      FROM (SELECT 'MONTH' AS period_grain, to_date(from_utc_timestamp(current_timestamp(), 'America/New_York')) AS today) g
+    ) d
+  ),
+  events AS (
+    -- Purchase and refund events by identified customers, dated in the property time zone
+    SELECT
+      identityMap['userId'][0].id AS user_id,
+      to_date(from_utc_timestamp(timestamp, 'America/New_York')) AS event_date,
+      commerce.purchases.value AS is_purchase,
+      eventType,
+      commerce.order.purchaseID AS transaction_id,
+      _tenant.traffic_type AS traffic_type,
+      _tenant.refund_type AS refund_type
+    FROM aep_web_events_dataset
+    CROSS JOIN params
+    WHERE to_date(from_utc_timestamp(timestamp, 'America/New_York')) BETWEEN params.start_date AND params.end_date
+      AND (commerce.purchases.value = 1 OR eventType = 'refund')
+  ),
+  full_refunds AS (
+    -- Orders fully refunded or cancelled; partial refunds keep the order
+    SELECT DISTINCT transaction_id
+    FROM events
+    WHERE eventType = 'refund' AND refund_type = 'full'
+  ),
+  last_purchase AS (
+    -- Latest completed purchase date per customer, ignoring test and fully refunded orders
+    SELECT e.user_id, MAX(e.event_date) AS last_purchase_date
+    FROM events e
+    LEFT JOIN full_refunds r ON e.transaction_id = r.transaction_id
+    WHERE e.is_purchase = 1
+      AND e.user_id IS NOT NULL
+      AND r.transaction_id IS NULL
+      AND COALESCE(e.traffic_type, '') != 'test'
+    GROUP BY e.user_id
+  )
+  -- Median days since last purchase across customers, with the mean shown beside it
+  SELECT
+    params.end_date AS reporting_date,
+    percentile_approx(datediff(params.end_date, last_purchase_date), 0.5) AS median_days_since_last_purchase,
+    ROUND(AVG(datediff(params.end_date, last_purchase_date)), 1) AS mean_days_since_last_purchase
+  FROM last_purchase
+  CROSS JOIN params
+  GROUP BY params.end_date;
+
+Calculation Notes: |
+  1️⃣ Per customer, days = reporting date minus the date of the latest completed purchase; a purchase on the reporting date returns 0.,2️⃣ Customers are keyed on user_id; purchases with no logged-in or matched user_id are excluded, as recency cannot be tied to a person.,3️⃣ Test and fully refunded orders are ignored; a cancellation is detected by its full refund (refund_type = 'full'). Partial refunds count.,4️⃣ Registered users who have never purchased are excluded (null), never set to 0 or to their tenure.,5️⃣ Reporting date is the last day of the period in the property time zone, so reruns of a closed period return the same value.,6️⃣ Average type, headlined as the median across customers; the mean, skewed by long-lapsed buyers, is reported beside it.,7️⃣ Population: customers with a completed purchase in the last 24 months, so recency is capped at about 730 days.
+
+Business Use Case: |
+  1️⃣ Marketing sends a win-back offer once a customer passes the typical repurchase interval for their category.,2️⃣ Marketing resets RFM recency score cut-offs from the quintiles each quarter and refreshes retention audiences.,3️⃣ Merchandising compares median recency by first-purchase category to time replenishment reminder emails.,4️⃣ Finance watches monthly median recency of the active base as an early churn signal ahead of retention rate.
+
+Dependencies:
+  Events: [purchase, refund-issued]
+  Dimensions: [transaction-id]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Last Purchase Recency Band; RFM Segment; Customer Loyalty Tier; Customer Value Tier; Acquisition Cohort; Item Category
+
+Dashboard Usage: [Customer Retention & RFM, CRM Lifecycle Marketing, Monthly Customer Health]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [time-to-first-purchase, average-customer-tenure, churned-customers, average-order-value]
+
+Derived KPIs: [customer-lifetime-value]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-29T11:47:46.442+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-29T12:55:27.415+00:00
+
