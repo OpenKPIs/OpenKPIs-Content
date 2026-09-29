@@ -1,7 +1,7 @@
 # KPI: Loyalty Redemption Rate
-# Generated: 2026-09-29T10:16:03.783Z
+# Generated: 2026-09-29T10:16:13.580Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Loyalty Redemption Rate
 Formula: (Loyalty Points Redeemed / Loyalty Points Earned) × 100
@@ -11,6 +11,19 @@ Description: |
 
 Category: Retention
 
+Tags: [kpi, E-commerce: Customer Retention, Loyalty & LTV]
+
+Industry: [["E-commerce"]]
+
+Priority: Medium
+
+Core Area: Engagement
+
+Scope: Global
+
+Measure Type: Percentage
+
+Aggregation Window: Monthly, Quarterly, Yearly
 
 
 
@@ -18,22 +31,97 @@ Category: Retention
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Ledger entries in the period from real members, in base points; expiries, manual adjustments and transfers are left out by type
+  WITH ledger AS (
+    SELECT
+      l.transaction_type,
+      ABS(l.points) * pt.base_point_conversion_rate AS base_points
+    FROM `your-project.crm.loyalty_ledger` AS l
+    JOIN `your-project.crm.loyalty_point_types` AS pt ON pt.point_type = l.point_type
+    JOIN `your-project.crm.loyalty_members` AS m ON m.member_id = l.member_id
+    WHERE l.transaction_date BETWEEN start_date AND end_date
+      AND l.transaction_type IN ('redemption', 'redemption_cancel', 'redemption_reversal',
+                                 'earn_purchase', 'earn_bonus', 'earn_promotion', 'refund_clawback')
+      AND m.account_type NOT IN ('test', 'employee')
+  )
+  -- Net points redeemed / net points earned x 100; null when no points were earned
+  SELECT
+    ROUND(100 * SAFE_DIVIDE(
+      SUM(CASE WHEN transaction_type = 'redemption' THEN base_points
+               WHEN transaction_type IN ('redemption_cancel', 'redemption_reversal') THEN -base_points
+               ELSE 0 END),
+      SUM(CASE WHEN transaction_type IN ('earn_purchase', 'earn_bonus', 'earn_promotion') THEN base_points
+               WHEN transaction_type = 'refund_clawback' THEN -base_points
+               ELSE 0 END)
+    ), 2) AS loyalty_redemption_rate_pct
+  FROM ledger;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Ledger entries in the period (last 90 days to yesterday) from real members, in base points; expiries, manual adjustments and transfers are left out by type
+  WITH ledger AS (
+    SELECT
+      l.transaction_type,
+      ABS(l.points) * pt.base_point_conversion_rate AS base_points
+    FROM crm_loyalty_ledger AS l
+    JOIN crm_loyalty_point_types AS pt ON pt.point_type = l.point_type
+    JOIN crm_loyalty_members AS m ON m.member_id = l.member_id
+    WHERE l.transaction_date BETWEEN DATE_SUB(CURRENT_DATE, 90) AND DATE_SUB(CURRENT_DATE, 1)
+      AND l.transaction_type IN ('redemption', 'redemption_cancel', 'redemption_reversal',
+                                 'earn_purchase', 'earn_bonus', 'earn_promotion', 'refund_clawback')
+      AND m.account_type NOT IN ('test', 'employee')
+  )
+  -- Net points redeemed / net points earned x 100; null when no points were earned
+  SELECT
+    ROUND(100 * SUM(CASE WHEN transaction_type = 'redemption' THEN base_points
+                         WHEN transaction_type IN ('redemption_cancel', 'redemption_reversal') THEN -base_points
+                         ELSE 0 END)
+      / NULLIF(SUM(CASE WHEN transaction_type IN ('earn_purchase', 'earn_bonus', 'earn_promotion') THEN base_points
+                        WHEN transaction_type = 'refund_clawback' THEN -base_points
+                        ELSE 0 END), 0), 2) AS loyalty_redemption_rate_pct
+  FROM ledger;
 
+Calculation Notes: |
+  1️⃣ Numerator: redemption debits in the loyalty ledger dated in the period, net of redemptions cancelled or reversed.
+  2️⃣ Denominator: earn credits in the same period (purchase, bonus and promotional awards), net of points clawed back on refunds.
+  3️⃣ Exclude expired points, manual adjustments, points transferred between members and test or employee accounts from both sides.
+  4️⃣ Period-based, not cohort-based: points earned earlier can be redeemed now, so a single month can exceed 100%; trend it quarterly.
+  5️⃣ Sum points, never currency; programmes with several point types convert them to one base point before summing.
+  6️⃣ The ledger holds online, app and in-store activity; the digital Loyalty Reward Redemption event is for funnel analysis, not this rate.
+  7️⃣ When no points were earned in the period, report null, not 0% or 100%.
 
+Business Use Case: |
+  1️⃣ Loyalty Marketing: rate falls → email members whose balance already clears the lowest reward threshold.
+  2️⃣ Finance: rate shifts for two quarters → re-estimate breakage and adjust the points liability accrual.
+  3️⃣ Merchandising: one tier redeems far less → add lower-cost rewards to that tier's catalogue.
 
+Dependencies:
+  Events: [loyalty-reward-redemption]
+  Metrics: [loyalty-points-earned]
+  Dimensions: [customer-loyalty-tier, loyalty-member-status]
 
+Source Data: CRM
 
+Report Attributes: |
+  Customer Loyalty Tier; Loyalty Member Status; Device Category; Customer Tenure Band; Acquisition Cohort
 
+Dashboard Usage: [Loyalty Programme Performance, Customer Retention & LTV]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [coupon-redemption-rate, customer-retention-rate, customer-lifetime-value, omnichannel-customer-rate]
 
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +131,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-29T10:16:03.22+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-29T10:16:13.18+00:00
 
