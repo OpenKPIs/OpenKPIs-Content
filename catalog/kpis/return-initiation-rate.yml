@@ -1,0 +1,272 @@
+# KPI: Return Initiation Rate
+# Generated: 2026-09-30T17:58:41.773Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Return Initiation Rate
+Formula: (Delivered Orders with ≥ 1 Return Initiated within the Return Window / Delivered Orders in the Cohort) × 100
+
+Description: |
+  Share of delivered orders with at least one return request started within the return window. Counted at initiation, before the item is received, so it leads Return Rate by the transit and inspection lag.
+
+Category: Operations
+
+Tags: [kpi, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: Percentage
+
+Aggregation Window: Weekly, Monthly, Quarterly
+
+GA4 Event: |
+  submit_form
+
+Adobe Event: |
+  form_submit
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "form_submit",
+          "eventAction": "return_request"
+        },
+        "attributes": {
+          "formType": "return_request",
+          "transactionID": "txn-1",
+          "returnID": "ret-1",
+          "returnReason": "damaged",
+          "returnMethod": "mail_prepaid_label",
+          "supportChannel": "returns_portal"
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "txn-1"
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_type": "return_request",
+    "form_id": "return-form",
+    "transaction_id": "txn-1",
+    "return_id": "ret-1",
+    "return_reason": "damaged",
+    "return_method": "mail_prepaid_label",
+    "support_channel": "returns_portal",
+    "ecommerce": {
+      "transaction_id": "txn-1",
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "form_submit",
+    "eventInfo": {
+      "formType": "return_request"
+    },
+    "transactionID": "txn-1",
+    "returnID": "ret-1",
+    "returnReason": "damaged",
+    "returnMethod": "mail_prepaid_label",
+    "supportChannel": "returns_portal",
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "quantity": 1
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "ecid-1",
+          "authenticatedState": "ambiguous",
+          "primary": true
+        }
+      ]
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "txn-1"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "quantity": 1
+      }
+    ],
+    "_tenant": {
+      "returns": {
+        "formType": "return_request",
+        "returnID": "ret-1",
+        "returnReason": "damaged",
+        "returnMethod": "mail_prepaid_label",
+        "supportChannel": "returns_portal"
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  DECLARE return_window_days INT64 DEFAULT 30;
+  
+  -- Delivered-order cohort by delivery week; test and cancelled orders excluded, RTO parcels never delivered have no delivered_at
+  WITH delivered_orders AS (
+    SELECT
+      order_id,
+      delivered_at,
+      DATE_TRUNC(DATE(delivered_at), WEEK(MONDAY)) AS delivery_week
+    FROM `your-project.oms.orders`
+    WHERE DATE(delivered_at) BETWEEN start_date AND end_date
+      AND is_test_order = FALSE
+      AND order_status != 'cancelled'
+  ),
+  -- Return requests from every channel: web submit_form return_request plus portal, agent and in-store rows in order management;
+  -- refunds issued without a return request (appeasements) never appear here; exchanges and later-withdrawn requests stay in
+  initiations AS (
+    SELECT
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'transaction_id') AS order_id,
+      TIMESTAMP_MICROS(event_timestamp) AS initiated_at
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date)
+                            AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL return_window_days DAY))
+      AND event_name = 'submit_form'
+      AND (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'form_type') = 'return_request'
+    UNION ALL
+    SELECT order_id, initiated_at
+    FROM `your-project.oms.return_requests`
+    WHERE DATE(initiated_at) BETWEEN start_date AND DATE_ADD(end_date, INTERVAL return_window_days DAY)
+  )
+  -- Rate per delivery week: distinct orders with a request inside the return window over all delivered orders; immature until the window elapses
+  SELECT
+    d.delivery_week,
+    COUNT(DISTINCT d.order_id) AS delivered_orders,
+    COUNT(DISTINCT i.order_id) AS orders_with_return_initiated,
+    ROUND(SAFE_DIVIDE(COUNT(DISTINCT i.order_id), COUNT(DISTINCT d.order_id)) * 100, 2) AS return_initiation_rate,
+    DATE_ADD(d.delivery_week, INTERVAL 6 + return_window_days DAY) < CURRENT_DATE() AS is_mature_cohort
+  FROM delivered_orders d
+  LEFT JOIN initiations i
+    ON i.order_id = d.order_id
+    AND i.initiated_at BETWEEN d.delivered_at AND TIMESTAMP_ADD(d.delivered_at, INTERVAL return_window_days DAY)
+  GROUP BY d.delivery_week
+  ORDER BY d.delivery_week;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SET start_date = DATE_SUB(CURRENT_DATE(), 90);
+  SET end_date = DATE_SUB(CURRENT_DATE(), 1);
+  SET return_window_days = 30;
+  
+  -- Delivered-order cohort by delivery week; test and cancelled orders excluded, RTO parcels never delivered have no delivered_at
+  WITH delivered_orders AS (
+    SELECT
+      order_id,
+      delivered_at,
+      TO_DATE(DATE_TRUNC('WEEK', delivered_at)) AS delivery_week
+    FROM aep_backend_dataset.oms_orders
+    WHERE TO_DATE(delivered_at) BETWEEN '${start_date}' AND '${end_date}'
+      AND is_test_order = FALSE
+      AND order_status != 'cancelled'
+  ),
+  -- Return requests from every channel: web formFilledOut return_request plus portal, agent and in-store rows in order management;
+  -- refunds issued without a return request (appeasements) never appear here; exchanges and later-withdrawn requests stay in
+  initiations AS (
+    SELECT
+      commerce.order.purchaseID AS order_id,
+      timestamp AS initiated_at
+    FROM aep_web_events_dataset
+    WHERE TO_DATE(timestamp) BETWEEN '${start_date}' AND DATE_ADD('${end_date}', ${return_window_days})
+      AND eventType = 'web.formFilledOut'
+      AND _tenant.returns.formType = 'return_request'
+    UNION ALL
+    SELECT order_id, initiated_at
+    FROM aep_backend_dataset.oms_return_requests
+    WHERE TO_DATE(initiated_at) BETWEEN '${start_date}' AND DATE_ADD('${end_date}', ${return_window_days})
+  )
+  -- Rate per delivery week: distinct orders with a request inside the return window over all delivered orders; immature until the window elapses
+  SELECT
+    d.delivery_week,
+    COUNT(DISTINCT d.order_id) AS delivered_orders,
+    COUNT(DISTINCT i.order_id) AS orders_with_return_initiated,
+    ROUND(COUNT(DISTINCT i.order_id) * 100.0 / NULLIF(COUNT(DISTINCT d.order_id), 0), 2) AS return_initiation_rate,
+    DATE_ADD(d.delivery_week, 6 + ${return_window_days}) < CURRENT_DATE() AS is_mature_cohort
+  FROM delivered_orders d
+  LEFT JOIN initiations i
+    ON i.order_id = d.order_id
+    AND i.initiated_at BETWEEN d.delivered_at AND d.delivered_at + INTERVAL ${return_window_days} DAYS
+  GROUP BY d.delivery_week
+  ORDER BY d.delivery_week;
+
+Calculation Notes: |
+  1️⃣ Cohort by delivery date; report a cohort only after its return window (e.g. 30 days) has fully elapsed, otherwise flag it as immature.
+  2️⃣ Count orders, not requests or units: an order with several return requests or lines counts once in the numerator.
+  3️⃣ Include requests from the returns portal, support agents and in-store starts; dedupe on order_id across channels.
+  4️⃣ Exclude test orders, cancelled orders, refunds issued without a return (appeasements) and RTO parcels never delivered.
+  5️⃣ Exchanges count as initiations; their share is reported separately in Return Exchange Rate.
+  6️⃣ Requests the customer later withdraws still count; report withdrawn initiations as a separate breakdown.
+  7️⃣ Gap to Return Rate = returns started but never shipped back; a widening gap points to label or drop-off friction.
+
+Business Use Case: |
+  1️⃣ Merchandising: SKU rate above category norm for two weeks → review size guide, imagery and copy for that SKU.
+  2️⃣ Customer Service: spike in initiations with reason "damaged" → open a carrier and packaging investigation.
+  3️⃣ Finance: cohort rate rises → raise the returns reserve before the items reach the warehouse.
+  4️⃣ Product: initiation-to-return gap widens → simplify label and drop-off steps in the returns portal.
+
+Dependencies:
+  Events: [return-initiated, delivery-confirmation]
+  Dimensions: [return-reason, return-method]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics) + Order Management (reconciliation)
+
+Report Attributes: |
+  return-reason; return-method; item-category; fulfillment-method; carrier; customer-status; device-category
+
+Dashboard Usage: [Returns & Refunds Overview, Merchandising Product Quality, Customer Service Operations]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [refund-rate, return-exchange-rate, return-to-origin-rate, wismo-rate, support-contact-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-30T17:44:31.683+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-30T17:58:41.516+00:00
+
