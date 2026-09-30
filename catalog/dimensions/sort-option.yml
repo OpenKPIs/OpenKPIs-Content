@@ -1,7 +1,7 @@
 # Dimension: Sort Option
-# Generated: 2026-09-30T17:57:08.585Z
+# Generated: 2026-09-30T17:57:18.146Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Sort Option
 
@@ -10,31 +10,257 @@ Description: |
 
 Category: Engagement
 
+Tags: [dimension, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Discovery
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  view_item_list
+
+Adobe Event: |
+  view_item_list
+
+W3 Data Layer: |
+  [
+    {
+      "digitalData": {
+        "page": {
+          "category": {
+            "pageType": "category"
+          }
+        },
+        "event": [
+          {
+            "eventInfo": {
+              "eventName": "view_item_list"
+            },
+            "attributes": {
+              "sortOption": "price_asc",
+              "trafficType": "external",
+              "itemListId": "list-1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "digitalData": {
+        "page": {
+          "category": {
+            "pageType": "search"
+          }
+        },
+        "event": [
+          {
+            "eventInfo": {
+              "eventName": "view_search_results"
+            },
+            "attributes": {
+              "sortOption": "relevance",
+              "trafficType": "external",
+              "searchTerm": "term",
+              "searchResultsCount": 24
+            }
+          }
+        ]
+      }
+    }
+  ]
+
+GA4 Data Layer: |
+  [
+    {
+      "event": "view_item_list",
+      "sort_option": "price_asc",
+      "page_type": "category",
+      "traffic_type": "external",
+      "ecommerce": {
+        "items": [
+          {
+            "item_id": "SKU-1",
+            "item_name": "item",
+            "index": 0,
+            "item_list_id": "list-1",
+            "item_list_name": "item list"
+          }
+        ]
+      }
+    },
+    {
+      "event": "view_search_results",
+      "search_term": "term",
+      "search_results_count": 24,
+      "sort_option": "relevance",
+      "page_type": "search",
+      "traffic_type": "external"
+    }
+  ]
+
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "view_item_list",
+      "eventInfo": {
+        "sortOption": "price_asc",
+        "pageType": "category",
+        "trafficType": "external"
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "name": "item"
+        }
+      ]
+    },
+    {
+      "event": "search",
+      "eventInfo": {
+        "sortOption": "relevance",
+        "pageType": "search",
+        "trafficType": "external",
+        "searchTerm": "term",
+        "searchResultsCount": 24
+      }
+    }
+  ]
+
+XDM Mapping: |
+  [
+    {
+      "eventType": "commerce.productListViews",
+      "commerce": {
+        "productListViews": {
+          "value": 1
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "name": "item"
+        }
+      ],
+      "_tenantId": {
+        "sortOption": "price_asc",
+        "pageType": "category",
+        "trafficType": "external"
+      }
+    },
+    {
+      "eventType": "search",
+      "_tenantId": {
+        "sortOption": "relevance",
+        "pageType": "search",
+        "trafficType": "external",
+        "searchTerm": "term",
+        "searchResultsCount": 24
+      }
+    }
+  ]
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- List views (category and search result lists): normalised page type and sort (blank = (not set)), traffic type and results count (search_results_count, else list size)
+  WITH list_views AS (
+    SELECT
+      COALESCE(NULLIF(TRIM((SELECT MAX(IF(ep.key = 'page_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep)), ''), '(not set)') AS page_type,
+      COALESCE(NULLIF(TRIM((SELECT MAX(IF(ep.key = 'sort_option', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep)), ''), '(not set)') AS sort_option,
+      (SELECT MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS traffic_type,
+      COALESCE((SELECT MAX(IF(ep.key = 'search_results_count', ep.value.int_value, NULL)) FROM UNNEST(event_params) AS ep), ARRAY_LENGTH(items), 0) AS results_count
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name IN ('view_item_list', 'view_search_results')
+  )
+  -- List views per page type and sort option, internal traffic and zero-result lists excluded
+  SELECT
+    page_type,
+    sort_option,
+    COUNT(*) AS list_views
+  FROM list_views
+  WHERE COALESCE(traffic_type, '') != 'internal'
+    AND results_count > 0
+  GROUP BY page_type, sort_option
+  ORDER BY page_type, list_views DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SET start_date = DATE_SUB(CURRENT_DATE(), 90);
+  SET end_date = DATE_SUB(CURRENT_DATE(), 1);
+  
+  -- List views (category and search result lists): normalised page type and sort (blank = (not set)), traffic type and results count (searchResultsCount, else list size)
+  WITH list_views AS (
+    SELECT
+      COALESCE(NULLIF(TRIM(_tenantId.pageType), ''), '(not set)') AS page_type,
+      COALESCE(NULLIF(TRIM(_tenantId.sortOption), ''), '(not set)') AS sort_option,
+      _tenantId.trafficType AS traffic_type,
+      COALESCE(_tenantId.searchResultsCount, NULLIF(SIZE(productListItems), -1), 0) AS results_count
+    FROM aep_web_events_dataset
+    WHERE eventType IN ('commerce.productListViews', 'search')
+      AND TO_DATE(timestamp) BETWEEN '${start_date}' AND '${end_date}'
+  )
+  -- List views per page type and sort option, internal traffic and zero-result lists excluded
+  SELECT
+    page_type,
+    sort_option,
+    COUNT(*) AS list_views
+  FROM list_views
+  WHERE COALESCE(traffic_type, '') != 'internal'
+    AND results_count > 0
+  GROUP BY page_type, sort_option
+  ORDER BY page_type, list_views DESC;
+
+Calculation Notes: |
+  1️⃣ Values: featured, relevance, price_asc, price_desc, newest, best_selling, rating, (not set). Map UI labels like "Price: Low to High" to these codes.
+  2️⃣ Always sent: an untouched list carries its default (relevance on search, featured on category); a blank value is an instrumentation gap.
+  3️⃣ Hit scope: the value belongs to the list view it is sent with. A sort change re-fires the list event; do not carry it onto PDP or cart hits.
+  4️⃣ Pagination and infinite-scroll loads keep the active sort; they are further views under the same value, not a new sort choice.
+  5️⃣ Sort only reorders the result set. Facet selections belong to Filter Value; the results count must not change when the sort changes.
+  6️⃣ Report search and category lists separately (page_type); their defaults differ, so pooled shares mislead.
+  7️⃣ Exclude internal traffic (traffic_type = internal) and zero-result lists, where no sort can be applied.
+
+Business Use Case: |
+  1️⃣ Merchandising: when price_asc dominates a category, reviews its price ladder and entry-price assortment.
+  2️⃣ Search team: when shoppers leave relevance for another sort on a query, tunes ranking for that term.
+  3️⃣ Product team: when a sort option is rarely used on mobile, drops or reorders it in the sort menu.
+  4️⃣ Merchandising: when best_selling out-converts featured on a category, makes it that category's default sort.
+
+Dependencies:
+  Events: [product-list-view, site-search]
+  Metrics: [search-results-views]
+  Dimensions: [page-type]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
+
+Report Attributes: |
+  Page Type; Item Category; Internal Search Term; Device Category
+
+Dashboard Usage: [Site Search Performance, Category Page Merchandising, Product Discovery Funnel]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [filter-value, price-band, search-results-count-band, internal-search-term, page-type, item-category, device-category]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +268,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-30T17:57:08.264+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-30T17:57:17.799+00:00
 
