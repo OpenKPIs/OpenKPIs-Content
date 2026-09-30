@@ -1,7 +1,7 @@
 # Dimension: Recommendation Placement
-# Generated: 2026-09-30T17:56:37.707Z
+# Generated: 2026-09-30T17:56:47.347Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Recommendation Placement
 
@@ -10,31 +10,319 @@ Description: |
 
 Category: Engagement
 
+Tags: [dimension, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Discovery
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  view_item_list
+
+Adobe Event: |
+  view_item_list
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "view_item_list"
+          },
+          "attributes": {
+            "recommendationPlacement": "pdp",
+            "itemListId": "rec-list-1",
+            "itemListName": "rec_pdp_similar"
+          }
+        }
+      ],
+      "product": [
+        {
+          "productInfo": {
+            "productID": "SKU-1",
+            "productName": "item"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "view_item_list",
+    "recommendation_placement": "pdp",
+    "ecommerce": {
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "item_list_id": "rec-list-1",
+          "item_list_name": "rec_pdp_similar",
+          "index": 0
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "view_item_list",
+    "eventInfo": {
+      "recommendationPlacement": "pdp",
+      "itemListId": "rec-list-1",
+      "itemListName": "rec_pdp_similar"
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "name": "item"
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "view_item_list": {
+      "eventType": "view_item_list",
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "name": "item"
+        }
+      ],
+      "_tenantId": {
+        "recommendationPlacement": "pdp",
+        "itemListId": "rec-list-1",
+        "itemListName": "rec_pdp_similar"
+      }
+    },
+    "select_item": {
+      "eventType": "select_item",
+      "productListItems": [
+        {
+          "SKU": "SKU-1"
+        }
+      ],
+      "_tenantId": {
+        "recommendationPlacement": "pdp",
+        "itemListId": "rec-list-1",
+        "itemListName": "rec_pdp_similar"
+      }
+    },
+    "add_to_cart": {
+      "eventType": "commerce.productListAdds",
+      "commerce": {
+        "productListAdds": {
+          "value": 1
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1"
+        }
+      ]
+    },
+    "purchase": {
+      "eventType": "commerce.purchases",
+      "commerce": {
+        "purchases": {
+          "value": 1
+        },
+        "order": {
+          "currencyCode": "USD"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1"
+        }
+      ]
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Recommendation-list events and the add_to_cart / purchase events that inherit a placement, keyed by session
+  WITH ev AS (
+    SELECT
+      event_name,
+      event_timestamp,
+      CONCAT(user_pseudo_id, '.', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_key,
+      NULLIF(TRIM(LOWER((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'recommendation_placement'))), '') AS placement_param,
+      -- Fallback: placement token of a recommendation list name per the naming convention rec_<placement>_<module> (e.g. rec_pdp_similar)
+      (SELECT REGEXP_EXTRACT(LOWER(i.item_list_name), r'^rec_(search_no_results|post_purchase|checkout|category|home|cart|pdp)(?:_|$)')
+         FROM UNNEST(items) AS i WHERE i.item_list_name IS NOT NULL LIMIT 1) AS placement_token,
+      items
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name IN ('view_item_list', 'select_item', 'add_to_cart', 'purchase')
+  ),
+  -- One row per module impression or click; lists with neither a placement value nor a token are not recommendations and drop out
+  rec AS (
+    SELECT
+      event_name,
+      event_timestamp,
+      session_key,
+      items,
+      CASE WHEN COALESCE(placement_param, placement_token) IN ('home', 'category', 'pdp', 'cart', 'checkout', 'post_purchase', 'search_no_results')
+           THEN COALESCE(placement_param, placement_token) ELSE '(not set)' END AS placement
+    FROM ev
+    WHERE event_name IN ('view_item_list', 'select_item')
+      AND COALESCE(placement_param, placement_token) IS NOT NULL
+  ),
+  -- add_to_cart and purchase item lines take the placement of the last earlier select_item on the same item_id in the same session
+  inherited AS (
+    SELECT c.event_name, r.placement
+    FROM ev AS c
+    CROSS JOIN UNNEST(c.items) AS ci
+    JOIN rec AS r
+      ON r.session_key = c.session_key
+     AND r.event_name = 'select_item'
+     AND r.event_timestamp <= c.event_timestamp
+    CROSS JOIN UNNEST(r.items) AS ri
+    WHERE c.event_name IN ('add_to_cart', 'purchase')
+      AND ri.item_id = ci.item_id
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY c.session_key, c.event_name, c.event_timestamp, ci.item_id ORDER BY r.event_timestamp DESC) = 1
+  )
+  -- Hits per placement and event: module impressions, clicks, and inherited add-to-cart and purchase item lines
+  SELECT placement, event_name, COUNT(*) AS hits
+  FROM (
+    SELECT placement, event_name FROM rec
+    UNION ALL
+    SELECT placement, event_name FROM inherited
+  )
+  GROUP BY placement, event_name
+  ORDER BY placement, event_name;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  SET start_date = DATE_SUB(CURRENT_DATE(), 90);
+  SET end_date = DATE_SUB(CURRENT_DATE(), 1);
+  
+  -- All events in range with a 30-minute-inactivity session number per ECID
+  WITH sessions AS (
+    SELECT
+      eventType,
+      timestamp,
+      identityMap['ECID'][0].id AS ecid,
+      NULLIF(TRIM(LOWER(_tenantId.recommendationPlacement)), '') AS placement_param,
+      -- Fallback: placement token of a recommendation list name per the naming convention rec_<placement>_<module> (e.g. rec_pdp_similar)
+      NULLIF(REGEXP_EXTRACT(LOWER(_tenantId.itemListName), '^rec_(search_no_results|post_purchase|checkout|category|home|cart|pdp)(?:_|$)', 1), '') AS placement_token,
+      productListItems,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (PARTITION BY identityMap['ECID'][0].id ORDER BY timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW).num AS session_num
+    FROM aep_web_events_dataset
+    WHERE TO_DATE(timestamp) BETWEEN '${start_date}' AND '${end_date}'
+  ),
+  -- One row per module impression or click; lists with neither a placement value nor a token are not recommendations and drop out
+  rec AS (
+    SELECT
+      eventType AS event_name,
+      timestamp,
+      ecid,
+      session_num,
+      productListItems,
+      CASE WHEN COALESCE(placement_param, placement_token) IN ('home', 'category', 'pdp', 'cart', 'checkout', 'post_purchase', 'search_no_results')
+           THEN COALESCE(placement_param, placement_token) ELSE '(not set)' END AS placement
+    FROM sessions
+    WHERE eventType IN ('view_item_list', 'select_item')
+      AND COALESCE(placement_param, placement_token) IS NOT NULL
+  ),
+  -- One row per clicked SKU of each select_item, carrying its placement
+  clicks AS (
+    SELECT ecid, session_num, timestamp, placement, ri.SKU AS sku
+    FROM (
+      SELECT ecid, session_num, timestamp, placement, explode(productListItems) AS ri
+      FROM rec
+      WHERE event_name = 'select_item'
+    ) AS r0
+  ),
+  -- One row per cart-add or purchase item line
+  lines AS (
+    SELECT CASE eventType WHEN 'commerce.productListAdds' THEN 'add_to_cart' ELSE 'purchase' END AS event_name,
+           ecid, session_num, timestamp, li.SKU AS sku
+    FROM (
+      SELECT eventType, ecid, session_num, timestamp, explode(productListItems) AS li
+      FROM sessions
+      WHERE eventType IN ('commerce.productListAdds', 'commerce.purchases')
+    ) AS l0
+  ),
+  -- Cart-add and purchase item lines take the placement of the last earlier select_item on the same SKU in the same session
+  inherited AS (
+    SELECT event_name, placement
+    FROM (
+      SELECT
+        l.event_name,
+        c.placement,
+        ROW_NUMBER() OVER (PARTITION BY l.ecid, l.session_num, l.event_name, l.timestamp, l.sku ORDER BY c.timestamp DESC) AS rn
+      FROM lines AS l
+      JOIN clicks AS c
+        ON c.ecid = l.ecid
+       AND c.session_num = l.session_num
+       AND c.sku = l.sku
+       AND c.timestamp <= l.timestamp
+    ) AS ranked
+    WHERE rn = 1
+  )
+  -- Hits per placement and event: module impressions, clicks, and inherited add-to-cart and purchase item lines
+  SELECT placement, event_name, COUNT(*) AS hits
+  FROM (
+    SELECT placement, event_name FROM rec
+    UNION ALL
+    SELECT placement, event_name FROM inherited
+  ) AS all_hits
+  GROUP BY placement, event_name
+  ORDER BY placement, event_name;
+
+Calculation Notes: |
+  1️⃣ Values: home, category, pdp, cart, checkout, post_purchase, search_no_results, (not set). Lowercase, fixed list owned by Merchandising.
+  2️⃣ Source: recommendation_placement on view_item_list/select_item; if missing, parsed from item_list_name named rec_<placement>_<module>.
+  3️⃣ Only recommendation lists are in scope; search results, category grids and promotion lists carry no placement and are excluded.
+  4️⃣ add_to_cart and purchase inherit the placement of the last select_item on the same item_id in the session; nothing carries across sessions.
+  5️⃣ A page can hold several modules, so placement is per module impression; impressions by placement will exceed page views.
+  6️⃣ The same slot on web and app maps to one value; algorithm or A/B variants keep the placement and differ only by item_list_id.
+  7️⃣ Impressions assume view_item_list fires when the module enters the viewport; firing on page load inflates low slots such as footer carousels.
+
+Business Use Case: |
+  1️⃣ Merchandising: when a placement's CTR drops below the site median, swaps the algorithm or moves the slot up.
+  2️⃣ Personalization team reviews attributed revenue by placement monthly and retires slots with views but no orders.
+  3️⃣ Product team checks CTR by placement before a PDP or cart redesign to pick modules that keep top space.
+
+Dependencies:
+  Events: [product-list-view, product-list-click]
+  Dimensions: [page-type]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Page Type; Device Category; Item Category; Traffic Source; New vs Returning User
+
+Dashboard Usage: [Recommendation Performance, Product Discovery & Merchandising]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [page-type, item-category, device-category]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +330,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-30T17:56:36.053+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-30T17:56:47.009+00:00
 
