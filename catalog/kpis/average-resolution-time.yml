@@ -1,0 +1,152 @@
+# KPI: Average Resolution Time
+# Generated: 2026-09-30T17:58:17.354Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Average Resolution Time
+Formula: SUM(Final Solved Timestamp - Ticket Created Timestamp, in hours) / Tickets Solved in Period
+
+Description: |
+  Mean hours from support ticket creation to final solved status, for tickets solved in the period across email, chat, phone and social. Shows how fast order, return and refund issues get closed.
+
+Category: Operations
+
+Tags: [kpi, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: Average
+
+Aggregation Window: Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT CURRENT_DATE();
+  
+  -- Final solve per ticket: the last transition to solved, so a reopened ticket is measured to its final solve
+  WITH final_solve AS (
+    SELECT
+      ticket_id,
+      MAX(changed_at) AS final_solved_at
+    FROM `your-project.crm.ticket_status_history`
+    WHERE new_status = 'solved'
+    GROUP BY ticket_id
+  ),
+  -- Cohort: tickets still solved/closed whose final solve falls in the period; spam, deleted and merged-away tickets excluded; calendar hours, pending time kept in the clock
+  resolved AS (
+    SELECT
+      TIMESTAMP_DIFF(f.final_solved_at, t.created_at, SECOND) / 3600.0 AS resolution_hours
+    FROM `your-project.crm.support_tickets` AS t
+    JOIN final_solve AS f USING (ticket_id)
+    WHERE t.current_status IN ('solved', 'closed')
+      AND t.is_spam = FALSE
+      AND t.is_deleted = FALSE
+      AND t.merged_into_ticket_id IS NULL
+      AND DATE(f.final_solved_at) BETWEEN start_date AND end_date
+  )
+  -- Mean resolution hours, with the median and 90th percentile the definition requires alongside it
+  SELECT
+    COUNT(*) AS tickets_solved,
+    SAFE_DIVIDE(SUM(resolution_hours), COUNT(*)) AS average_resolution_hours,
+    APPROX_QUANTILES(resolution_hours, 100)[OFFSET(50)] AS median_resolution_hours,
+    APPROX_QUANTILES(resolution_hours, 100)[OFFSET(90)] AS p90_resolution_hours
+  FROM resolved;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window: last 90 days to today
+  WITH params AS (
+    SELECT
+      DATE_SUB(CURRENT_DATE, 90) AS start_date,
+      CURRENT_DATE AS end_date
+  ),
+  -- Final solve per ticket: the last transition to solved, so a reopened ticket is measured to its final solve
+  final_solve AS (
+    SELECT
+      ticket_id,
+      MAX(changed_at) AS final_solved_at
+    FROM crm_ticket_status_history
+    WHERE new_status = 'solved'
+    GROUP BY ticket_id
+  ),
+  -- Cohort: tickets still solved/closed whose final solve falls in the period; spam, deleted and merged-away tickets excluded; calendar hours, pending time kept in the clock
+  resolved AS (
+    SELECT
+      (UNIX_TIMESTAMP(f.final_solved_at) - UNIX_TIMESTAMP(t.created_at)) / 3600.0 AS resolution_hours
+    FROM crm_support_tickets AS t
+    JOIN final_solve AS f ON f.ticket_id = t.ticket_id
+    CROSS JOIN params AS p
+    WHERE t.current_status IN ('solved', 'closed')
+      AND t.is_spam = FALSE
+      AND t.is_deleted = FALSE
+      AND t.merged_into_ticket_id IS NULL
+      AND TO_DATE(f.final_solved_at) BETWEEN p.start_date AND p.end_date
+  )
+  -- Mean resolution hours, with the median and 90th percentile the definition requires alongside it
+  SELECT
+    COUNT(*) AS tickets_solved,
+    SUM(resolution_hours) / NULLIF(COUNT(*), 0) AS average_resolution_hours,
+    PERCENTILE_APPROX(resolution_hours, 0.5) AS median_resolution_hours,
+    PERCENTILE_APPROX(resolution_hours, 0.9) AS p90_resolution_hours
+  FROM resolved;
+
+Calculation Notes: |
+  1️⃣ Cohort: tickets whose final solved timestamp falls in the period; open, pending and on-hold tickets are excluded until solved.
+  2️⃣ Clock runs from ticket creation to the last solved status; a reopened ticket is measured to its final solve, not its first.
+  3️⃣ Exclude spam, deleted and merged-away tickets; a merged thread counts once, under the surviving ticket.
+  4️⃣ Headline is calendar hours; a business-hours version uses the helpdesk schedule and must be labelled as such.
+  5️⃣ Time pending on the customer stays in the clock; do not subtract it from the headline figure.
+  6️⃣ The mean is skewed by long-tail tickets: report median and 90th percentile alongside it.
+  7️⃣ Channel is the ticket source at creation; a chat that moves to email stays a chat ticket.
+
+Business Use Case: |
+  1️⃣ Customer Service: weekly mean breaches SLA on one channel → move agents to that queue or adjust shift cover.
+  2️⃣ Customer Service: return-reason tickets resolve slowest → give tier-1 agents refund authority and return macros.
+  3️⃣ Operations: WISMO tickets drive resolution time up → push proactive delivery notifications for delayed orders.
+
+Dependencies:
+  Dimensions: [ticket-status, ticket-priority, support-channel, resolution-type]
+
+Source Data: CRM
+
+Report Attributes: |
+  Support Channel; Ticket Priority; Resolution Type; Return Reason; Ticket Status
+
+Dashboard Usage: [Customer Service Operations, Returns & Refunds Performance]
+
+Segment Eligibility: |
+  false
+
+Related KPIs: [support-contact-rate, self-service-resolution-rate, wismo-rate, refund-rate, net-promoter-score]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-30T17:43:48.435+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-30T17:58:16.912+00:00
+
