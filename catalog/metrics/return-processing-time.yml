@@ -1,0 +1,142 @@
+# Metric: Return Processing Time
+# Generated: 2026-09-30T18:54:10.919Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Return Processing Time
+Formula: AVG(TIMESTAMP_DIFF(refund_issued_at, return_initiated_at, HOUR) / 24) over returns whose final refund posted in the reporting period
+
+Description: |
+  Average days from a return being initiated to its refund being issued, across returns refunded in the period. It is the customer's refund wait, return transit included.
+
+Category: Operations
+
+Tags: [metric, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: Average
+
+Aggregation Window: Weekly, Monthly, Quarterly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Last monetary refund per RMA (store credit and gift card included; zero-value exchanges carry no refund)
+  WITH rma_final_refund AS (
+    SELECT
+      rma_id,
+      MAX(refund_issued_at) AS refund_issued_at
+    FROM `your-project.erp.refunds`
+    WHERE refund_amount > 0
+    GROUP BY rma_id
+  ),
+  -- Refunded RMAs only (open, pending-inspection, on-hold and rejected excluded), no test orders or internal RMAs, final refund in period
+  processed_returns AS (
+    SELECT
+      r.rma_id,
+      TIMESTAMP_DIFF(f.refund_issued_at, r.return_initiated_at, HOUR) / 24 AS processing_days
+    FROM `your-project.erp.returns` AS r
+    JOIN rma_final_refund AS f
+      ON f.rma_id = r.rma_id
+    WHERE r.return_status = 'refunded'
+      AND r.is_test_order = FALSE
+      AND r.rma_origin NOT IN ('fraud_clawback', 'carrier_loss_claim')
+      AND DATE(f.refund_issued_at) BETWEEN start_date AND end_date
+  )
+  -- Average calendar days from RMA creation to final refund, one decimal
+  SELECT
+    ROUND(AVG(processing_days), 1) AS return_processing_time_days
+  FROM processed_returns;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window: last 90 complete days (same defaults as start_date / end_date in BigQuery)
+  WITH params AS (
+    SELECT
+      CAST(CURRENT_DATE - INTERVAL '90' DAY AS DATE) AS start_date,
+      CAST(CURRENT_DATE - INTERVAL '1' DAY AS DATE) AS end_date
+  ),
+  -- Last monetary refund per RMA (store credit and gift card included; zero-value exchanges carry no refund)
+  rma_final_refund AS (
+    SELECT
+      rma_id,
+      MAX(refund_issued_at) AS refund_issued_at
+    FROM aep_backend_dataset.erp_refunds
+    WHERE refund_amount > 0
+    GROUP BY rma_id
+  ),
+  -- Refunded RMAs only (open, pending-inspection, on-hold and rejected excluded), no test orders or internal RMAs, final refund in period
+  processed_returns AS (
+    SELECT
+      r.rma_id,
+      FLOOR((UNIX_TIMESTAMP(f.refund_issued_at) - UNIX_TIMESTAMP(r.return_initiated_at)) / 3600) / 24 AS processing_days
+    FROM aep_backend_dataset.erp_returns AS r
+    JOIN rma_final_refund AS f
+      ON f.rma_id = r.rma_id
+    CROSS JOIN params AS p
+    WHERE r.return_status = 'refunded'
+      AND r.is_test_order = FALSE
+      AND r.rma_origin NOT IN ('fraud_clawback', 'carrier_loss_claim')
+      AND CAST(f.refund_issued_at AS DATE) BETWEEN p.start_date AND p.end_date
+  )
+  -- Average calendar days from RMA creation to final refund, one decimal
+  SELECT
+    ROUND(AVG(processing_days), 1) AS return_processing_time_days
+  FROM processed_returns;
+
+Calculation Notes: |
+  1️⃣ One row per return authorization (RMA); the clock starts when the RMA is created, online or in store, and stops when its final refund posts.,2️⃣ Cohort is returns whose final refund posted in the period; open, pending-inspection and on-hold returns are excluded until refunded.,3️⃣ Store credit and gift card refunds count as refunded on issue; exchanges with no monetary refund and rejected returns are excluded.,4️⃣ Partial refunds on one RMA stop the clock at the last refund that closes it, so the value reflects the full customer wait.,5️⃣ Calendar time, weekends included: hours / 24 to one decimal. Instant refunds issued at initiation return 0.,6️⃣ Test orders and internally generated RMAs (fraud clawbacks, carrier-loss claims) are excluded.,7️⃣ Not Average Resolution Time (support tickets) and not warehouse receipt-to-restock time; carrier transit back to the warehouse is included.
+
+Business Use Case: |
+  1️⃣ Customer Service sees the average pass the published refund promise and chases RMAs stuck between receipt and refund.,2️⃣ Customer Service splits by return method and steers customers to drop-off options that refund faster than mail-in.,3️⃣ Finance checks refunds held in approval queues when the time rises while warehouse receipt times stay flat.,4️⃣ Customer Service checks whether a rise in refund-status contacts follows a rise in processing time before adding staff.
+
+Dependencies:
+  Events: [return-initiated, refund-issued]
+  Dimensions: [return-method]
+
+Source Data: ERP
+
+Report Attributes: |
+  return-method; return-reason; refund-type; fulfillment-method; carrier; item-category
+
+Dashboard Usage: [Returns & Refunds Operations, Customer Service Performance]
+
+Segment Eligibility: |
+  false
+
+Related Metrics: [refunds-issued, returned-items, average-delivery-time]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-30T18:24:15.53+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-30T18:54:10.602+00:00
+
