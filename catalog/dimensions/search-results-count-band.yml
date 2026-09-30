@@ -1,7 +1,7 @@
 # Dimension: Search Results Count Band
-# Generated: 2026-09-30T17:56:53.826Z
+# Generated: 2026-09-30T17:57:02.271Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Search Results Count Band
 
@@ -10,31 +10,206 @@ Description: |
 
 Category: Experience
 
+Tags: [dimension, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Discovery
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  view_search_results
+
+Adobe Event: |
+  search
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "view_search_results"
+          },
+          "attributes": {
+            "search_term": "term",
+            "search_results_count": 25,
+            "page_number": 1,
+            "is_refire": false,
+            "traffic_type": "external"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "view_search_results",
+    "search_term": "term",
+    "search_results_count": 25,
+    "page_number": 1,
+    "is_refire": false,
+    "traffic_type": "external"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "search",
+    "eventInfo": {
+      "eventName": "search"
+    },
+    "search_term": "term",
+    "search_results_count": 25,
+    "page_number": 1,
+    "is_refire": false,
+    "traffic_type": "external"
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "search",
+    "_<tenantId>": {
+      "siteSearch": {
+        "searchTerm": "term",
+        "searchResultsCount": 25,
+        "pageNumber": 1,
+        "isRefire": false,
+        "trafficType": "external"
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- First results page of each view_search_results, refires and internal/bot traffic removed, parameters pivoted from event_params
+  WITH searches AS (
+    SELECT
+      user_pseudo_id,
+      event_timestamp,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'search_term') AS search_term,
+      (SELECT SAFE_CAST(COALESCE(CAST(value.int_value AS STRING), CAST(value.double_value AS STRING), value.string_value) AS FLOAT64)
+         FROM UNNEST(event_params) WHERE key = 'search_results_count') AS results_count
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'view_search_results'
+      AND (SELECT COALESCE(value.int_value, SAFE_CAST(value.double_value AS INT64), SAFE_CAST(value.string_value AS INT64)) FROM UNNEST(event_params) WHERE key = 'page_number') = 1
+      AND COALESCE((SELECT LOWER(COALESCE(value.string_value, CAST(value.int_value AS STRING))) FROM UNNEST(event_params) WHERE key = 'is_refire'), 'false') NOT IN ('true', '1')
+      AND COALESCE((SELECT LOWER(value.string_value) FROM UNNEST(event_params) WHERE key = 'traffic_type'), '') NOT IN ('internal', 'bot')
+  ),
+  -- Sort reloads: a first-page result view repeating the previous search term in the same session is the same search
+  first_views AS (
+    SELECT
+      search_term,
+      results_count,
+      LAG(search_term) OVER (PARTITION BY user_pseudo_id, ga_session_id ORDER BY event_timestamp) AS previous_term
+    FROM searches
+  )
+  -- Band each search once; a missing, non-numeric or out-of-range count is (not set), never 0
+  SELECT
+    search_term,
+    CASE
+      WHEN results_count = 0 THEN '0'
+      WHEN results_count BETWEEN 1 AND 10 THEN '1-10'
+      WHEN results_count BETWEEN 11 AND 50 THEN '11-50'
+      WHEN results_count >= 51 THEN '51+'
+      ELSE '(not set)'
+    END AS search_results_count_band
+  FROM first_views
+  WHERE previous_term IS NULL OR previous_term IS DISTINCT FROM search_term;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Events in the last 90 days to yesterday with a 30-minute-inactivity session per visitor
+  WITH events AS (
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      timestamp,
+      eventType,
+      _tenantId.siteSearch.searchTerm AS search_term,
+      TRY_CAST(CAST(_tenantId.siteSearch.searchResultsCount AS STRING) AS DOUBLE) AS results_count,
+      TRY_CAST(CAST(_tenantId.siteSearch.pageNumber AS STRING) AS INT) AS page_number,
+      LOWER(CAST(_tenantId.siteSearch.isRefire AS STRING)) AS is_refire,
+      LOWER(_tenantId.siteSearch.trafficType) AS traffic_type,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (PARTITION BY identityMap['ECID'][0].id ORDER BY timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session
+    FROM aep_web_events_dataset
+    WHERE CAST(timestamp AS DATE) BETWEEN DATE_SUB(CURRENT_DATE, 90) AND DATE_SUB(CURRENT_DATE, 1)
+  ),
+  -- First results page of each search, refires and internal/bot traffic removed; a first-page search repeating the previous term in the session is a sort reload
+  first_views AS (
+    SELECT
+      search_term,
+      results_count,
+      LAG(search_term) OVER (PARTITION BY ecid, session.num ORDER BY timestamp) AS previous_term
+    FROM events
+    WHERE eventType = 'search'
+      AND page_number = 1
+      AND COALESCE(is_refire, 'false') NOT IN ('true', '1')
+      AND COALESCE(traffic_type, '') NOT IN ('internal', 'bot')
+  )
+  -- Band each search once; a missing, non-numeric or out-of-range count is (not set), never 0
+  SELECT
+    search_term,
+    CASE
+      WHEN results_count = 0 THEN '0'
+      WHEN results_count BETWEEN 1 AND 10 THEN '1-10'
+      WHEN results_count BETWEEN 11 AND 50 THEN '11-50'
+      WHEN results_count >= 51 THEN '51+'
+      ELSE '(not set)'
+    END AS search_results_count_band
+  FROM first_views
+  WHERE previous_term IS NULL OR previous_term IS DISTINCT FROM search_term;
+
+Calculation Notes: |
+  1️⃣ Source: search_results_count on view_search_results (GA4) or Adobe search; page_number = 1 only, refires (is_refire = true) excluded.
+  2️⃣ Values: 0, 1-10, 11-50, 51+ and (not set). A missing or non-numeric count is (not set), never 0.
+  3️⃣ Count = total matches the engine returned before pagination, not the number of tiles rendered on the page.
+  4️⃣ Sort reload: a first-page view repeating the previous search term in the same session is the same search and is not banded again.
+  5️⃣ Autocomplete suggestions shown while typing are not searches; only submitted searches carry a band.
+  6️⃣ The 0 band share of all searches equals Zero-Results Search Rate under the same filters.
+  7️⃣ Internal and bot traffic (traffic_type = internal or bot) is excluded before banding.
+
+Business Use Case: |
+  1️⃣ Search merchandiser: when the 0 band share rises, reviews its top terms and adds synonyms, redirects or products.
+  2️⃣ Merchandising team: when 51+ searches convert below 1-10, tunes relevance ranking and default facets for those terms.
+  3️⃣ Product owner: after a search engine or index release, compares band mix week over week to catch recall regressions.
+
+Dependencies:
+  Events: [site-search]
+  Metrics: [site-searches, search-results-views]
+  Dimensions: [internal-search-term]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
+
+Report Attributes: |
+  Internal Search Term; Device Category; Page Type; Traffic Source
+
+Dashboard Usage: [Site Search Performance, Product Discovery & Merchandising]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [internal-search-term, filter-value, sort-option]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +217,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-30T17:56:53.378+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-30T17:57:01.778+00:00
 
