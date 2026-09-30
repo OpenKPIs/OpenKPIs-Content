@@ -1,7 +1,7 @@
 # Metric: Help Center Views
-# Generated: 2026-09-30T18:23:44.331Z
+# Generated: 2026-09-30T18:23:53.450Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Help Center Views
 Formula: COUNT(page_view) WHERE content_group = 'help_center' AND page_type NOT IN ('order_status', 'account_orders', 'contact_form') AND traffic_type != 'internal', by event date in the reporting period
@@ -11,30 +11,174 @@ Description: |
 
 Category: Experience
 
+Tags: [metric, E-commerce: Returns, Refunds & Customer Support]
 
+Industry: E-commerce
 
+Priority: Medium
 
+Core Area: Engagement
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  page_view
 
+Adobe Event: |
+  pageView
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "help-article-1",
+        "pageName": "help:article",
+        "destinationURL": "https://example.com/help/article-1"
+      },
+      "category": {
+        "primaryCategory": "help_center",
+        "pageType": "help_article"
+      },
+      "attributes": {
+        "articleID": "ART-1",
+        "trafficType": "external"
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_location": "https://example.com/help/article-1",
+    "page_title": "Help article",
+    "content_group": "help_center",
+    "page_type": "help_article",
+    "traffic_type": "external",
+    "article_id": "ART-1"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "web": {
+      "webPageDetails": {
+        "name": "help:article",
+        "URL": "https://example.com/help/article-1",
+        "siteSection": "help_center",
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "_tenantId": {
+      "pageType": "help_article",
+      "trafficType": "external",
+      "helpArticle": {
+        "articleId": "ART-1"
+      }
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web.webPageDetails.pageViews.value": 1,
+    "web.webPageDetails.siteSection": "help_center",
+    "web.webPageDetails.name": "help:article",
+    "web.webPageDetails.URL": "https://example.com/help/article-1",
+    "_tenantId.pageType": "help_article",
+    "_tenantId.trafficType": "external",
+    "_tenantId.helpArticle.articleId": "ART-1"
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Agent console and chat widget views are excluded only where they are flagged traffic_type = 'internal'; no other export field isolates them.
+  -- page_view events in the period with their help-center parameters pivoted (event_date is already in the property's reporting time zone)
+  WITH page_views AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      MAX(IF(ep.key = 'content_group', ep.value.string_value, NULL)) AS content_group,
+      MAX(IF(ep.key = 'page_type', ep.value.string_value, NULL)) AS page_type,
+      MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'page_view'
+    GROUP BY event_date, user_pseudo_id, event_timestamp, event_bundle_sequence_id
+  )
+  -- Help center views per day: every help-center page view, excluding order status, account order and contact form pages and internal traffic
+  SELECT
+    event_date,
+    COUNT(*) AS help_center_views
+  FROM page_views
+  WHERE content_group = 'help_center'
+    AND COALESCE(page_type, '') NOT IN ('order_status', 'account_orders', 'contact_form')
+    AND COALESCE(traffic_type, '') != 'internal'
+  GROUP BY event_date
+  ORDER BY event_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Agent console and chat widget views are excluded only where they are flagged trafficType = 'internal'; no other XDM field isolates them.
+  -- Page view events in the period, dated in the property's reporting time zone (replace 'America/New_York' with it)
+  WITH page_views AS (
+    SELECT
+      CAST(FROM_UTC_TIMESTAMP(timestamp, 'America/New_York') AS DATE) AS event_date,
+      web.webPageDetails.siteSection AS content_group,
+      _tenantId.pageType AS page_type,
+      _tenantId.trafficType AS traffic_type
+    FROM aep_web_events_dataset
+    WHERE eventType = 'web.webpagedetails.pageViews'
+      AND CAST(FROM_UTC_TIMESTAMP(timestamp, 'America/New_York') AS DATE) BETWEEN DATE_SUB(CURRENT_DATE, 90) AND DATE_SUB(CURRENT_DATE, 1)
+  )
+  -- Help center views per day: every help-center page view, excluding order status, account order and contact form pages and internal traffic
+  SELECT
+    event_date,
+    COUNT(*) AS help_center_views
+  FROM page_views
+  WHERE content_group = 'help_center'
+    AND COALESCE(page_type, '') NOT IN ('order_status', 'account_orders', 'contact_form')
+    AND COALESCE(traffic_type, '') != 'internal'
+  GROUP BY event_date
+  ORDER BY event_date;
 
+Calculation Notes: |
+  1️⃣ Counts every page_view with content_group = 'help_center': help home, category, article, FAQ and returns or shipping policy pages.,2️⃣ FAQ pages count as page views here; FAQ accordion expands (faq_expand) are interactions, not views, and are excluded.,3️⃣ Built on page_view only; help_article_view fires on article pages as a subset, so never add the two together.,4️⃣ Reloads, back-button re-views and paginated category pages each count; per-session reach needs unique page views instead.,5️⃣ Order status, account order and contact form pages are excluded; they count in Order Status Checks and Contact Form Submissions.,6️⃣ Excludes traffic_type = 'internal'; agent console or chat widget views are excluded only where they carry that internal flag.,7️⃣ Attributed to the event date in the property's reporting time zone.
 
+Business Use Case: |
+  1️⃣ Customer Service rewrites high-view articles still followed by a contact form submission in the same session.,2️⃣ Customer Service adds help content when views of a topic spike after a shipping delay or policy change.,3️⃣ Product places help links on checkout and order pages when help views rise but contact volume does not fall.
 
+Dependencies:
+  Events: [page-view, help-article-view]
+  Dimensions: [help-article, page-type]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Help Article; Page Type; Device Category; Traffic Source; Customer Status
 
+Dashboard Usage: [Customer Support & Self-Service Overview, Help Content Performance]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [order-status-checks, contact-form-submissions, search-results-views]
 
+Derived KPIs: [self-service-resolution-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +188,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-30T18:23:43.94+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-30T18:23:53.143+00:00
 
