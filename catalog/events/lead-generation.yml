@@ -1,0 +1,221 @@
+# Event: Lead Generation
+# Generated: 2026-09-30T18:54:38.809Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Lead Generation
+Event Serialization: always
+
+Description: |
+  Fires when a shopper submits a form that creates a contactable lead: quote request, trade or B2B account inquiry, consultation booking or back-in-stock alert. Support contacts use contact-form-submission.
+
+Category: Acquisition
+
+Tags: [event, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+
+Event Type: standard
+
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  generate_lead
+
+Adobe Event: |
+  generate_lead
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "generate_lead",
+          "eventAction": "lead_submitted"
+        },
+        "attributes": {
+          "lead_id": "lead-1",
+          "lead_type": "quote_request",
+          "form_id": "form-1",
+          "lead_source": "pdp",
+          "value": 100,
+          "currency": "USD",
+          "campaign_source": "google",
+          "campaign_medium": "cpc",
+          "lead_validation_status": "valid"
+        }
+      }
+    ],
+    "product": [
+      {
+        "productInfo": {
+          "productID": "SKU-1",
+          "productName": "item"
+        },
+        "attributes": {
+          "item_variant": "variant"
+        }
+      }
+    ],
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "user-1"
+            }
+          }
+        ]
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "generate_lead",
+    "lead_id": "lead-1",
+    "lead_type": "quote_request",
+    "form_id": "form-1",
+    "lead_source": "pdp",
+    "value": 100,
+    "currency": "USD",
+    "items": [
+      {
+        "item_id": "SKU-1",
+        "item_name": "item",
+        "item_variant": "variant"
+      }
+    ],
+    "campaign_source": "google",
+    "campaign_medium": "cpc",
+    "lead_validation_status": "valid",
+    "user_id": "user-1"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "generate_lead",
+    "eventInfo": {
+      "lead_id": "lead-1",
+      "lead_type": "quote_request",
+      "form_id": "form-1",
+      "lead_source": "pdp",
+      "value": 100,
+      "currency": "USD",
+      "campaign_source": "google",
+      "campaign_medium": "cpc",
+      "lead_validation_status": "valid",
+      "user_id": "user-1"
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "name": "item",
+        "selectedOptions": [
+          {
+            "attribute": "variant",
+            "value": "variant"
+          }
+        ]
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "leadOperation.newLead",
+    "timestamp": "2026-01-01T00:00:00Z",
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "ecid-1",
+          "authenticatedState": "ambiguous",
+          "primary": true
+        }
+      ]
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "name": "item",
+        "selectedOptions": [
+          {
+            "attribute": "variant",
+            "value": "variant"
+          }
+        ]
+      }
+    ],
+    "_tenant": {
+      "lead_id": "lead-1",
+      "lead_type": "quote_request",
+      "form_id": "form-1",
+      "lead_source": "pdp",
+      "value": 100,
+      "currency": "USD",
+      "campaign_source": "google",
+      "campaign_medium": "cpc",
+      "lead_validation_status": "valid",
+      "user_id": "user-1"
+    }
+  }
+
+Parameters: |
+  {
+    "lead_id": "string - unique lead identifier returned by the form backend or CRM; dedupe key",
+    "lead_type": "string - quote_request, trade_account, consultation or back_in_stock",
+    "form_id": "string - stable identifier of the lead form that was submitted",
+    "lead_source": "string - placement that produced the lead, e.g. pdp, footer, landing_page, exit_intent",
+    "value": "number - expected lead value in currency units, set by Marketing; optional",
+    "currency": "string - ISO 4217 code; required whenever value is sent",
+    "items": "array - product(s) the lead concerns (item_id, item_name, item_variant); optional",
+    "campaign_source": "string - UTM source of the session that produced the lead; optional",
+    "campaign_medium": "string - UTM medium of the session that produced the lead; optional",
+    "lead_validation_status": "string - valid, duplicate or spam as returned by the backend; optional",
+    "user_id": "string - hashed customer identifier when the shopper is logged in; optional"
+  }
+
+Calculation Notes: |
+  ["1️⃣ Fires on server-confirmed form success (lead_id returned); never on submit click, failed validation or form view. Newsletter opt-ins use sign_up.","2️⃣ Serialization always: every successful submission is a hit. Dedupe on lead_id so double submits and thank-you page reloads count once.","3️⃣ Required: lead_id, lead_type, form_id, lead_source. Optional: value, currency, items, campaign_source, campaign_medium, lead_validation_status.","4️⃣ lead_type is a fixed list: quote_request, trade_account, consultation, back_in_stock. items carries the product for back-in-stock and quote leads.","5️⃣ value is the expected lead value set by Marketing, never order revenue; send it only with currency, and omit both where no lead-value model exists.","6️⃣ Fire only with analytics consent. Never send email, phone or name; lead_id and a hashed user_id stitch the hit to the CRM lead record.","7️⃣ Common mistakes: firing on thank-you page load (bookmarks and refreshes inflate leads) and reusing one form_id across different lead forms."]
+
+Business Use Case: |
+  ["1️⃣ Performance Marketing: cost per lead on a paid campaign rises above target → moves budget to lower-CPL campaigns.","2️⃣ Sales: quote leads from one lead_source rarely close in CRM → Marketing tightens that source's targeting.","3️⃣ Merchandising: back-in-stock leads pile up on one SKU → raises the reorder quantity for that item.","4️⃣ CRO Team: lead form completions drop after a form redesign → removes the added fields and retests."]
+
+Dependencies:
+  Events: [session-start]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  lead_type; lead_source; form_id; Traffic Source; First Touch Channel Grouping; Device Category; Page Type
+
+    Dashboard Usage: [Marketing Acquisition Performance, Lead Funnel & Cost per Lead, Paid Media Campaign Performance]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [traffic-source, first-touch-channel-grouping, device-category, page-type]
+
+    
+    
+    Derived KPIs: [lead-conversion-rate, cost-per-lead]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-30T18:09:58.533+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-30T18:54:38.267+00:00
+
