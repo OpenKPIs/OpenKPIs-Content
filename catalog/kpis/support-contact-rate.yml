@@ -1,7 +1,7 @@
 # KPI: Support Contact Rate
-# Generated: 2026-09-30T17:45:10.036Z
+# Generated: 2026-09-30T17:45:19.217Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 KPI Name: Support Contact Rate
 Formula: (Inbound Support Contacts in Period / Orders Placed in Period) × 100
@@ -11,6 +11,19 @@ Description: |
 
 Category: Experience
 
+Tags: [kpi, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: Rate
+
+Aggregation Window: Daily, Weekly, Monthly
 
 
 
@@ -18,22 +31,111 @@ Category: Experience
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Inbound contacts: one per surviving ticket, dated by creation; excludes merged, spam, auto-responder, outbound and internal tickets
+  WITH contacts AS (
+    SELECT COUNT(DISTINCT ticket_id) AS inbound_contacts
+    FROM `your-project.crm.support_tickets`
+    WHERE DATE(created_at) BETWEEN start_date AND end_date
+      AND direction = 'inbound'
+      AND merged_into_ticket_id IS NULL
+      AND is_spam = FALSE
+      AND is_auto_reply = FALSE
+      AND is_internal = FALSE
+  ),
+  -- Orders placed across all channels, excluding test orders and orders cancelled as fraud
+  orders AS (
+    SELECT COUNT(DISTINCT order_id) AS orders_placed
+    FROM `your-project.oms.orders`
+    WHERE DATE(order_created_at) BETWEEN start_date AND end_date
+      AND is_test_order = FALSE
+      AND NOT (order_status = 'cancelled' AND cancel_reason = 'fraud')
+  )
+  -- Contacts per 100 orders, uncapped
+  SELECT
+    c.inbound_contacts,
+    o.orders_placed,
+    ROUND(SAFE_DIVIDE(c.inbound_contacts, o.orders_placed) * 100, 2) AS support_contact_rate
+  FROM contacts c
+  CROSS JOIN orders o;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window: last 90 complete days
+  WITH params AS (
+    SELECT DATE_SUB(CURRENT_DATE(), 90) AS start_date,
+           DATE_SUB(CURRENT_DATE(), 1) AS end_date
+  ),
+  -- Inbound contacts: one per surviving ticket, dated by creation; excludes merged, spam, auto-responder, outbound and internal tickets
+  contacts AS (
+    SELECT COUNT(DISTINCT t.ticket_id) AS inbound_contacts
+    FROM aep_backend_dataset.crm_support_tickets t
+    CROSS JOIN params p
+    WHERE TO_DATE(t.created_at) BETWEEN p.start_date AND p.end_date
+      AND t.direction = 'inbound'
+      AND t.merged_into_ticket_id IS NULL
+      AND t.is_spam = FALSE
+      AND t.is_auto_reply = FALSE
+      AND t.is_internal = FALSE
+  ),
+  -- Orders placed across all channels, excluding test orders and orders cancelled as fraud
+  orders AS (
+    SELECT COUNT(DISTINCT o.order_id) AS orders_placed
+    FROM aep_backend_dataset.oms_orders o
+    CROSS JOIN params p
+    WHERE TO_DATE(o.order_created_at) BETWEEN p.start_date AND p.end_date
+      AND o.is_test_order = FALSE
+      AND NOT (o.order_status = 'cancelled' AND o.cancel_reason = 'fraud')
+  )
+  -- Contacts per 100 orders, uncapped
+  SELECT
+    c.inbound_contacts,
+    o.orders_placed,
+    ROUND(CAST(c.inbound_contacts AS DOUBLE) / NULLIF(o.orders_placed, 0) * 100, 2) AS support_contact_rate
+  FROM contacts c
+  CROSS JOIN orders o;
 
+Calculation Notes: |
+  1️⃣ Contact = one inbound ticket or conversation, any channel. Merged tickets count once; replies on an open ticket are not new contacts.
+  2️⃣ Exclude spam, auto-responder loops, outbound agent messages and internally created tickets.
+  3️⃣ Pre-sale questions with no order still count; split them out by contact reason instead of dropping them.
+  4️⃣ Denominator: all orders placed in the period across channels; exclude test orders and orders cancelled as fraud.
+  5️⃣ Date contacts by ticket creation, not resolution; a reopened ticket adds no contact.
+  6️⃣ A new ticket on an already handled issue is a new contact; track repeats through first contact resolution, not here.
+  7️⃣ Expressed per 100 orders, not per customer; peak weeks can exceed 100, so never cap the value.
 
+Business Use Case: |
+  1️⃣ Customer Service: weekly rate above plan → adjust agent staffing and chat hours for the next two weeks.
+  2️⃣ Customer Service: WISMO share of contacts rising → add proactive shipping notifications and tracking links.
+  3️⃣ Product: rate jumps after a site release → review the changed checkout and account pages and fix defects.
+  4️⃣ Merchandising: one category drives most contacts per order → rewrite size guides and copy for its top SKUs.
 
+Dependencies:
+  Events: [contact-form-submission, purchase]
+  Dimensions: [support-channel]
+  KPIs: [orders]
 
+Source Data: CRM
 
+Report Attributes: |
+  support-channel; contact reason; ticket-priority; item-category; fulfillment-method; device-category
 
+Dashboard Usage: [Customer Support Operations, Customer Experience Overview, Peak Season Readiness]
 
+Segment Eligibility: |
+  true
 
+Related KPIs: [wismo-rate, self-service-resolution-rate, average-resolution-time, return-initiation-rate, refund-rate, delivery-exception-rate]
 
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -43,5 +145,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-30T17:45:09.665+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-30T17:45:18.558+00:00
 
