@@ -1,0 +1,398 @@
+# KPI: Self-Service Resolution Rate
+# Generated: 2026-09-30T17:58:54.575Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Self-Service Resolution Rate
+Formula: ((Help-Center Sessions - Help-Center Sessions Followed by a Support Contact within 24h) / Help-Center Sessions) × 100
+
+Description: |
+  Share of help-center sessions not followed by a support contact (form, chat or click-to-call) within 24 hours. The standard deflection measure for help-center content.
+
+Category: Experience
+
+Tags: [kpi, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Session
+
+Measure Type: Percentage
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  pageView
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageID": "ART-1",
+        "pageName": "article",
+        "destinationURL": "https://example.com/help/article-1"
+      },
+      "category": {
+        "pageType": "help_center"
+      },
+      "attributes": {
+        "articleId": "ART-1",
+        "trafficType": "external"
+      }
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "USER-1"
+            }
+          }
+        ]
+      }
+    ],
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "pageView"
+        }
+      },
+      {
+        "eventInfo": {
+          "eventName": "form_submit"
+        },
+        "attributes": {
+          "formType": "support_contact",
+          "supportChannel": "chat",
+          "trafficType": "external"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  [
+    {
+      "event": "page_view",
+      "page_type": "help_center",
+      "page_location": "https://example.com/help/article-1",
+      "article_id": "ART-1",
+      "article_title": "article",
+      "traffic_type": "external",
+      "user_id": "USER-1"
+    },
+    {
+      "event": "submit_form",
+      "form_type": "support_contact",
+      "support_channel": "chat",
+      "traffic_type": "external",
+      "user_id": "USER-1"
+    }
+  ]
+
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "pageView",
+      "web": {
+        "webPageDetails": {
+          "name": "article",
+          "URL": "https://example.com/help/article-1",
+          "siteSection": "help_center"
+        }
+      },
+      "identityMap": {
+        "CRMID": [
+          {
+            "id": "USER-1",
+            "authenticatedState": "authenticated",
+            "primary": false
+          }
+        ]
+      },
+      "_tenantId": {
+        "articleId": "ART-1",
+        "trafficType": "external"
+      }
+    },
+    {
+      "event": "form_submit",
+      "identityMap": {
+        "CRMID": [
+          {
+            "id": "USER-1",
+            "authenticatedState": "authenticated",
+            "primary": false
+          }
+        ]
+      },
+      "_tenantId": {
+        "formType": "support_contact",
+        "supportChannel": "chat",
+        "trafficType": "external"
+      }
+    }
+  ]
+
+XDM Mapping: |
+  [
+    {
+      "eventType": "web.webpagedetails.pageViews",
+      "web": {
+        "webPageDetails": {
+          "name": "article",
+          "URL": "https://example.com/help/article-1",
+          "siteSection": "help_center",
+          "pageViews": {
+            "value": 1
+          }
+        }
+      },
+      "_tenantId": {
+        "articleId": "ART-1",
+        "trafficType": "external"
+      },
+      "identityMap": {
+        "ECID": [
+          {
+            "id": "ECID-1",
+            "authenticatedState": "ambiguous",
+            "primary": true
+          }
+        ],
+        "CRMID": [
+          {
+            "id": "USER-1",
+            "authenticatedState": "authenticated",
+            "primary": false
+          }
+        ]
+      }
+    },
+    {
+      "eventType": "web.formFilledOut",
+      "_tenantId": {
+        "formType": "support_contact",
+        "supportChannel": "chat",
+        "trafficType": "external"
+      },
+      "identityMap": {
+        "ECID": [
+          {
+            "id": "ECID-1",
+            "authenticatedState": "ambiguous",
+            "primary": true
+          }
+        ],
+        "CRMID": [
+          {
+            "id": "USER-1",
+            "authenticatedState": "authenticated",
+            "primary": false
+          }
+        ]
+      }
+    }
+  ]
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  DECLARE contact_page_type STRING DEFAULT 'contact';
+  
+  -- Page views and support contacts in range plus one day for the 24h window; internal and agent traffic (traffic_type = internal) removed
+  WITH events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_day,
+      event_name,
+      event_timestamp,
+      user_id,
+      user_pseudo_id,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_type') AS page_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'form_type') AS form_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date)
+                            AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL 1 DAY))
+      AND event_name IN ('page_view', 'submit_form')
+      AND COALESCE((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type'), '') != 'internal'
+  ),
+  -- Per session: landing page type, first help_center view and its day, user_id if the user signed in
+  sessions AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      MAX(user_id) AS user_id,
+      MIN_BY(COALESCE(page_type, ''), event_timestamp) AS landing_page_type,
+      MIN(IF(page_type = 'help_center', event_timestamp, NULL)) AS first_help_ts,
+      MIN(IF(page_type = 'help_center', event_day, NULL)) AS help_date
+    FROM events
+    WHERE event_name = 'page_view'
+    GROUP BY user_pseudo_id, ga_session_id
+  ),
+  -- Denominator: help-center sessions credited to the day of the first help view; sessions landing on the contact page excluded
+  help_sessions AS (
+    SELECT *
+    FROM sessions
+    WHERE first_help_ts IS NOT NULL
+      AND landing_page_type != contact_page_type
+      AND help_date BETWEEN start_date AND end_date
+  ),
+  -- Support contacts: submit_form with form_type = support_contact, every support_channel (form, chat, phone)
+  contacts AS (
+    SELECT user_id, user_pseudo_id, event_timestamp AS contact_ts
+    FROM events
+    WHERE event_name = 'submit_form'
+      AND form_type = 'support_contact'
+  ),
+  -- Unresolved: a contact by the same device or signed-in user within 24h of the first help view, across sessions and devices
+  contacted AS (
+    SELECT DISTINCT h.user_pseudo_id, h.ga_session_id
+    FROM help_sessions h
+    JOIN contacts c
+      ON (c.user_pseudo_id = h.user_pseudo_id OR (c.user_id IS NOT NULL AND c.user_id = h.user_id))
+     AND c.contact_ts >= h.first_help_ts
+     AND c.contact_ts < h.first_help_ts + 24 * 3600 * 1000000
+  )
+  -- Rate per help-session date: sessions with no contact in the window over all help-center sessions
+  SELECT
+    h.help_date,
+    COUNT(*) AS help_center_sessions,
+    COUNT(c.ga_session_id) AS sessions_followed_by_contact,
+    ROUND(SAFE_DIVIDE(COUNT(*) - COUNT(c.ga_session_id), COUNT(*)) * 100, 2) AS self_service_resolution_rate
+  FROM help_sessions h
+  LEFT JOIN contacted c
+    ON c.user_pseudo_id = h.user_pseudo_id
+   AND c.ga_session_id = h.ga_session_id
+  GROUP BY h.help_date
+  ORDER BY h.help_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Window: help sessions from 90 days ago to yesterday; events read through today for the 24h contact window; contact page type = 'contact'
+  
+  -- Page views and support contacts in range plus one day for the 24h window; internal and agent traffic (trafficType = internal) removed; 30-minute sessions per ECID
+  WITH events AS (
+    SELECT
+      timestamp,
+      eventType,
+      identityMap['ECID'][0].id AS ecid,
+      identityMap['CRMID'][0].id AS user_id,
+      web.webPageDetails.siteSection AS page_type,
+      _tenantId.formType AS form_type,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY identityMap['ECID'][0].id ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ).num AS session_num
+    FROM aep_web_events_dataset
+    WHERE TO_DATE(timestamp) BETWEEN DATE_SUB(CURRENT_DATE(), 90) AND CURRENT_DATE()
+      AND eventType IN ('web.webpagedetails.pageViews', 'web.formFilledOut')
+      AND COALESCE(_tenantId.trafficType, '') <> 'internal'
+  ),
+  -- Per session: landing page type, first help_center view and its day, user ID if the user signed in
+  sessions AS (
+    SELECT
+      ecid,
+      session_num,
+      MAX(user_id) AS user_id,
+      MIN_BY(COALESCE(page_type, ''), timestamp) AS landing_page_type,
+      MIN(CASE WHEN page_type = 'help_center' THEN timestamp END) AS first_help_ts,
+      TO_DATE(MIN(CASE WHEN page_type = 'help_center' THEN timestamp END)) AS help_date
+    FROM events
+    WHERE eventType = 'web.webpagedetails.pageViews'
+    GROUP BY ecid, session_num
+  ),
+  -- Denominator: help-center sessions credited to the day of the first help view; sessions landing on the contact page excluded
+  help_sessions AS (
+    SELECT *
+    FROM sessions
+    WHERE first_help_ts IS NOT NULL
+      AND landing_page_type <> 'contact'
+      AND help_date BETWEEN DATE_SUB(CURRENT_DATE(), 90) AND DATE_SUB(CURRENT_DATE(), 1)
+  ),
+  -- Support contacts: web.formFilledOut with formType = support_contact, every supportChannel (form, chat, phone)
+  contacts AS (
+    SELECT ecid, user_id, timestamp AS contact_ts
+    FROM events
+    WHERE eventType = 'web.formFilledOut'
+      AND form_type = 'support_contact'
+  ),
+  -- Unresolved: a contact by the same device or signed-in user within 24h of the first help view, across sessions and devices
+  contacted AS (
+    SELECT DISTINCT h.ecid, h.session_num
+    FROM help_sessions h
+    JOIN contacts c
+      ON (c.ecid = h.ecid OR (c.user_id IS NOT NULL AND c.user_id = h.user_id))
+     AND c.contact_ts >= h.first_help_ts
+     AND c.contact_ts < h.first_help_ts + INTERVAL 24 HOURS
+  )
+  -- Rate per help-session date: sessions with no contact in the window over all help-center sessions
+  SELECT
+    h.help_date,
+    COUNT(*) AS help_center_sessions,
+    COUNT(c.session_num) AS sessions_followed_by_contact,
+    ROUND((COUNT(*) - COUNT(c.session_num)) * 100.0 / NULLIF(COUNT(*), 0), 2) AS self_service_resolution_rate
+  FROM help_sessions h
+  LEFT JOIN contacted c
+    ON c.ecid = h.ecid
+   AND c.session_num = h.session_num
+  GROUP BY h.help_date
+  ORDER BY h.help_date;
+
+Calculation Notes: |
+  1️⃣ Denominator: sessions with at least one page_view where page_type = help_center; sessions that land directly on the contact page are excluded.
+  2️⃣ Contact: every form, chat start or click-to-call fires submit_form with form_type = support_contact and support_channel (form, chat, phone).
+  3️⃣ Window: 24h from first help view, across sessions and devices when user_id is set; credited to the help-session date; latest day provisional.
+  4️⃣ Each help-center session is judged on its own; one contact marks every help-center session by that user in the prior 24h as unresolved.
+  5️⃣ Exclude internal and agent traffic, marked traffic_type = internal; bots are removed only by the platform's known-bot filter.
+  6️⃣ Contacts with no prior help-center view are out of scope here; Support Contact Rate covers total contact volume.
+  7️⃣ Silent exits count as resolved; read alongside article feedback (helpful = no) to catch customers who gave up rather than got an answer.
+
+Business Use Case: |
+  1️⃣ Customer Service: rate drops week over week → rewrite the articles most often viewed just before a contact.
+  2️⃣ Customer Service: rate falls on return-policy articles → add a direct return-initiation link inside the article.
+  3️⃣ Customer Service: WISMO articles show low resolution → ask Product to surface carrier tracking on order status.
+  4️⃣ Finance: deflected sessions × cost per contact → report avoided support cost in the quarterly service budget.
+
+Dependencies:
+  Events: [page-view, help-article-view, contact-form-submission]
+  Dimensions: [page-type, help-article, support-channel]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Help Article; Support Channel; Device Category; Traffic Source; New vs Returning User
+
+Dashboard Usage: [Customer Support Performance, Help Center Content Effectiveness]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [support-contact-rate, wismo-rate, average-resolution-time, return-initiation-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-30T17:44:49.611+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-30T17:58:54.289+00:00
+
