@@ -1,0 +1,152 @@
+# Event: Outbound Link Click
+# Generated: 2026-09-30T18:55:15.802Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Outbound Link Click
+Event Serialization: always
+
+Description: |
+  GA4 enhanced-measurement click with outbound = true, fired when a shopper follows a link to another domain such as a marketplace, social profile or partner site. Cross-domain checkout hops are excluded.
+
+Category: Engagement
+
+Tags: [event, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Engagement
+
+
+Event Type: standard
+
+Aggregation Window: Event, Session, Daily
+
+GA4 Event: |
+  click
+
+Adobe Event: |
+  click
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "click",
+          "eventAction": "click"
+        },
+        "category": {
+          "primaryCategory": "exit link"
+        },
+        "attributes": {
+          "link_url": "https://example.com/page",
+          "link_domain": "example.com",
+          "outbound": true,
+          "link_id": "link-1",
+          "link_classes": "link"
+        }
+      }
+    ],
+    "page": {
+      "pageInfo": {
+        "destinationURL": "https://www.example.org/product"
+      },
+      "category": {
+        "pageType": "product"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "click",
+    "link_url": "https://example.com/page",
+    "link_domain": "example.com",
+    "outbound": true,
+    "link_id": "link-1",
+    "link_classes": "link",
+    "page_location": "https://www.example.org/product",
+    "page_type": "product"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "click",
+    "eventInfo": {
+      "link_url": "https://example.com/page",
+      "link_domain": "example.com",
+      "outbound": true,
+      "link_id": "link-1",
+      "link_classes": "link",
+      "page_location": "https://www.example.org/product",
+      "page_type": "product"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webInteraction.linkClicks",
+    "web.webInteraction.type": "exit",
+    "web.webInteraction.URL": "link_url",
+    "web.webInteraction.name": "link_id",
+    "web.webInteraction.linkClicks.value": 1,
+    "web.webPageDetails.URL": "page_location",
+    "_<tenantId>.linkDomain": "link_domain",
+    "_<tenantId>.outbound": "outbound",
+    "_<tenantId>.linkClasses": "link_classes",
+    "_<tenantId>.pageType": "page_type"
+  }
+
+Parameters: |
+  {
+    "link_url": "string - Full destination URL, query string stripped of PII",
+    "link_domain": "string - Destination hostname, e.g. amazon.com",
+    "outbound": "boolean - true when link_domain is outside the site and the cross-domain list",
+    "link_id": "string - HTML id of the clicked link, if set",
+    "link_classes": "string - HTML class attribute of the clicked link, if set",
+    "page_location": "string - URL of the page where the click happened",
+    "page_type": "string - Site template of the source page, e.g. product, landing, blog"
+  }
+
+Calculation Notes: |
+  ["1️⃣ Fires on a user click of an <a> link whose hostname differs from the page's; never on mailto:, tel:, script-only buttons or same-domain links.","2️⃣ Serialization always: every click is a hit, repeats included. Count unique exits by link_url per session at reporting time, not in the tag.","3️⃣ Required: link_url, link_domain, outbound (true). Optional: link_id, link_classes, page_location, page_type.","4️⃣ Domains on the GA4 cross-domain list (hosted checkout, payment, BNPL) do not set outbound; keep that list current or checkout hops read as exits.","5️⃣ Consent: sent only with analytics_storage granted. Strip query strings holding emails, tokens or order IDs from link_url before sending.","6️⃣ No manual click push: page_type is a page-level shared event parameter. A custom outbound tag beside enhanced measurement double-counts.","7️⃣ Same-tab exits can lose the hit when the page unloads first; expect counts to understate same-tab exits slightly."]
+
+Business Use Case: |
+  ["1️⃣ Affiliate Manager: partner clicks diverge from partner-reported referrals → disputes the invoice before payout.","2️⃣ E-commerce Marketing: PDP clicks to marketplace listings grow → tests moving the link below Add to Cart.","3️⃣ Social Media Manager: header social-icon clicks drain paid landing sessions → moves the icons to the footer.","4️⃣ Acquisition Lead: a paid campaign's landing page shows high outbound share → pauses the ad set and fixes the page."]
+
+Dependencies:
+  Events: [page-view]
+  Dimensions: [page-url]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  Link Domain; Link URL; Page URL; Page Type; Traffic Source; Device Category
+
+    Dashboard Usage: [Acquisition & Landing Page Performance, Affiliate & Partner Referral Tracking, Site Exit Analysis]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [page-url, page-type, traffic-source, referrer, device-category]
+
+    
+    
+    
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-30T18:10:35.203+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-30T18:55:15.49+00:00
+
