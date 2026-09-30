@@ -1,0 +1,186 @@
+# Event: Newsletter Subscription
+# Generated: 2026-09-30T18:54:57.292Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Newsletter Subscription
+Event Serialization: always
+
+Description: |
+  Fires when a visitor submits a valid email to join the marketing newsletter from a footer, pop-up or checkout opt-in. Account creation uses account-registration; paid plans use subscription-start.
+
+Category: Acquisition
+
+Tags: [event, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Onboarding
+
+
+Event Type: standard
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  sign_up
+
+Adobe Event: |
+  sign_up
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "sign_up"
+        },
+        "category": {
+          "primaryCategory": "newsletter"
+        },
+        "attributes": {
+          "registration_type": "newsletter",
+          "method": "email",
+          "form_id": "form-1",
+          "form_type": "footer",
+          "marketing_opt_in": true,
+          "newsletter_list_id": "list-1",
+          "coupon": "CODE-1"
+        }
+      }
+    ],
+    "page": {
+      "category": {
+        "pageType": "home"
+      }
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "hashed-id-1"
+            }
+          }
+        ]
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "sign_up",
+    "registration_type": "newsletter",
+    "method": "email",
+    "form_id": "form-1",
+    "form_type": "footer",
+    "page_type": "home",
+    "marketing_opt_in": true,
+    "newsletter_list_id": "list-1",
+    "coupon": "CODE-1",
+    "user_id": "hashed-id-1"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "sign_up",
+    "eventInfo": {
+      "registration_type": "newsletter",
+      "method": "email",
+      "form_id": "form-1",
+      "form_type": "footer",
+      "page_type": "home",
+      "marketing_opt_in": true,
+      "newsletter_list_id": "list-1",
+      "coupon": "CODE-1",
+      "user_id": "hashed-id-1"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "ecid-1",
+          "authenticatedState": "ambiguous",
+          "primary": true
+        }
+      ],
+      "CRMID": [
+        {
+          "id": "hashed-id-1",
+          "authenticatedState": "authenticated",
+          "primary": false
+        }
+      ]
+    },
+    "_tenantId": {
+      "signup": {
+        "registrationType": "newsletter",
+        "method": "email",
+        "formId": "form-1",
+        "formType": "footer",
+        "pageType": "home",
+        "marketingOptIn": true,
+        "newsletterListId": "list-1",
+        "coupon": "CODE-1"
+      }
+    }
+  }
+
+Parameters: |
+  {
+    "registration_type": "string - kind of sign-up; always newsletter for this event",
+    "method": "string - how the email was captured, e.g. email (typed) or google (social prefill)",
+    "form_id": "string - stable ID of the signup form",
+    "form_type": "string - footer, popup, exit_intent, checkout_opt_in or landing_page",
+    "page_type": "string - page template where the form was submitted",
+    "marketing_opt_in": "boolean - explicit marketing consent given with the submit",
+    "newsletter_list_id": "string - ESP list or audience joined",
+    "coupon": "string - welcome incentive code offered, if any",
+    "user_id": "string - hashed customer ID when the visitor is logged in"
+  }
+
+Calculation Notes: |
+  ["1️⃣ Fires on the signup endpoint's success response, not on button click; failed validation and already-subscribed replies do not fire.","2️⃣ Serialization always: every successful submit is a hit. Unique subscribers are deduplicated in the ESP by email address, not in analytics.","3️⃣ Required: registration_type, method, form_id, form_type, page_type, marketing_opt_in. All other parameters are optional.","4️⃣ Never push the email address or name to the dataLayer; send only after consent allows analytics storage.","5️⃣ Double opt-in: fire once on submit; the confirmation click is recorded by the ESP, not as a second hit.","6️⃣ Checkout opt-in fires only if the shopper ticked the box and the email is new to the list; pre-ticked boxes do not count.","7️⃣ Common mistake: sign_up without registration_type = newsletter, which merges email captures into account-registration counts."]
+
+Business Use Case: |
+  ["1️⃣ Email Marketing Manager: pop-up sign-ups fall after a redesign → A/B tests the offer and trigger timing.","2️⃣ Acquisition Lead: paid social drives sign-ups but few welcome-coupon orders → shifts budget to higher-intent channels.","3️⃣ CRM Manager: checkout opt-in share drops in one market → audits consent copy and checkbox placement."]
+
+Dependencies:
+  Events: [page-view]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  form_type; page_type; traffic-source; first-touch-channel-grouping; device-category; new-vs-returning-user
+
+    Dashboard Usage: [Email List Growth, Top-of-Funnel Acquisition]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [traffic-source, first-touch-channel-grouping, page-type, registration-type, new-vs-returning-user]
+
+    Derived Dimensions: [acquisition-cohort]
+
+    
+    
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-30T18:10:16.567+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-09-30T18:54:56.88+00:00
+
