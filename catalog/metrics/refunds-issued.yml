@@ -1,7 +1,7 @@
 # Metric: Refunds Issued
-# Generated: 2026-09-30T18:23:59.632Z
+# Generated: 2026-09-30T18:24:08.877Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Refunds Issued
 Formula: COUNT(DISTINCT refund_id) WHERE event_name = 'refund', by refund issue date in the reporting period
@@ -11,30 +11,195 @@ Description: |
 
 Category: Monetization
 
+Tags: [metric, E-commerce: Returns, Refunds & Customer Support]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Monetization
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  refund
 
+Adobe Event: |
+  refund
 
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "txn-1",
+      "total": {
+        "transactionTotal": 100,
+        "currency": "USD"
+      },
+      "attributes": {
+        "refundID": "rfd-1",
+        "refundType": "partial",
+        "trafficType": "external"
+      }
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "refund"
+        }
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "refund",
+    "refund_id": "rfd-1",
+    "refund_type": "partial",
+    "traffic_type": "external",
+    "ecommerce": {
+      "transaction_id": "txn-1",
+      "currency": "USD",
+      "value": 100,
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "price": 100,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "refund",
+    "eventInfo": {
+      "refundID": "rfd-1",
+      "refundType": "partial",
+      "refundAmount": 100,
+      "trafficType": "external"
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "quantity": 1,
+        "priceTotal": 100
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "refund",
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "ecid-1",
+          "authenticatedState": "ambiguous",
+          "primary": true
+        }
+      ]
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "quantity": 1,
+        "priceTotal": 100
+      }
+    ],
+    "_tenantId": {
+      "trafficType": "external",
+      "refund": {
+        "refundID": "rfd-1",
+        "refundType": "partial",
+        "refundAmount": 100
+      }
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Refund events in the period with refund_id, traffic_type and refunded value pivoted from event_params
+  WITH refunds AS (
+    SELECT
+      MAX(IF(ep.key = 'refund_id', ep.value.string_value, NULL)) AS refund_id,
+      MAX(IF(ep.key = 'traffic_type', ep.value.string_value, NULL)) AS traffic_type,
+      MAX(IF(ep.key = 'value', COALESCE(ep.value.double_value, CAST(ep.value.int_value AS FLOAT64)), NULL)) AS refund_value
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'refund'
+    GROUP BY user_pseudo_id, event_timestamp, event_bundle_sequence_id
+  )
+  -- Chargebacks carry no flag on the refund event; they are issuer-initiated and are not sent as merchant refund events
+  -- Refunds issued, full and partial alike, one per refund_id; a missing value is a full refund; test/internal orders and voided authorisations (value sent as 0) excluded
+  SELECT
+    COUNT(DISTINCT refund_id) AS refunds_issued
+  FROM refunds
+  WHERE COALESCE(traffic_type, '') NOT IN ('internal', 'test')
+    AND (refund_value IS NULL OR refund_value <> 0);
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Chargebacks carry no flag on the refund event; they are issuer-initiated and are not sent as merchant refund events
+  -- Refunds issued in the period (last 90 days to yesterday), full and partial alike, one per refundID; a missing refundAmount is a full refund; test/internal orders and voided authorisations (refundAmount sent as 0) excluded
+  SELECT
+    COUNT(DISTINCT _tenantId.refund.refundID) AS refunds_issued
+  FROM aep_web_events_dataset
+  WHERE CAST(timestamp AS DATE) BETWEEN DATE_SUB(CURRENT_DATE, 90) AND DATE_SUB(CURRENT_DATE, 1)
+    AND eventType = 'refund'
+    AND COALESCE(_tenantId.trafficType, '') NOT IN ('internal', 'test')
+    AND (_tenantId.refund.refundAmount IS NULL OR _tenantId.refund.refundAmount <> 0);
 
+Calculation Notes: |
+  1️⃣ One count per refund_id; several partial refunds on one order count separately, and resends of the same refund_id count once.,2️⃣ Dated by refund issue date, not order date; a refund on an order from a prior period counts in the period it is issued.,3️⃣ Full and partial refunds both count; split them with refund_type rather than excluding either.,4️⃣ Counted when the refund is issued, not when a return is initiated or approved; pending refunds wait until they are issued.,5️⃣ Excludes voided authorisations with no captured funds, chargebacks and test orders; none is a merchant-issued refund.,6️⃣ The refund event is usually sent server-side; reconcile weekly against platform refund records, as dropped hits leave gaps.
 
+Business Use Case: |
+  1️⃣ Customer Service sees a weekly refund spike, splits it by return reason and escalates the top SKUs to Merchandising.,2️⃣ Finance matches the refund count to payment processor settlements at month-end before closing the refund accrual.,3️⃣ Merchandising tracks refunds by item category after a supplier change and pulls lines whose count keeps rising.
 
+Dependencies:
+  Events: [refund-issued]
+  Dimensions: [refund-type, transaction-id]
 
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
 
+Report Attributes: |
+  Refund Type; Return Reason; Return Method; Payment Method; Item Category; Fulfillment Method; Country
 
+Dashboard Usage: [Returns & Refunds Overview, Customer Service Operations, Finance Month-End Close]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [returned-items, return-processing-time]
 
+Derived KPIs: [refund-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +209,7 @@ Contributed By: devyendarm
 
 Created At: 2026-09-30T18:23:59.312+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-09-30T18:24:08.457+00:00
 
