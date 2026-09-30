@@ -1,0 +1,168 @@
+# Dimension: Filter Value
+# Generated: 2026-09-30T17:59:18.475Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Filter Value
+
+Description: |
+  Facet value a shopper selects in product-list faceted navigation (Nike, Red, UK 10, 4 stars & up), always read with its filter_type. Captured as filter_value on the filter_apply event.
+
+Category: Engagement
+
+Tags: [dimension, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Discovery
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  filter_apply
+
+Adobe Event: |
+  filterApply
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "filter_apply"
+        },
+        "attributes": {
+          "filter_type": "color",
+          "filter_value": "red"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "filter_apply",
+    "filter_type": "size",
+    "filter_value": "8|8.5"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "filterApply",
+    "eventInfo": {
+      "filter_type": "size",
+      "filter_value": "8|8.5"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "web": {
+      "webInteraction": {
+        "name": "filterApply",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "_<tenantId>": {
+      "filterType": "size",
+      "filterValue": "8|8.5"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  -- filter_apply hits with filter_type and filter_value pivoted from event_params
+  WITH filter_hits AS (
+    SELECT
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'filter_type') AS filter_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'filter_value') AS filter_value
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'filter_apply'
+  )
+  -- One row per selected value (multi-select split on '|'), trimmed and lowercased, empty as (not set), paired with its filter_type
+  SELECT DISTINCT
+    COALESCE(NULLIF(LOWER(TRIM(filter_type)), ''), '(not set)') AS filter_type,
+    COALESCE(NULLIF(LOWER(TRIM(selected_value)), ''), '(not set)') AS filter_value
+  FROM filter_hits
+  LEFT JOIN UNNEST(SPLIT(filter_value, '|')) AS selected_value;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- filterApply hits from the last 90 days to yesterday, one row per selected value (multi-select split on '|')
+  WITH filter_hits AS (
+    SELECT
+      _tenantId.filterType AS filter_type,
+      explode_outer(split(_tenantId.filterValue, '[|]')) AS selected_value
+    FROM aep_web_events_dataset
+    WHERE CAST(timestamp AS DATE) BETWEEN DATE_SUB(CURRENT_DATE, 90) AND DATE_SUB(CURRENT_DATE, 1)
+      AND eventType = 'web.webinteraction.linkClicks'
+      AND web.webInteraction.name = 'filterApply'
+  )
+  -- Selected values trimmed and lowercased, empty as (not set), paired with their filter_type
+  SELECT DISTINCT
+    COALESCE(NULLIF(LOWER(TRIM(filter_type)), ''), '(not set)') AS filter_type,
+    COALESCE(NULLIF(LOWER(TRIM(selected_value)), ''), '(not set)') AS filter_value
+  FROM filter_hits;
+
+Calculation Notes: |
+  1️⃣ Source: filter_value on the filter_apply event, reported with filter_type; the same value (e.g. black) can sit under colour and under brand.
+  2️⃣ Multi-select: values arrive pipe-delimited in one filter_value ('8|8.5'); each is split into its own row, so one hit counts once per value.
+  3️⃣ Values are the event's normalised keys (brand_nike, size_uk_9), not display labels; reports trim and lowercase them, empty = (not set).
+  4️⃣ Capture rule: the event fires on selection only; deselection, Clear all and price-slider drags do not fire, so they never reach this dimension.
+  5️⃣ Only shopper-initiated selections count; filters restored from URL parameters on page load or back navigation do not fire.
+  6️⃣ Synonyms (grey/gray) are mapped to one key in the data layer before the push; reports show the key as sent and apply no mapping.
+  7️⃣ High cardinality: GA4 standard reports roll rare values into (other); use the BigQuery export for long-tail values.
+
+Business Use Case: |
+  1️⃣ Merchandising: when a heavily used filter value returns few products, extends that range or fixes missing attributes.
+  2️⃣ UX team ranks filter values by conversion monthly and moves the top values to the first facet positions.
+  3️⃣ Product data team: when shoppers filter on values missing from many SKUs, enriches those attributes in the PIM.
+
+Dependencies:
+  Events: [filter-applied]
+  Metrics: [filter-applications]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  filter_type; item-category; page-type; device-category; sort-option
+
+Dashboard Usage: [Product Discovery & Faceted Navigation, Merchandising Performance, Product List Conversion]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [item-category, internal-search-term, page-type, price-band, sort-option, search-results-count-band]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-30T17:55:56.444+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-30T17:59:18.143+00:00
+
