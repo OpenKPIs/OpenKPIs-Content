@@ -1,0 +1,377 @@
+# Dimension: Price Band
+# Generated: 2026-09-30T17:59:32.054Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Price Band
+
+Description: |
+  Groups each item by unit price (items[].price) in store currency: Free, Under 25, 25–49.99, 50–99.99, 100+ or (not set). Applies to items viewed, added to cart or purchased.
+
+Category: Monetization
+
+Tags: [dimension, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Discovery
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  prodView
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "view_item"
+        }
+      },
+      {
+        "eventInfo": {
+          "eventName": "add_to_cart"
+        }
+      },
+      {
+        "eventInfo": {
+          "eventName": "purchase"
+        }
+      }
+    ],
+    "product": [
+      {
+        "productInfo": {
+          "productID": "SKU-1",
+          "productName": "item"
+        },
+        "attributes": {
+          "price": 100,
+          "currency": "USD"
+        }
+      }
+    ],
+    "cart": {
+      "price": {
+        "currency": "USD"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-1"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 100
+          }
+        }
+      ]
+    },
+    "transaction": {
+      "transactionID": "txn-1",
+      "total": {
+        "currency": "USD"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-1"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 100
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  [
+    {
+      "event": "view_item",
+      "ecommerce": {
+        "currency": "USD",
+        "value": 100,
+        "items": [
+          {
+            "item_id": "SKU-1",
+            "item_name": "item",
+            "price": 100,
+            "quantity": 1
+          }
+        ]
+      }
+    },
+    {
+      "event": "add_to_cart",
+      "ecommerce": {
+        "currency": "USD",
+        "value": 100,
+        "items": [
+          {
+            "item_id": "SKU-1",
+            "item_name": "item",
+            "price": 100,
+            "quantity": 1
+          }
+        ]
+      }
+    },
+    {
+      "event": "purchase",
+      "ecommerce": {
+        "transaction_id": "txn-1",
+        "currency": "USD",
+        "value": 100,
+        "items": [
+          {
+            "item_id": "SKU-1",
+            "item_name": "item",
+            "price": 100,
+            "quantity": 1
+          }
+        ]
+      }
+    }
+  ]
+
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "prodView",
+      "xdm": {
+        "eventType": "commerce.productViews",
+        "commerce": {
+          "productViews": {
+            "value": 1
+          }
+        },
+        "productListItems": [
+          {
+            "SKU": "SKU-1",
+            "name": "item",
+            "priceTotal": 100,
+            "quantity": 1,
+            "currencyCode": "USD"
+          }
+        ]
+      }
+    },
+    {
+      "event": "scAdd",
+      "xdm": {
+        "eventType": "commerce.productListAdds",
+        "commerce": {
+          "productListAdds": {
+            "value": 1
+          }
+        },
+        "productListItems": [
+          {
+            "SKU": "SKU-1",
+            "name": "item",
+            "priceTotal": 100,
+            "quantity": 1,
+            "currencyCode": "USD"
+          }
+        ]
+      }
+    },
+    {
+      "event": "purchase",
+      "xdm": {
+        "eventType": "commerce.purchases",
+        "commerce": {
+          "purchases": {
+            "value": 1
+          },
+          "order": {
+            "currencyCode": "USD"
+          }
+        },
+        "productListItems": [
+          {
+            "SKU": "SKU-1",
+            "name": "item",
+            "priceTotal": 100,
+            "quantity": 1,
+            "currencyCode": "USD"
+          }
+        ]
+      }
+    }
+  ]
+
+XDM Mapping: |
+  [
+    {
+      "eventType": "commerce.productViews",
+      "commerce": {
+        "productViews": {
+          "value": 1
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "name": "item",
+          "priceTotal": 100,
+          "quantity": 1,
+          "currencyCode": "USD"
+        }
+      ]
+    },
+    {
+      "eventType": "commerce.productListAdds",
+      "commerce": {
+        "productListAdds": {
+          "value": 1
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "name": "item",
+          "priceTotal": 100,
+          "quantity": 1,
+          "currencyCode": "USD"
+        }
+      ]
+    },
+    {
+      "eventType": "commerce.purchases",
+      "commerce": {
+        "purchases": {
+          "value": 1
+        },
+        "order": {
+          "currencyCode": "USD"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "name": "item",
+          "priceTotal": 100,
+          "quantity": 1,
+          "currencyCode": "USD"
+        }
+      ]
+    }
+  ]
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  DECLARE store_currency STRING DEFAULT 'USD';
+  -- One row per item on view_item, add_to_cart and purchase with its unit price (never price x quantity); an item in a currency other than the store currency gets no price
+  WITH item_rows AS (
+    SELECT
+      IF((SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'currency') = store_currency, item.price, NULL) AS unit_price
+    FROM `your-project.analytics_123456789.events_*`,
+      UNNEST(items) AS item
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name IN ('view_item', 'add_to_cart', 'purchase')
+  )
+  -- Fixed bands with inclusive lower bounds; 0 = Free; missing, negative or non-store-currency price = (not set)
+  SELECT
+    CASE
+      WHEN unit_price IS NULL OR unit_price < 0 THEN '(not set)'
+      WHEN unit_price = 0 THEN 'Free'
+      WHEN unit_price < 25 THEN 'Under 25'
+      WHEN unit_price < 50 THEN '25–49.99'
+      WHEN unit_price < 100 THEN '50–99.99'
+      ELSE '100+'
+    END AS price_band
+  FROM item_rows;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative date range and the store currency
+  WITH params AS (
+    SELECT DATE_SUB(CURRENT_DATE, 90) AS start_date, DATE_SUB(CURRENT_DATE, 1) AS end_date, 'USD' AS store_currency
+  ),
+  -- One row per item on product view, add to cart and purchase with its unit price (priceTotal is the line total, so divide by quantity; missing or 0 quantity counts as 1, as GA4 keeps the price); an item in a currency other than the store currency gets no price
+  item_rows AS (
+    SELECT
+      IF(item.currencyCode = p.store_currency, item.priceTotal / COALESCE(NULLIF(item.quantity, 0), 1), NULL) AS unit_price
+    FROM aep_web_events_dataset e
+      CROSS JOIN params p
+      LATERAL VIEW explode(e.productListItems) t AS item
+    WHERE CAST(e.timestamp AS DATE) BETWEEN p.start_date AND p.end_date
+      AND e.eventType IN ('commerce.productViews', 'commerce.productListAdds', 'commerce.purchases')
+  )
+  -- Fixed bands with inclusive lower bounds; 0 = Free; missing, negative or non-store-currency price = (not set)
+  SELECT
+    CASE
+      WHEN unit_price IS NULL OR unit_price < 0 THEN '(not set)'
+      WHEN unit_price = 0 THEN 'Free'
+      WHEN unit_price < 25 THEN 'Under 25'
+      WHEN unit_price < 50 THEN '25–49.99'
+      WHEN unit_price < 100 THEN '50–99.99'
+      ELSE '100+'
+    END AS price_band
+  FROM item_rows;
+
+Calculation Notes: |
+  1️⃣ Source: items[].price on view_item, add_to_cart and purchase. Values: Free, Under 25, 25–49.99, 50–99.99, 100+, (not set).
+  2️⃣ Lower bounds are inclusive: 25.00 is 25–49.99, 100.00 is 100+. Bands use the unit price, never the line total (price × quantity).
+  3️⃣ Bands use items[].price as sent; the separate discount field is not subtracted, and compare-at or list price is not used.
+  4️⃣ Bands use items[].price only when the event currency equals the store currency; any other currency → (not set), never converted.
+  5️⃣ Missing or negative price → (not set). Price 0 (free gift, sample) → Free, so it does not inflate Under 25.
+  6️⃣ Set per item row of each event: an order with items in several bands counts in each band, so orders by band sum above total orders.
+  7️⃣ Compare periods only on the same band boundaries; changing a cut-off breaks trend comparison.
+
+Business Use Case: |
+  1️⃣ Merchandising: when 100+ items lose view-to-cart share month over month, reviews price points and PDP value messaging.
+  2️⃣ Assortment planners compare band mix of views vs units sold each season and shift buys toward over-converting bands.
+  3️⃣ Pricing team: after a markdown, checks which bands gained revenue share and which items dropped into a lower band.
+  4️⃣ Search and discovery team sets the price filter's preset ranges to match the bands that hold most viewed items.
+
+Dependencies:
+  Events: [product-view, add-to-cart, purchase]
+  Dimensions: [currency]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Item Category; Product Name; Device Category; Traffic Source; Currency
+
+Dashboard Usage: [Merchandising Performance, Assortment & Price Mix, Product Discovery Funnel]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [item-category, product-name, currency, filter-value, sort-option]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-30T17:56:18.94+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-30T17:59:31.556+00:00
+
