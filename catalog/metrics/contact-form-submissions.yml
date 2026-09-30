@@ -1,0 +1,220 @@
+# Metric: Contact Form Submissions
+# Generated: 2026-09-30T18:53:26.418Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Contact Form Submissions
+Formula: COUNT(submit_form events WHERE form_type = 'contact' AND form_status = 'success'), deduplicated per submission, by event date in the reporting period
+
+Description: |
+  Count of successful contact and support form submissions in the period, from the unified submit_form event filtered to the contact form. It is the numerator of Support Contact Rate.
+
+Category: Experience
+
+Tags: [metric, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Engagement
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  submit_form
+
+Adobe Event: |
+  form_submit
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "category": {
+          "pageType": "contact"
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "submit_form",
+            "eventAction": "form_submit"
+          },
+          "category": {
+            "primaryCategory": "form"
+          },
+          "attributes": {
+            "form_type": "contact",
+            "form_id": "form-1",
+            "form_name": "contact_us",
+            "form_status": "success",
+            "contact_reason": "order_status",
+            "traffic_type": "external"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_type": "contact",
+    "form_id": "form-1",
+    "form_name": "contact_us",
+    "form_status": "success",
+    "contact_reason": "order_status",
+    "page_type": "contact",
+    "traffic_type": "external"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "form_submit",
+    "eventInfo": {
+      "form_type": "contact",
+      "form_id": "form-1",
+      "form_name": "contact_us",
+      "form_status": "success",
+      "contact_reason": "order_status",
+      "page_type": "contact",
+      "traffic_type": "external"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "timestamp": "2026-01-01T00:00:00Z",
+    "web": {
+      "webPageDetails": {
+        "name": "contact"
+      }
+    },
+    "_tenantId": {
+      "form_type": "contact",
+      "form_id": "form-1",
+      "form_name": "contact_us",
+      "form_status": "success",
+      "contact_reason": "order_status",
+      "traffic_type": "external"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE end_date DATE DEFAULT CURRENT_DATE();
+  DECLARE start_date DATE DEFAULT DATE_SUB(end_date, INTERVAL 90 DAY);
+  
+  -- Successful contact-form submit_form hits, internal traffic excluded; table suffix is the event date in the property time zone
+  WITH contact_hits AS (
+    SELECT
+      user_pseudo_id,
+      event_timestamp,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'form_id') AS form_id
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'submit_form'
+      AND (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'form_type') = 'contact'
+      AND (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'form_status') = 'success'
+      AND COALESCE((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type'), '') <> 'internal'
+  ),
+  -- Seconds since the previous hit by the same user on the same form
+  gaps AS (
+    SELECT
+      (event_timestamp - LAG(event_timestamp) OVER (PARTITION BY user_pseudo_id, form_id ORDER BY event_timestamp)) / 1000000 AS gap_seconds
+    FROM contact_hits
+  )
+  -- Count submissions, collapsing repeat hits within 60 seconds into one
+  SELECT COUNT(*) AS contact_form_submissions
+  FROM gaps
+  WHERE gap_seconds IS NULL OR gap_seconds >= 60;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window and the property time zone used to date events
+  WITH params AS (
+    SELECT
+      date_sub(current_date(), 90) AS start_date,
+      current_date() AS end_date,
+      'America/New_York' AS property_tz
+  ),
+  -- Successful contact-form submissions, internal traffic excluded, dated in the property time zone
+  contact_hits AS (
+    SELECT
+      e.identityMap['ECID'][0].id AS ecid,
+      e.timestamp AS event_ts,
+      e._tenantId.form_id AS form_id
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE e.eventType = 'web.formFilledOut'
+      AND to_date(from_utc_timestamp(e.timestamp, p.property_tz)) BETWEEN p.start_date AND p.end_date
+      AND e._tenantId.form_type = 'contact'
+      AND e._tenantId.form_status = 'success'
+      AND COALESCE(e._tenantId.traffic_type, '') <> 'internal'
+  ),
+  -- Seconds since the previous hit by the same user on the same form
+  gaps AS (
+    SELECT
+      unix_timestamp(event_ts) - unix_timestamp(LAG(event_ts) OVER (PARTITION BY ecid, form_id ORDER BY event_ts)) AS gap_seconds
+    FROM contact_hits
+  )
+  -- Count submissions, collapsing repeat hits within 60 seconds into one
+  SELECT COUNT(*) AS contact_form_submissions
+  FROM gaps
+  WHERE gap_seconds IS NULL OR gap_seconds >= 60;
+
+Calculation Notes: |
+  1️⃣ Only submit_form with form_type = 'contact'; newsletter, review, return, lead and sign-up forms are excluded.
+  2️⃣ Counts confirmed successes only (form_status = 'success'); validation errors and submissions blocked as spam are excluded.
+  3️⃣ Repeat hits from the same user and form within 60 seconds count once (double-clicks, thank-you page reloads).
+  4️⃣ Counts submissions, not people or tickets: a customer who writes twice counts twice.
+  5️⃣ Chat, email and phone contacts are out of scope; they are reported from the support platform, not the web form.
+  6️⃣ Internal and bot traffic (traffic_type = 'internal') is excluded; dated by event timestamp in the property time zone.
+
+Business Use Case: |
+  1️⃣ Customer Service sets weekly agent staffing from the contact-form volume forecast by day of week.
+  2️⃣ Customer Service flags a spike after a release or carrier delay and sends the top contact reasons to Product.
+  3️⃣ Product checks form volume after a help center update to confirm contacts were deflected to self-service.
+
+Dependencies:
+  Events: [contact-form-submission]
+  Dimensions: [support-channel]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Contact Reason; Page Type; Device Category; Customer Status; Traffic Source
+
+Dashboard Usage: [Customer Support Volume, Post-Purchase Experience]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [order-status-checks, help-center-views]
+
+Derived KPIs: [support-contact-rate]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-09-30T18:23:27.929+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-30T18:53:25.991+00:00
+
