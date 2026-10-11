@@ -1,7 +1,7 @@
 # Metric: Store Selections
-# Generated: 2026-10-11T02:14:27.857Z
+# Generated: 2026-10-11T02:14:36.444Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Store Selections
 Formula: COUNT(store selection events WHERE store_id IS NOT NULL), deduplicated by event_id, by event date in the reporting period
@@ -11,30 +11,219 @@ Description: |
 
 Category: Conversion
 
+Tags: [metric, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: Retail
+
+Priority: Medium
+
+Core Area: Checkout
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  select_content
+
+Adobe Event: |
+  select_content
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "select_content"
+        },
+        "attributes": {
+          "event_id": "evt-1",
+          "content_type": "store",
+          "store_id": "STORE-1",
+          "store_selection_method": "store_locator",
+          "fulfillment_method": "pickup",
+          "page_type": "product",
+          "traffic_type": "external"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "select_content",
+    "event_id": "evt-1",
+    "content_type": "store",
+    "store_id": "STORE-1",
+    "store_selection_method": "store_locator",
+    "fulfillment_method": "pickup",
+    "page_type": "product",
+    "traffic_type": "external"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "select_content",
+    "event_id": "evt-1",
+    "content_type": "store",
+    "store_id": "STORE-1",
+    "store_selection_method": "store_locator",
+    "fulfillment_method": "pickup",
+    "page_type": "product",
+    "traffic_type": "external"
+  }
+
+XDM Mapping: |
+  {
+    "_id": "evt-1",
+    "eventType": "select_content",
+    "timestamp": "2026-01-01T00:00:00Z",
+    "_tenantId": {
+      "storeSelection": {
+        "contentType": "store",
+        "storeId": "STORE-1",
+        "selectionMethod": "store_locator",
+        "fulfillmentMethod": "pickup",
+        "pageType": "product",
+        "trafficType": "external"
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH store_select AS (
+    -- Store selection events (select_content, content_type = 'store') with their parameters pivoted from event_params
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      user_pseudo_id,
+      event_timestamp,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'event_id') AS event_id,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'content_type') AS content_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'store_id') AS store_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'store_selection_method') AS store_selection_method,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'select_content'
+  ),
+  deduped AS (
+    -- Explicit selections with a store_id from external traffic, one row per event_id (re-fires count once)
+    SELECT *
+    FROM store_select
+    WHERE content_type = 'store'
+      AND store_id IS NOT NULL
+      AND COALESCE(store_selection_method, '') NOT IN ('geolocation', 'profile_default')
+      AND COALESCE(traffic_type, 'external') NOT IN ('internal', 'bot')
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY COALESCE(event_id, CONCAT(user_pseudo_id, '-', CAST(event_timestamp AS STRING)))
+      ORDER BY event_timestamp
+    ) = 1
+  ),
+  sequenced AS (
+    -- Store selected just before, within the same session
+    SELECT
+      *,
+      LAG(store_id) OVER (PARTITION BY user_pseudo_id, ga_session_id ORDER BY event_timestamp) AS previous_store_id
+    FROM deduped
+  )
+  -- Store selections per event date and selection method; re-confirming the store already selected in the session is not counted
+  SELECT
+    event_date,
+    store_selection_method,
+    COUNT(*) AS store_selections
+  FROM sequenced
+  WHERE previous_store_id IS NULL OR previous_store_id != store_id
+  GROUP BY event_date, store_selection_method
+  ORDER BY event_date, store_selection_method;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Relative reporting window and reporting time zone (set reporting_tz to the property's reporting time zone)
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date, 'UTC' AS reporting_tz
+  ),
+  sessionized AS (
+    -- Every event per ECID in the window, sessionized with a 30-minute inactivity timeout (the XDM mapping carries no session id)
+    SELECT
+      to_date(from_utc_timestamp(e.timestamp, p.reporting_tz)) AS event_date,
+      e.identityMap['ECID'][0].id AS ecid,
+      e.timestamp,
+      e._id AS event_id,
+      e.eventType AS event_type,
+      e._tenantId.storeSelection.contentType AS content_type,
+      e._tenantId.storeSelection.storeId AS store_id,
+      e._tenantId.storeSelection.selectionMethod AS store_selection_method,
+      e._tenantId.storeSelection.trafficType AS traffic_type,
+      SESS_TIMEOUT(e.timestamp, 60 * 30) OVER (PARTITION BY e.identityMap['ECID'][0].id ORDER BY e.timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS sess
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE to_date(from_utc_timestamp(e.timestamp, p.reporting_tz)) BETWEEN p.start_date AND p.end_date
+  ),
+  deduped AS (
+    -- Explicit store selections with a store_id from external traffic, one row per event_id (re-fires count once)
+    SELECT *
+    FROM (
+      SELECT s.*, ROW_NUMBER() OVER (PARTITION BY COALESCE(s.event_id, s.ecid || '-' || CAST(s.timestamp AS STRING)) ORDER BY s.timestamp) AS rn
+      FROM sessionized s
+      WHERE s.event_type = 'select_content'
+        AND s.content_type = 'store'
+        AND s.store_id IS NOT NULL
+        AND COALESCE(s.store_selection_method, '') NOT IN ('geolocation', 'profile_default')
+        AND COALESCE(s.traffic_type, 'external') NOT IN ('internal', 'bot')
+    ) d
+    WHERE rn = 1
+  ),
+  sequenced AS (
+    -- Store selected just before, within the same session
+    SELECT
+      *,
+      LAG(store_id) OVER (PARTITION BY ecid, sess.num ORDER BY timestamp) AS previous_store_id
+    FROM deduped
+  )
+  -- Store selections per event date and selection method; re-confirming the store already selected in the session is not counted
+  SELECT
+    event_date,
+    store_selection_method,
+    COUNT(*) AS store_selections
+  FROM sequenced
+  WHERE previous_store_id IS NULL OR previous_store_id != store_id
+  GROUP BY event_date, store_selection_method
+  ORDER BY event_date, store_selection_method;
+
+Calculation Notes: |
+  1️⃣ One count per store selection event carrying a store_id; page reloads or SPA re-fires with the same event_id count once.,2️⃣ Only explicit choices count; auto-assigned stores arrive as store_selection_method 'geolocation' or 'profile_default' and are excluded.,3️⃣ Switching to a different store counts again; re-confirming the store already selected in the same session does not.,4️⃣ Explicit store_selection_method values name the entry point (store locator, product page, cart, checkout); report selections split by it.,5️⃣ Internal and bot traffic excluded via traffic_type; counted on the event date in the property's reporting time zone.,6️⃣ A selection is intent, not an order; read it against store-locator-searches upstream and bopis-orders downstream.
+
+Business Use Case: |
+  1️⃣ Product compares weekly selections with BOPIS orders and fixes the pickup step where selections stop converting.,2️⃣ Merchandising raises allocation to stores whose selections grow while store inventory checks return out of stock.,3️⃣ Store operations staff pickup counters from daily selections by store ahead of promotions and holiday peaks.
+
+Dependencies:
+  Dimensions: [store-name, fulfillment-method]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  store-name; store-zip-code-local-market; fulfillment-method; page-type; device-category
+
+Dashboard Usage: [BOPIS Funnel Performance, Omnichannel Store Demand]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [store-locator-searches, store-inventory-checks, bopis-orders, pickups-completed, curbside-orders, ship-to-store-orders]
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +233,7 @@ Contributed By: devyendarm
 
 Created At: 2026-10-11T02:14:27.506+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-10-11T02:14:36.144+00:00
 
