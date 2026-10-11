@@ -1,7 +1,7 @@
 # Dimension: Item Coupon
-# Generated: 2026-10-11T01:58:11.526Z
+# Generated: 2026-10-11T01:58:20.982Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Item Coupon
 
@@ -10,31 +10,205 @@ Description: |
 
 Category: Monetization
 
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "transaction": {
+        "transactionID": "txn-1",
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU-1",
+              "productName": "item"
+            },
+            "quantity": 1,
+            "price": {
+              "basePrice": 100,
+              "voucherCode": "SAVE10",
+              "voucherDiscount": 10,
+              "currency": "USD"
+            }
+          }
+        ]
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "txn-1",
+      "value": 90,
+      "currency": "USD",
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "price": 90,
+          "quantity": 1,
+          "discount": 10,
+          "coupon": "SAVE10"
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "eventName": "purchase"
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "name": "item",
+        "quantity": 1,
+        "priceTotal": 90,
+        "_tenantId": {
+          "couponCode": "SAVE10"
+        }
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "name": "item",
+        "quantity": 1,
+        "priceTotal": 90,
+        "_tenantId": {
+          "couponCode": "SAVE10"
+        }
+      }
+    ]
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- one row per line item on the cart, checkout and purchase events; line coupon only (no order-level fallback),
+  -- trimmed, uppercased, multiple codes sorted alphabetically and comma-joined, empty or missing = (not set)
+  SELECT
+    e.event_date,
+    e.event_timestamp,
+    e.event_name,
+    e.ecommerce.transaction_id,
+    i.item_id,
+    COALESCE(NULLIF(ARRAY_TO_STRING(ARRAY(
+      SELECT TRIM(c) FROM UNNEST(SPLIT(UPPER(i.coupon), ',')) AS c
+      WHERE TRIM(c) NOT IN ('', '(NOT SET)')
+      ORDER BY TRIM(c)), ','), ''), '(not set)') AS item_coupon
+  FROM `your-project.analytics_123456789.events_*` AS e, UNNEST(e.items) AS i
+  WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+    AND e.event_name IN ('add_to_cart', 'begin_checkout', 'add_shipping_info', 'add_payment_info', 'purchase');
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- begin_checkout, add_shipping_info and add_payment_info all arrive in XDM as commerce.checkouts.
+  WITH params AS (
+    -- relative reporting window
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  )
+  -- one row per line item on the cart, checkout and purchase events; line coupon only (no order-level fallback),
+  -- trimmed, uppercased, multiple codes sorted alphabetically and comma-joined, empty or missing = (not set)
+  SELECT
+    to_date(e.timestamp) AS event_date,
+    e.timestamp AS event_timestamp,
+    e.eventType AS event_type,
+    e.commerce.order.purchaseID AS transaction_id,
+    item.SKU AS item_id,
+    COALESCE(NULLIF(array_join(array_sort(filter(
+      transform(split(upper(item._tenantId.couponCode), ','), c -> trim(c)),
+      c -> c NOT IN ('', '(NOT SET)'))), ','), ''), '(not set)') AS item_coupon
+  FROM aep_web_events_dataset e
+  CROSS JOIN params p
+  LATERAL VIEW explode(e.productListItems) t AS item
+  WHERE e.eventType IN ('commerce.productListAdds', 'commerce.checkouts', 'commerce.purchases')
+    AND to_date(e.timestamp) BETWEEN p.start_date AND p.end_date;
+
+Calculation Notes: |
+  1️⃣ Source: items[].coupon on add_to_cart, begin_checkout, add_shipping_info, add_payment_info and purchase; one value per line item.
+  2️⃣ Item scope: the value describes one line in items[], not the event, session or order that carries it.
+  3️⃣ Normalise: trim and uppercase, so "save10" and "SAVE10 " report as SAVE10. An empty or missing value is (not set), never a code.
+  4️⃣ Accepted codes only: send after the platform applies the discount; rejected or expired codes go on checkout_error, not items[].coupon.
+  5️⃣ No inheritance: the order-level purchase coupon is not copied into items[]; a line carries a code only when its discount applied to that line.
+  6️⃣ Several codes on one line: send comma-separated in alphabetical order, so the same combination always reports as one value.
+  7️⃣ Purchase dedupe and refund netting belong to the item metrics (Item Revenue, Units Sold); this dimension only labels each line.
+
+Business Use Case: |
+  1️⃣ Merchandising: when an item coupon's item revenue no longer covers its discount, narrows or ends the offer.
+  2️⃣ Marketing: when an item coupon's usage spikes outside its campaign channel, treats it as leaked and retires it.
+  3️⃣ Finance: at month end, reconciles item discount by coupon against the commerce platform's promotion cost.
+
+Dependencies:
+  Events: [add-to-cart, add-shipping-info, purchase]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
+
+Report Attributes: |
+  Item Category; Product Name; Price Band; Coupon Code
+
+Dashboard Usage: [Promotion Performance, Merchandising Item Performance, Cart & Checkout Funnel]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [coupon-code, item-category, product-name, price-band]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +216,7 @@ Contributed By: devyendarm
 
 Created At: 2026-10-11T01:58:11.15+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-10-11T01:58:20.676+00:00
 
