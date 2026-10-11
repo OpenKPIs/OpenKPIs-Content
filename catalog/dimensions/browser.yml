@@ -1,7 +1,7 @@
 # Dimension: Browser
-# Generated: 2026-10-11T01:57:39.892Z
+# Generated: 2026-10-11T01:57:48.745Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Browser
 
@@ -10,31 +10,216 @@ Description: |
 
 Category: Experience
 
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Checkout
+
+Scope: Session
+
+Data Type: string
+
+Aggregation Window: Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  pageView
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "checkout",
+        "destinationURL": "https://example.com/checkout"
+      },
+      "attributes": {
+        "traffic_type": "internal"
+      }
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "pageView"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_location": "https://example.com/checkout",
+    "page_title": "Checkout",
+    "page_type": "checkout",
+    "traffic_type": "internal"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "eventInfo": {
+      "path": "page"
+    },
+    "web": {
+      "webPageDetails": {
+        "name": "checkout",
+        "URL": "https://example.com/checkout"
+      }
+    },
+    "_tenant": {
+      "traffic_type": "internal"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web": {
+      "webPageDetails": {
+        "name": "checkout",
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "environment": {
+      "type": "browser",
+      "browserDetails": {
+        "name": "Chrome",
+        "userAgent": "Mozilla/5.0"
+      }
+    },
+    "_tenant": {
+      "traffic_type": "internal"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Bot traffic has no export column; known bots are already filtered at collection, so only the internal-traffic rule is applied here.
+  -- Web events only (app streams carry no browser), with browser family, session key and traffic_type.
+  WITH web_events AS (
+    SELECT
+      user_pseudo_id,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      event_timestamp,
+      COALESCE(NULLIF(device.web_info.browser, ''), '(not set)') AS browser,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND platform = 'WEB'
+  ),
+  -- One row per session: browser of the session's first event, flagged if any event is internal traffic.
+  sessions AS (
+    SELECT
+      user_pseudo_id,
+      ga_session_id,
+      ARRAY_AGG(browser ORDER BY event_timestamp LIMIT 1)[OFFSET(0)] AS browser,
+      LOGICAL_OR(IFNULL(traffic_type, '') = 'internal') AS is_internal
+    FROM web_events
+    GROUP BY user_pseudo_id, ga_session_id
+  )
+  -- Browser family per session (in-app values such as Safari (in-app) and Android Webview stay separate), internal-traffic sessions excluded.
+  SELECT
+    user_pseudo_id,
+    ga_session_id,
+    browser
+  FROM sessions
+  WHERE NOT is_internal;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Bot traffic has no dataset column; known bots are already filtered at collection, so only the internal-traffic rule is applied here.
+  -- Reporting window: last 90 days up to yesterday (same as the BigQuery DECLARE defaults).
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  ),
+  -- Web events only (environment.type = 'browser'), with browser family, ECID and traffic_type from the tenant namespace.
+  web_events AS (
+    SELECT
+      e.identityMap['ECID'][0].id AS ecid,
+      e.timestamp,
+      COALESCE(NULLIF(e.environment.browserDetails.name, ''), '(not set)') AS browser,
+      e._tenant.traffic_type AS traffic_type
+    FROM aep_web_experience_events e
+    CROSS JOIN params p
+    WHERE e.environment.type = 'browser'
+      AND e.timestamp >= p.start_date
+      AND e.timestamp < date_add(p.end_date, 1)
+  ),
+  -- Session number per ECID from a 30-minute inactivity timeout.
+  sessionized AS (
+    SELECT
+      ecid,
+      timestamp,
+      browser,
+      traffic_type,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (PARTITION BY ecid ORDER BY timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW).num AS session_num
+    FROM web_events
+  ),
+  -- One row per session: browser of the session's first event, flagged if any event is internal traffic.
+  sessions AS (
+    SELECT
+      ecid,
+      session_num,
+      min_by(browser, timestamp) AS browser,
+      MAX(CASE WHEN traffic_type = 'internal' THEN 1 ELSE 0 END) AS is_internal
+    FROM sessionized
+    GROUP BY ecid, session_num
+  )
+  -- Browser family per session (in-app values such as Safari (in-app) and Android Webview stay separate), internal-traffic sessions excluded.
+  SELECT
+    ecid,
+    session_num,
+    browser
+  FROM sessions
+  WHERE is_internal = 0;
+
+Calculation Notes: |
+  1️⃣ Source: device.web_info.browser in the GA4 export; Adobe Browser from the user agent. Version is a separate Browser Version field.
+  2️⃣ Values: Chrome, Safari, Edge, Firefox, Samsung Internet, Opera, Android Webview, Safari (in-app), (not set). Report the family, not the version.
+  3️⃣ Session scope: take the browser of the session's first event; the value does not change within a session.
+  4️⃣ In-app browsers (Instagram, Facebook) report as Safari (in-app) or Android Webview; keep them separate, they break payment redirects.
+  5️⃣ App streams carry no browser: keep web events only (platform = WEB; environment.type = browser) and exclude app traffic.
+  6️⃣ Known bots are filtered at collection; exclude sessions with any internal-traffic event (traffic_type = internal).
+  7️⃣ Chromium freezes the user-agent string; the family stays reliable, but minor version needs client hints.
+
+Business Use Case: |
+  1️⃣ Product team: when checkout completion in one browser falls below the site rate, opens a defect and retests.
+  2️⃣ Payments team: when payment failures cluster in in-app browsers, prompts those shoppers to open checkout externally.
+  3️⃣ Front-end QA: each quarter, sets the test matrix to the browsers covering 95% of checkout sessions.
+
+Dependencies:
+  Events: [page-view, session-start]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
+
+Report Attributes: |
+  Browser Version; Device Category; Operating System; Country
+
+Dashboard Usage: [Checkout Funnel by Browser, Payment Failure Diagnostics, Site Experience QA]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [device-category, operating-system]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +227,7 @@ Contributed By: devyendarm
 
 Created At: 2026-10-11T01:57:39.592+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-10-11T01:57:48.442+00:00
 
