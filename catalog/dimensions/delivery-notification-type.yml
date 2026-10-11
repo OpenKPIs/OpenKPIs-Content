@@ -1,0 +1,188 @@
+# Dimension: Delivery Notification Type
+# Generated: 2026-10-11T14:54:40.816Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Delivery Notification Type
+
+Description: |
+  Stage of the shipping message sent to a customer: shipped, out_for_delivery, delivered, delayed or delivery_exception. Sent as notification_type on notification_open; channel is a separate field.
+
+Category: Operations
+
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Engagement
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  notification_open
+
+Adobe Event: |
+  notificationOpen
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "notification_open"
+        },
+        "attributes": {
+          "notification_type": "delivered",
+          "message_channel": "email",
+          "message_id": "msg-1",
+          "shipment_id": "SHP-1",
+          "machine_open": false
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "notification_open",
+    "notification_type": "delivered",
+    "message_channel": "email",
+    "message_id": "msg-1",
+    "shipment_id": "SHP-1",
+    "machine_open": false
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "notificationOpen",
+    "eventInfo": {
+      "notification_type": "delivered",
+      "message_channel": "email",
+      "message_id": "msg-1",
+      "shipment_id": "SHP-1",
+      "machine_open": false
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "notificationOpen",
+    "_tenantId": {
+      "notificationType": "delivered",
+      "messageChannel": "email",
+      "messageId": "msg-1",
+      "shipmentId": "SHP-1",
+      "machineOpen": false
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Relative reporting window: last 90 complete days
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- One row per notification_open with its parameters pivoted out of event_params
+  WITH opens AS (
+    SELECT
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'message_id') AS message_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'shipment_id') AS shipment_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'notification_type') AS notification_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'notification_open'
+  )
+  
+  -- Map to the fixed list (missing or unmapped = (not set)); exclude out-of-scope messages with no listed type and no shipment_id
+  SELECT
+    message_id,
+    shipment_id,
+    CASE WHEN notification_type IN ('shipped', 'out_for_delivery', 'delivered', 'delayed', 'delivery_exception')
+         THEN notification_type ELSE '(not set)' END AS notification_type
+  FROM opens
+  WHERE notification_type IN ('shipped', 'out_for_delivery', 'delivered', 'delayed', 'delivery_exception')
+     OR shipment_id IS NOT NULL;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window: last 90 complete days
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date,
+           date_sub(current_date(), 1) AS end_date
+  ),
+  
+  -- One row per notificationOpen with its tenant fields
+  opens AS (
+    SELECT
+      _tenantId.messageId AS message_id,
+      _tenantId.shipmentId AS shipment_id,
+      _tenantId.notificationType AS notification_type
+    FROM aep_web_events, params
+    WHERE eventType = 'notificationOpen'
+      AND to_date(timestamp) BETWEEN params.start_date AND params.end_date
+  )
+  
+  -- Map to the fixed list (missing or unmapped = (not set)); exclude out-of-scope messages with no listed type and no shipment_id
+  SELECT
+    message_id,
+    shipment_id,
+    CASE WHEN notification_type IN ('shipped', 'out_for_delivery', 'delivered', 'delayed', 'delivery_exception')
+         THEN notification_type ELSE '(not set)' END AS notification_type
+  FROM opens
+  WHERE notification_type IN ('shipped', 'out_for_delivery', 'delivered', 'delayed', 'delivery_exception')
+     OR shipment_id IS NOT NULL;
+
+Calculation Notes: |
+  1️⃣ Source: the notification_type parameter on the notification_open event. One value per opened message.
+  2️⃣ Values: shipped, out_for_delivery, delivered, delayed, delivery_exception. A missing or unmapped value reports as (not set).
+  3️⃣ Map each ESP flow or template ID to the fixed list at send time; never infer the type from subject line text.
+  4️⃣ Out of scope: order confirmation, pickup-ready, return and marketing templates (no listed type, no shipment_id) are excluded, not (not set).
+  5️⃣ Event scope: the value describes one message. Resend and machine-open counting rules belong to Delivery Notifications Opened.
+
+Business Use Case: |
+  1️⃣ Customer Service: when WISMO contacts rise after shipped messages, adds the tracking link and ETA to that template.
+  2️⃣ Marketing: when delayed messages show a low open rate, moves them from email to SMS or push.
+  3️⃣ Customer Service: when delivery_exception sends spike for one carrier, escalates to that carrier's account manager.
+  4️⃣ Merchandising: when delivered messages hold a high open rate, tests a review request or cross-sell block in them.
+
+Dependencies:
+  Events: [notification-open, shipment-notification-open]
+  Metrics: [delivery-notifications-sent, delivery-notifications-opened]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Carrier; Shipment Status; Delivery Exception Type; Device Category; Delivery Region
+
+Dashboard Usage: [Post-Purchase Communications, Delivery Experience & WISMO]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [shipment-status, delivery-exception-type, delivery-confirmation-method, carrier, delivery-sla-status, order-status, delivery-attempt-number]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-10-11T13:25:47.854+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-10-11T14:54:40.473+00:00
+
