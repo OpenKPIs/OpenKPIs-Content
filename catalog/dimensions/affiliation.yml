@@ -1,7 +1,7 @@
 # Dimension: Affiliation
-# Generated: 2026-10-11T01:57:23.249Z
+# Generated: 2026-10-11T01:57:33.041Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Affiliation
 
@@ -10,31 +10,262 @@ Description: |
 
 Category: Monetization
 
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "txn-1",
+      "attributes": {
+        "affiliation": "store-1"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-1"
+          },
+          "attributes": {
+            "affiliation": "store-1"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "affiliation": "store-1",
+    "ecommerce": {
+      "transaction_id": "txn-1",
+      "currency": "USD",
+      "value": 100,
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "affiliation": "store-1",
+          "price": 100,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "affiliation": "store-1"
+    },
+    "xdm": {
+      "commerce": {
+        "purchases": {
+          "value": 1
+        },
+        "order": {
+          "purchaseID": "txn-1",
+          "currencyCode": "USD"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "quantity": 1,
+          "priceTotal": 100,
+          "_tenantId": {
+            "affiliation": "store-1"
+          }
+        }
+      ],
+      "_tenantId": {
+        "affiliation": "store-1"
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "quantity": 1,
+        "priceTotal": 100,
+        "_tenantId": {
+          "affiliation": "store-1"
+        }
+      }
+    ],
+    "_tenantId": {
+      "affiliation": "store-1"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH txn_items AS (
+    -- Purchase and refund rows per item with item-level and order-level affiliation (blank treated as missing)
+    SELECT
+      e.event_name,
+      e.ecommerce.transaction_id AS transaction_id,
+      i.item_id,
+      NULLIF(TRIM(i.affiliation), '') AS item_affiliation,
+      NULLIF(TRIM((SELECT ep.value.string_value FROM UNNEST(e.event_params) AS ep WHERE ep.key = 'affiliation')), '') AS order_affiliation
+    FROM `your-project.analytics_123456789.events_*` AS e
+    LEFT JOIN UNNEST(e.items) AS i
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND e.event_name IN ('purchase', 'refund')
+  ),
+  original_items AS (
+    -- Original purchase affiliation per transaction and item, used to credit refunds
+    SELECT transaction_id, item_id, MAX(item_affiliation) AS purchase_item_affiliation
+    FROM txn_items
+    WHERE event_name = 'purchase' AND transaction_id IS NOT NULL
+    GROUP BY transaction_id, item_id
+  ),
+  original_orders AS (
+    -- Original purchase order-level affiliation per transaction, used to credit refunds
+    SELECT transaction_id, MAX(order_affiliation) AS purchase_order_affiliation
+    FROM txn_items
+    WHERE event_name = 'purchase' AND transaction_id IS NOT NULL
+    GROUP BY transaction_id
+  )
+  -- Credited affiliation per transaction and item: refunds take the original purchase value (item, then order); then item, then order, else (not set)
+  SELECT DISTINCT
+    t.transaction_id,
+    t.item_id,
+    COALESCE(
+      IF(t.event_name = 'refund', oi.purchase_item_affiliation, NULL),
+      IF(t.event_name = 'refund', oo.purchase_order_affiliation, NULL),
+      t.item_affiliation,
+      t.order_affiliation,
+      '(not set)'
+    ) AS affiliation
+  FROM txn_items AS t
+  LEFT JOIN original_items AS oi
+    ON oi.transaction_id = t.transaction_id AND oi.item_id = t.item_id
+  LEFT JOIN original_orders AS oo
+    ON oo.transaction_id = t.transaction_id;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH params AS (
+    -- Relative reporting window: last 90 complete days
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  ),
+  txn_items AS (
+    -- Purchase and refund rows per item with item-level and order-level affiliation (blank treated as missing)
+    SELECT
+      e.eventType AS event_type,
+      e.commerce.order.purchaseID AS transaction_id,
+      pli.SKU AS item_id,
+      NULLIF(TRIM(pli._tenantId.affiliation), '') AS item_affiliation,
+      NULLIF(TRIM(e._tenantId.affiliation), '') AS order_affiliation
+    FROM aep_web_events_dataset AS e
+    LATERAL VIEW OUTER explode(e.productListItems) AS pli
+    CROSS JOIN params AS p
+    WHERE to_date(e.timestamp) BETWEEN p.start_date AND p.end_date
+      AND e.eventType IN ('commerce.purchases', 'refund')
+  ),
+  original_items AS (
+    -- Original purchase affiliation per transaction and item, used to credit refunds
+    SELECT transaction_id, item_id, MAX(item_affiliation) AS purchase_item_affiliation
+    FROM txn_items
+    WHERE event_type = 'commerce.purchases' AND transaction_id IS NOT NULL
+    GROUP BY transaction_id, item_id
+  ),
+  original_orders AS (
+    -- Original purchase order-level affiliation per transaction, used to credit refunds
+    SELECT transaction_id, MAX(order_affiliation) AS purchase_order_affiliation
+    FROM txn_items
+    WHERE event_type = 'commerce.purchases' AND transaction_id IS NOT NULL
+    GROUP BY transaction_id
+  )
+  -- Credited affiliation per transaction and item: refunds take the original purchase value (item, then order); then item, then order, else (not set)
+  SELECT DISTINCT
+    t.transaction_id,
+    t.item_id,
+    COALESCE(
+      CASE WHEN t.event_type = 'refund' THEN oi.purchase_item_affiliation END,
+      CASE WHEN t.event_type = 'refund' THEN oo.purchase_order_affiliation END,
+      t.item_affiliation,
+      t.order_affiliation,
+      '(not set)'
+    ) AS affiliation
+  FROM txn_items AS t
+  LEFT JOIN original_items AS oi
+    ON oi.transaction_id = t.transaction_id AND oi.item_id = t.item_id
+  LEFT JOIN original_orders AS oo
+    ON oo.transaction_id = t.transaction_id;
+
+Calculation Notes: |
+  1️⃣ Source: affiliation on purchase and refund (GA4); items[].affiliation takes precedence over the order value in item-scoped reports.
+  2️⃣ Values: a controlled list of store or seller codes (e.g. us_web, uk_app, seller_1042); free-text labels split one store across rows.
+  3️⃣ A missing value reports as (not set). Single-store sites set a default server-side rather than leaving it blank.
+  4️⃣ Refunds: the original purchase's affiliation (item-level, then order-level) wins over any value sent on the refund event.
+  5️⃣ Not a marketing field: affiliate or partner traffic belongs in traffic source and campaign parameters, not here.
+  6️⃣ Event scope: the value belongs to the transaction it is sent with; it is not persisted to later sessions or to user-level reports.
+
+Business Use Case: |
+  1️⃣ Sales: when a storefront's revenue share drops week over week, checks its pricing, stock and checkout availability.
+  2️⃣ Marketplace team: when a seller's refund rate exceeds the category norm, opens a seller performance review.
+  3️⃣ Finance: before monthly close, reconciles revenue by affiliation to order management per store or seller.
+
+Dependencies:
+  Events: [purchase, refund-issued]
+  Dimensions: [transaction-id]
+
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
+
+Report Attributes: |
+  Affiliation; Transaction ID; Fulfillment Method; Country; Currency
+
+Dashboard Usage: [Revenue by Storefront, Marketplace Seller Performance, Order Reconciliation]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [store-name, transaction-id, fulfillment-method, currency, country]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +273,7 @@ Contributed By: devyendarm
 
 Created At: 2026-10-11T01:57:22.554+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-10-11T01:57:32.735+00:00
 
