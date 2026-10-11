@@ -1,0 +1,209 @@
+# Dimension: Return Shipping Option
+# Generated: 2026-10-11T14:55:52.988Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Return Shipping Option
+
+Description: |
+  How the customer's return shipment is paid for: free_prepaid_label, paid_prepaid_label (fee deducted from refund), customer_arranged or not_applicable. Distinct from Return Method, the hand-back channel.
+
+Category: Operations
+
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  submit_form
+
+Adobe Event: |
+  form_submit
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "submit_form",
+          "type": "return_request"
+        },
+        "attributes": {
+          "returnId": "RET-1",
+          "returnMethod": "mail_in",
+          "returnShippingOption": "free_prepaid_label"
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "txn-1"
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_type": "return_request",
+    "transaction_id": "txn-1",
+    "return_id": "RET-1",
+    "return_method": "mail_in",
+    "return_shipping_option": "free_prepaid_label"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "form_submit",
+    "eventInfo": {
+      "form_type": "return_request",
+      "transaction_id": "txn-1",
+      "return_id": "RET-1",
+      "return_method": "mail_in",
+      "return_shipping_option": "free_prepaid_label"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "form_submit",
+    "timestamp": "2026-01-01T00:00:00Z",
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "ecid-1",
+          "authenticatedState": "ambiguous",
+          "primary": true
+        }
+      ]
+    },
+    "_tenant": {
+      "formType": "return_request",
+      "transactionId": "txn-1",
+      "returnId": "RET-1",
+      "returnMethod": "mail_in",
+      "returnShippingOption": "free_prepaid_label"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Return events: submit_form with form_type = return_request, carrying return_id and return_shipping_option
+  WITH return_events AS (
+    SELECT
+      event_timestamp,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'return_id') AS return_id,
+      NULLIF(TRIM((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'return_shipping_option')), '') AS return_shipping_option
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'submit_form'
+      AND (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'form_type') = 'return_request'
+  ),
+  -- One value per return_id: the option sent at label issue is final (fee waivers already applied), so no other source is joined
+  per_return AS (
+    SELECT
+      return_id,
+      ARRAY_AGG(return_shipping_option IGNORE NULLS ORDER BY event_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS return_shipping_option
+    FROM return_events
+    WHERE return_id IS NOT NULL
+    GROUP BY return_id
+  )
+  -- Option per return; a return with no option is (not set), never inferred from return_method
+  SELECT
+    return_id,
+    COALESCE(return_shipping_option, '(not set)') AS return_shipping_option
+  FROM per_return;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window: last 90 complete days
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date,
+           date_sub(current_date(), 1) AS end_date
+  ),
+  -- Return events: form_submit with formType = return_request, carrying returnId and returnShippingOption
+  return_events AS (
+    SELECT
+      e.timestamp AS event_ts,
+      e._tenant.returnId AS return_id,
+      NULLIF(TRIM(e._tenant.returnShippingOption), '') AS return_shipping_option
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE to_date(e.timestamp) BETWEEN p.start_date AND p.end_date
+      AND e.eventType = 'form_submit'
+      AND e._tenant.formType = 'return_request'
+  ),
+  -- One value per return_id: the option sent at label issue is final (fee waivers already applied), so no other source is joined
+  per_return AS (
+    SELECT
+      return_id,
+      max_by(return_shipping_option, CASE WHEN return_shipping_option IS NOT NULL THEN event_ts END) AS return_shipping_option
+    FROM return_events
+    WHERE return_id IS NOT NULL
+    GROUP BY return_id
+  )
+  -- Option per return; a return with no option is (not set), never inferred from returnMethod
+  SELECT
+    return_id,
+    COALESCE(return_shipping_option, '(not set)') AS return_shipping_option
+  FROM per_return;
+
+Calculation Notes: |
+  1️⃣ Source: return_shipping_option on submit_form (form_type = return_request), keyed by return_id; one value per return.
+  2️⃣ Values: free_prepaid_label, paid_prepaid_label, customer_arranged, not_applicable (in-store or kiosk returns with no parcel shipped).
+  3️⃣ Record the option sent on the return-request submit_form at label issue, not the one first viewed; the sent value is final.
+  4️⃣ The returns platform applies fee waivers (promotion, loyalty tier) before sending, so a waived fee arrives as free_prepaid_label.
+  5️⃣ Return scope: a multi-item return on one label carries one value; split returns with separate labels get one value per return_id.
+  6️⃣ Missing value is (not set); never infer it from return_method, since mail_in returns can be free or paid.
+
+Business Use Case: |
+  1️⃣ Finance: when free-label cost per return rises, models a label fee for non-defective return reasons.
+  2️⃣ Customer Service: when paid_prepaid_label returns drive fee complaints, rewrites the returns policy copy.
+  3️⃣ Merchandising: when a category's free-label return share climbs, reviews its size guidance and product content.
+
+Dependencies:
+  Events: [return-initiated]
+  Dimensions: [return-method]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
+
+Report Attributes: |
+  return-method; return-reason; item-category; carrier; refund-type
+
+Dashboard Usage: [Returns Operations Dashboard, Return Cost & Refund Leakage, Post-Purchase Experience Overview]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [return-method, return-reason, refund-type, resolution-type, shipping-tier, carrier]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-10-11T13:26:34.327+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-10-11T14:55:52.547+00:00
+
