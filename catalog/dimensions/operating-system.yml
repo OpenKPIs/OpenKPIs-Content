@@ -1,0 +1,210 @@
+# Dimension: Operating System
+# Generated: 2026-10-11T03:20:18.604Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Operating System
+
+Description: |
+  The operating system family of the device behind a session: Windows, Macintosh, iOS, Android, Linux, Chrome OS or (not set). GA4 and Adobe collect it automatically; no tagging needed.
+
+Category: Experience
+
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Checkout
+
+Scope: Session
+
+Data Type: string
+
+Aggregation Window: Session, Daily, Weekly, Monthly
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  pageView
+
+W3 Data Layer: |
+  {
+    "page": {
+      "attributes": {
+        "traffic_type": "internal"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "traffic_type": "internal"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "_tenant": {
+      "traffic_type": "internal"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web": {
+      "webPageDetails": {
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "environment": {
+      "type": "browser",
+      "operatingSystem": "iOS"
+    },
+    "_tenant": {
+      "traffic_type": "internal"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Bots are filtered at collection; the source carries no bot flag, so no bot filter is applied here.
+  WITH events AS (
+    -- Events in range with their session key, raw OS label and internal-traffic flag
+    SELECT
+      CONCAT(user_pseudo_id, '.', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_key,
+      event_timestamp,
+      IFNULL(device.operating_system, '(not set)') AS os_raw,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+  ),
+  sessions AS (
+    -- OS from each session's first event; sessions with any internal event are excluded
+    SELECT
+      session_key,
+      ARRAY_AGG(os_raw ORDER BY event_timestamp LIMIT 1)[OFFSET(0)] AS os_raw
+    FROM events
+    WHERE session_key IS NOT NULL
+    GROUP BY session_key
+    HAVING COUNTIF(traffic_type = 'internal') = 0
+  )
+  -- Per-session OS, version labels rolled up to the family
+  SELECT
+    session_key,
+    CASE
+      WHEN os_raw IS NULL OR TRIM(os_raw) IN ('', '(not set)') THEN '(not set)'
+      WHEN LOWER(os_raw) LIKE 'windows%' THEN 'Windows'
+      WHEN LOWER(os_raw) LIKE 'mac%' OR LOWER(os_raw) LIKE 'os x%' THEN 'Macintosh'
+      WHEN LOWER(os_raw) LIKE 'ios%' OR LOWER(os_raw) LIKE 'ipados%' THEN 'iOS'
+      WHEN LOWER(os_raw) LIKE 'android%' THEN 'Android'
+      WHEN LOWER(os_raw) LIKE 'chrome os%' OR LOWER(os_raw) LIKE 'chromeos%' THEN 'Chrome OS'
+      WHEN LOWER(os_raw) LIKE 'linux%' THEN 'Linux'
+      ELSE os_raw
+    END AS operating_system
+  FROM sessions;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Bots are filtered at collection; the source carries no bot flag, so no bot filter is applied here.
+  WITH params AS (
+    -- Relative reporting window: the last 90 complete days
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  ),
+  events AS (
+    -- Events in range with a 30-minute-inactivity session, raw OS label and internal-traffic flag
+    SELECT
+      e.identityMap['ECID'][0].id AS ecid,
+      e.timestamp,
+      COALESCE(e.environment.operatingSystem, '(not set)') AS os_raw,
+      e._tenant.traffic_type AS traffic_type,
+      SESS_TIMEOUT(e.timestamp, 60 * 30) OVER (
+        PARTITION BY e.identityMap['ECID'][0].id ORDER BY e.timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM your_aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE CAST(e.timestamp AS DATE) BETWEEN p.start_date AND p.end_date
+      AND e.identityMap['ECID'][0].id IS NOT NULL
+  ),
+  sessions AS (
+    -- OS from each session's first event; sessions with any internal event are excluded
+    SELECT
+      ecid,
+      session.num AS session_num,
+      min_by(os_raw, timestamp) AS os_raw
+    FROM events
+    GROUP BY ecid, session.num
+    HAVING SUM(CASE WHEN traffic_type = 'internal' THEN 1 ELSE 0 END) = 0
+  )
+  -- Per-session OS, version labels (e.g. "OS X 10.15") rolled up to the family
+  SELECT
+    CONCAT(ecid, '.', CAST(session_num AS STRING)) AS session_key,
+    CASE
+      WHEN os_raw IS NULL OR TRIM(os_raw) IN ('', '(not set)') THEN '(not set)'
+      WHEN LOWER(os_raw) LIKE 'windows%' THEN 'Windows'
+      WHEN LOWER(os_raw) LIKE 'mac%' OR LOWER(os_raw) LIKE 'os x%' THEN 'Macintosh'
+      WHEN LOWER(os_raw) LIKE 'ios%' OR LOWER(os_raw) LIKE 'ipados%' THEN 'iOS'
+      WHEN LOWER(os_raw) LIKE 'android%' THEN 'Android'
+      WHEN LOWER(os_raw) LIKE 'chrome os%' OR LOWER(os_raw) LIKE 'chromeos%' THEN 'Chrome OS'
+      WHEN LOWER(os_raw) LIKE 'linux%' THEN 'Linux'
+      ELSE os_raw
+    END AS operating_system
+  FROM sessions;
+
+Calculation Notes: |
+  1️⃣ Source: GA4 device.operating_system (user agent or app SDK); Adobe Operating Systems dimension. No dataLayer field is required.
+  2️⃣ Values: Windows, Macintosh, iOS, Android, Linux, Chrome OS, (not set). Roll Adobe version labels (e.g. "OS X 10.15") up to the family.
+  3️⃣ Family only: the version belongs in operating_system_version. iPadOS reports as iOS; Android tablets report as Android.
+  4️⃣ Session scope: take the OS from the session's first event. A user on two devices gets one value per session, not a blended one.
+  5️⃣ Browsers freeze OS versions in the user agent; the family stays reliable, the version does not. Do not trend Windows 10 vs 11 from the UA.
+  6️⃣ Exclude internal traffic (traffic_type = internal); bots are filtered at collection. A (not set) share above 1% points to a broken UA parser.
+
+Business Use Case: |
+  1️⃣ Product team: when iOS checkout conversion trails Android, tests Apple Pay visibility and the Safari payment form.
+  2️⃣ Product QA: when one OS's cart-to-purchase rate drops after a release, runs cross-OS regression tests on checkout.
+  3️⃣ Marketing: when an OS's revenue per visit diverges, sets OS bid adjustments in paid search and app install campaigns.
+
+Dependencies:
+  Events: [session-start, page-view]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
+
+Report Attributes: |
+  Device Category; Browser; Operating System Version; Country
+
+Dashboard Usage: [Checkout Funnel by Device, Conversion by Technology]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [device-category, browser, express-checkout-method]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-10-11T01:58:28.148+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-10-11T03:20:18.34+00:00
+
