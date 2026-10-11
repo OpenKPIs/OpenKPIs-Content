@@ -1,0 +1,257 @@
+# Metric: Landing Page Sessions
+# Generated: 2026-10-11T12:54:37.729Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Landing Page Sessions
+Formula: COUNT(DISTINCT CONCAT(user_pseudo_id, '.', ga_session_id)) GROUP BY landing_page, where landing_page = path of page_location of the session's first page_view by event_timestamp, else '(not set)'
+
+Description: |
+  Sessions per landing page, each session counted once against the path of its first page_view. Sessions with no page_view report (not set), so the total equals Sessions.
+
+Category: Acquisition
+
+Tags: [metric, E-commerce: Top-of-Funnel & Marketing Acquisition]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: Session
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  pageView
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "page",
+        "destinationURL": "https://www.example.com/page",
+        "referringURL": "https://www.example.com/"
+      },
+      "attributes": {
+        "trafficType": "external"
+      }
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "pageView"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "page_view",
+    "page_location": "https://www.example.com/page",
+    "page_title": "page",
+    "page_referrer": "https://www.example.com/",
+    "traffic_type": "external"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "web": {
+      "webPageDetails": {
+        "URL": "https://www.example.com/page",
+        "name": "page"
+      },
+      "webReferrer": {
+        "URL": "https://www.example.com/"
+      }
+    },
+    "_tenantId": {
+      "trafficType": "external"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web": {
+      "webPageDetails": {
+        "URL": "https://www.example.com/page",
+        "name": "page",
+        "pageViews": {
+          "value": 1
+        }
+      },
+      "webReferrer": {
+        "URL": "https://www.example.com/"
+      }
+    },
+    "_tenantId": {
+      "trafficType": "external"
+    },
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "ecid-1",
+          "authenticatedState": "ambiguous",
+          "primary": true
+        }
+      ]
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Events with session id, page_location and traffic_type (one extra day each side so sessions crossing midnight are complete)
+  WITH events AS (
+    SELECT
+      user_pseudo_id,
+      PARSE_DATE('%Y%m%d', event_date) AS event_day,
+      event_name,
+      event_timestamp,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_location') AS page_location,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL 1 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL 1 DAY))
+  ),
+  
+  -- One row per session (user_pseudo_id + ga_session_id), dated on its start day, with the page_location of its first page_view; internal sessions dropped
+  sessions AS (
+    SELECT
+      CONCAT(user_pseudo_id, '.', CAST(ga_session_id AS STRING)) AS session_key,
+      MIN(event_day) AS session_date,
+      ARRAY_AGG(IF(event_name = 'page_view', IFNULL(page_location, '(not set)'), NULL) IGNORE NULLS ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS landing_location
+    FROM events
+    WHERE ga_session_id IS NOT NULL
+    GROUP BY user_pseudo_id, ga_session_id
+    HAVING COUNTIF(traffic_type = 'internal') = 0
+  )
+  
+  -- Sessions per landing page path; sessions without a page_view report (not set) and stay in the total
+  SELECT
+    session_date,
+    CASE
+      WHEN landing_location IS NULL OR landing_location = '(not set)' THEN '(not set)'
+      ELSE COALESCE(NULLIF(REGEXP_EXTRACT(landing_location, r'^(?:[a-zA-Z][a-zA-Z0-9+.-]*://[^/?#]*)?([^?#]*)'), ''), '/')
+    END AS landing_page,
+    COUNT(DISTINCT session_key) AS landing_page_sessions
+  FROM sessions
+  WHERE session_date BETWEEN start_date AND end_date
+  GROUP BY session_date, landing_page
+  ORDER BY session_date, landing_page_sessions DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window: last 90 complete days
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date,
+           date_sub(current_date(), 1) AS end_date
+  ),
+  
+  -- Events with ECID, page URL and traffic type (one extra day each side so sessions crossing midnight are complete)
+  events AS (
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      timestamp,
+      eventType,
+      web.webPageDetails.URL AS page_url,
+      _tenantId.trafficType AS traffic_type
+    FROM aep_web_events, params
+    WHERE timestamp >= date_sub(params.start_date, 1)
+      AND timestamp < date_add(params.end_date, 2)
+  ),
+  
+  -- Sessions per ECID with a 30-minute inactivity timeout
+  sessionized AS (
+    SELECT
+      *,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY ecid ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM events
+    WHERE ecid IS NOT NULL
+  ),
+  
+  -- One row per session (ECID + session number), dated on its start day, with the URL of its first page view; internal sessions dropped
+  sessions AS (
+    SELECT
+      concat(ecid, '.', CAST(session.num AS STRING)) AS session_key,
+      to_date(MIN(timestamp)) AS session_date,
+      min_by(
+        CASE WHEN eventType = 'web.webpagedetails.pageViews' THEN coalesce(page_url, '(not set)') END,
+        CASE WHEN eventType = 'web.webpagedetails.pageViews' THEN timestamp END
+      ) AS landing_location
+    FROM sessionized
+    GROUP BY ecid, session.num
+    HAVING SUM(CASE WHEN traffic_type = 'internal' THEN 1 ELSE 0 END) = 0
+  )
+  
+  -- Sessions per landing page path; sessions without a page view report (not set) and stay in the total
+  SELECT
+    session_date,
+    CASE
+      WHEN landing_location IS NULL OR landing_location = '(not set)' THEN '(not set)'
+      ELSE coalesce(nullif(regexp_extract(landing_location, '^(?:[a-zA-Z][a-zA-Z0-9+.-]*://[^/?#]*)?([^?#]*)', 1), ''), '/')
+    END AS landing_page,
+    COUNT(DISTINCT session_key) AS landing_page_sessions
+  FROM sessions, params
+  WHERE session_date BETWEEN params.start_date AND params.end_date
+  GROUP BY session_date, landing_page
+  ORDER BY session_date, landing_page_sessions DESC;
+
+Calculation Notes: |
+  1️⃣ Landing page is the path of page_location on the session's first page_view; host and query string are stripped, an empty path reports '/'.,2️⃣ Session key is user_pseudo_id.ga_session_id; each session counts once, against one landing page only.,3️⃣ Sessions with no page_view report landing page (not set), as GA4's Landing page dimension does, and stay in the total.,4️⃣ A session ends after 30 minutes of inactivity (GA4 default).,5️⃣ Sessions crossing midnight count once, on the date the session started.,6️⃣ Internal traffic (traffic_type = internal) is excluded; GA4 already filters known bots and spiders.
+
+Business Use Case: |
+  1️⃣ Marketing checks landing sessions after a campaign launch to confirm paid traffic reaches the intended page.,2️⃣ Marketing pairs high-entry landing pages with their bounce rate and queues the worst for offer and copy tests.,3️⃣ Merchandising tracks entries to category and product pages after SEO changes and fixes pages whose entries drop.,4️⃣ Product reviews weekly entries landing on retired or 404 URLs and adds redirects to live pages.
+
+Dependencies:
+  Events: [page-view]
+  Dimensions: [page-url]
+  KPIs: [session]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  Landing Page; Traffic Source; First Touch Channel Grouping; Device Category; Country; New vs Returning User
+
+Dashboard Usage: [Acquisition Overview, Landing Page Performance, SEO Health]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [unique-visitors, new-users, product-view, search-results-views]
+
+Derived KPIs: [bounce-rate, conversion-rate, revenue-per-visit]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-10-11T11:50:08.898+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-10-11T12:54:37.355+00:00
+
