@@ -1,0 +1,208 @@
+# Dimension: Gift Order
+# Generated: 2026-10-11T14:55:28.313Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Gift Order
+
+Description: |
+  Whether a gift option (gift wrap, gift message or gift receipt) was chosen at checkout, reported per order as true, false or (not set). Gift orders need different packing, pricing display and return handling.
+
+Category: Operations
+
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "txn-1",
+      "total": {
+        "basePrice": 100,
+        "currency": "USD"
+      },
+      "attributes": {
+        "gift_order": true
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "txn-1",
+      "value": 100,
+      "currency": "USD",
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "price": 100,
+          "quantity": 1
+        }
+      ]
+    },
+    "gift_order": true
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD"
+      }
+    },
+    "_tenantId": {
+      "giftOrder": true
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD"
+      }
+    },
+    "_tenantId": {
+      "giftOrder": true
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- One gift_order value per transaction_id: earliest purchase event wins; missing parameter is (not set), never false
+  WITH orders AS (
+    SELECT
+      ecommerce.transaction_id,
+      CASE LOWER((SELECT COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)) FROM UNNEST(event_params) ep WHERE ep.key = 'gift_order'))
+        WHEN 'true' THEN 'true'
+        WHEN '1' THEN 'true'
+        WHEN 'false' THEN 'false'
+        WHEN '0' THEN 'false'
+        ELSE '(not set)'
+      END AS gift_order
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY ecommerce.transaction_id ORDER BY event_timestamp) = 1
+  )
+  -- Orders per gift_order value
+  SELECT
+    gift_order,
+    COUNT(*) AS orders
+  FROM orders
+  GROUP BY gift_order
+  ORDER BY orders DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- One gift_order value per purchaseID: earliest purchase event wins; missing field is (not set), never false
+  WITH ranked AS (
+    SELECT
+      commerce.order.purchaseID AS transaction_id,
+      CASE
+        WHEN _tenantId.giftOrder = TRUE THEN 'true'
+        WHEN _tenantId.giftOrder = FALSE THEN 'false'
+        ELSE '(not set)'
+      END AS gift_order,
+      ROW_NUMBER() OVER (PARTITION BY commerce.order.purchaseID ORDER BY timestamp) AS rn
+    FROM your_aep_experience_event_dataset
+    WHERE timestamp >= DATE_SUB(CURRENT_DATE(), 90)
+      AND timestamp < CURRENT_DATE()
+      AND eventType = 'commerce.purchases'
+      AND commerce.order.purchaseID IS NOT NULL
+  ),
+  orders AS (
+    SELECT transaction_id, gift_order FROM ranked WHERE rn = 1
+  )
+  -- Orders per gift_order value
+  SELECT
+    gift_order,
+    COUNT(*) AS orders
+  FROM orders
+  GROUP BY gift_order
+  ORDER BY orders DESC;
+
+Calculation Notes: |
+  1️⃣ Source: gift_order on the purchase event, one value per transaction_id; true when any gift option is confirmed, otherwise false.
+  2️⃣ Order scope: one line with gift wrap, gift message or gift receipt flags the whole order true; line detail belongs in items[].
+  3️⃣ Values: true, false. A purchase without the parameter is (not set), never false; track its share as a tagging gap.
+  4️⃣ Send the gift setting confirmed at order placement, not a checkbox toggled earlier in checkout. Count each transaction_id once.
+  5️⃣ Flag only: never send gift message text, recipient name or address. Buying a gift card is not a gift order unless a gift option is chosen.
+  6️⃣ Refunds and cancellations inherit the original flag by joining on transaction_id; do not resend gift_order on refund.
+  7️⃣ Gift share peaks in Q4 and before holidays; compare against the same week last year, not the prior month.
+
+Business Use Case: |
+  1️⃣ Merchandising: before Q4, sizes gift-wrap stock and gift-set assortment from last year's weekly gift order share.
+  2️⃣ Customer Service: when gift orders return more than non-gift orders, adds an exchange-first gift-receipt return flow.
+  3️⃣ Marketing: when gift order AOV beats non-gift AOV, offers free gift wrap above non-gift AOV in holiday email.
+  4️⃣ Fulfillment: when gift orders miss promised delivery dates near holidays, moves the gift-order cutoff earlier.
+
+Dependencies:
+  Events: [purchase]
+  Dimensions: [transaction-id]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
+
+Report Attributes: |
+  Shipping Tier; Fulfillment Method; Item Category; Device Category; Traffic Source
+
+Dashboard Usage: [Holiday Trading Dashboard, Order Fulfillment Overview, Checkout Options Performance]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [transaction-id, order-status, fulfillment-method, shipping-tier, return-reason, coupon-code]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-10-11T13:26:18.473+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-10-11T14:55:28.009+00:00
+
