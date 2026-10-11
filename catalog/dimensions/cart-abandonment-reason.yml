@@ -1,0 +1,194 @@
+# Dimension: Cart Abandonment Reason
+# Generated: 2026-10-11T03:19:46.045Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Cart Abandonment Reason
+
+Description: |
+  Shopper-stated reason for leaving a cart or checkout without ordering, coded to Baymard categories such as extra costs, account required or slow delivery. Taken from exit and post-abandonment surveys.
+
+Category: Conversion
+
+Tags: [dimension, E-commerce: Cart & Checkout Funnel Analytics]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  submit_form
+
+Adobe Event: |
+  form_submit
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "form_submit"
+        },
+        "attributes": {
+          "formType": "cart_abandonment_survey",
+          "abandonmentReason": "extra_costs"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_type": "cart_abandonment_survey",
+    "abandonment_reason": "extra_costs"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "form_submit",
+    "form": {
+      "formType": "cart_abandonment_survey",
+      "abandonmentReason": "extra_costs"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "form_submit",
+    "_tenantId": {
+      "formType": "cart_abandonment_survey",
+      "abandonmentReason": "extra_costs"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Cart abandonment survey responses (submit_form, form_type = cart_abandonment_survey); a missing reason is (not set)
+  WITH responses AS (
+    SELECT
+      user_pseudo_id,
+      event_timestamp,
+      COALESCE(NULLIF((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'abandonment_reason'), ''), '(not set)') AS abandonment_reason
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'submit_form'
+      AND (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'form_type') = 'cart_abandonment_survey'
+  ),
+  -- Purchases, read one day past end_date so late responses get their full 24-hour window
+  purchases AS (
+    SELECT DISTINCT user_pseudo_id, event_timestamp
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL 1 DAY))
+      AND event_name = 'purchase'
+  )
+  -- Abandonment reason per kept response: only responses with no purchase by the same shopper within 24 hours after it
+  SELECT
+    r.user_pseudo_id,
+    TIMESTAMP_MICROS(r.event_timestamp) AS response_ts,
+    r.abandonment_reason
+  FROM responses AS r
+  LEFT JOIN purchases AS p
+    ON p.user_pseudo_id = r.user_pseudo_id
+   AND p.event_timestamp > r.event_timestamp
+   AND p.event_timestamp <= r.event_timestamp + 86400000000
+  WHERE p.user_pseudo_id IS NULL;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window: last 90 days up to yesterday
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  ),
+  -- Cart abandonment survey responses (form_submit, formType = cart_abandonment_survey); a missing reason is (not set)
+  responses AS (
+    SELECT
+      e.identityMap['ECID'][0].id AS ecid,
+      e.timestamp AS response_ts,
+      COALESCE(NULLIF(e._tenantId.abandonmentReason, ''), '(not set)') AS abandonment_reason
+    FROM your_experience_event_dataset AS e
+    CROSS JOIN params AS p
+    WHERE CAST(e.timestamp AS DATE) BETWEEN p.start_date AND p.end_date
+      AND e.eventType = 'form_submit'
+      AND e._tenantId.formType = 'cart_abandonment_survey'
+  ),
+  -- Purchases, read one day past end_date so late responses get their full 24-hour window
+  purchases AS (
+    SELECT DISTINCT e.identityMap['ECID'][0].id AS ecid, e.timestamp AS purchase_ts
+    FROM your_experience_event_dataset AS e
+    CROSS JOIN params AS p
+    WHERE CAST(e.timestamp AS DATE) BETWEEN p.start_date AND date_add(p.end_date, 1)
+      AND e.commerce.purchases.value > 0
+  )
+  -- Abandonment reason per kept response: only responses with no purchase by the same shopper within 24 hours after it
+  SELECT
+    r.ecid,
+    r.response_ts,
+    r.abandonment_reason
+  FROM responses AS r
+  LEFT JOIN purchases AS pu
+    ON pu.ecid = r.ecid
+   AND pu.purchase_ts > r.response_ts
+   AND pu.purchase_ts <= r.response_ts + INTERVAL 24 HOURS
+  WHERE pu.ecid IS NULL;
+
+Calculation Notes: |
+  1️⃣ Values (Baymard): extra_costs, account_required, slow_delivery, payment_security, complex_checkout, total_cost_unclear, site_error.
+  2️⃣ Also: returns_policy, payment_options, card_declined, just_browsing, other, (not set). Map survey labels to these codes; never store free text.
+  3️⃣ One primary reason per response. Multi-select surveys keep the shopper's first choice.
+  4️⃣ Source: submit_form with form_type = cart_abandonment_survey, from the cart/checkout exit-intent prompt or the abandoned-cart email survey.
+  5️⃣ Keep only responses from shoppers with no purchase within 24 hours of the response; shoppers who come back and buy are excluded.
+  6️⃣ just_browsing is a valid code: the shopper had no intent to buy. Keep it as is; never remap it to other.
+  7️⃣ (not set) means a submitted survey with a blank reason. Shoppers who skip the survey send no submit_form and have no row.
+
+Business Use Case: |
+  1️⃣ Checkout product team: when extra_costs or total_cost_unclear leads, shows shipping and tax earlier in the cart.
+  2️⃣ Product owner: when account_required share rises, moves guest checkout ahead of sign-in.
+  3️⃣ Payments team: when payment_options or card_declined grows, reviews wallet and BNPL coverage and decline rules.
+  4️⃣ CRM marketing: tailors abandoned-cart emails by reason, e.g. a free-shipping offer for extra_costs.
+
+Dependencies:
+  Events: [purchase]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  device-category; checkout-type; traffic-source; new-vs-returning-user; payment-method; shipping-tier
+
+Dashboard Usage: [Cart & Checkout Funnel, Checkout Friction Analysis, Abandoned Cart Recovery]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [checkout-error-type, return-reason, checkout-type, payment-method, shipping-tier]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-10-11T01:57:54.987+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-10-11T03:19:45.829+00:00
+
