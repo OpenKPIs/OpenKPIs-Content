@@ -1,7 +1,7 @@
 # Metric: Curbside Orders
-# Generated: 2026-10-11T02:13:38.814Z
+# Generated: 2026-10-11T02:13:49.869Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Curbside Orders
 Formula: COUNT(DISTINCT transaction_id) on purchase events WHERE fulfillment_method = 'curbside', by order date in the reporting period
@@ -11,30 +11,237 @@ Description: |
 
 Category: Operations
 
+Tags: [metric, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
 
+Industry: Retail
 
+Priority: Medium
 
+Core Area: Checkout
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  purchase
 
+Adobe Event: |
+  purchase
 
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "txn-1",
+      "total": {
+        "basePrice": 100,
+        "currency": "USD"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "sku": "SKU-1",
+            "productName": "item"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 100
+          }
+        }
+      ],
+      "attributes": {
+        "fulfillmentMethod": "curbside",
+        "trafficType": "external"
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "fulfillment_method": "curbside",
+    "traffic_type": "external",
+    "ecommerce": {
+      "transaction_id": "txn-1",
+      "value": 100,
+      "currency": "USD",
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "price": 100,
+          "quantity": 1
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "fulfillmentMethod": "curbside",
+      "trafficType": "external"
+    },
+    "xdm": {
+      "_tenantId": {
+        "fulfillmentMethod": "curbside",
+        "trafficType": "external"
+      },
+      "commerce": {
+        "purchases": {
+          "value": 1
+        },
+        "order": {
+          "purchaseID": "txn-1",
+          "currencyCode": "USD",
+          "priceTotal": 100
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "name": "item",
+          "quantity": 1,
+          "priceTotal": 100
+        }
+      ]
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD",
+        "priceTotal": 100
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "quantity": 1,
+        "priceTotal": 100
+      }
+    ],
+    "_tenantId": {
+      "fulfillmentMethod": "curbside",
+      "trafficType": "external"
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Purchase hits in the window with event-level fulfillment_method and traffic_type pivoted from event_params
+  WITH purchase_hits AS (
+    SELECT
+      ecommerce.transaction_id AS transaction_id,
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      LOWER((SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'fulfillment_method')) AS fulfillment_method,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+  ),
+  -- One row per order: first purchase date as order date; curbside if any hit maps to a curbside value (split orders count once); internal if any hit is internal
+  orders AS (
+    SELECT
+      transaction_id,
+      MIN(event_date) AS order_date,
+      LOGICAL_OR(fulfillment_method IN ('curbside', 'curbside_pickup', 'drive_up', 'kerbside')) AS is_curbside,
+      LOGICAL_OR(traffic_type = 'internal') AS is_internal
+    FROM purchase_hits
+    GROUP BY transaction_id
+  )
+  -- Distinct curbside orders by order date, internal and test orders excluded, cancelled orders kept
+  SELECT
+    order_date,
+    COUNT(DISTINCT transaction_id) AS curbside_orders
+  FROM orders
+  WHERE is_curbside
+    AND NOT COALESCE(is_internal, FALSE)
+  GROUP BY order_date
+  ORDER BY order_date;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window: last 90 complete days
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  ),
+  -- Purchase hits in the window with the tenant fulfillmentMethod and trafficType (tenant counterpart of GA4 traffic_type)
+  purchase_hits AS (
+    SELECT
+      e.commerce.order.purchaseID AS transaction_id,
+      to_date(e.timestamp) AS event_date,
+      lower(e._tenantId.fulfillmentMethod) AS fulfillment_method,
+      e._tenantId.trafficType AS traffic_type
+    FROM aep_web_events_dataset AS e
+    CROSS JOIN params AS p
+    WHERE e.eventType = 'commerce.purchases'
+      AND to_date(e.timestamp) BETWEEN p.start_date AND p.end_date
+      AND e.commerce.order.purchaseID IS NOT NULL
+  ),
+  -- One row per order: first purchase date as order date; curbside if any hit maps to a curbside value (split orders count once); internal if any hit is internal
+  orders AS (
+    SELECT
+      transaction_id,
+      MIN(event_date) AS order_date,
+      MAX(CASE WHEN fulfillment_method IN ('curbside', 'curbside_pickup', 'drive_up', 'kerbside') THEN 1 ELSE 0 END) AS is_curbside,
+      MAX(CASE WHEN traffic_type = 'internal' THEN 1 ELSE 0 END) AS is_internal
+    FROM purchase_hits
+    GROUP BY transaction_id
+  )
+  -- Distinct curbside orders by order date, internal and test orders excluded, cancelled orders kept
+  SELECT
+    order_date,
+    COUNT(DISTINCT transaction_id) AS curbside_orders
+  FROM orders
+  WHERE is_curbside = 1
+    AND is_internal = 0
+  GROUP BY order_date
+  ORDER BY order_date;
 
+Calculation Notes: |
+  1️⃣ Distinct transaction_id on purchase events with fulfillment_method = 'curbside'; repeat purchase hits for one order count once.,2️⃣ Counted on the order date, not the pickup date; the method selected at checkout holds even if the customer later switches pickup type.,3️⃣ Subset of BOPIS Orders: in-store counter, locker and ship-to-store pickups are excluded and stay in their own counts.,4️⃣ Map platform values (curbside_pickup, drive_up, kerbside) to curbside through the fulfillment-method dimension before counting.,5️⃣ Tagging rule: the purchase hit sends order-level fulfillment_method 'curbside' when any line is curbside; split orders count once.,6️⃣ Internal and test orders (traffic_type = internal) are excluded; cancelled orders stay in, since the metric counts orders placed.,7️⃣ Not the curbside-pickup-check-in event: arrivals and handovers are measured by that event and Pickups Completed, after the order.
 
+Business Use Case: |
+  1️⃣ Store operations staffs curbside bays and runners per store and hour from last week's curbside order count.,2️⃣ Sales reviews curbside orders in stores newly enabled for curbside and widens or pauses the rollout.,3️⃣ Marketing tracks curbside orders during a pickup promotion and ends the offer if the count stays flat.
 
+Dependencies:
+  Events: [purchase]
+  Dimensions: [fulfillment-method]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Fulfillment Method; Store Name; Pickup Window; Device Category
 
+Dashboard Usage: [Omnichannel Fulfillment, Store Pickup Operations]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [bopis-orders, pickups-completed, pickup-notifications-sent, ship-to-store-orders, store-selections]
 
+Derived KPIs: [curbside-pickup-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +251,7 @@ Contributed By: devyendarm
 
 Created At: 2026-10-11T02:13:38.201+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-10-11T02:13:49.247+00:00
 
