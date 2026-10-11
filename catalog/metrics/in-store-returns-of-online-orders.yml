@@ -1,0 +1,136 @@
+# Metric: In-Store Returns of Online Orders
+# Generated: 2026-10-11T03:18:25.659Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: In-Store Returns of Online Orders
+Formula: COUNT(DISTINCT pos_return_id) WHERE original_order_id IN (web order transaction_id), excluding voided returns, by return posting date in the reporting period
+
+Description: |
+  Count of POS return transactions in which goods bought online are brought back to a physical store, matched to the web order id. Counts returns, not units; mail-in returns are excluded.
+
+Category: Operations
+
+Tags: [metric, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: Retail
+
+Priority: Medium
+
+Core Area: Generic
+
+Scope: Global
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- In-store POS returns posted in the period (store-local business date), voided/cancelled and mail-in or carrier drop-off excluded
+  WITH store_returns AS (
+    SELECT pos_return_id, original_order_id, business_date
+    FROM `your-project.erp.pos_returns`
+    WHERE business_date BETWEEN start_date AND end_date
+      AND return_method = 'in_store'
+      AND return_status NOT IN ('voided', 'cancelled')
+  ),
+  -- Web orders (ship-to-home, BOPIS, ship-to-store); pickups refused at the counter are cancelled orders, not returns
+  web_orders AS (
+    SELECT DISTINCT transaction_id
+    FROM `your-project.erp.orders`
+    WHERE order_channel = 'online'
+      AND order_status != 'cancelled'
+  )
+  -- One count per POS return matched to a web order id; receiptless unmatched returns drop out of the join
+  SELECT
+    r.business_date AS return_date,
+    COUNT(DISTINCT r.pos_return_id) AS in_store_returns_of_online_orders
+  FROM store_returns AS r
+  JOIN web_orders AS o
+    ON r.original_order_id = o.transaction_id
+  GROUP BY return_date
+  ORDER BY return_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window: last 90 complete days
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  ),
+  -- In-store POS returns posted in the period (store-local business date), voided/cancelled and mail-in or carrier drop-off excluded
+  store_returns AS (
+    SELECT r.pos_return_id, r.original_order_id, r.business_date
+    FROM aep_backend_dataset.pos_returns AS r
+    CROSS JOIN params AS p
+    WHERE r.business_date BETWEEN p.start_date AND p.end_date
+      AND r.return_method = 'in_store'
+      AND r.return_status NOT IN ('voided', 'cancelled')
+  ),
+  -- Web orders (ship-to-home, BOPIS, ship-to-store); pickups refused at the counter are cancelled orders, not returns
+  web_orders AS (
+    SELECT DISTINCT transaction_id
+    FROM aep_backend_dataset.orders
+    WHERE order_channel = 'online'
+      AND order_status != 'cancelled'
+  )
+  -- One count per POS return matched to a web order id; receiptless unmatched returns drop out of the join
+  SELECT
+    r.business_date AS return_date,
+    COUNT(DISTINCT r.pos_return_id) AS in_store_returns_of_online_orders
+  FROM store_returns AS r
+  JOIN web_orders AS o
+    ON r.original_order_id = o.transaction_id
+  GROUP BY r.business_date
+  ORDER BY return_date;
+
+Calculation Notes: |
+  1️⃣ One count per POS return transaction (pos_return_id) whose original order id matches a web transaction_id; units and refund value are not summed.,2️⃣ Counted on the POS return posting date in store local time, not the online order date or the date the return was started online.,3️⃣ Covers returns of ship-to-home, BOPIS and ship-to-store orders; returns of store purchases and mail-in or carrier drop-off returns are excluded.,4️⃣ Receiptless returns not matched to a web order id are excluded; track the unmatched POS return share separately as a data-quality check.,5️⃣ Voided and cancelled return transactions are excluded; an exchange counts when the POS posts a return line against the online order.,6️⃣ Pickups refused at the counter before handover are order cancellations, not returns, and are excluded.,7️⃣ Not the in-store return event (a POS scan signal) nor returned-items (units, all return methods); a backend count deduplicated by return.
+
+Business Use Case: |
+  1️⃣ Store Operations staffs return counters by store from weekly in-store returns of online orders.,2️⃣ Finance books online-order refunds issued at the POS against e-commerce, not store, sales.,3️⃣ Merchandising routes resaleable online-order returns into store stock instead of shipping them back.
+
+Dependencies:
+  Events: [purchase]
+  Dimensions: [transaction-id, store-name]
+
+Source Data: ERP
+
+Report Attributes: |
+  Store Name; Fulfillment Method; Return Reason; Item Category; Region
+
+Dashboard Usage: [Omnichannel Returns, Store Operations Overview, Returns & Refunds Reconciliation]
+
+Segment Eligibility: |
+  false
+
+Related Metrics: [returned-items, refunds-issued, return-processing-time, bopis-orders, pickups-completed, ship-to-store-orders]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-10-11T02:13:56.319+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-10-11T03:18:25.404+00:00
+
