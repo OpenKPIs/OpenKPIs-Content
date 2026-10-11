@@ -1,0 +1,237 @@
+# Dimension: Delivery Attempt Number
+# Generated: 2026-10-11T14:54:17.243Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Delivery Attempt Number
+
+Description: |
+  Ordinal of the carrier delivery attempt on a shipment: 1, 2, 3 or 4+, read from attempted and delivered scans. Splits delivery outcomes into first-attempt success versus redelivery.
+
+Category: Operations
+
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Backend source: OMS shipment tracking scans, not GA4 export tables
+  -- Relative reporting window: last 90 complete days
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Shipments with any scan in the window, every fulfillment method kept (including NULL)
+  WITH shipments AS (
+    SELECT DISTINCT s.tracking_number, s.fulfillment_method
+    FROM `your-project.oms.shipments` AS s
+    JOIN `your-project.oms.shipment_tracking_scans` AS sc ON sc.tracking_number = s.tracking_number
+    WHERE sc.scan_local_date BETWEEN start_date AND end_date
+  ),
+  
+  -- First terminal scan per shipment, where the value freezes
+  terminal AS (
+    SELECT tracking_number, scan_timestamp AS terminal_ts, scan_id AS terminal_scan_id
+    FROM (
+      SELECT
+        sc.tracking_number, sc.scan_timestamp, sc.scan_id,
+        ROW_NUMBER() OVER (PARTITION BY sc.tracking_number ORDER BY sc.scan_timestamp, sc.scan_id) AS terminal_rank
+      FROM `your-project.oms.shipment_tracking_scans` AS sc
+      JOIN shipments USING (tracking_number)
+      WHERE sc.scan_type IN ('DELIVERED', 'REDIRECTED_TO_PICKUP_POINT', 'RETURNED_TO_SENDER')
+        AND sc.scan_local_date <= end_date
+    )
+    WHERE terminal_rank = 1
+  ),
+  
+  -- Relevant scans at or before the first terminal scan; repeated attempted scans on the same local day count once
+  scans AS (
+    SELECT tracking_number, scan_type, scan_timestamp, scan_id
+    FROM (
+      SELECT
+        sc.tracking_number, sc.scan_type, sc.scan_timestamp, sc.scan_id,
+        ROW_NUMBER() OVER (PARTITION BY sc.tracking_number, sc.scan_type, sc.scan_local_date ORDER BY sc.scan_timestamp, sc.scan_id) AS same_day_rank
+      FROM `your-project.oms.shipment_tracking_scans` AS sc
+      JOIN shipments AS sh ON sh.tracking_number = sc.tracking_number
+      LEFT JOIN terminal AS t ON t.tracking_number = sc.tracking_number
+      WHERE sc.scan_type IN ('OUT_FOR_DELIVERY', 'DELIVERY_ATTEMPTED', 'DELIVERED')
+        AND sc.scan_local_date <= end_date
+        AND (t.terminal_ts IS NULL
+          OR sc.scan_timestamp < t.terminal_ts
+          OR (sc.scan_timestamp = t.terminal_ts AND sc.scan_id <= t.terminal_scan_id))
+    )
+    WHERE scan_type <> 'DELIVERY_ATTEMPTED' OR same_day_rank = 1
+  ),
+  
+  -- An attempt is an attempted or delivered scan that follows an out-for-delivery scan
+  ordered AS (
+    SELECT
+      tracking_number, scan_type,
+      LAG(scan_type) OVER (PARTITION BY tracking_number ORDER BY scan_timestamp, scan_id) AS prev_scan_type
+    FROM scans
+  ),
+  attempts AS (
+    SELECT tracking_number, COUNT(*) AS attempt_number
+    FROM ordered
+    WHERE scan_type IN ('DELIVERY_ATTEMPTED', 'DELIVERED')
+      AND prev_scan_type = 'OUT_FOR_DELIVERY'
+    GROUP BY tracking_number
+  )
+  
+  -- Per-shipment value: 1, 2, 3 or 4+; store pickup, ship-to-store and no attempt yet are (not set)
+  SELECT
+    s.tracking_number,
+    CASE
+      WHEN s.fulfillment_method IN ('store_pickup', 'ship_to_store') THEN '(not set)'
+      WHEN a.attempt_number IS NULL THEN '(not set)'
+      WHEN a.attempt_number >= 4 THEN '4+'
+      ELSE CAST(a.attempt_number AS STRING)
+    END AS delivery_attempt_number
+  FROM shipments AS s
+  LEFT JOIN attempts AS a ON a.tracking_number = s.tracking_number;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Backend source: OMS shipment tracking scans, not web event datasets
+  -- Relative reporting window: last 90 complete days
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date,
+           date_sub(current_date(), 1) AS end_date
+  ),
+  
+  -- Shipments with any scan in the window, every fulfillment method kept (including NULL)
+  shipments AS (
+    SELECT DISTINCT s.tracking_number, s.fulfillment_method
+    FROM oms_shipments s
+    JOIN oms_shipment_tracking_scans sc ON sc.tracking_number = s.tracking_number
+    CROSS JOIN params p
+    WHERE sc.scan_local_date BETWEEN p.start_date AND p.end_date
+  ),
+  
+  -- First terminal scan per shipment, where the value freezes
+  terminal AS (
+    SELECT tracking_number, scan_timestamp AS terminal_ts, scan_id AS terminal_scan_id
+    FROM (
+      SELECT
+        sc.tracking_number, sc.scan_timestamp, sc.scan_id,
+        ROW_NUMBER() OVER (PARTITION BY sc.tracking_number ORDER BY sc.scan_timestamp, sc.scan_id) AS terminal_rank
+      FROM oms_shipment_tracking_scans sc
+      JOIN shipments sh ON sh.tracking_number = sc.tracking_number
+      CROSS JOIN params p
+      WHERE sc.scan_type IN ('DELIVERED', 'REDIRECTED_TO_PICKUP_POINT', 'RETURNED_TO_SENDER')
+        AND sc.scan_local_date <= p.end_date
+    ) r
+    WHERE terminal_rank = 1
+  ),
+  
+  -- Relevant scans at or before the first terminal scan; repeated attempted scans on the same local day count once
+  scans AS (
+    SELECT tracking_number, scan_type, scan_timestamp, scan_id
+    FROM (
+      SELECT
+        sc.tracking_number, sc.scan_type, sc.scan_timestamp, sc.scan_id,
+        ROW_NUMBER() OVER (PARTITION BY sc.tracking_number, sc.scan_type, sc.scan_local_date ORDER BY sc.scan_timestamp, sc.scan_id) AS same_day_rank
+      FROM oms_shipment_tracking_scans sc
+      JOIN shipments sh ON sh.tracking_number = sc.tracking_number
+      LEFT JOIN terminal t ON t.tracking_number = sc.tracking_number
+      CROSS JOIN params p
+      WHERE sc.scan_type IN ('OUT_FOR_DELIVERY', 'DELIVERY_ATTEMPTED', 'DELIVERED')
+        AND sc.scan_local_date <= p.end_date
+        AND (t.terminal_ts IS NULL
+          OR sc.scan_timestamp < t.terminal_ts
+          OR (sc.scan_timestamp = t.terminal_ts AND sc.scan_id <= t.terminal_scan_id))
+    ) d
+    WHERE scan_type <> 'DELIVERY_ATTEMPTED' OR same_day_rank = 1
+  ),
+  
+  -- An attempt is an attempted or delivered scan that follows an out-for-delivery scan
+  ordered AS (
+    SELECT
+      tracking_number, scan_type,
+      LAG(scan_type) OVER (PARTITION BY tracking_number ORDER BY scan_timestamp, scan_id) AS prev_scan_type
+    FROM scans
+  ),
+  attempts AS (
+    SELECT tracking_number, COUNT(*) AS attempt_number
+    FROM ordered
+    WHERE scan_type IN ('DELIVERY_ATTEMPTED', 'DELIVERED')
+      AND prev_scan_type = 'OUT_FOR_DELIVERY'
+    GROUP BY tracking_number
+  )
+  
+  -- Per-shipment value: 1, 2, 3 or 4+; store pickup, ship-to-store and no attempt yet are (not set)
+  SELECT
+    s.tracking_number,
+    CASE
+      WHEN s.fulfillment_method IN ('store_pickup', 'ship_to_store') THEN '(not set)'
+      WHEN a.attempt_number IS NULL THEN '(not set)'
+      WHEN a.attempt_number >= 4 THEN '4+'
+      ELSE CAST(a.attempt_number AS STRING)
+    END AS delivery_attempt_number
+  FROM shipments s
+  LEFT JOIN attempts a ON a.tracking_number = s.tracking_number;
+
+Calculation Notes: |
+  1️⃣ Source: derived from carrier tracking scans per tracking number in the OMS backend, not sent in a data layer.
+  2️⃣ Counting: each out-for-delivery run ending in an attempted or delivered scan is one attempt; the first is 1, each later one adds 1.
+  3️⃣ Values: the string 1, 2, 3 or 4+, as in Number of Shipments. A shipment with no attempt scan yet is (not set), never 0.
+  4️⃣ Shipment scope: one value per tracking number. A split order carries one value per shipment, never one per order.
+  5️⃣ Exclusions: store pickup and ship-to-store orders have no home delivery attempt and stay (not set).
+  6️⃣ Final value: frozen at the delivered, redirected-to-pickup-point or returned-to-sender scan; open shipments show the latest attempt so far.
+  7️⃣ Dedupe: repeated attempted scans for one tracking number on the same local day count as one attempt.
+
+Business Use Case: |
+  1️⃣ Operations: when one carrier's share of attempt 2+ rises, raises it at the carrier review with lane-level evidence.
+  2️⃣ Customer Service: when a shipment reaches attempt 2, sends a reschedule or pickup-point option before attempt 3.
+  3️⃣ Finance: at month end, reconciles carrier redelivery surcharges against shipments with attempt 2 or higher.
+
+Dependencies:
+  Dimensions: [shipment-status]
+
+Source Data: ERP
+
+Report Attributes: |
+  carrier; delivery-region; shipping-tier; delivery-exception-type; delivery-time-window
+
+Dashboard Usage: [Last-Mile Delivery Performance, Carrier Scorecard, Failed Delivery Analysis]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [shipment-status, delivery-exception-type, delivery-confirmation-method, delivery-sla-status, carrier, delivery-time-window]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-10-11T13:25:31.616+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-10-11T14:54:16.911+00:00
+
