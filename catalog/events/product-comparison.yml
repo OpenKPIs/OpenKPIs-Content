@@ -1,0 +1,233 @@
+# Event: Product Comparison
+# Generated: 2026-10-11T03:20:35.427Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Product Comparison
+Event Serialization: always
+
+Description: |
+  Custom compare_items event, fired when a shopper adds a product to, removes it from, or opens the side-by-side comparison tool. Carries the compared items[] and compare_count so tray use can be tied to purchase.
+
+Category: Engagement
+
+Tags: [event, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Discovery
+
+
+Event Type: custom
+
+Aggregation Window: Event, Session, Daily, Weekly
+
+GA4 Event: |
+  compare_items
+
+Adobe Event: |
+  compareItems
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "category": {
+          "pageType": "pdp"
+        }
+      },
+      "product": [
+        {
+          "productInfo": {
+            "productID": "SKU-1",
+            "productName": "item",
+            "manufacturer": "brand"
+          },
+          "category": {
+            "primaryCategory": "category"
+          },
+          "attributes": {
+            "item_variant": "variant",
+            "price": 100
+          }
+        }
+      ],
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "compare_items",
+            "eventAction": "add"
+          },
+          "attributes": {
+            "compare_action": "add",
+            "compare_count": 2,
+            "item_list_id": "list-1",
+            "item_list_name": "list",
+            "currency": "USD",
+            "value": 100
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "compare_items",
+    "compare_action": "add",
+    "compare_count": 2,
+    "item_list_id": "list-1",
+    "item_list_name": "list",
+    "page_type": "pdp",
+    "ecommerce": {
+      "currency": "USD",
+      "value": 100,
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "item_brand": "brand",
+          "item_category": "category",
+          "item_variant": "variant",
+          "price": 100
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "compareItems",
+    "eventInfo": {
+      "compare_action": "add",
+      "compare_count": 2,
+      "item_list_id": "list-1",
+      "item_list_name": "list",
+      "page_type": "pdp",
+      "currency": "USD",
+      "value": 100
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "name": "item",
+        "priceTotal": 100,
+        "currencyCode": "USD",
+        "productCategories": [
+          {
+            "categoryName": "category"
+          }
+        ],
+        "selectedOptions": [
+          {
+            "attribute": "variant",
+            "value": "variant"
+          }
+        ],
+        "_<tenantId>": {
+          "brand": "brand"
+        }
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "compare_items",
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "ecid-1",
+          "authenticatedState": "ambiguous",
+          "primary": true
+        }
+      ]
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "name": "item",
+        "priceTotal": 100,
+        "currencyCode": "USD",
+        "productCategories": [
+          {
+            "categoryName": "category"
+          }
+        ],
+        "selectedOptions": [
+          {
+            "attribute": "variant",
+            "value": "variant"
+          }
+        ],
+        "_<tenantId>": {
+          "brand": "brand"
+        }
+      }
+    ],
+    "_<tenantId>": {
+      "compareAction": "add",
+      "compareCount": 2,
+      "itemListId": "list-1",
+      "itemListName": "list",
+      "pageType": "pdp",
+      "value": 100
+    }
+  }
+
+Parameters: |
+  {
+    "compare_action": "string - add, remove or view; which compare-tray action fired the event",
+    "items": "array - products affected: item_id, item_name, item_brand, item_category, item_variant, price; all tray items on view",
+    "compare_count": "integer - number of products in the comparison tray after the action",
+    "item_list_id": "string - optional; id of the list the product was added from, e.g. category_shoes",
+    "item_list_name": "string - optional; name of the list the product was added from, e.g. Running Shoes",
+    "page_type": "string - optional; page where the action happened: plp, pdp, search or compare",
+    "currency": "string - optional; ISO 4217 code for item prices, required if value is sent",
+    "value": "number - optional; sum of price across items in the hit"
+  }
+
+Calculation Notes: |
+  ["1️⃣ Fires when the compare tray changes (add, remove) or the comparison view renders (view); never on hover or a failed tick.","2️⃣ Serialization always: every add, remove and view is a hit. Count unique compared products per session by item_id at reporting time.","3️⃣ Required: compare_action, items, compare_count. Optional: item_list_id, item_list_name, page_type, currency, value.","4️⃣ add and remove send only the item changed; view sends every product in the tray. compare_count is the tray size after the change.","5️⃣ Tray at its configured maximum or duplicate add: no hit, the tray did not change. Reloading the comparison page fires view again.","6️⃣ No PII: items carry catalog fields only. Runs under the analytics consent category; drop the hit when analytics consent is denied.","7️⃣ Common mistake: a custom name like compare_click per button. Keep one event, compare_items, and split behaviour with compare_action."]
+
+Business Use Case: |
+  ["1️⃣ Merchandising: compare views high but add-to-cart low in a category → fixes spec gaps on the PDPs being compared.","2️⃣ Product: few shoppers reach the view step after adding two items → tests a sticky compare tray with a clear CTA.","3️⃣ E-commerce Marketing: one pair of products is compared often → builds a comparison guide for them.","4️⃣ Merchandising: a product is removed from trays more than kept → reviews its price and spec position against rivals."]
+
+Dependencies:
+  Events: [product-view, product-list-view, add-to-cart]
+  Metrics: [products-compared]
+  Dimensions: [product-name, item-category, page-type]
+  KPIs: [item-view-to-cart-rate]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  compare_action; Product Name; Item Category; Page Type; Item List Name; Device Category
+
+    Dashboard Usage: [Product Discovery Funnel, Merchandising Performance, Category Comparison Insights]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [product-name, item-category, page-type, device-category, price-band]
+
+    
+    Derived Metrics: [products-compared]
+
+    
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-10-11T03:15:49.003+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-10-11T03:20:35.152+00:00
+
