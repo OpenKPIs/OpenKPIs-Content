@@ -1,0 +1,213 @@
+# Dimension: Free Shipping Eligibility
+# Generated: 2026-10-11T14:55:04.714Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Free Shipping Eligibility
+
+Description: |
+  The basis on which an order qualified for free shipping: Threshold Met, Promotion, Member Benefit or Not Eligible. It records the offer the platform applied; Shipping Tier records service level and speed.
+
+Category: Monetization
+
+Tags: [dimension, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event, Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "txn-1",
+      "total": {
+        "basePrice": 100,
+        "currency": "USD",
+        "shipping": 0,
+        "shippingMethod": "Standard",
+        "transactionTotal": 100
+      },
+      "attributes": {
+        "freeShippingEligibility": "Threshold Met"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "ecommerce": {
+      "transaction_id": "txn-1",
+      "value": 100,
+      "currency": "USD",
+      "shipping": 0,
+      "shipping_tier": "Standard",
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "price": 100,
+          "quantity": 1
+        }
+      ]
+    },
+    "free_shipping_eligibility": "Threshold Met"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "xdm": {
+      "commerce": {
+        "purchases": {
+          "value": 1
+        },
+        "order": {
+          "purchaseID": "txn-1",
+          "currencyCode": "USD",
+          "priceTotal": 100
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1",
+          "quantity": 1,
+          "priceTotal": 100
+        }
+      ],
+      "_tenantId": {
+        "freeShippingEligibility": "Threshold Met"
+      }
+    }
+  }
+
+XDM Mapping: |
+  {
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD"
+      }
+    },
+    "_tenantId": {
+      "freeShippingEligibility": "Threshold Met"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- One value per order: the free_shipping_eligibility sent on the first purchase hit of each transaction_id (refunds never rewrite it)
+  WITH orders AS (
+    SELECT
+      ecommerce.transaction_id AS transaction_id,
+      COALESCE(NULLIF(TRIM((SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'free_shipping_eligibility')), ''), '(not set)') AS free_shipping_eligibility
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY ecommerce.transaction_id ORDER BY event_timestamp) = 1
+  )
+  -- Orders by free shipping basis
+  SELECT
+    free_shipping_eligibility,
+    COUNT(*) AS orders
+  FROM orders
+  GROUP BY free_shipping_eligibility
+  ORDER BY orders DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window: last 90 complete days
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date,
+           date_sub(current_date(), 1) AS end_date
+  ),
+  -- One value per order: the freeShippingEligibility sent on the first purchase hit of each purchaseID (refunds never rewrite it)
+  orders AS (
+    SELECT
+      commerce.order.purchaseID AS transaction_id,
+      COALESCE(NULLIF(TRIM(MIN_BY(_tenantId.freeShippingEligibility, timestamp)), ''), '(not set)') AS free_shipping_eligibility
+    FROM aep_web_events_dataset, params
+    WHERE commerce.purchases.value > 0
+      AND commerce.order.purchaseID IS NOT NULL
+      AND to_date(timestamp) BETWEEN params.start_date AND params.end_date
+    GROUP BY commerce.order.purchaseID
+  )
+  -- Orders by free shipping basis
+  SELECT
+    free_shipping_eligibility,
+    COUNT(*) AS orders
+  FROM orders
+  GROUP BY free_shipping_eligibility
+  ORDER BY orders DESC;
+
+Calculation Notes: |
+  1️⃣ Source: the shipping rule the commerce platform applied at order placement, sent on purchase. Never infer it from shipping = 0 alone.
+  2️⃣ Values: Threshold Met, Promotion, Member Benefit, Not Eligible, Not Applicable, (not set). One value per order.
+  3️⃣ Several rules apply: record the one the platform applied; if it reports more than one, use Promotion, then Member Benefit, then Threshold Met.
+  4️⃣ Threshold Met follows the subtotal the platform evaluates, usually after discounts and before tax and shipping. Use the same basis in reports.
+  5️⃣ Eligibility, not choice: an eligible order upgraded to a paid express tier keeps its basis; the upgrade shows in Shipping Tier and shipping value.
+  6️⃣ Pickup (BOPIS, curbside) and digital-only orders have no shipment: Not Applicable, never Not Eligible.
+  7️⃣ Fixed at purchase: a refund or cancellation that drops an order below the threshold never changes it. Reconcile with platform shipping lines.
+
+Business Use Case: |
+  1️⃣ Finance: at month end, totals shipping cost absorbed by basis and flags the basis whose cost outgrows its margin.
+  2️⃣ Merchandising: when Threshold Met orders bunch just above the threshold, tests raising it by one price step.
+  3️⃣ Marketing: after a free-shipping promotion, compares Promotion order AOV and conversion to baseline before rerunning it.
+  4️⃣ Loyalty team: tracks Member Benefit order share and revenue to justify the paid membership's shipping perk.
+
+Dependencies:
+  Events: [purchase]
+  Dimensions: [transaction-id, shipping-tier]
+
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
+
+Report Attributes: |
+  Shipping Tier; Fulfillment Method; Coupon Code; Loyalty Member Status; Device Category; Country
+
+Dashboard Usage: [Shipping Cost & Free Shipping Performance, Promotion Performance, Checkout & Order Economics]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [shipping-tier, shipment-mode, fulfillment-method, coupon-code, loyalty-member-status, price-band]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-10-11T13:26:02.57+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-10-11T14:55:04.281+00:00
+
