@@ -1,7 +1,7 @@
 # Metric: BOPIS Revenue
-# Generated: 2026-10-11T02:13:19.589Z
+# Generated: 2026-10-11T02:13:31.267Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: BOPIS Revenue
 Formula: SUM(items.price × items.quantity) on purchase events WHERE fulfillment_method IN ('store_pickup', 'curbside'), deduplicated by transaction_id, by purchase date
@@ -11,30 +11,235 @@ Description: |
 
 Category: Monetization
 
+Tags: [metric, Retail: Omnichannel (BOPIS - Buy Online Pick Up In Store)]
+
+Industry: Retail
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Event
+
+Measure Type: Currency
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "transaction": {
+      "transactionID": "txn-1",
+      "total": {
+        "basePrice": 100,
+        "currency": "USD"
+      },
+      "attributes": {
+        "fulfillmentMethod": "store_pickup",
+        "storeID": "store-1",
+        "trafficType": "external"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-1",
+            "productName": "item"
+          },
+          "quantity": 1,
+          "price": {
+            "basePrice": 100
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "fulfillment_method": "store_pickup",
+    "traffic_type": "external",
+    "ecommerce": {
+      "transaction_id": "txn-1",
+      "currency": "USD",
+      "value": 100,
+      "tax": 0,
+      "shipping": 0,
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "price": 100,
+          "quantity": 1,
+          "location_id": "store-1"
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "eventInfo": {
+      "fulfillmentMethod": "store_pickup",
+      "trafficType": "external"
+    },
+    "_tenantId": {
+      "storeID": "store-1"
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "name": "item",
+        "quantity": 1,
+        "priceTotal": 100
+      }
+    ]
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "commerce": {
+      "purchases": {
+        "value": 1
+      },
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "quantity": 1,
+        "priceTotal": 100
+      }
+    ],
+    "_tenantId": {
+      "fulfillmentMethod": "store_pickup",
+      "storeID": "store-1",
+      "trafficType": "external"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Purchase events with fulfillment method, traffic type and item revenue (price x quantity, tax and shipping excluded) in the reporting currency via price_in_usd
+  WITH purchases AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS purchase_date,
+      event_timestamp,
+      ecommerce.transaction_id AS transaction_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'fulfillment_method') AS fulfillment_method,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type,
+      (SELECT SUM(i.price_in_usd * i.quantity) FROM UNNEST(items) AS i) AS item_revenue
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+      AND ecommerce.transaction_id IS NOT NULL
+  ),
+  -- Keep only the first purchase event per transaction_id (drops confirmation-page reload fires)
+  first_purchase AS (
+    SELECT *
+    FROM purchases
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp) = 1
+  )
+  -- BOPIS revenue by purchase date: store pickup and curbside only, internal traffic excluded
+  SELECT
+    purchase_date,
+    SUM(item_revenue) AS bopis_revenue
+  FROM first_purchase
+  WHERE fulfillment_method IN ('store_pickup', 'curbside')
+    AND (traffic_type IS NULL OR traffic_type != 'internal')
+  GROUP BY purchase_date
+  ORDER BY purchase_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window: the last 90 complete days
+  WITH params AS (
+    SELECT DATE_SUB(CURRENT_DATE(), 90) AS start_date, DATE_SUB(CURRENT_DATE(), 1) AS end_date
+  ),
+  -- Purchase events with fulfillment method, traffic type and item revenue (productListItems.priceTotal = price x quantity, tax and shipping excluded) in the dataset's reporting currency
+  purchases AS (
+    SELECT
+      CAST(e.timestamp AS DATE) AS purchase_date,
+      e.timestamp AS event_ts,
+      e.commerce.order.purchaseID AS transaction_id,
+      e._tenantId.fulfillmentMethod AS fulfillment_method,
+      e._tenantId.trafficType AS traffic_type,
+      AGGREGATE(e.productListItems, CAST(0 AS DOUBLE), (acc, p) -> acc + p.priceTotal) AS item_revenue
+    FROM aep_web_events_dataset e
+    CROSS JOIN params
+    WHERE e.eventType = 'commerce.purchases'
+      AND CAST(e.timestamp AS DATE) BETWEEN params.start_date AND params.end_date
+      AND e.commerce.order.purchaseID IS NOT NULL
+  ),
+  -- Keep only the first purchase event per transaction_id (drops confirmation-page reload fires)
+  first_purchase AS (
+    SELECT *
+    FROM (
+      SELECT purchases.*, ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_ts) AS rn
+      FROM purchases
+    ) ranked
+    WHERE rn = 1
+  )
+  -- BOPIS revenue by purchase date: store pickup and curbside only, internal traffic excluded
+  SELECT
+    purchase_date,
+    SUM(item_revenue) AS bopis_revenue
+  FROM first_purchase
+  WHERE fulfillment_method IN ('store_pickup', 'curbside')
+    AND (traffic_type IS NULL OR traffic_type != 'internal')
+  GROUP BY purchase_date
+  ORDER BY purchase_date;
+
+Calculation Notes: |
+  1️⃣ Sum of items.price (discounted unit price, so item discounts are netted) × quantity on purchase events; tax and shipping excluded.,2️⃣ Included when fulfillment_method is store_pickup or curbside, the same filter as BOPIS Orders; ship-to-store and ship-to-home are excluded.,3️⃣ One purchase per transaction_id: duplicate fires from confirmation-page reloads are dropped, keeping the first event.,4️⃣ Split carts need a separate transaction_id per fulfillment group; a single mixed purchase is classed by its one fulfillment_method value.,5️⃣ Booked on the purchase date, not the pickup date; unclaimed, cancelled and refunded orders are not netted out here.,6️⃣ Internal traffic is excluded; amounts are in the reporting currency: GA4 items.price_in_usd, AEP priceTotal as configured for the dataset.
+
+Business Use Case: |
+  1️⃣ Sales reviews weekly BOPIS revenue by store and adds pickup staff where pickup value is growing fastest.,2️⃣ Finance reconciles monthly BOPIS revenue with order management and flags stores where tagged revenue drifts.,3️⃣ Marketing compares BOPIS and ship-to-home revenue after a pickup promotion to decide whether to extend it.
+
+Dependencies:
+  Events: [purchase]
+  Dimensions: [fulfillment-method, transaction-id, currency]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  fulfillment-method; store-name; pickup-location-type; item-category; device-category; traffic-source
+
+Dashboard Usage: [Omnichannel Performance, BOPIS Operations, Revenue by Fulfillment Method]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [bopis-orders, pickups-completed, average-order-value, items-per-order, curbside-orders, ship-to-store-orders]
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +249,7 @@ Contributed By: devyendarm
 
 Created At: 2026-10-11T02:13:18.912+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-10-11T02:13:29.849+00:00
 
