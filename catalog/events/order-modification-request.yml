@@ -1,7 +1,7 @@
 # Event: Order Modification Request
-# Generated: 2026-10-12T14:51:01.578Z
+# Generated: 2026-10-12T14:51:10.183Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Event Name: Order Modification Request
 Event Serialization: always
@@ -11,38 +11,236 @@ Description: |
 
 Category: Operations
 
+Tags: [event, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Generic
 
 
+Event Type: standard
 
+Aggregation Window: Event, Daily, Weekly, Monthly
 
+GA4 Event: |
+  submit_form
 
+Adobe Event: |
+  form_submit
 
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "submit_form"
+        },
+        "attributes": {
+          "form_type": "order_modification",
+          "modification_id": "mod-1",
+          "modification_type": "quantity_change",
+          "form_status": "rejected",
+          "value_delta": 0,
+          "rejection_reason": "already_picked",
+          "request_channel": "web"
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "txn-1",
+      "total": {
+        "currency": "USD"
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-1",
+            "productName": "item"
+          },
+          "attributes": {
+            "item_variant": "variant"
+          },
+          "price": {
+            "basePrice": 100
+          },
+          "quantity": 2
+        }
+      ]
+    },
+    "user": [
+      {
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "user-1"
+            }
+          }
+        ]
+      }
+    ]
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_type": "order_modification",
+    "transaction_id": "txn-1",
+    "ecommerce": {
+      "currency": "USD",
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "item_variant": "variant",
+          "price": 100,
+          "quantity": 2
+        }
+      ]
+    },
+    "modification_id": "mod-1",
+    "modification_type": "quantity_change",
+    "form_status": "rejected",
+    "value_delta": 0,
+    "rejection_reason": "already_picked",
+    "request_channel": "web",
+    "user_id": "user-1"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "form_submit",
+    "eventInfo": {
+      "form_type": "order_modification",
+      "modification_id": "mod-1",
+      "modification_type": "quantity_change",
+      "form_status": "rejected",
+      "value_delta": 0,
+      "rejection_reason": "already_picked",
+      "request_channel": "web"
+    },
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "user-1",
+          "authenticatedState": "authenticated",
+          "primary": false
+        }
+      ]
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "name": "item",
+        "quantity": 2,
+        "priceTotal": 200,
+        "_tenant": {
+          "itemVariant": "variant"
+        }
+      }
+    ]
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "user-1",
+          "authenticatedState": "authenticated",
+          "primary": false
+        }
+      ]
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "txn-1",
+        "currencyCode": "USD"
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-1",
+        "name": "item",
+        "quantity": 2,
+        "priceTotal": 200,
+        "_tenant": {
+          "itemVariant": "variant"
+        }
+      }
+    ],
+    "_tenant": {
+      "formSubmit": {
+        "form_type": "order_modification",
+        "modification_id": "mod-1",
+        "modification_type": "quantity_change",
+        "form_status": "rejected",
+        "value_delta": 0,
+        "rejection_reason": "already_picked",
+        "request_channel": "web"
+      }
+    }
+  }
 
+Parameters: |
+  {
+    "form_type": "string - fixed value order_modification",
+    "transaction_id": "string - ID of the original order, matching the purchase transaction_id",
+    "modification_id": "string - unique ID the order system returns for this edit request; dedupe key",
+    "modification_type": "string - item_add, item_remove, quantity_change or variant_change",
+    "form_status": "string - accepted or rejected, as returned by the order system",
+    "items": "array - changed lines only: item_id, item_name, item_variant, price, quantity (new quantity; 0 if removed)",
+    "currency": "string - ISO 4217 code of the order",
+    "value_delta": "number - signed change in order value from this edit; negative for reductions, 0 if rejected",
+    "rejection_reason": "string - optional; already_picked, already_shipped, out_of_stock or payment_failed",
+    "request_channel": "string - optional; web, app or agent",
+    "user_id": "string - optional; hashed internal customer ID"
+  }
 
+Calculation Notes: |
+  1️⃣ Fires when the order system answers an edit request against a placed order, accepted or rejected; never when the edit form opens.,2️⃣ Serialization always: one hit per request. Dedupe on modification_id so a reload of the confirmation view does not re-fire.,3️⃣ Required: form_type, transaction_id, modification_id, modification_type, form_status, items, currency, value_delta.,4️⃣ Optional: request_channel (agent edits are sent server-side), rejection_reason (rejected requests only), user_id.,5️⃣ Not fired for full cancellation (Order Cancellation) or address edits: Shipping Address Change pre-label, Delivery Preference Update after.,6️⃣ Analytics consent gates the hit. user_id is the hashed internal ID; never send name, email or address in any parameter.,7️⃣ Common mistake: sending the whole order in items. Send changed lines only, quantity = new quantity (0 if removed); value_delta signed.
 
+Business Use Case: |
+  1️⃣ Fulfillment Ops: many requests rejected as already_picked → lengthens the edit window before pick release.,2️⃣ Merchandising: variant_change clusters on one product → fixes its size guide or variant imagery.,3️⃣ Customer Service: agent-channel share rises → adds self-service order editing to the order status page.,4️⃣ Finance: sums value_delta by week → reconciles booked revenue against edited order totals.
 
+Dependencies:
+  Events: [purchase]
+  Dimensions: [transaction-id, order-status]
 
+Source Data: Digital Analytics (GA4) + Commerce Platform Orders (Shopify / Salesforce Commerce Cloud / Adobe Commerce)
 
+    Report Attributes: |
+  modification_type; form_status; rejection_reason; request_channel
 
+    Dashboard Usage: [Post-Purchase Order Operations, Customer Service Contact Drivers]
 
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [transaction-id, order-status, fulfillment-method, item-category]
 
     
     
     
-    
-    
-    
-    
-    
-    
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
     Status: draft
 
     Contributed By: devyendarm
 
     Created At: 2026-10-12T14:51:01.089+00:00
 
-    
-    
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-10-12T14:51:09.828+00:00
+
