@@ -1,7 +1,7 @@
 # Dimension: Loyalty Points Transaction Type
-# Generated: 2026-10-12T13:29:47.365Z
+# Generated: 2026-10-12T13:29:55.870Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Loyalty Points Transaction Type
 
@@ -10,6 +10,19 @@ Description: |
 
 Category: Retention
 
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV, loyalty, points]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Engagement
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
 
 
 
@@ -17,24 +30,115 @@ Category: Retention
 
 
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Reporting window on ledger posted_at: last 90 complete days
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- One posted entry per ledger_entry_id; pending entries and test / internal member accounts excluded
+  WITH ledger AS (
+    SELECT
+      l.ledger_entry_id,
+      LOWER(TRIM(l.transaction_type)) AS raw_type
+    FROM `your-project.crm.loyalty_points_ledger` AS l
+    JOIN `your-project.crm.loyalty_members` AS m
+      ON m.member_id = l.member_id
+    WHERE l.entry_status = 'posted'
+      AND DATE(l.posted_at) BETWEEN start_date AND end_date
+      AND COALESCE(m.account_type, 'customer') NOT IN ('test', 'internal')
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY l.ledger_entry_id ORDER BY l.posted_at DESC) = 1
+  )
+  -- Map platform labels to the five standard values, one row per ledger entry
+  SELECT
+    ledger_entry_id,
+    CASE
+      WHEN raw_type IN ('earn', 'earned') THEN 'earn'
+      WHEN raw_type IN ('redeem', 'redeemed', 'redemption') THEN 'redeem'
+      WHEN raw_type IN ('expire', 'expired', 'expiration') THEN 'expire'
+      WHEN raw_type IN ('adjust', 'adjusted', 'adjustment') THEN 'adjust'
+      WHEN raw_type IN ('reverse', 'reversed', 'reversal') THEN 'reverse'
+      ELSE '(not set)'
+    END AS loyalty_points_transaction_type
+  FROM ledger;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Reporting window on ledger posted_at: last 90 complete days
+  WITH params AS (
+    SELECT
+      date_sub(current_date(), 90) AS start_date,
+      date_sub(current_date(), 1) AS end_date
+  ),
+  -- One posted entry per ledger_entry_id; pending entries and test / internal member accounts excluded
+  ledger AS (
+    SELECT ledger_entry_id, raw_type
+    FROM (
+      SELECT
+        l.ledger_entry_id,
+        lower(trim(l.transaction_type)) AS raw_type,
+        row_number() OVER (PARTITION BY l.ledger_entry_id ORDER BY l.posted_at DESC) AS rn
+      FROM aep_backend_dataset_loyalty_points_ledger l
+      JOIN aep_backend_dataset_loyalty_members m
+        ON m.member_id = l.member_id
+      CROSS JOIN params p
+      WHERE l.entry_status = 'posted'
+        AND to_date(l.posted_at) BETWEEN p.start_date AND p.end_date
+        AND coalesce(m.account_type, 'customer') NOT IN ('test', 'internal')
+    ) d
+    WHERE rn = 1
+  )
+  -- Map platform labels to the five standard values, one row per ledger entry
+  SELECT
+    ledger_entry_id,
+    CASE
+      WHEN raw_type IN ('earn', 'earned') THEN 'earn'
+      WHEN raw_type IN ('redeem', 'redeemed', 'redemption') THEN 'redeem'
+      WHEN raw_type IN ('expire', 'expired', 'expiration') THEN 'expire'
+      WHEN raw_type IN ('adjust', 'adjusted', 'adjustment') THEN 'adjust'
+      WHEN raw_type IN ('reverse', 'reversed', 'reversal') THEN 'reverse'
+      ELSE '(not set)'
+    END AS loyalty_points_transaction_type
+  FROM ledger;
+
+Calculation Notes: |
+  1️⃣ Source: transaction_type on the loyalty points ledger, one value per ledger entry (ledger_entry_id); web events do not carry it.
+  2️⃣ Values: earn, redeem, expire, adjust, reverse. Map platform labels (Smile.io, Yotpo, etc.) to these five before reporting.
+  3️⃣ Sign: earn credits, redeem and expire debit; adjust and reverse can go either way, so sum the signed points_delta per type.
+  4️⃣ reverse undoes a prior entry by order_id: an earn clawback on return debits, a redemption refund on cancel credits; goodwill is adjust.
+  5️⃣ Report by ledger posted_at: expire entries fall on the expiry batch date, not the original earn date.
+  6️⃣ Pending earn entries held for the return window stay out until they post as earn; exclude test and internal member accounts.
+  7️⃣ Distinct from Refund Type, which classifies order refunds; this classifies points movements, and a refund's clawback lands here as reverse.
+
+Business Use Case: |
+  1️⃣ Finance: at month end, books the points liability change as the net signed points_delta across all five types.
+  2️⃣ Marketing: when expire volume rises, sends lapse reminders to members 30 days before their points expire.
+  3️⃣ Customer Service: when manual adjust entries grow, audits agent goodwill credits against the points policy.
+
+Dependencies:
+  Events: [loyalty-reward-redemption]
+  Metrics: [loyalty-points-earned]
+
+Source Data: CRM
+
+Report Attributes: |
+  Customer Loyalty Tier; Loyalty Member Status
+
+Dashboard Usage: [Loyalty Program Performance, Points Liability Reconciliation]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [customer-loyalty-tier, loyalty-member-status, refund-type]
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -42,5 +146,7 @@ Contributed By: devyendarm
 
 Created At: 2026-10-12T13:29:46.874+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-10-12T13:29:55.56+00:00
 
