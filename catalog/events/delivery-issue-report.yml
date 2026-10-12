@@ -1,0 +1,152 @@
+# Event: Delivery Issue Report
+# Generated: 2026-10-12T14:55:38.968Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Delivery Issue Report
+Event Serialization: always
+
+Description: |
+  Standard submit_form event with form_type = delivery_issue, fired when a customer reports a missing, late or damaged shipment. Carrier-raised exceptions are Delivery Exception Occurrence, not this event.
+
+Category: Experience
+
+Tags: [event, E-commerce: Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+
+Event Type: standard
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  submit_form
+
+Adobe Event: |
+  form_submit
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "submit_form",
+            "eventAction": "delivery_issue"
+          },
+          "attributes": {
+            "form_type": "delivery_issue",
+            "shipment_id": "shp-1",
+            "issue_type": "damaged",
+            "case_id": "case-1",
+            "carrier": "carrier",
+            "support_channel": "self_service"
+          }
+        }
+      ],
+      "transaction": {
+        "transactionID": "txn-1"
+      }
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_type": "delivery_issue",
+    "transaction_id": "txn-1",
+    "shipment_id": "shp-1",
+    "issue_type": "damaged",
+    "case_id": "case-1",
+    "carrier": "carrier",
+    "support_channel": "self_service"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "form_submit",
+    "eventInfo": {
+      "form_type": "delivery_issue",
+      "transaction_id": "txn-1",
+      "shipment_id": "shp-1",
+      "issue_type": "damaged",
+      "case_id": "case-1",
+      "carrier": "carrier",
+      "support_channel": "self_service"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.formFilledOut",
+    "commerce": {
+      "order": {
+        "purchaseID": "txn-1"
+      }
+    },
+    "_tenantId": {
+      "form_type": "delivery_issue",
+      "shipment_id": "shp-1",
+      "issue_type": "damaged",
+      "case_id": "case-1",
+      "carrier": "carrier",
+      "support_channel": "self_service"
+    }
+  }
+
+Parameters: |
+  {
+    "form_type": "string - fixed value delivery_issue",
+    "transaction_id": "string - order ID of the affected order, same key as purchase",
+    "shipment_id": "string - shipment or package reported; one order can hold several",
+    "issue_type": "string - not_received, late, damaged or partial",
+    "case_id": "string - service case or ticket ID returned on submit (optional)",
+    "carrier": "string - carrier handling the shipment (optional)",
+    "support_channel": "string - self_service or agent (optional)"
+  }
+
+Calculation Notes: |
+  1️⃣ Fires when the order-issue form is accepted and a case_id is returned; never on form open, failed validation or a tracking page view.,2️⃣ Serialization always: one hit per report. Drop a resubmit with the same transaction_id, shipment_id and issue_type within 24 hours.,3️⃣ Required: form_type, transaction_id, shipment_id, issue_type (not_received, late, damaged, partial). Optional: case_id, carrier, support_channel.,4️⃣ Customer-initiated only: carrier scans go to Delivery Exception Occurrence; general Contact Us messages stay Contact Form Submission.,5️⃣ No free text, photos, address, email or phone in the hit; case_id links to the service record. Send only under analytics consent.,6️⃣ Reports logged by an agent on phone or chat are sent server-side with support_channel = agent and the customer's client_id.,7️⃣ Common mistakes: one hit per item instead of per shipment, and a missing shipment_id on split orders, which breaks carrier attribution.
+
+Business Use Case: |
+  1️⃣ Customer Service: damaged reports for one carrier rise week over week → files a carrier claim and reviews packaging.,2️⃣ Fulfillment Ops: not_received reports cluster on shipments scanned delivered → requires photo proof in that region.,3️⃣ Finance: reports per 1,000 shipments by carrier exceed contract → withholds SLA credits at the quarterly review.
+
+Dependencies:
+  Events: [purchase]
+  Dimensions: [carrier, support-channel]
+
+Source Data: Digital Analytics (GA4)
+
+    Report Attributes: |
+  issue_type; carrier; support_channel; shipping_tier; fulfillment_method; device_category
+
+    Dashboard Usage: [Delivery Experience, Carrier Performance Scorecard, Customer Service Contact Drivers]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [carrier, delivery-exception-type, shipment-status, support-channel, delivery-attempt-number]
+
+    
+    
+    Derived KPIs: [wismo-rate, support-contact-rate]
+
+    Data Sensitivity: Internal
+
+    Contains PII: No
+
+    Status: published
+
+    Contributed By: devyendarm
+
+    Created At: 2026-10-12T14:50:44.423+00:00
+
+    Last Modified By: devyendarm
+
+    Last Modified At: 2026-10-12T14:55:38.554+00:00
+
