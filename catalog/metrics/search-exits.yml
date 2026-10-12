@@ -1,7 +1,7 @@
 # Metric: Search Exits
-# Generated: 2026-10-12T11:51:09.239Z
+# Generated: 2026-10-12T11:51:17.808Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Search Exits
 Formula: COUNT(DISTINCT session_key) WHERE the session's last page_view is a search results view (view_search_results); session_key = user_pseudo_id.ga_session_id
@@ -11,30 +11,206 @@ Description: |
 
 Category: Engagement
 
+Tags: [metric, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: E-commerce
 
+Priority: High
 
+Core Area: Discovery
 
+Scope: Session
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  view_search_results
 
+Adobe Event: |
+  pageView
 
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "search results",
+        "pageID": "search"
+      },
+      "category": {
+        "primaryCategory": "search",
+        "pageType": "search_results"
+      },
+      "attributes": {
+        "search_term": "term",
+        "search_results_count": 24,
+        "search_type": "product",
+        "page_number": 1,
+        "traffic_type": "external"
+      }
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "view_search_results",
+    "search_term": "term",
+    "search_results_count": 24,
+    "search_type": "product",
+    "page_type": "search_results",
+    "page_number": 1,
+    "traffic_type": "external"
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "pageView",
+    "eventInfo": {
+      "pageType": "search_results"
+    },
+    "web": {
+      "webPageDetails": {
+        "name": "search results",
+        "pageViews": {
+          "value": 1
+        }
+      }
+    },
+    "_tenantId": {
+      "search_term": "term",
+      "search_results_count": 24,
+      "search_type": "product",
+      "page_number": 1,
+      "page_type": "search_results",
+      "traffic_type": "external"
+    }
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "web.webpagedetails.pageViews",
+    "web.webPageDetails.pageViews.value": 1,
+    "web.webPageDetails.name": "search results",
+    "_tenantId.search_term": "term",
+    "_tenantId.search_results_count": 24,
+    "_tenantId.search_type": "product",
+    "_tenantId.page_number": 1,
+    "_tenantId.page_type": "search_results",
+    "_tenantId.traffic_type": "external"
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Page-level views (page_view and view_search_results) per session; one day either side so sessions crossing midnight are complete
+  WITH page_views AS (
+    SELECT
+      CONCAT(user_pseudo_id, '.', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING)) AS session_key,
+      PARSE_DATE('%Y%m%d', event_date) AS event_day,
+      event_timestamp,
+      event_name,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_type') AS page_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'search_type') AS search_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(start_date, INTERVAL 1 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_ADD(end_date, INTERVAL 1 DAY))
+      AND event_name IN ('page_view', 'view_search_results')
+  ),
+  -- Last page view of each session (results-page view wins a timestamp tie), with a session-level internal/bot flag
+  last_views AS (
+    SELECT
+      *,
+      LOGICAL_OR(COALESCE(traffic_type, '') IN ('internal', 'bot')) OVER (PARTITION BY session_key) AS excluded_traffic
+    FROM page_views
+    WHERE session_key IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY session_key ORDER BY event_timestamp DESC, IF(event_name = 'view_search_results', 0, 1)) = 1
+  )
+  -- Sessions whose last page view is a search results page, dated by that view, excluding store locator and internal/bot traffic
+  SELECT COUNT(DISTINCT session_key) AS search_exits
+  FROM last_views
+  WHERE (event_name = 'view_search_results' OR page_type = 'search_results')
+    AND event_day BETWEEN start_date AND end_date
+    AND COALESCE(search_type, '') != 'store_locator'
+    AND NOT excluded_traffic;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date, date_sub(current_date(), 1) AS end_date
+  ),
+  -- Every web event assigned to its 30-minute-inactivity session per ECID; one day either side so sessions crossing midnight are complete
+  sessionized AS (
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      timestamp,
+      eventType,
+      _tenantId.page_type AS page_type,
+      _tenantId.search_type AS search_type,
+      _tenantId.traffic_type AS traffic_type,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY identityMap['ECID'][0].id ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session
+    FROM aep_web_events CROSS JOIN params
+    WHERE timestamp >= date_sub(params.start_date, 1)
+      AND timestamp < date_add(params.end_date, 2)
+      AND identityMap['ECID'][0].id IS NOT NULL
+  ),
+  -- Last page view of each session (results-page view wins a timestamp tie), with a session-level internal/bot flag
+  last_views AS (
+    SELECT
+      CONCAT(ecid, '.', CAST(session.num AS STRING)) AS session_key,
+      timestamp,
+      page_type,
+      search_type,
+      MAX(CASE WHEN COALESCE(traffic_type, '') IN ('internal', 'bot') THEN 1 ELSE 0 END) OVER (PARTITION BY ecid, session.num) AS excluded_traffic,
+      ROW_NUMBER() OVER (PARTITION BY ecid, session.num ORDER BY timestamp DESC, CASE WHEN page_type = 'search_results' THEN 0 ELSE 1 END) AS rn
+    FROM sessionized
+    WHERE eventType = 'web.webpagedetails.pageViews'
+  )
+  -- Sessions whose last page view is a search results page, dated by that view, excluding store locator and internal/bot traffic
+  SELECT COUNT(DISTINCT session_key) AS search_exits
+  FROM last_views CROSS JOIN params
+  WHERE rn = 1
+    AND page_type = 'search_results'
+    AND CAST(timestamp AS DATE) BETWEEN params.start_date AND params.end_date
+    AND COALESCE(search_type, '') <> 'store_locator'
+    AND excluded_traffic = 0;
 
+Calculation Notes: |
+  1️⃣ At most one exit per session: it counts when the session's last page view is a search results page, as in UA Search Exits.,2️⃣ Pagination, sort and filter re-views of the results page are the same search; leaving from page 3 of results is still a search exit.,3️⃣ Any later page view (product detail, cart, another page) means no exit; non-page events such as scroll or user_engagement do not cancel it.,4️⃣ A session ends after 30 minutes of inactivity; returning after the timeout opens a new session and the earlier exit stands.,5️⃣ Zero-results searches that end the session are included; split them out with Search Results Count Band.,6️⃣ Store locator searches (search_type store_locator) and internal or bot traffic (traffic_type) are excluded.,7️⃣ Dated by the timestamp of the exiting results page view, so a session crossing midnight counts on the day it ended.
 
+Business Use Case: |
+  1️⃣ Merchandising reviews the top search terms by exits each week and fixes synonyms, redirects or ranking for them.,2️⃣ Merchandising adds products or landing content for high-exit terms that also return zero results.,3️⃣ Product compares search exits by device after a search UI release and rolls back a change that raises them.
 
+Dependencies:
+  Events: [site-search]
+  Metrics: [search-results-views, site-searches]
+  Dimensions: [internal-search-term]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  Internal Search Term; Search Results Count Band; Device Category; Traffic Source; Page Type
 
+Dashboard Usage: [Site Search Performance, Product Discovery & Merchandising]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [site-searches, search-results-views, unique-searchers, zero-results-searches, average-search-depth]
 
+Derived KPIs: [search-exit-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +220,7 @@ Contributed By: devyendarm
 
 Created At: 2026-10-12T11:51:08.729+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-10-12T11:51:17.449+00:00
 
