@@ -1,7 +1,7 @@
 # Metric: Promotion Views
-# Generated: 2026-10-12T11:50:54.044Z
+# Generated: 2026-10-12T11:51:02.577Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Metric Name: Promotion Views
 Formula: COUNT of view_promotion impressions, one per distinct promotion_id per page view, by event timestamp in the reporting period
@@ -11,30 +11,239 @@ Description: |
 
 Category: Engagement
 
+Tags: [metric, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
 
+Industry: E-commerce
 
+Priority: Medium
 
+Core Area: Discovery
 
+Scope: Event
 
+Measure Type: Counter
 
+Aggregation Window: Daily, Weekly, Monthly
 
+GA4 Event: |
+  view_promotion
 
+Adobe Event: |
+  view_promotion
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "page": {
+        "category": {
+          "pageType": "home"
+        }
+      },
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "view_promotion",
+            "type": "promotion"
+          },
+          "attributes": {
+            "trafficType": "external",
+            "promotions": [
+              {
+                "promotionId": "PROMO-1",
+                "promotionName": "promo",
+                "creativeName": "banner",
+                "creativeSlot": "slot-1"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  {
+    "event": "view_promotion",
+    "promotion_id": "PROMO-1",
+    "promotion_name": "promo",
+    "creative_name": "banner",
+    "creative_slot": "slot-1",
+    "page_type": "home",
+    "traffic_type": "external",
+    "ecommerce": {
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "promotion_id": "PROMO-1",
+          "promotion_name": "promo"
+        }
+      ]
+    }
+  }
 
+Adobe Client Data Layer: |
+  {
+    "event": "view_promotion",
+    "eventInfo": {
+      "path": "promotions"
+    },
+    "promotions": [
+      {
+        "promotionId": "PROMO-1",
+        "promotionName": "promo",
+        "creativeName": "banner",
+        "creativeSlot": "slot-1"
+      }
+    ],
+    "page": {
+      "pageType": "home"
+    },
+    "trafficType": "external"
+  }
 
+XDM Mapping: |
+  {
+    "eventType": "view_promotion",
+    "timestamp": "2026-01-01T00:00:00Z",
+    "identityMap": {
+      "ECID": [
+        {
+          "id": "ecid-1",
+          "authenticatedState": "ambiguous",
+          "primary": true
+        }
+      ]
+    },
+    "_tenantId": {
+      "trafficType": "external",
+      "promotions": [
+        {
+          "promotionId": "PROMO-1",
+          "promotionName": "promo",
+          "creativeName": "banner",
+          "creativeSlot": "slot-1"
+        }
+      ]
+    }
+  }
 
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  WITH events AS (
+    -- Page views and promotion views in the period, internal traffic excluded, event-level promotion fields pivoted
+    SELECT
+      user_pseudo_id,
+      event_timestamp,
+      event_name,
+      items,
+      (SELECT NULLIF(ep.value.string_value, '') FROM UNNEST(event_params) AS ep WHERE ep.key = 'promotion_id') AS promotion_id,
+      (SELECT NULLIF(ep.value.string_value, '') FROM UNNEST(event_params) AS ep WHERE ep.key = 'promotion_name') AS promotion_name
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name IN ('page_view', 'view_promotion')
+      AND COALESCE((SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'traffic_type'), '') != 'internal'
+  ),
+  anchored AS (
+    -- Tie each promotion view to the user's most recent page view, so re-renders on the same page share one page view key
+    SELECT
+      *,
+      LAST_VALUE(IF(event_name = 'page_view', event_timestamp, NULL) IGNORE NULLS)
+        OVER (PARTITION BY user_pseudo_id ORDER BY event_timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS page_view_ts
+    FROM events
+  ),
+  promotions AS (
+    -- One row per promotion listed on the event: promotion_id (item, then event level), else promotion_name, else (not set)
+    SELECT
+      a.user_pseudo_id,
+      a.page_view_ts,
+      COALESCE(NULLIF(i.promotion_id, ''), a.promotion_id, NULLIF(i.promotion_name, ''), a.promotion_name, '(not set)') AS promotion_key
+    FROM anchored AS a
+    LEFT JOIN UNNEST(a.items) AS i
+    WHERE a.event_name = 'view_promotion'
+  )
+  -- Promotion Views: each distinct promotion counts once per page view
+  SELECT
+    COUNT(DISTINCT CONCAT(user_pseudo_id, '|', COALESCE(CAST(page_view_ts AS STRING), 'none'), '|', promotion_key)) AS promotion_views
+  FROM promotions;
 
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH events AS (
+    -- Page views and promotion views in the last 90 complete days, internal traffic excluded
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      timestamp,
+      eventType,
+      _tenantId.promotions AS promotions
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(current_date(), 90)
+      AND timestamp < current_date()
+      AND eventType IN ('web.webpagedetails.pageViews', 'view_promotion')
+      AND COALESCE(_tenantId.trafficType, '') != 'internal'
+  ),
+  anchored AS (
+    -- Tie each promotion view to the visitor's most recent page view, so re-renders on the same page share one page view key
+    SELECT
+      *,
+      last(CASE WHEN eventType = 'web.webpagedetails.pageViews' THEN timestamp END, true)
+        OVER (PARTITION BY ecid ORDER BY timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS page_view_ts
+    FROM events
+  ),
+  promotions AS (
+    -- One row per promotion listed on the event: promotionId, else promotionName, else (not set)
+    SELECT
+      a.ecid,
+      a.page_view_ts,
+      COALESCE(NULLIF(p.promotionId, ''), NULLIF(p.promotionName, ''), '(not set)') AS promotion_key
+    FROM anchored AS a
+    LATERAL VIEW OUTER explode(a.promotions) AS p
+    WHERE a.eventType = 'view_promotion'
+  )
+  -- Promotion Views: each distinct promotion counts once per page view
+  SELECT
+    COUNT(DISTINCT CONCAT(ecid, '|', COALESCE(CAST(page_view_ts AS STRING), 'none'), '|', promotion_key)) AS promotion_views
+  FROM promotions;
 
+Calculation Notes: |
+  1️⃣ One view per promotion_id per page view; carousel rotations and scroll-back re-renders on the same page add no views.
+  2️⃣ Fire when at least 50% of the creative is in the viewport for 1 second; firing on page load for below-the-fold slots inflates the count.
+  3️⃣ Internal promotions only: hero banners, tiles and on-site offers. Third-party ad impressions and product list views are excluded.
+  4️⃣ When one view_promotion lists several promotions in items, each distinct promotion_id counts as one view.
+  5️⃣ Promotion identity is promotion_id, else promotion_name; events with neither report (not set) and stay in the total.
+  6️⃣ Internal traffic (traffic_type = internal) is excluded, the same filter Promotion Clicks applies, so the CTR ratio stays consistent.
 
+Business Use Case: |
+  1️⃣ Merchandising compares each banner's views with its clicks and swaps creatives whose CTR trails the slot average.
+  2️⃣ Marketing checks campaign promotion views on launch day and fixes slot targeting when views fall short of plan.
+  3️⃣ Merchandising moves high-priority offers to the creative_slot positions that deliver the most views per session.
 
+Dependencies:
+  Events: [promotion-view]
+  Dimensions: [page-type]
 
+Source Data: Digital Analytics (GA4)
 
+Report Attributes: |
+  promotion_id; promotion_name; creative_name; creative_slot; page-type; device-category
 
+Dashboard Usage: [Internal Promotion Performance, Merchandising Dashboard, Homepage Performance]
 
+Segment Eligibility: |
+  true
 
+Related Metrics: [promotion-clicks, product-view]
 
+Derived KPIs: [promotion-click-through-rate]
 
+Data Sensitivity: Internal
 
 Contains PII: No
 
@@ -44,5 +253,7 @@ Contributed By: devyendarm
 
 Created At: 2026-10-12T11:50:53.564+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-10-12T11:51:02.239+00:00
 
