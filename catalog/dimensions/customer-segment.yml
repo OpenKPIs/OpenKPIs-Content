@@ -1,0 +1,220 @@
+# Dimension: Customer Segment
+# Generated: 2026-10-12T14:54:26.850Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Customer Segment
+
+Description: |
+  Owner-defined segment a customer belongs to (e.g. vip, wholesale, employee), as set in the CRM or commerce platform. Unlike RFM Segment or Customer Value Tier, it follows business rules, not a score.
+
+Category: Retention
+
+Tags: [dimension, E-commerce: Customer Retention, Loyalty & LTV, retention, segmentation]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Generic
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "purchase"
+        }
+      }
+    ],
+    "user": [
+      {
+        "segment": {
+          "customer_segment": "vip"
+        },
+        "profile": [
+          {
+            "profileInfo": {
+              "profileID": "U-1"
+            }
+          }
+        ]
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "purchase",
+    "user_id": "U-1",
+    "user_properties": {
+      "customer_segment": "vip"
+    },
+    "ecommerce": {
+      "transaction_id": "txn-1",
+      "value": 100,
+      "currency": "USD",
+      "items": [
+        {
+          "item_id": "SKU-1",
+          "item_name": "item",
+          "price": 100,
+          "quantity": 1
+        }
+      ]
+    }
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "purchase",
+    "user": {
+      "userID": "U-1",
+      "customerSegment": "vip"
+    },
+    "eventInfo": {
+      "transactionID": "txn-1"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "commerce.purchases",
+    "identityMap": {
+      "CRMID": [
+        {
+          "id": "U-1",
+          "authenticatedState": "authenticated",
+          "primary": true
+        }
+      ]
+    },
+    "commerce": {
+      "purchases": {
+        "value": 1
+      }
+    },
+    "_tenantId": {
+      "customerSegment": "vip"
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Owner precedence among overlapping segment rules is applied in the CRM before the value is sent; the precedence list is not in these tables.
+  -- Reporting window: last 90 complete days
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Segment held when each purchase fired (event-time user property); anonymous or blank values are (not set)
+  WITH segment_events AS (
+    SELECT
+      COALESCE(user_id, user_pseudo_id) AS customer_key,
+      IF(
+        user_id IS NULL,
+        '(not set)',
+        COALESCE(NULLIF((SELECT up.value.string_value FROM UNNEST(user_properties) AS up WHERE up.key = 'customer_segment'), ''), '(not set)')
+      ) AS customer_segment
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name = 'purchase'
+  )
+  -- Distinct customers per segment, (not set) kept as the identity-resolution gap
+  SELECT
+    customer_segment,
+    COUNT(DISTINCT customer_key) AS customers
+  FROM segment_events
+  GROUP BY customer_segment
+  ORDER BY customers DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Owner precedence among overlapping segment rules is applied in the CRM before the value is sent; the precedence list is not in these tables.
+  -- Reporting window: last 90 complete days
+  WITH params AS (
+    SELECT
+      CAST(DATE_SUB(CURRENT_DATE, 90) AS DATE) AS start_date,
+      CAST(DATE_SUB(CURRENT_DATE, 1) AS DATE) AS end_date
+  ),
+  -- Segment held when each purchase fired (event-time tenant field); anonymous or blank values are (not set)
+  segment_events AS (
+    SELECT
+      COALESCE(e.identityMap['CRMID'][0].id, e.identityMap['ECID'][0].id) AS customer_key,
+      CASE
+        WHEN e.identityMap['CRMID'][0].id IS NULL THEN '(not set)'
+        ELSE COALESCE(NULLIF(e._tenantId.customerSegment, ''), '(not set)')
+      END AS customer_segment
+    FROM aep_web_events_dataset e
+    CROSS JOIN params p
+    WHERE CAST(e.timestamp AS DATE) BETWEEN p.start_date AND p.end_date
+      AND e.eventType = 'commerce.purchases'
+  )
+  -- Distinct customers per segment, (not set) kept as the identity-resolution gap
+  SELECT
+    customer_segment,
+    COUNT(DISTINCT customer_key) AS customers
+  FROM segment_events
+  GROUP BY customer_segment
+  ORDER BY customers DESC;
+
+Calculation Notes: |
+  1️⃣ Source: customer_segment user property, synced from the CRM or commerce-platform segment and sent on purchase; keyed by user_id.
+  2️⃣ One value per user: when a customer meets several segment rules, the owner's precedence list picks the highest-ranked segment.
+  3️⃣ Values are the governed segment names (e.g. vip, wholesale, employee, b2b_account), snake_case; new values need owner sign-off.
+  4️⃣ Report the segment held when the event fired, not today's; history is never back-filled after a customer moves segment.
+  5️⃣ Anonymous or unmatched users are (not set), never a default segment; track their share as an identity-resolution gap.
+  6️⃣ Not a score: RFM Segment, Customer Value Tier, Churn Risk Segment and Customer Status stay separate; never copy their values here.
+  7️⃣ When a segment rule changes, annotate dashboards on the change date; earlier periods keep the membership they had.
+
+Business Use Case: |
+  1️⃣ Marketing: when a segment's repeat purchase rate drops, launches a win-back campaign built for that segment.
+  2️⃣ Merchandising: when wholesale or b2b_account order value shifts, revises tiered pricing and pack sizes for that segment.
+  3️⃣ Finance: each quarter, compares Customer Lifetime Value by segment to set acquisition budgets per segment.
+  4️⃣ Customer Service: when the vip segment's contact rate rises, routes those customers to a priority queue.
+
+Dependencies:
+  Events: [purchase]
+
+Source Data: Digital Analytics (GA4 / Adobe Analytics)
+
+Report Attributes: |
+  Customer Segment; Acquisition Cohort; Customer Tenure Band; Traffic Source; Device Category
+
+Dashboard Usage: [Customer Retention & LTV, Segment Performance]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [rfm-segment, customer-value-tier, churn-risk-segment, customer-status, customer-loyalty-tier, customer-tenure-band]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-10-12T13:29:29.952+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-10-12T14:54:26.308+00:00
+
