@@ -1,0 +1,333 @@
+# Metric: Average Search Depth
+# Generated: 2026-10-12T12:54:22.031Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Average Search Depth
+Formula: Search Depth / Unique Searches, where Search Depth = COUNT(page_view after a search results page, same session, before the next search) and Unique Searches = COUNT(DISTINCT session × search_term)
+
+Description: |
+  Average page views a shopper makes after an on-site search: Search Depth (page views after a search) divided by unique searches. Higher depth means results lead shoppers further into the catalog.
+
+Category: Engagement
+
+Tags: [metric, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+
+Industry: E-commerce
+
+Priority: Medium
+
+Core Area: Discovery
+
+Scope: Event
+
+Measure Type: Average
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  search
+
+Adobe Event: |
+  search
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageURL": "https://www.example.com/search?q=term",
+        "onsiteSearchTerm": "term",
+        "onsiteSearchResults": 10
+      },
+      "category": {
+        "pageType": "search_results"
+      },
+      "attributes": {
+        "traffic_type": "external"
+      }
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "search"
+        }
+      },
+      {
+        "eventInfo": {
+          "eventName": "page_view"
+        },
+        "attributes": {
+          "pageURL": "https://www.example.com/product/SKU-1",
+          "pageType": "product_detail"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  [
+    {
+      "event": "search",
+      "search_term": "term",
+      "search_results_count": 10,
+      "page_location": "https://www.example.com/search?q=term",
+      "page_type": "search_results",
+      "traffic_type": "external"
+    },
+    {
+      "event": "page_view",
+      "page_location": "https://www.example.com/product/SKU-1",
+      "page_type": "product_detail",
+      "traffic_type": "external"
+    }
+  ]
+
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "search",
+      "eventInfo": {
+        "search_term": "term",
+        "search_results_count": 10,
+        "page_location": "https://www.example.com/search?q=term",
+        "page_type": "search_results",
+        "traffic_type": "external"
+      }
+    },
+    {
+      "event": "pageView",
+      "eventInfo": {
+        "page_location": "https://www.example.com/product/SKU-1",
+        "page_type": "product_detail",
+        "traffic_type": "external"
+      }
+    }
+  ]
+
+XDM Mapping: |
+  [
+    {
+      "eventType": "search",
+      "identityMap": {
+        "ECID": [
+          {
+            "id": "ECID-1",
+            "authenticatedState": "ambiguous",
+            "primary": true
+          }
+        ]
+      },
+      "web": {
+        "webPageDetails": {
+          "URL": "https://www.example.com/search?q=term"
+        }
+      },
+      "_tenantId": {
+        "searchTerm": "term",
+        "searchResultsCount": 10,
+        "pageType": "search_results",
+        "trafficType": "external"
+      }
+    },
+    {
+      "eventType": "web.webpagedetails.pageViews",
+      "identityMap": {
+        "ECID": [
+          {
+            "id": "ECID-1",
+            "authenticatedState": "ambiguous",
+            "primary": true
+          }
+        ]
+      },
+      "web": {
+        "webPageDetails": {
+          "URL": "https://www.example.com/product/SKU-1",
+          "pageViews": {
+            "value": 1
+          }
+        }
+      },
+      "_tenantId": {
+        "pageType": "product_detail",
+        "trafficType": "external"
+      }
+    }
+  ]
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
+  
+  -- Search and page_view events with page type and a session key that also splits at midnight (user_pseudo_id.ga_session_id.event_date)
+  WITH events AS (
+    SELECT
+      CONCAT(user_pseudo_id, '.', CAST((SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS STRING), '.', event_date) AS session_key,
+      event_name,
+      event_timestamp,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_type') AS page_type,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'search_term') AS search_term,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      AND event_name IN ('search', 'page_view')
+  ),
+  
+  -- Bot, internal and test traffic removed before numerator and denominator are counted
+  clean AS (
+    SELECT session_key, event_name, event_timestamp, page_type, search_term
+    FROM events
+    WHERE session_key IS NOT NULL
+      AND IFNULL(traffic_type, 'external') NOT IN ('bot', 'internal', 'test')
+  ),
+  
+  -- First search per session: page views before it carry no search depth
+  first_search AS (
+    SELECT session_key, MIN(event_timestamp) AS first_search_ts
+    FROM clean
+    WHERE event_name = 'search'
+    GROUP BY session_key
+  ),
+  
+  -- Search Depth: page views after a search that are not results pages (page_type 'search_results' covers the results page, its pagination and re-sorts); each falls in exactly one search's window (up to the next search), so the total is the summed depth
+  depth AS (
+    SELECT COUNT(*) AS search_depth
+    FROM clean p
+    JOIN first_search f ON f.session_key = p.session_key
+    WHERE p.event_name = 'page_view'
+      AND p.event_timestamp > f.first_search_ts
+      AND IFNULL(p.page_type, '') != 'search_results'
+  ),
+  
+  -- Unique Searches: one per session and search_term, so refires and reloads count once and search exits stay in with depth 0
+  unique_searches AS (
+    SELECT COUNT(DISTINCT CONCAT(session_key, '|', search_term)) AS unique_searches
+    FROM clean
+    WHERE event_name = 'search'
+  )
+  
+  -- Average Search Depth = Search Depth / Unique Searches
+  SELECT ROUND(SAFE_DIVIDE(d.search_depth, u.unique_searches), 2) AS average_search_depth
+  FROM depth d
+  CROSS JOIN unique_searches u;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Relative reporting window: last 90 complete days
+  WITH params AS (
+    SELECT date_sub(current_date(), 90) AS start_date,
+           date_sub(current_date(), 1) AS end_date
+  ),
+  
+  -- Events with identity, page type, search term and traffic type
+  events AS (
+    SELECT
+      identityMap['ECID'][0].id AS ecid,
+      timestamp,
+      eventType,
+      _tenantId.pageType AS page_type,
+      _tenantId.searchTerm AS search_term,
+      _tenantId.trafficType AS traffic_type
+    FROM aep_web_events, params
+    WHERE timestamp >= params.start_date
+      AND timestamp < date_add(params.end_date, 1)
+  ),
+  
+  -- Sessions per ECID with a 30-minute inactivity timeout, split at midnight
+  sessionized AS (
+    SELECT
+      *,
+      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
+        PARTITION BY ecid, to_date(timestamp) ORDER BY timestamp
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session
+    FROM events
+    WHERE ecid IS NOT NULL
+  ),
+  
+  -- Search and page view events only; bot, internal and test traffic removed before numerator and denominator are counted
+  clean AS (
+    SELECT
+      CONCAT(ecid, '.', CAST(to_date(timestamp) AS STRING), '.', CAST(session.num AS STRING)) AS session_key,
+      eventType,
+      timestamp,
+      page_type,
+      search_term
+    FROM sessionized
+    WHERE eventType IN ('search', 'web.webpagedetails.pageViews')
+      AND COALESCE(traffic_type, 'external') NOT IN ('bot', 'internal', 'test')
+  ),
+  
+  -- First search per session: page views before it carry no search depth
+  first_search AS (
+    SELECT session_key, MIN(timestamp) AS first_search_ts
+    FROM clean
+    WHERE eventType = 'search'
+    GROUP BY session_key
+  ),
+  
+  -- Search Depth: page views after a search that are not results pages (page_type 'search_results' covers the results page, its pagination and re-sorts); each falls in exactly one search's window (up to the next search), so the total is the summed depth
+  depth AS (
+    SELECT COUNT(*) AS search_depth
+    FROM clean p
+    JOIN first_search f ON f.session_key = p.session_key
+    WHERE p.eventType = 'web.webpagedetails.pageViews'
+      AND p.timestamp > f.first_search_ts
+      AND COALESCE(p.page_type, '') != 'search_results'
+  ),
+  
+  -- Unique Searches: one per session and search_term, so refires and reloads count once and search exits stay in with depth 0
+  unique_searches AS (
+    SELECT COUNT(DISTINCT CONCAT(session_key, '|', search_term)) AS unique_searches
+    FROM clean
+    WHERE eventType = 'search'
+  )
+  
+  -- Average Search Depth = Search Depth / Unique Searches
+  SELECT ROUND(d.search_depth / NULLIF(u.unique_searches, 0), 2) AS average_search_depth
+  FROM depth d
+  CROSS JOIN unique_searches u;
+
+Calculation Notes: |
+  1️⃣ Search Depth counts page_view events after a search results page in the same session, up to the next search or session end.,2️⃣ The results page itself is not counted; pagination or re-sorting of the same term's results adds no depth.,3️⃣ Denominator is unique searches: one per session and search_term, so refires and reloads of the same query count once.,4️⃣ Searches with no later page view (search exits) stay in the denominator with a depth of 0.,5️⃣ A session ends after 30 minutes of inactivity or at midnight; depth never carries into the next session.,6️⃣ Bot, internal and test traffic is excluded via traffic_type before both numerator and denominator are counted.
+
+Business Use Case: |
+  1️⃣ Merchandising sees depth fall for a top search term and reviews its result ranking and facet set.,2️⃣ Product compares depth before and after a search engine or relevance change to confirm shoppers browse further.,3️⃣ Merchandising reads low depth alongside Search Exits to find terms whose results end the visit.
+
+Dependencies:
+  Events: [site-search, page-view]
+  Metrics: [site-searches, search-results-views]
+  Dimensions: [internal-search-term]
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  internal-search-term; search-results-count-band; device-category; traffic-source; page-type
+
+Dashboard Usage: [Site Search Performance, Product Discovery & Merchandising]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [site-searches, search-results-views, unique-searchers, search-exits, zero-results-searches]
+
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: published
+
+Contributed By: devyendarm
+
+Created At: 2026-10-12T11:50:18.03+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-10-12T12:54:21.654+00:00
+
