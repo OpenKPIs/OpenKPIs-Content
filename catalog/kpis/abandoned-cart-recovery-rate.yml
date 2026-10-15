@@ -1,13 +1,13 @@
 # KPI: Abandoned Cart Recovery Rate
-# Generated: 2026-10-15T07:18:53.992Z
+# Generated: 2026-10-15T07:40:51.913Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 KPI Name: Abandoned Cart Recovery Rate
-Formula: (Recovered abandoned carts / Eligible abandoned carts) × 100
+Formula: (Abandoned carts that led to a completed order / Abandoned carts) × 100
 
 Description: |
-  Percentage of eligible abandoned carts that become completed purchases within the configured recovery window. Includes purchases with and without marketing contact.
+  Percentage of abandoned shopping carts that later lead to a completed order within the recovery period. Includes orders placed with or without marketing contact.
 
 Category: Conversion
 
@@ -29,7 +29,7 @@ GA4 Event: |
   Collect add_to_cart, remove_from_cart, begin_checkout and purchase. Send custom merchant_id and cart_id as event-level parameters outside ecommerce. Purchase includes ecommerce.transaction_id and items. Cart events carry the same cart key and the items involved. Configure tags to forward these fields; the mapping illustrates purchase.
 
 Adobe Event: |
-  Map additions, removals, checkout and purchase to commerce.productListAdds, commerce.productListRemovals, commerce.checkouts and commerce.purchases. Configure Client Data Layer collection rules. The XDM fragment illustrates an addition; purchase uses commerce.purchases and commerce.order.purchaseID. Define cartContext.merchantID and cartContext.cartID as strings under the organization's tenant namespace, replacing _tenant.
+  Map additions, removals, checkout and purchase to commerce.productListAdds, commerce.productListRemovals, commerce.checkouts and commerce.purchases. Configure Adobe Client Data Layer rules to populate XDM. Purchase uses commerce.order.purchaseID. Define cartContext.merchantID and cartContext.cartID as strings under the organization's tenant namespace, replacing _tenant. Map the layer's cart fields to that context on every event. The XDM fragment illustrates purchase.
 
 W3 Data Layer: |
   {
@@ -64,16 +64,6 @@ W3 Data Layer: |
         ]
       },
       "event": [
-        {
-          "eventInfo": {
-            "eventName": "add_to_cart",
-            "eventAction": "add"
-          },
-          "attributes": {
-            "merchantID": "m_31",
-            "cartID": "c_82f1"
-          }
-        },
         {
           "eventInfo": {
             "eventName": "purchase",
@@ -150,11 +140,14 @@ Adobe Client Data Layer: |
 
 XDM Mapping: |
   {
-    "eventType": "commerce.productListAdds",
+    "eventType": "commerce.purchases",
     "identityMap": {},
     "commerce": {
-      "productListAdds": {
+      "purchases": {
         "value": 1
+      },
+      "order": {
+        "purchaseID": "o_93a2"
       }
     },
     "productListItems": [
@@ -172,70 +165,114 @@ XDM Mapping: |
   }
 
 Google Analytics SQL: |
-  -- BigQuery Standard SQL integration template; these relations are not native GA4 tables.
-  -- Bind cart_recovery_config, cart_abandonment_facts and completed_order_facts to
-  -- governed backend integration views. Browser event counts cannot establish the denominator.
-  -- Overall recovery includes linked purchases with and without marketing contact.
-  -- No marketing exposure, qualifying touch or attribution model is required.
+  -- BigQuery Standard SQL integration template; not a query over native GA4 tables.
+  -- Bind the three logical relations below to governed backend integration views.
+  -- Browser events alone cannot establish abandonment or the denominator.
+  -- This shared contract applies to both SQL templates. No deployment is asserted.
   --
-  -- Shared input contract for both platform templates:
-  -- cart_recovery_config has exactly one validated row. Required fields:
-  -- abandonment_seconds INT64 > 0; recovery_seconds INT64 > 0;
-  -- arrival_seconds INT64 >= 0; report_lookback_seconds INT64 > 0;
-  -- report_end_lag_seconds INT64 >= 0; reporting_timezone STRING, valid IANA zone;
+  -- CONFIGURATION CONTRACT
+  -- cart_recovery_config has exactly one validated row:
+  -- abandonment_seconds INT64 > 0, recovery_seconds INT64 > 0,
+  -- arrival_seconds INT64 >= 0, report_lookback_seconds INT64 > 0,
+  -- report_end_lag_seconds INT64 >= 0, reporting_timezone STRING (valid IANA zone),
   -- restatement_policy STRING = 'recompute_affected_cohorts'. No default durations.
-  -- Reject missing, duplicate or invalid configuration before executing either query.
-  -- All durations must fit timestamp arithmetic. Report boundaries are relative to
-  -- the current whole-second observation time. For local calendar periods, resolve
-  -- boundaries in reporting_timezone and supply the resulting elapsed-second offsets.
-  -- Use the same observation second and boundaries when comparing platform results.
+  -- Upstream validation rejects missing/duplicate rows, nulls, invalid signs,
+  -- invalid timezones and values that overflow timestamp arithmetic.
+  -- abandonment_seconds, recovery_seconds and arrival_seconds govern fact creation.
+  -- Preserve the applied recovery and arrival durations on each abandonment fact.
+  -- Use UTC whole-second timestamps and the same observation second on both platforms.
+  -- Report boundaries are relative to observation time. For local calendar periods,
+  -- resolve boundaries in reporting_timezone into elapsed-second offsets first.
   --
-  -- cart_abandonment_facts fields: merchant_id STRING, canonical_cart_id STRING,
+  -- FACT CONTRACT
+  -- cart_abandonment_facts: merchant_id STRING, canonical_cart_id STRING,
   -- abandonment_ts TIMESTAMP, recovery_seconds INT64, arrival_seconds INT64,
-  -- measurement_complete BOOL. Unique nonnull key: merchant_id, canonical_cart_id.
-  -- Validate nonempty keys, nonnull timestamps, positive recovery_seconds and
-  -- nonnegative arrival_seconds before query execution. Preserve configured durations
-  -- on each fact so later rule changes do not alter existing recovery deadlines.
-  -- Build facts from complete ordered cart lifecycle history, not a reporting-window scan.
-  -- First abandonment is configured inactivity expiry for a nonempty production cart
-  -- with no accepted, payment-confirmed purchase at or before that expiry.
-  -- Exclude emptied carts, test/bot activity and confirmed fraud. Freeze first abandonment;
-  -- later re-entry cannot move it. Resolve checkout, restored-cart and merged-cart lineage
-  -- first. Each merged lifecycle has one canonical key and one first abandonment.
-  -- Deduplicate source events by their stable keys. Resolve simultaneous state changes
-  -- by authoritative sequence and source event ID; quarantine unresolved conflicts.
+  -- measurement_complete BOOL. Unique key: (merchant_id, canonical_cart_id).
+  -- Keys must be nonempty; timestamps and durations must be nonnull and valid.
+  -- Build facts from complete ordered backend cart history, not a reporting-window scan.
+  -- Resolve merged, restored and checkout identifiers into one merchant-scoped lifecycle.
+  -- Freeze its first abandonment at inactivity expiry while the cart is nonempty,
+  -- with no accepted, payment-confirmed order at or before expiry. Re-entry cannot reset it.
+  -- Exclude emptied carts and test, bot or confirmed fraud activity.
+  -- Deduplicate source deliveries by stable source keys. Order simultaneous updates
+  -- by authoritative sequence and event ID; quarantine unresolved conflicts.
   --
-  -- completed_order_facts fields: merchant_id STRING, transaction_id STRING,
-  -- canonical_cart_id STRING, purchase_ts TIMESTAMP. Unique nonnull key:
-  -- merchant_id, transaction_id. An order maps to at most one canonical cart.
-  -- Deduplicate deliveries using order key and authoritative acceptance time.
-  -- Include accepted, payment-confirmed production orders; exclude test/bot/fraud orders.
-  -- Explicit commerce lineage is required; customer/device identity alone cannot link a cart.
-  -- Legitimate later refunds or cancellations retain completion. Changed prices or partial
-  -- contents still permit one recovery. Read orders through the selected recovery deadlines.
-  -- Both fact tables use UTC timestamps at whole-second resolution.
+  -- completed_order_facts: merchant_id STRING, transaction_id STRING,
+  -- canonical_cart_id STRING, purchase_ts TIMESTAMP.
+  -- Unique key: (merchant_id, transaction_id); keys and timestamps are nonnull.
+  -- Each accepted, payment-confirmed production order links to at most one canonical cart.
+  -- Deduplicate by merchant/order key and authoritative acceptance time.
+  -- Require explicit commerce lineage; customer or device identity alone is insufficient.
+  -- Exclude test, bot and confirmed fraud orders. Partial basket purchases and changed
+  -- prices qualify. Legitimate later refunds or cancellations retain completion.
+  -- Read orders through every selected recovery deadline.
   --
-  -- Coverage: measurement_complete is true only with complete cart history and order-link
-  -- coverage through the recovery deadline. Retain anonymous and marketing-suppressed carts.
-  -- Missing keys and lifecycle records require a separate coverage report and block result
-  -- publication; do not silently omit them. Incomplete candidate coverage suppresses results.
-  -- No matching order with complete coverage means observed non-recovery; unavailable
-  -- linkage does not. Recompute affected cohorts for late arrivals and retain revision history.
+  -- COVERAGE, PRIVACY AND INTERPRETATION
+  -- measurement_complete is true only with complete lifecycle and order-link coverage
+  -- through the recovery deadline. No linked order then means observed non-recovery.
+  -- Missing linkage is unknown coverage. False/null candidate coverage suppresses output.
+  -- Upstream reconciliation must detect absent lifecycle records, missing keys and
+  -- unresolved conflicts and block publication; these SELECT queries cannot detect them.
+  -- Include anonymous and marketing-suppressed carts and purchases with or without contact.
+  -- No campaign touch or attribution model applies; recovery does not establish causation.
+  -- Respect collection permission separately from marketing permission. Keep customer
+  -- linkage in controlled backend systems; send no contact details or contact hashes.
+  -- Opaque cart/order keys are customer-linkable: Restricted sensitivity and pii_flag=true.
+  -- All mapping values are synthetic examples. Payloads are fragments, not complete
+  -- event envelopes. Collection supplies event IDs and timestamps, including XDM _id
+  -- and timestamp. Empty identityMap is intentional; person identity is unnecessary.
+  -- _tenant must be replaced with the declared organization namespace before collection.
+  -- Cart context is custom; commerce purchase and item fields use platform structures.
+  -- This count-based KPI needs no monetary fields. Report sales separately if needed.
   --
-  -- Shared privacy and mapping contract: opaque cart/order keys are customer-linkable,
-  -- hence Restricted and pii_flag=true. Keep contact linkage in controlled backend systems.
-  -- Respect collection permission separately from marketing permission; send no contact hashes.
-  -- Payloads are synthetic field examples, not deployed records or complete event envelopes.
-  -- Collection supplies event timestamps and IDs, including XDM timestamp and _id.
-  -- XDM uses the declared tenant cartContext strings and needs no person identity here.
-  -- Purchase XDM uses commerce.purchases, commerce.order.purchaseID and the same cartContext.
-  -- This count-based KPI needs no money fields or campaign context.
+  -- REPORTING CONTRACT
+  -- Select first abandonment in [report_start, report_end); finalize only after the
+  -- recovery deadline plus arrival allowance. Exclude immature carts from final results.
+  -- Mature-cart results are not estimates for all carts in an unfinished reporting period.
+  -- Segment both populations by frozen abandonment attributes, retaining unknown values.
+  -- Combine disjoint populations by summing counts, then recompute the percentage.
+  -- Recompute affected abandonment cohorts for late data and retain revision history.
   --
-  -- Output: one total across mature carts first abandoned in the half-open reporting interval.
-  -- Immature carts are excluded, not reported as failures; this is not a full-period estimate
-  -- when that period contains immature carts. Finalization includes the arrival allowance.
-  -- Segment using frozen abandonment attributes on both populations, retaining unknown values.
-  -- Combine disjoint cohorts by summing counts and recomputing the percentage.
+  -- DETERMINISTIC SYNTHETIC TEST SPECIFICATION (NOT EXECUTED)
+  -- Shared symbols: T is the fixed whole-second test observation instant; S and E are
+  -- report boundaries derived from valid configuration; A is first abandonment;
+  -- R > 0 is configured recovery duration; L >= 0 is arrival allowance; D = A + R.
+  -- Choose S <= A < E and D + L <= T unless a test overrides this.
+  -- Expected tuples below are (eligible carts, carts with orders, status, percentage).
+  -- F = 'final_mature_carts'; I = 'incomplete_coverage'. Each case is independent.
+  -- 1. No facts: (0,0,F,NULL). One complete cart, no order: (1,0,F,0).
+  -- 2. Four complete carts; two distinct orders linked to only one cart in (A,D]:
+  --    (4,1,F,25). Duplicate deliveries of either order leave this unchanged.
+  -- 3. One cart with an order at D: (1,1,F,100); only an order at D+1 second: (1,0,F,0).
+  -- 4. Empty cart, order before inactivity expiry, or order exactly at expiry:
+  --    each produces no abandonment fact upstream, hence (0,0,F,NULL).
+  --    A malformed abandonment fact with a purchase at A must fail upstream validation;
+  --    the SQL join itself never credits a purchase at A.
+  -- 5. Restored/merged aliases of one lifecycle produce one fact; one linked order:
+  --    (1,1,F,100). Re-entry leaves A and D unchanged; an order after D remains uncredited.
+  -- 6. Two merchants share the same cart ID; an order belongs only to the first:
+  --    (2,1,F,50). One order linked to two carts fails upstream uniqueness validation.
+  -- 7. A customer/device-only match cannot credit a cart. With complete authoritative
+  --    linkage proving no matching cart order: (1,0,F,0); unavailable linkage: NULLs/I.
+  -- 8. Mature cart at S: (1,0,F,0); cart at E: (0,0,F,NULL).
+  --    At T=D+L-1 second: (0,0,F,NULL); at T=D+L: (1,0,F,0), with no orders.
+  -- 9. One candidate with false or null measurement_complete:
+  --    (NULL,NULL,I,NULL), even if an apparent linked order exists.
+  --    An absent lifecycle or missing key must block publication upstream, not pass as zero.
+  -- 10. Changing only marketing contact, suppression or shopper identification leaves
+  --     all counts unchanged. Collection restrictions must be reflected in coverage.
+  -- 11. Test, bot and fraud carts produce no facts. Test/bot/fraud orders do not credit
+  --     an otherwise valid cart: (1,0,F,0). A valid partial purchase with changed prices:
+  --     (1,1,F,100); a later legitimate refund or cancellation leaves it unchanged.
+  --     Unresolved lifecycle conflicts block publication upstream.
+  -- 12. Disjoint groups with 1/2 and 1/8 yield (10,2,F,20), not an average of percentages.
+  --     Later segment changes leave the original segment assignment unchanged.
+  --     A late qualifying order changes its original cohort from (1,0,F,0) to (1,1,F,100).
+  -- 13. Reject missing, duplicate or null configuration; zero inactivity/recovery/lookback;
+  --     negative durations or end lag; invalid timezone; and arithmetic overflow.
+  --     Zero arrival allowance and zero end lag are valid.
+  -- Run these cases against both integrations with identical T, boundaries and facts.
+  -- Require identical counts/status and percentage difference <= 0.000001.
   WITH bounds AS (
     SELECT
       TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), SECOND) AS observation_ts,
@@ -263,7 +300,7 @@ Google Analytics SQL: |
       c.merchant_id,
       c.canonical_cart_id,
       c.measurement_complete,
-      MAX(IF(o.transaction_id IS NOT NULL, 1, 0)) AS recovered
+      MAX(IF(o.transaction_id IS NOT NULL, 1, 0)) AS has_order
     FROM candidates AS c
     LEFT JOIN completed_order_facts AS o
       ON o.merchant_id = c.merchant_id
@@ -273,57 +310,38 @@ Google Analytics SQL: |
     GROUP BY c.merchant_id, c.canonical_cart_id, c.measurement_complete
   ), totals AS (
     SELECT
-      COUNT(*) AS eligible_carts,
-      COALESCE(SUM(recovered), 0) AS recovered_carts,
+      COUNT(*) AS abandoned_carts,
+      COALESCE(SUM(has_order), 0) AS carts_with_orders,
       COUNTIF(measurement_complete IS NULL OR NOT measurement_complete) AS incomplete_carts
     FROM outcomes
   )
   SELECT
     IF(incomplete_carts > 0, 'incomplete_coverage', 'final_mature_carts') AS result_status,
-    IF(incomplete_carts = 0, eligible_carts, NULL) AS eligible_abandoned_carts,
-    IF(incomplete_carts = 0, recovered_carts, NULL) AS recovered_abandoned_carts,
-    IF(incomplete_carts = 0, 100.0 * SAFE_DIVIDE(recovered_carts, eligible_carts), NULL) AS abandoned_cart_recovery_rate_pct
+    IF(incomplete_carts = 0, abandoned_carts, NULL) AS abandoned_carts,
+    IF(incomplete_carts = 0, carts_with_orders, NULL) AS abandoned_carts_with_orders,
+    IF(incomplete_carts = 0, 100.0 * SAFE_DIVIDE(carts_with_orders, abandoned_carts), NULL) AS abandoned_cart_recovery_rate_pct
   FROM totals;
 
 AEP Query Service SQL: |
-  -- AEP Query Service SELECT template over integrated datasets, not native recovery fields.
+  -- AEP Query Service read-only integration template.
   -- Bind cart_recovery_config, cart_abandonment_facts and completed_order_facts to
-  -- datasets implementing the shared input, privacy and coverage contract in ga4_sql.
-  -- That contract is mandatory for both templates, including upstream validation.
-  -- No customer deployment or automatically available lifecycle dataset is implied.
+  -- integrated datasets implementing the shared contract and synthetic tests in ga4_sql.
+  -- These are logical integration relations, not native AEP recovery datasets.
+  -- The shared upstream validation, lifecycle, coverage, privacy and reporting rules
+  -- are mandatory. This query does not detect missing lifecycle records or validate
+  -- configuration uniqueness. Neither template nor its tests has been executed here.
   --
-  -- AEP schema bindings:
+  -- AEP field types:
   -- cart_recovery_config: abandonment_seconds, recovery_seconds, arrival_seconds,
-  -- report_lookback_seconds and report_end_lag_seconds are BIGINT; reporting_timezone
-  -- and restatement_policy are STRING. Exactly one valid row; no defaults.
-  -- Abandonment, recovery and lookback durations are positive; arrival and end lag
-  -- are nonnegative. Validate the IANA timezone and timestamp arithmetic ranges.
-  -- cart_abandonment_facts: merchant_id STRING, canonical_cart_id STRING,
-  -- abandonment_ts TIMESTAMP, recovery_seconds BIGINT, arrival_seconds BIGINT,
+  -- report_lookback_seconds, report_end_lag_seconds BIGINT;
+  -- reporting_timezone, restatement_policy STRING. Exactly one validated row.
+  -- cart_abandonment_facts: merchant_id, canonical_cart_id STRING;
+  -- abandonment_ts TIMESTAMP; recovery_seconds, arrival_seconds BIGINT;
   -- measurement_complete BOOLEAN. Unique nonnull merchant/cart key.
-  -- completed_order_facts: merchant_id STRING, transaction_id STRING,
-  -- canonical_cart_id STRING, purchase_ts TIMESTAMP. Unique nonnull merchant/order key.
-  -- Each order maps to at most one canonical cart through explicit commerce lineage.
-  -- Session timezone is UTC; all input timestamps have whole-second resolution.
-  --
-  -- Freeze first qualifying abandonment and its configured durations from complete
-  -- backend history. Resolve merged/restored/checkout identities before counting.
-  -- Exclude carts emptied or purchased at or before inactivity expiry. Re-entry cannot
-  -- move abandonment. Deduplicate by source keys; order simultaneous updates by
-  -- authoritative sequence then event ID and quarantine unresolved conflicts.
-  -- Include accepted, payment-confirmed production purchases, excluding test/bot/fraud.
-  -- Later legitimate refunds/cancellations retain completion; partial contents qualify.
-  -- Retain anonymous and suppressed carts. No touch or customer-identity match is required.
-  -- Missing keys or records block publication through the upstream coverage check;
-  -- incomplete candidate coverage suppresses the query result. Read order history through
-  -- recovery deadlines. Recompute affected cohorts for late data, retaining revision history.
-  --
-  -- One total across mature carts in a relative half-open reporting interval.
-  -- For calendar periods, resolve local boundaries into elapsed-second offsets.
-  -- Match the observation second and boundaries to BigQuery for parity checks.
-  -- Immature carts are excluded; output is not an estimate for all carts in the period.
-  -- Filter segments by frozen abandonment attributes, retaining unknown values and
-  -- both outcomes. Combine disjoint cohorts using counts rather than averaging rates.
+  -- completed_order_facts: merchant_id, transaction_id, canonical_cart_id STRING;
+  -- purchase_ts TIMESTAMP. Unique nonnull merchant/order key; one cart per order.
+  -- Session timezone must be UTC; input timestamps have whole-second resolution.
+  -- Match BigQuery's observation second and resolved report boundaries for parity.
   WITH bounds AS (
     SELECT
       unix_timestamp(current_timestamp()) AS observation_epoch,
@@ -349,7 +367,7 @@ AEP Query Service SQL: |
       c.merchant_id,
       c.canonical_cart_id,
       c.measurement_complete,
-      MAX(CASE WHEN o.transaction_id IS NOT NULL THEN 1 ELSE 0 END) AS recovered
+      MAX(CASE WHEN o.transaction_id IS NOT NULL THEN 1 ELSE 0 END) AS has_order
     FROM candidates c
     LEFT JOIN completed_order_facts o
       ON o.merchant_id = c.merchant_id
@@ -359,31 +377,31 @@ AEP Query Service SQL: |
     GROUP BY c.merchant_id, c.canonical_cart_id, c.measurement_complete
   ), totals AS (
     SELECT
-      COUNT(*) AS eligible_carts,
-      COALESCE(SUM(recovered), 0) AS recovered_carts,
+      COUNT(*) AS abandoned_carts,
+      COALESCE(SUM(has_order), 0) AS carts_with_orders,
       COALESCE(SUM(CASE WHEN measurement_complete = true THEN 0 ELSE 1 END), 0) AS incomplete_carts
     FROM outcomes
   )
   SELECT
     CASE WHEN incomplete_carts > 0 THEN 'incomplete_coverage' ELSE 'final_mature_carts' END AS result_status,
-    CASE WHEN incomplete_carts = 0 THEN eligible_carts ELSE NULL END AS eligible_abandoned_carts,
-    CASE WHEN incomplete_carts = 0 THEN recovered_carts ELSE NULL END AS recovered_abandoned_carts,
-    CASE WHEN incomplete_carts = 0 THEN 100.0 * recovered_carts / NULLIF(eligible_carts, 0) ELSE NULL END AS abandoned_cart_recovery_rate_pct
+    CASE WHEN incomplete_carts = 0 THEN abandoned_carts ELSE NULL END AS abandoned_carts,
+    CASE WHEN incomplete_carts = 0 THEN carts_with_orders ELSE NULL END AS abandoned_carts_with_orders,
+    CASE WHEN incomplete_carts = 0 THEN 100.0 * carts_with_orders / NULLIF(abandoned_carts, 0) ELSE NULL END AS abandoned_cart_recovery_rate_pct
   FROM totals;
 
 Calculation Notes: |
-  1️⃣ Count one merchant-scoped cart lifecycle; resolve checkout, merged and restored cart links before counting.
-  2️⃣ Freeze first abandonment at configured inactivity expiry for a nonempty cart with no completed purchase at or before expiry.
-  3️⃣ Include purchases with and without marketing contact. Campaign-attributed conversion is a separate measure.
-  4️⃣ Require explicit order-to-cart links. Count each cart once and credit each order to at most one cart.
-  5️⃣ Count purchases after abandonment through its configured deadline; finalize after the configured data-arrival allowance.
-  6️⃣ Keep anonymous and marketing-suppressed carts. Missing linkage is a coverage limitation; use backend history for the denominator.
+  1️⃣ Count each merchant's cart lifecycle once; resolve merged, restored and checkout links before identifying first abandonment.
+  2️⃣ Abandonment starts when the chosen inactivity limit expires for a nonempty cart with no completed order.
+  3️⃣ Count a cart once when a linked order occurs after abandonment and by its recovery deadline; credit each order to one cart.
+  4️⃣ Set inactivity, recovery and data-arrival periods as business rules; preserve the rules applied to each cart.
+  5️⃣ Finalize after recovery and data-arrival periods end. Report by abandonment date; exclude immature carts from final results.
+  6️⃣ Include anonymous and marketing-suppressed carts. Incomplete history or order linkage requires coverage reporting and suppression.
   7️⃣ Exclude test, bot and fraud activity. Later legitimate refunds retain completion. Return null for no carts; combine rates from counts.
 
 Business Use Case: |
-  1️⃣ Track how much abandoned shopping demand returns to purchase.
-  2️⃣ Compare recovery across cart sizes and checkout stages to prioritize improvements.
-  3️⃣ Review recovery trends alongside recovered sales and incentive costs.
+  1️⃣ Track how often abandoned shopping carts lead to completed orders.
+  2️⃣ Compare results by cart size and checkout stage to prioritize improvements.
+  3️⃣ Review recovery alongside sales and incentive costs.
 
 Dependencies:
   Events: [add-to-cart, remove-from-cart, checkout-initiation, purchase]
@@ -397,7 +415,7 @@ Report Attributes: |
 Dashboard Usage: [Cart and checkout performance, Abandoned demand recovery, Recovery trends by customer group]
 
 Segment Eligibility: |
-  Compare carts by checkout stage, cart size, device or customer group recorded at abandonment. Include recovered and unrecovered carts in each group, retain unknown values, and use the same recovery rules.
+  Compare carts by checkout stage, cart size, device or customer group recorded at abandonment. Include carts with and without later orders in each group, retain unknown values, and use the same recovery rules.
 
 Related KPIs: [cart-abandonment-rate, cart-conversion-rate, email-click-to-purchase-conversion-rate]
 
@@ -413,5 +431,5 @@ Created At: 2026-09-17T23:15:39.578+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-10-15T07:18:53.411+00:00
+Last Modified At: 2026-10-15T07:40:51.351+00:00
 
