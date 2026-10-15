@@ -1,19 +1,19 @@
 # Metric: Zero-Results Searches
-# Generated: 2026-10-12T11:51:33.424Z
+# Generated: 2026-10-15T08:11:08.907Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Metric Name: Zero-Results Searches
-Formula: COUNT(search events WHERE search_results_count = 0 AND is_refire is not true AND search_type != 'store_locator' AND traffic_type NOT IN ('internal', 'bot')), by event date in the reporting period
+Formula: Count of submitted product searches with zero matching products
 
 Description: |
-  Count of site searches that return no products: unified search events with search_results_count = 0 (Adobe null searches). Numerator of Zero-Results Search Rate over Site Searches.
+  The number of submitted product searches that show no matching products to the shopper during the reporting period.
 
 Category: Experience
 
-Tags: [metric, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+Tags: [Product search, Product discovery, Search quality]
 
-Industry: E-commerce
+Industry: E-commerce, Retail
 
 Priority: High
 
@@ -26,65 +26,73 @@ Measure Type: Counter
 Aggregation Window: Daily, Weekly, Monthly
 
 GA4 Event: |
-  search
+  Use the recommended search event with sanitized search_term. Custom parameters: search_submission_id, search_submitted_at, search_results_count, search_type, submission_kind, traffic_type, response_status. Emit the final response for a deliberate submission; retries retain its identifier and values. Configure collection to serialize text parameters as strings. Store search_results_count in exactly one GA4 value slot: integer, double, float, or a decimal string. Decimal strings representing zero must contain only an optional sign, zeros, and an optional decimal point followed by zeros. Parameter keys must occur once. Submission timestamps use RFC 3339 UTC strings. The SQL checks numeric zero directly without rounding. Register custom dimensions only where reporting requires them.
 
 Adobe Event: |
-  search
+  Configure a custom product-search completion event and map its submission identifier, submission timestamp, final result count, search type, submission kind, traffic classification, and response status to the XDM search fields shown. An Adobe Analytics custom counter may be populated through an explicitly configured integration; search or null searches is not an automatic native equivalent. The AEP query uses ExperienceEvent records, not Analytics report totals. Replace _tenantId with the configured tenant namespace in the mapping and SQL. The schema must define searchResultsCount as double, submittedAt as date-time, and the remaining search fields as strings. Configure ingestion for the custom search eventType. W3 and Adobe Client Data Layer examples require an integration to analytics. The synthetic ECID illustrates identityMap and is unnecessary for counting.
 
 W3 Data Layer: |
   {
-    "page": {
-      "category": {
-        "pageType": "search_results"
-      }
-    },
-    "event": [
-      {
-        "eventInfo": {
-          "eventName": "search"
-        },
-        "attributes": {
-          "searchTerm": "term",
-          "searchType": "product",
-          "searchResultsCount": 0,
-          "isRefire": false,
-          "trafficType": "external"
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "search"
+          },
+          "attributes": {
+            "searchTerm": "blue boots",
+            "searchSubmissionId": "synthetic-search-001",
+            "searchSubmittedAt": "2026-10-14T12:00:00Z",
+            "searchResultsCount": 0,
+            "searchType": "product",
+            "submissionKind": "query",
+            "trafficType": "external",
+            "responseStatus": "completed"
+          }
         }
-      }
-    ]
+      ]
+    }
   }
 
 GA4 Data Layer: |
   {
     "event": "search",
-    "search_term": "term",
-    "search_type": "product",
+    "search_term": "blue boots",
+    "search_submission_id": "synthetic-search-001",
+    "search_submitted_at": "2026-10-14T12:00:00Z",
     "search_results_count": 0,
-    "is_refire": false,
-    "page_type": "search_results",
-    "traffic_type": "external"
+    "search_type": "product",
+    "submission_kind": "query",
+    "traffic_type": "external",
+    "response_status": "completed"
   }
 
 Adobe Client Data Layer: |
-  {
-    "event": "search",
-    "eventInfo": {
-      "searchTerm": "term",
-      "searchType": "product",
-      "searchResultsCount": 0,
-      "isRefire": false,
-      "pageType": "search_results",
-      "trafficType": "external"
+  [
+    {
+      "event": "search",
+      "eventInfo": {
+        "searchTerm": "blue boots",
+        "searchSubmissionId": "synthetic-search-001",
+        "searchSubmittedAt": "2026-10-14T12:00:00Z",
+        "searchResultsCount": 0,
+        "searchType": "product",
+        "submissionKind": "query",
+        "trafficType": "external",
+        "responseStatus": "completed"
+      }
     }
-  }
+  ]
 
 XDM Mapping: |
   {
+    "_id": "synthetic-response-001",
+    "timestamp": "2026-10-14T12:00:01Z",
     "eventType": "search",
     "identityMap": {
       "ECID": [
         {
-          "id": "ecid-1",
+          "id": "synthetic-ecid-001",
           "authenticatedState": "ambiguous",
           "primary": true
         }
@@ -92,98 +100,159 @@ XDM Mapping: |
     },
     "_tenantId": {
       "search": {
-        "searchTerm": "term",
-        "searchType": "product",
+        "searchTerm": "blue boots",
+        "submissionId": "synthetic-search-001",
+        "submittedAt": "2026-10-14T12:00:00Z",
         "searchResultsCount": 0,
-        "isRefire": false
-      },
-      "pageType": "search_results",
-      "trafficType": "external"
+        "searchType": "product",
+        "submissionKind": "query",
+        "trafficType": "external",
+        "responseStatus": "completed"
+      }
     }
   }
 
 Google Analytics SQL: |
-  -- ==========================================
-  -- 1. GOOGLE BIGQUERY SQL
-  -- ==========================================
-  -- Reporting window: last 90 complete days (event_date is already in the property time zone)
-  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
-  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
-  
-  -- Search events in the window with result count, re-fire flag, search type and traffic type pivoted from event_params
-  WITH searches AS (
+  -- Bind {{ga4_export_dataset}} to the GA4 export dataset; query finalized daily events_* tables.
+  -- Parameters: @report_days INT64 > 0, @completion_lag_days INT64 >= 0, @report_tz STRING IANA zone, @coverage_complete BOOL.
+  -- Coverage must include every final response for the selected submissions, complete exports, and upstream conflict quarantine.
+  -- Submission IDs are globally unique; one immutable final response per ID; identical retries retain all values.
+  -- Collection excludes navigation/refinement emissions; query means deliberate submission, including a submitted suggestion.
+  -- Final counts exclude unrelated recommendations; contradictory payloads, duplicate keys, and ambiguous value slots are quarantined upstream.
+  -- Completion event time is at or after submission time. Search terms are sanitized before collection; raw access is restricted.
+  WITH bounds AS (
     SELECT
-      (SELECT MAX(IF(key = 'search_results_count', COALESCE(value.int_value, SAFE_CAST(value.string_value AS INT64), CAST(value.double_value AS INT64)), NULL)) FROM UNNEST(event_params)) AS search_results_count,
-      (SELECT MAX(IF(key = 'is_refire', LOWER(COALESCE(value.string_value, CAST(value.int_value AS STRING))), NULL)) FROM UNNEST(event_params)) AS is_refire,
-      (SELECT MAX(IF(key = 'search_type', value.string_value, NULL)) FROM UNNEST(event_params)) AS search_type,
-      (SELECT MAX(IF(key = 'traffic_type', value.string_value, NULL)) FROM UNNEST(event_params)) AS traffic_type
-    FROM `your-project.analytics_123456789.events_*`
-    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
+      TIMESTAMP(DATE_SUB(DATE_SUB(CURRENT_DATE(@report_tz), INTERVAL @completion_lag_days DAY), INTERVAL @report_days DAY), @report_tz) AS start_ts,
+      TIMESTAMP(DATE_SUB(CURRENT_DATE(@report_tz), INTERVAL @completion_lag_days DAY), @report_tz) AS end_ts
+  ), extracted AS (
+    SELECT
+      TIMESTAMP_MICROS(event_timestamp) AS completed_at,
+      (SELECT IF(COUNT(*) = 1, ANY_VALUE(value.string_value), NULL) FROM UNNEST(event_params) WHERE key = 'search_submission_id') AS submission_id,
+      SAFE_CAST((SELECT IF(COUNT(*) = 1, ANY_VALUE(value.string_value), NULL) FROM UNNEST(event_params) WHERE key = 'search_submitted_at') AS TIMESTAMP) AS submitted_at,
+      (SELECT IF(COUNT(*) = 1, ANY_VALUE(value.string_value), NULL) FROM UNNEST(event_params) WHERE key = 'search_type') AS search_type,
+      (SELECT IF(COUNT(*) = 1, ANY_VALUE(value.string_value), NULL) FROM UNNEST(event_params) WHERE key = 'submission_kind') AS submission_kind,
+      (SELECT IF(COUNT(*) = 1, ANY_VALUE(value.string_value), NULL) FROM UNNEST(event_params) WHERE key = 'traffic_type') AS traffic_type,
+      (SELECT IF(COUNT(*) = 1, ANY_VALUE(value.string_value), NULL) FROM UNNEST(event_params) WHERE key = 'response_status') AS response_status,
+      (SELECT COUNT(*) = 1 AND COUNTIF(
+        IF(value.int_value IS NULL, 0, 1) + IF(value.double_value IS NULL, 0, 1) + IF(value.float_value IS NULL, 0, 1) + IF(value.string_value IS NULL, 0, 1) = 1
+        AND (
+          value.int_value = 0 OR value.double_value = 0 OR value.float_value = 0
+          OR REGEXP_CONTAINS(value.string_value, r'^[+-]?0+(\.0+)?$')
+        )
+      ) = 1 FROM UNNEST(event_params) WHERE key = 'search_results_count') AS valid_zero
+    FROM `{{ga4_export_dataset}}.events_*`
+    CROSS JOIN bounds
+    WHERE REGEXP_CONTAINS(_TABLE_SUFFIX, r'^\d{8}$')
       AND event_name = 'search'
+      AND TIMESTAMP_MICROS(event_timestamp) >= bounds.start_ts
+      AND TIMESTAMP_MICROS(event_timestamp) < CURRENT_TIMESTAMP()
+  ), submissions AS (
+    SELECT submission_id, MIN(submitted_at) AS submitted_at
+    FROM extracted
+    WHERE submission_id IS NOT NULL AND TRIM(submission_id) != ''
+    GROUP BY submission_id
+    HAVING MIN(submitted_at) = MAX(submitted_at)
+      AND LOGICAL_AND(COALESCE(
+        submitted_at IS NOT NULL
+        AND completed_at >= submitted_at
+        AND search_type = 'product'
+        AND submission_kind = 'query'
+        AND traffic_type = 'external'
+        AND response_status = 'completed'
+        AND valid_zero,
+        FALSE
+      ))
   )
-  
-  -- Zero-results searches: count exactly 0 (null is excluded), no re-fires, no store locator, no internal or bot traffic
-  SELECT COUNT(*) AS zero_results_searches
-  FROM searches
-  WHERE search_results_count = 0
-    AND IFNULL(is_refire, 'false') NOT IN ('true', '1')
-    AND IFNULL(search_type, '') != 'store_locator'
-    AND IFNULL(traffic_type, '') NOT IN ('internal', 'bot');
+  SELECT IF(@coverage_complete, COUNT(*), CAST(NULL AS INT64)) AS zero_results_searches
+  FROM submissions
+  CROSS JOIN bounds
+  WHERE submitted_at >= bounds.start_ts AND submitted_at < bounds.end_ts;
 
 AEP Query Service SQL: |
-  -- ==========================================
-  -- 2. ADOBE AEP QUERY SERVICE SQL
-  -- ==========================================
-  -- Reporting window: last 90 complete days, dated in the property time zone (set report_tz to it)
-  WITH params AS (
-    SELECT date_sub(current_date(), 90) AS start_date,
-           date_sub(current_date(), 1) AS end_date,
-           'America/New_York' AS report_tz
-  ),
-  
-  -- Search events with local event date, result count, re-fire flag, search type and traffic type
-  searches AS (
+  -- Bind {{aep_dataset}} to the ExperienceEvent dataset and {{tenant_namespace}} to the namespace represented by _tenantId in XDM.
+  -- Bind {{report_days}} positive integer, {{completion_lag_days}} nonnegative integer, {{report_tz}} validated IANA zone, {{coverage_complete}} boolean literal.
+  -- Coverage requires every final response for selected submissions, complete ingestion, and upstream conflict quarantine.
+  -- Submission IDs are globally unique; one immutable final response per ID; identical retries retain all values.
+  -- XDM searchResultsCount is double, submittedAt is date-time, and other search fields are strings; reject invalid source values before ingestion.
+  -- Collection excludes navigation/refinement emissions; query means deliberate submission, including a submitted suggestion.
+  -- Final counts exclude unrelated recommendations. Quarantine conflicting payloads; never coerce malformed or tiny nonzero values to zero.
+  -- Completion timestamp is at or after submission time. Search terms are sanitized before collection; raw access is restricted.
+  WITH settings AS (
     SELECT
-      to_date(from_utc_timestamp(timestamp, params.report_tz)) AS event_date,
-      _tenantId.search.searchResultsCount AS search_results_count,
-      _tenantId.search.isRefire AS is_refire,
-      _tenantId.search.searchType AS search_type,
-      _tenantId.trafficType AS traffic_type
-    FROM aep_web_events, params
-    WHERE eventType = 'search'
-      AND timestamp >= date_sub(params.start_date, 1)
-      AND timestamp < date_add(params.end_date, 2)
+      {{report_days}} AS report_days,
+      {{completion_lag_days}} AS completion_lag_days,
+      '{{report_tz}}' AS report_tz,
+      {{coverage_complete}} AS coverage_complete
+  ), bounds AS (
+    SELECT
+      to_utc_timestamp(CAST(date_sub(date_sub(to_date(from_utc_timestamp(current_timestamp(), report_tz)), completion_lag_days), report_days) AS TIMESTAMP), report_tz) AS start_ts,
+      to_utc_timestamp(CAST(date_sub(to_date(from_utc_timestamp(current_timestamp(), report_tz)), completion_lag_days) AS TIMESTAMP), report_tz) AS end_ts,
+      coverage_complete
+    FROM settings
+  ), extracted AS (
+    SELECT
+      e.timestamp AS completed_at,
+      e.{{tenant_namespace}}.search.submissionId AS submission_id,
+      e.{{tenant_namespace}}.search.submittedAt AS submitted_at,
+      e.{{tenant_namespace}}.search.searchResultsCount AS result_count,
+      e.{{tenant_namespace}}.search.searchType AS search_type,
+      e.{{tenant_namespace}}.search.submissionKind AS submission_kind,
+      e.{{tenant_namespace}}.search.trafficType AS traffic_type,
+      e.{{tenant_namespace}}.search.responseStatus AS response_status
+    FROM {{aep_dataset}} e
+    CROSS JOIN bounds b
+    WHERE e.eventType = 'search'
+      AND e.timestamp >= b.start_ts
+      AND e.timestamp < current_timestamp()
+  ), submissions AS (
+    SELECT submission_id, MIN(submitted_at) AS submitted_at
+    FROM extracted
+    WHERE submission_id IS NOT NULL AND TRIM(submission_id) <> ''
+    GROUP BY submission_id
+    HAVING MIN(submitted_at) = MAX(submitted_at)
+      AND SUM(CASE WHEN
+        submitted_at IS NOT NULL
+        AND completed_at >= submitted_at
+        AND result_count = 0
+        AND search_type = 'product'
+        AND submission_kind = 'query'
+        AND traffic_type = 'external'
+        AND response_status = 'completed'
+        THEN 0 ELSE 1 END) = 0
   )
-  
-  -- Zero-results searches: count exactly 0 (null is excluded), no re-fires, no store locator, no internal or bot traffic
-  SELECT COUNT(*) AS zero_results_searches
-  FROM searches, params
-  WHERE event_date BETWEEN params.start_date AND params.end_date
-    AND search_results_count = 0
-    AND COALESCE(is_refire, false) = false
-    AND COALESCE(search_type, '') != 'store_locator'
-    AND COALESCE(traffic_type, '') NOT IN ('internal', 'bot');
+  SELECT CASE WHEN (SELECT coverage_complete FROM bounds)
+    THEN COUNT(*) ELSE CAST(NULL AS BIGINT) END AS zero_results_searches
+  FROM submissions s
+  CROSS JOIN bounds b
+  WHERE s.submitted_at >= b.start_ts AND s.submitted_at < b.end_ts;
 
 Calculation Notes: |
-  1️⃣ Counts each submitted search whose search_results_count is exactly 0; same event population as Site Searches, so the two reconcile.,2️⃣ Re-fires on refresh, back button or pagination (is_refire = true) are excluded; one submitted query counts once.,3️⃣ A missing or null search_results_count is not zero; those events are excluded here and tracked as an instrumentation defect.,4️⃣ Store locator searches (search_type = store_locator) are excluded; every other search type, or none, is counted, as in Site Searches.,5️⃣ A query auto-corrected to a term that returns products is not a zero-results search; the count shown to the shopper decides.,6️⃣ Zero results after applying filters to a successful search fire filter_apply, not search, and are not counted here.,7️⃣ Bot and internal traffic are excluded via traffic_type; events are dated by event timestamp in the property time zone.
+  1️⃣ Count each submission ID once; deliberate repeats use new IDs. Require immutable final responses and quarantine conflicts before export.
+  2️⃣ Require an explicit valid zero count and completed response; exclude errors, timeouts, missing counts, fractions, and invalid values.
+  3️⃣ Require product, query, and external labels; exclude bots, staff, tests, navigation, autocomplete requests, and refinements.
+  4️⃣ Use final matches after correction; recommendations are not matches. Date by submission in the configured zone and complete-day window.
+  5️⃣ Confirm coverage and completion lag; return unknown for incomplete coverage. Sum only separate periods or mutually exclusive segments.
+  6️⃣ Match Site Searches rules, periods, and segments for Zero-Results Search Rate; no eligible searches means an undefined rate.
+  7️⃣ PII flag covers aggregate output only. Sanitize terms before collection; restrict raw terms and linked identifiers as personal data.
 
 Business Use Case: |
-  1️⃣ Merchandising reviews the top zero-results terms weekly and adds synonyms or redirects for the highest-volume ones.,2️⃣ Merchandising sends zero-results terms for products not stocked to Buying as assortment-gap demand signals.,3️⃣ Product compares zero-results searches before and after a search engine or catalog feed release and rolls back a spike.
+  1️⃣ Prioritize synonyms and redirects for common searches with no matches.
+  2️⃣ Identify demand for products missing from the assortment.
+  3️⃣ Monitor search quality after search engine or product catalog changes.
 
 Dependencies:
   Events: [site-search]
-  Metrics: [site-searches]
   Dimensions: [internal-search-term]
 
-Source Data: Digital Analytics (GA4 / Adobe Analytics)
+Source Data: Product search responses and digital analytics search events
 
 Report Attributes: |
-  Internal Search Term; Search Type; Device Category; Page Type; Traffic Source
+  Internal Search Term; Device category; Page Type; Traffic Source
 
-Dashboard Usage: [Site Search Performance, Product Discovery & Merchandising]
+Dashboard Usage: [Site Search Performance, Product Discovery]
 
 Segment Eligibility: |
-  true
+  Compare searches by search term, device, page type, or traffic source. Use the same selection for total searches when calculating a percentage. Add counts only across separate periods or mutually exclusive groups.
 
 Related Metrics: [site-searches, search-results-views, unique-searchers, search-exits, average-search-depth]
 
@@ -197,9 +266,9 @@ Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-10-12T11:51:24.108+00:00
+Created At: 2026-10-15T08:11:04.788+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-10-12T11:51:32.87+00:00
+Last Modified At: 2026-10-15T08:11:08.604+00:00
 
