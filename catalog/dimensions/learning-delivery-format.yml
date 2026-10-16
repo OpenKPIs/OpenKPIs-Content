@@ -1,0 +1,405 @@
+# Dimension: Learning Delivery Format
+# Generated: 2026-09-14T19:30:06.751Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Learning Delivery Format
+
+Description: |
+  Classifies the primary operational format through which a learner receives a course, program, class, or other learning offering. It distinguishes asynchronous online, synchronous virtual, in-person, hybrid, blended, and offline self-directed delivery for consistent engagement, completion, capacity, and outcome analysis.
+
+Category: Engagement
+
+Tags: [dimension]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  view_item
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"view_item"},"attributes":{"learningDeliveryFormat":"<learning_delivery_format>"}}]}}
+
+GA4 Data Layer: |
+  {"event":"view_item","ecommerce":{"items":[{"item_id":"<learning_offering_id>","item_name":"<learning_offering_name>","learning_delivery_format":"<learning_delivery_format>"}]}}
+
+Adobe Client Data Layer: |
+  {"event":"view-item","eventInfo":{"learningDeliveryFormat":"<learning_delivery_format>"}}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"<learning_delivery_format>"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH source_events AS (
+    SELECT
+      event_timestamp,
+      event_name,
+      user_pseudo_id,
+      i.item_id AS learning_offering_id,
+      i.item_name AS learning_offering_name,
+      COALESCE(
+        (SELECT COALESCE(ip.value.string_value, CAST(ip.value.int_value AS STRING), CAST(ip.value.double_value AS STRING), CAST(ip.value.float_value AS STRING))
+         FROM UNNEST(i.item_params) ip
+         WHERE ip.key = 'learning_delivery_format'
+         LIMIT 1),
+        (SELECT COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING), CAST(ep.value.float_value AS STRING))
+         FROM UNNEST(event_params) ep
+         WHERE ep.key = 'learning_delivery_format'
+         LIMIT 1)
+      ) AS raw_learning_delivery_format,
+      CASE
+        WHEN EXISTS (
+          SELECT 1
+          FROM UNNEST(i.item_params) ip
+          WHERE ip.key = 'learning_delivery_format'
+        ) THEN 'items.item_params.learning_delivery_format'
+        ELSE 'event_params.learning_delivery_format'
+      END AS source_field_path
+    FROM `your-project.analytics_123456789.events_*` e
+    LEFT JOIN UNNEST(e.items) i
+    WHERE e.event_name = 'view_item'
+      AND _TABLE_SUFFIX NOT LIKE 'intraday_%'
+  ),
+  normalized AS (
+    SELECT
+      *,
+      NULLIF(
+        TRIM(
+          REGEXP_REPLACE(
+            REGEXP_REPLACE(LOWER(raw_learning_delivery_format), r'[_/|]+', ' '),
+            r'\s+',
+            ' '
+          )
+        ),
+        ''
+      ) AS normalized_value
+    FROM source_events
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_value IS NULL OR normalized_value IN ('unknown', 'not set', '(not set)', 'n a', 'na', 'null', 'unspecified') THEN 'UNKNOWN'
+        WHEN REGEXP_CONTAINS(normalized_value, r'\b(hybrid|blended|mixed mode|mixed modality|flex|hyflex)\b') THEN 'HYBRID'
+        WHEN REGEXP_CONTAINS(normalized_value, r'\b(self paced|self-paced|on demand|on-demand|asynchronous|elearning|e learning|cbt|wbt|mooc)\b') THEN 'ONLINE_SELF_PACED'
+        WHEN REGEXP_CONTAINS(normalized_value, r'\b(virtual instructor led|virtual classroom|live online|live virtual|webinar|vilt|remote instructor)\b') THEN 'VIRTUAL_INSTRUCTOR_LED'
+        WHEN REGEXP_CONTAINS(normalized_value, r'\b(in person|in-person|classroom|face to face|face-to-face|onsite|on site|campus|ilt)\b') THEN 'IN_PERSON'
+        WHEN REGEXP_CONTAINS(normalized_value, r'\b(online|virtual|remote|digital|web based|web-based)\b') THEN 'ONLINE'
+        WHEN REGEXP_CONTAINS(normalized_value, r'\b(correspondence|postal|mail based|mail-based)\b') THEN 'CORRESPONDENCE'
+        ELSE 'OTHER'
+      END AS format_category
+    FROM normalized
+    WHERE raw_learning_delivery_format IS NOT NULL
+  ),
+  dimension_rollup AS (
+    SELECT
+      normalized_value,
+      format_category,
+      ARRAY_AGG(raw_learning_delivery_format ORDER BY event_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS representative_raw_value,
+      ARRAY_AGG(source_field_path ORDER BY IF(source_field_path LIKE 'items.%', 0, 1), event_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS representative_source_field_path,
+      MIN(TIMESTAMP_MICROS(event_timestamp)) AS first_seen_timestamp,
+      MAX(TIMESTAMP_MICROS(event_timestamp)) AS last_seen_timestamp,
+      COUNT(*) AS event_count,
+      COUNT(DISTINCT learning_offering_id) AS offering_count,
+      ARRAY_AGG(learning_offering_id IGNORE NULLS ORDER BY event_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS example_learning_offering_id,
+      ARRAY_AGG(learning_offering_name IGNORE NULLS ORDER BY event_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS example_learning_offering_name
+    FROM classified
+    GROUP BY normalized_value, format_category
+  )
+  SELECT
+    TO_HEX(SHA256(COALESCE(normalized_value, 'unknown'))) AS learning_delivery_format_key,
+    UPPER(REGEXP_REPLACE(COALESCE(normalized_value, 'unknown'), r'[^a-z0-9]+', '_')) AS learning_delivery_format_code,
+    CASE format_category
+      WHEN 'IN_PERSON' THEN 'In Person'
+      WHEN 'VIRTUAL_INSTRUCTOR_LED' THEN 'Virtual Instructor-Led'
+      WHEN 'ONLINE_SELF_PACED' THEN 'Online Self-Paced'
+      WHEN 'HYBRID' THEN 'Hybrid or Blended'
+      WHEN 'ONLINE' THEN 'Online'
+      WHEN 'CORRESPONDENCE' THEN 'Correspondence'
+      WHEN 'UNKNOWN' THEN 'Unknown'
+      ELSE INITCAP(normalized_value)
+    END AS learning_delivery_format_name,
+    CONCAT('Learning delivered using the ', COALESCE(normalized_value, 'unknown'), ' format.') AS learning_delivery_format_description,
+    representative_raw_value AS learning_delivery_format_raw,
+    COALESCE(normalized_value, 'unknown') AS learning_delivery_format_normalized,
+    format_category AS learning_delivery_format_category,
+    CASE
+      WHEN format_category = 'IN_PERSON' THEN 'PHYSICAL'
+      WHEN format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED') THEN 'DIGITAL'
+      WHEN format_category = 'HYBRID' THEN 'PHYSICAL_AND_DIGITAL'
+      WHEN format_category = 'CORRESPONDENCE' THEN 'REMOTE_NON_DIGITAL'
+      ELSE 'UNCLASSIFIED'
+    END AS delivery_mode,
+    CASE
+      WHEN format_category = 'IN_PERSON' THEN 'PHYSICAL_LOCATION'
+      WHEN format_category = 'HYBRID' THEN 'PHYSICAL_AND_VIRTUAL'
+      WHEN format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED') THEN 'VIRTUAL_LOCATION'
+      WHEN format_category = 'CORRESPONDENCE' THEN 'REMOTE'
+      ELSE 'UNKNOWN'
+    END AS location_type,
+    CASE
+      WHEN format_category IN ('IN_PERSON', 'VIRTUAL_INSTRUCTOR_LED') THEN 'SYNCHRONOUS'
+      WHEN format_category = 'ONLINE_SELF_PACED' THEN 'ASYNCHRONOUS'
+      WHEN format_category IN ('HYBRID', 'ONLINE') THEN 'MIXED_OR_UNSPECIFIED'
+      ELSE 'UNKNOWN'
+    END AS synchronicity_type,
+    CASE
+      WHEN format_category IN ('IN_PERSON', 'VIRTUAL_INSTRUCTOR_LED') THEN 'INSTRUCTOR_PRESENT'
+      WHEN format_category = 'ONLINE_SELF_PACED' THEN 'NO_LIVE_INSTRUCTOR'
+      WHEN format_category IN ('HYBRID', 'ONLINE') THEN 'OPTIONAL_OR_MIXED'
+      ELSE 'UNKNOWN'
+    END AS instructor_presence_type,
+    CASE
+      WHEN format_category = 'IN_PERSON' THEN 'FACE_TO_FACE'
+      WHEN format_category = 'VIRTUAL_INSTRUCTOR_LED' THEN 'LIVE_DIGITAL'
+      WHEN format_category IN ('ONLINE', 'ONLINE_SELF_PACED') THEN 'DIGITAL'
+      WHEN format_category = 'HYBRID' THEN 'MULTIMODAL'
+      WHEN format_category = 'CORRESPONDENCE' THEN 'CORRESPONDENCE'
+      ELSE 'UNKNOWN'
+    END AS interaction_mode,
+    CASE WHEN format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED', 'HYBRID') THEN 'TECHNOLOGY_REQUIRED' ELSE 'TECHNOLOGY_NOT_REQUIRED_OR_UNKNOWN' END AS technology_dependency_type,
+    CASE WHEN format_category = 'IN_PERSON' THEN 'ONSITE' WHEN format_category = 'HYBRID' THEN 'ONSITE_AND_REMOTE' WHEN format_category = 'UNKNOWN' THEN 'UNKNOWN' ELSE 'REMOTE' END AS attendance_mode,
+    CASE WHEN format_category IN ('IN_PERSON', 'VIRTUAL_INSTRUCTOR_LED') THEN 'SCHEDULED' WHEN format_category = 'ONLINE_SELF_PACED' THEN 'ON_DEMAND' WHEN format_category IN ('HYBRID', 'ONLINE') THEN 'MIXED_OR_UNSPECIFIED' ELSE 'UNKNOWN' END AS schedule_type,
+    CASE WHEN format_category = 'ONLINE_SELF_PACED' THEN 'LEARNER_PACED' WHEN format_category IN ('IN_PERSON', 'VIRTUAL_INSTRUCTOR_LED') THEN 'INSTRUCTOR_PACED' WHEN format_category IN ('HYBRID', 'ONLINE') THEN 'MIXED_OR_UNSPECIFIED' ELSE 'UNKNOWN' END AS pacing_type,
+    CASE WHEN format_category = 'IN_PERSON' THEN 'CLASSROOM' WHEN format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED') THEN 'DIGITAL_LEARNING' WHEN format_category = 'HYBRID' THEN 'BLENDED_LEARNING' ELSE format_category END AS modality_group,
+    CASE WHEN format_category = 'IN_PERSON' THEN 'OFFLINE' WHEN format_category = 'HYBRID' THEN 'OMNICHANNEL' WHEN format_category = 'CORRESPONDENCE' THEN 'NON_DIGITAL_REMOTE' WHEN format_category = 'UNKNOWN' THEN 'UNKNOWN' ELSE 'DIGITAL' END AS channel_group,
+    format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED', 'HYBRID') AS is_online,
+    format_category IN ('IN_PERSON', 'HYBRID') AS is_in_person,
+    format_category = 'HYBRID' AS is_hybrid,
+    format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED', 'HYBRID') AS is_virtual,
+    format_category = 'ONLINE_SELF_PACED' AS is_self_paced,
+    format_category IN ('IN_PERSON', 'VIRTUAL_INSTRUCTOR_LED', 'HYBRID') AS is_instructor_led,
+    format_category IN ('IN_PERSON', 'VIRTUAL_INSTRUCTOR_LED', 'HYBRID') AS is_synchronous,
+    format_category IN ('ONLINE_SELF_PACED', 'ONLINE', 'HYBRID') AS is_asynchronous,
+    format_category = 'HYBRID' AS is_blended,
+    format_category = 'ONLINE_SELF_PACED' AS is_on_demand,
+    format_category IN ('IN_PERSON', 'HYBRID') AS requires_physical_location,
+    format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED', 'HYBRID') AS requires_virtual_platform,
+    '1.0' AS taxonomy_version,
+    'GOOGLE_ANALYTICS_4' AS source_system,
+    'view_item' AS source_event_name,
+    'GA4_ECOMMERCE_EVENT' AS source_schema,
+    representative_source_field_path AS source_field_path,
+    DATE(first_seen_timestamp) AS first_seen_date,
+    DATE(last_seen_timestamp) AS last_seen_date,
+    first_seen_timestamp,
+    last_seen_timestamp,
+    event_count,
+    offering_count,
+    example_learning_offering_id,
+    example_learning_offering_name,
+    CASE WHEN format_category = 'UNKNOWN' THEN 'MISSING_OR_UNKNOWN' WHEN format_category = 'OTHER' THEN 'UNMAPPED_VALUE' ELSE 'VALID' END AS data_quality_status,
+    format_category = 'UNKNOWN' AS is_unknown,
+    TRUE AS is_active,
+    DATE(first_seen_timestamp) AS effective_start_date,
+    CAST(NULL AS DATE) AS effective_end_date,
+    CURRENT_TIMESTAMP() AS record_updated_timestamp
+  FROM dimension_rollup;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH source_events AS (
+    SELECT
+      timestamp AS event_timestamp,
+      eventType AS event_name,
+      CAST(_experience.analytics.customDimensions.eVars.eVar1 AS STRING) AS raw_learning_delivery_format,
+      CAST(NULL AS STRING) AS learning_offering_id,
+      CAST(NULL AS STRING) AS learning_offering_name,
+      '_experience.analytics.customDimensions.eVars.eVar1' AS source_field_path
+    FROM your_aep_experience_event_dataset
+    WHERE eventType = 'view_item'
+  ),
+  normalized AS (
+    SELECT
+      *,
+      NULLIF(
+        TRIM(
+          REGEXP_REPLACE(
+            REGEXP_REPLACE(LOWER(raw_learning_delivery_format), '[_/|]+', ' '),
+            '\\s+',
+            ' '
+          )
+        ),
+        ''
+      ) AS normalized_value
+    FROM source_events
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_value IS NULL OR normalized_value IN ('unknown', 'not set', '(not set)', 'n a', 'na', 'null', 'unspecified') THEN 'UNKNOWN'
+        WHEN normalized_value RLIKE '\\b(hybrid|blended|mixed mode|mixed modality|flex|hyflex)\\b' THEN 'HYBRID'
+        WHEN normalized_value RLIKE '\\b(self paced|self-paced|on demand|on-demand|asynchronous|elearning|e learning|cbt|wbt|mooc)\\b' THEN 'ONLINE_SELF_PACED'
+        WHEN normalized_value RLIKE '\\b(virtual instructor led|virtual classroom|live online|live virtual|webinar|vilt|remote instructor)\\b' THEN 'VIRTUAL_INSTRUCTOR_LED'
+        WHEN normalized_value RLIKE '\\b(in person|in-person|classroom|face to face|face-to-face|onsite|on site|campus|ilt)\\b' THEN 'IN_PERSON'
+        WHEN normalized_value RLIKE '\\b(online|virtual|remote|digital|web based|web-based)\\b' THEN 'ONLINE'
+        WHEN normalized_value RLIKE '\\b(correspondence|postal|mail based|mail-based)\\b' THEN 'CORRESPONDENCE'
+        ELSE 'OTHER'
+      END AS format_category
+    FROM normalized
+    WHERE raw_learning_delivery_format IS NOT NULL
+  ),
+  dimension_rollup AS (
+    SELECT
+      normalized_value,
+      format_category,
+      MAX(raw_learning_delivery_format) AS representative_raw_value,
+      MAX(source_field_path) AS representative_source_field_path,
+      MIN(event_timestamp) AS first_seen_timestamp,
+      MAX(event_timestamp) AS last_seen_timestamp,
+      COUNT(*) AS event_count,
+      COUNT(DISTINCT learning_offering_id) AS offering_count,
+      MAX(learning_offering_id) AS example_learning_offering_id,
+      MAX(learning_offering_name) AS example_learning_offering_name
+    FROM classified
+    GROUP BY normalized_value, format_category
+  )
+  SELECT
+    SHA2(COALESCE(normalized_value, 'unknown'), 256) AS learning_delivery_format_key,
+    UPPER(REGEXP_REPLACE(COALESCE(normalized_value, 'unknown'), '[^a-z0-9]+', '_')) AS learning_delivery_format_code,
+    CASE format_category
+      WHEN 'IN_PERSON' THEN 'In Person'
+      WHEN 'VIRTUAL_INSTRUCTOR_LED' THEN 'Virtual Instructor-Led'
+      WHEN 'ONLINE_SELF_PACED' THEN 'Online Self-Paced'
+      WHEN 'HYBRID' THEN 'Hybrid or Blended'
+      WHEN 'ONLINE' THEN 'Online'
+      WHEN 'CORRESPONDENCE' THEN 'Correspondence'
+      WHEN 'UNKNOWN' THEN 'Unknown'
+      ELSE INITCAP(normalized_value)
+    END AS learning_delivery_format_name,
+    CONCAT('Learning delivered using the ', COALESCE(normalized_value, 'unknown'), ' format.') AS learning_delivery_format_description,
+    representative_raw_value AS learning_delivery_format_raw,
+    COALESCE(normalized_value, 'unknown') AS learning_delivery_format_normalized,
+    format_category AS learning_delivery_format_category,
+    CASE
+      WHEN format_category = 'IN_PERSON' THEN 'PHYSICAL'
+      WHEN format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED') THEN 'DIGITAL'
+      WHEN format_category = 'HYBRID' THEN 'PHYSICAL_AND_DIGITAL'
+      WHEN format_category = 'CORRESPONDENCE' THEN 'REMOTE_NON_DIGITAL'
+      ELSE 'UNCLASSIFIED'
+    END AS delivery_mode,
+    CASE
+      WHEN format_category = 'IN_PERSON' THEN 'PHYSICAL_LOCATION'
+      WHEN format_category = 'HYBRID' THEN 'PHYSICAL_AND_VIRTUAL'
+      WHEN format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED') THEN 'VIRTUAL_LOCATION'
+      WHEN format_category = 'CORRESPONDENCE' THEN 'REMOTE'
+      ELSE 'UNKNOWN'
+    END AS location_type,
+    CASE
+      WHEN format_category IN ('IN_PERSON', 'VIRTUAL_INSTRUCTOR_LED') THEN 'SYNCHRONOUS'
+      WHEN format_category = 'ONLINE_SELF_PACED' THEN 'ASYNCHRONOUS'
+      WHEN format_category IN ('HYBRID', 'ONLINE') THEN 'MIXED_OR_UNSPECIFIED'
+      ELSE 'UNKNOWN'
+    END AS synchronicity_type,
+    CASE
+      WHEN format_category IN ('IN_PERSON', 'VIRTUAL_INSTRUCTOR_LED') THEN 'INSTRUCTOR_PRESENT'
+      WHEN format_category = 'ONLINE_SELF_PACED' THEN 'NO_LIVE_INSTRUCTOR'
+      WHEN format_category IN ('HYBRID', 'ONLINE') THEN 'OPTIONAL_OR_MIXED'
+      ELSE 'UNKNOWN'
+    END AS instructor_presence_type,
+    CASE
+      WHEN format_category = 'IN_PERSON' THEN 'FACE_TO_FACE'
+      WHEN format_category = 'VIRTUAL_INSTRUCTOR_LED' THEN 'LIVE_DIGITAL'
+      WHEN format_category IN ('ONLINE', 'ONLINE_SELF_PACED') THEN 'DIGITAL'
+      WHEN format_category = 'HYBRID' THEN 'MULTIMODAL'
+      WHEN format_category = 'CORRESPONDENCE' THEN 'CORRESPONDENCE'
+      ELSE 'UNKNOWN'
+    END AS interaction_mode,
+    CASE WHEN format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED', 'HYBRID') THEN 'TECHNOLOGY_REQUIRED' ELSE 'TECHNOLOGY_NOT_REQUIRED_OR_UNKNOWN' END AS technology_dependency_type,
+    CASE WHEN format_category = 'IN_PERSON' THEN 'ONSITE' WHEN format_category = 'HYBRID' THEN 'ONSITE_AND_REMOTE' WHEN format_category = 'UNKNOWN' THEN 'UNKNOWN' ELSE 'REMOTE' END AS attendance_mode,
+    CASE WHEN format_category IN ('IN_PERSON', 'VIRTUAL_INSTRUCTOR_LED') THEN 'SCHEDULED' WHEN format_category = 'ONLINE_SELF_PACED' THEN 'ON_DEMAND' WHEN format_category IN ('HYBRID', 'ONLINE') THEN 'MIXED_OR_UNSPECIFIED' ELSE 'UNKNOWN' END AS schedule_type,
+    CASE WHEN format_category = 'ONLINE_SELF_PACED' THEN 'LEARNER_PACED' WHEN format_category IN ('IN_PERSON', 'VIRTUAL_INSTRUCTOR_LED') THEN 'INSTRUCTOR_PACED' WHEN format_category IN ('HYBRID', 'ONLINE') THEN 'MIXED_OR_UNSPECIFIED' ELSE 'UNKNOWN' END AS pacing_type,
+    CASE WHEN format_category = 'IN_PERSON' THEN 'CLASSROOM' WHEN format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED') THEN 'DIGITAL_LEARNING' WHEN format_category = 'HYBRID' THEN 'BLENDED_LEARNING' ELSE format_category END AS modality_group,
+    CASE WHEN format_category = 'IN_PERSON' THEN 'OFFLINE' WHEN format_category = 'HYBRID' THEN 'OMNICHANNEL' WHEN format_category = 'CORRESPONDENCE' THEN 'NON_DIGITAL_REMOTE' WHEN format_category = 'UNKNOWN' THEN 'UNKNOWN' ELSE 'DIGITAL' END AS channel_group,
+    format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED', 'HYBRID') AS is_online,
+    format_category IN ('IN_PERSON', 'HYBRID') AS is_in_person,
+    format_category = 'HYBRID' AS is_hybrid,
+    format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED', 'HYBRID') AS is_virtual,
+    format_category = 'ONLINE_SELF_PACED' AS is_self_paced,
+    format_category IN ('IN_PERSON', 'VIRTUAL_INSTRUCTOR_LED', 'HYBRID') AS is_instructor_led,
+    format_category IN ('IN_PERSON', 'VIRTUAL_INSTRUCTOR_LED', 'HYBRID') AS is_synchronous,
+    format_category IN ('ONLINE_SELF_PACED', 'ONLINE', 'HYBRID') AS is_asynchronous,
+    format_category = 'HYBRID' AS is_blended,
+    format_category = 'ONLINE_SELF_PACED' AS is_on_demand,
+    format_category IN ('IN_PERSON', 'HYBRID') AS requires_physical_location,
+    format_category IN ('ONLINE', 'ONLINE_SELF_PACED', 'VIRTUAL_INSTRUCTOR_LED', 'HYBRID') AS requires_virtual_platform,
+    '1.0' AS taxonomy_version,
+    'ADOBE_EXPERIENCE_PLATFORM' AS source_system,
+    'view_item' AS source_event_name,
+    'XDM_EXPERIENCE_EVENT' AS source_schema,
+    representative_source_field_path AS source_field_path,
+    CAST(first_seen_timestamp AS DATE) AS first_seen_date,
+    CAST(last_seen_timestamp AS DATE) AS last_seen_date,
+    first_seen_timestamp,
+    last_seen_timestamp,
+    event_count,
+    offering_count,
+    example_learning_offering_id,
+    example_learning_offering_name,
+    CASE WHEN format_category = 'UNKNOWN' THEN 'MISSING_OR_UNKNOWN' WHEN format_category = 'OTHER' THEN 'UNMAPPED_VALUE' ELSE 'VALID' END AS data_quality_status,
+    format_category = 'UNKNOWN' AS is_unknown,
+    TRUE AS is_active,
+    CAST(first_seen_timestamp AS DATE) AS effective_start_date,
+    CAST(NULL AS DATE) AS effective_end_date,
+    CURRENT_TIMESTAMP() AS record_updated_timestamp
+  FROM dimension_rollup;
+
+Calculation Notes: |
+  1️⃣ Assign format at learning-offering or scheduled-section level.  
+  2️⃣ Copy effective value to enrollment, attendance, content-launch, progress, and completion events.  
+  3️⃣ Use 'blended' for asynchronous and scheduled synchronous components.  
+  4️⃣ Use 'hybrid_synchronous' for physical or virtual attendance options.  
+  5️⃣ Do not classify as blended based on downloadable files or optional content.  
+  6️⃣ Use offering-level value over course-level value in case of conflicts.  
+  7️⃣ Map missing values to 'unknown' and exclude test or deleted offerings.
+
+Business Use Case: |
+  The Chief Learning Officer compares enrollment, attendance, completion, learner satisfaction, and unit delivery cost by format. If synchronous virtual offerings produce completion outcomes comparable to in-person offerings but have lower delivery cost and higher geographic reach, the portfolio team can shift selected future sections to synchronous virtual delivery while retaining in-person delivery for subjects requiring physical practice.
+
+
+Source Data: Learning Management System (LMS), Learning Experience Platform (LXP), Student Information System (SIS), Course Catalog, Virtual Classroom Platform, Scheduling System, and Digital Analytics
+
+Report Attributes: |
+  ["Course","Program","Subject Area","Learning Offering","Enrollment Type","Learner Segment","Geography","Instructor","Cohort","Learning Location","Device Type","Calendar Period"]
+
+Dashboard Usage: [Learning Portfolio Performance Dashboard, Enrollment and Completion Dashboard, Learning Engagement Dashboard, Instructional Delivery Operations Dashboard, Course Quality and Outcomes Dashboard, Learning Delivery Cost Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Course, Learning Offering, Learning Modality, Content Type, Enrollment Type, Instructor, Cohort, Learning Location, Device Type, Session Type]
+
+Derived Dimensions: [Delivery Format Group, Synchronicity Type, Instructor Interaction Mode, Physical Attendance Requirement, Online Delivery Indicator]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-14T19:30:05.489655+00:00
+
+Last Modified By: devyendarm
+
+
