@@ -1,0 +1,492 @@
+# Dimension: Traveler Acquisition Channel
+# Generated: 2026-09-13T22:30:30.539Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Traveler Acquisition Channel
+
+Description: |
+  Classifies each known or anonymous traveler by the normalized digital marketing channel that generated the traveler’s earliest eligible interaction with the brand. The value provides a persistent, mutually exclusive acquisition classification for first-touch cohort analysis and does not change when the traveler returns through subsequent channels.
+
+Category: Acquisition
+
+Tags: [dimension]
+
+Industry: Travel & Hospitality
+
+Priority: High
+
+Core Area: Discovery
+
+Scope: User
+
+Data Type: string
+
+Aggregation Window: User
+
+GA4 Event: |
+  page_view
+
+Adobe Event: |
+  page_view
+
+W3 Data Layer: |
+  {"digitalData":{"user":[{"profile":[{"attributes":{"travelerAcquisitionChannel":"{{normalized_traveler_acquisition_channel}}"}}]}]}}
+
+GA4 Data Layer: |
+  {"event":"page_view","user_properties":{"acquisition_channel":{"value":"{{normalized_traveler_acquisition_channel}}"}}}
+
+Adobe Client Data Layer: |
+  {"data":{"traveler":{"acquisitionChannel":"{{normalized_traveler_acquisition_channel}}"}},"event":"page_view"}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"{{normalized_traveler_acquisition_channel}}"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH event_base AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS event_timestamp,
+      event_name,
+      TO_HEX(SHA256(CONCAT(
+        COALESCE(user_pseudo_id, ''), '|',
+        CAST(event_timestamp AS STRING), '|',
+        event_name, '|',
+        CAST(COALESCE(event_bundle_sequence_id, 0) AS STRING)
+      ))) AS event_id,
+      user_pseudo_id,
+      user_id,
+      COALESCE(NULLIF(user_id, ''), user_pseudo_id) AS traveler_id,
+      (SELECT COALESCE(value.int_value, SAFE_CAST(value.string_value AS INT64))
+       FROM UNNEST(event_params)
+       WHERE key = 'ga_session_id'
+       LIMIT 1) AS session_id,
+      (SELECT COALESCE(value.int_value, SAFE_CAST(value.string_value AS INT64))
+       FROM UNNEST(event_params)
+       WHERE key = 'ga_session_number'
+       LIMIT 1) AS session_number,
+      platform,
+      stream_id,
+      '123456789' AS property_id,
+      NULLIF(TRIM((
+        SELECT value.string_value
+        FROM UNNEST(user_properties)
+        WHERE key = 'acquisition_channel'
+        ORDER BY set_timestamp_micros DESC
+        LIMIT 1
+      )), '') AS explicit_acquisition_channel,
+      LOWER(COALESCE(
+        NULLIF(collected_traffic_source.manual_source, ''),
+        NULLIF((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'source' LIMIT 1), ''),
+        NULLIF(traffic_source.source, ''),
+        '(direct)'
+      )) AS source,
+      LOWER(COALESCE(
+        NULLIF(collected_traffic_source.manual_medium, ''),
+        NULLIF((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'medium' LIMIT 1), ''),
+        NULLIF(traffic_source.medium, ''),
+        '(none)'
+      )) AS medium,
+      COALESCE(
+        NULLIF(collected_traffic_source.manual_campaign_name, ''),
+        NULLIF((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'campaign' LIMIT 1), ''),
+        NULLIF(traffic_source.name, ''),
+        '(not set)'
+      ) AS campaign,
+      COALESCE(
+        NULLIF(collected_traffic_source.manual_campaign_id, ''),
+        NULLIF((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'campaign_id' LIMIT 1), '')
+      ) AS campaign_id,
+      COALESCE(
+        NULLIF(collected_traffic_source.manual_term, ''),
+        NULLIF((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'term' LIMIT 1), '')
+      ) AS term,
+      COALESCE(
+        NULLIF(collected_traffic_source.manual_content, ''),
+        NULLIF((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'content' LIMIT 1), '')
+      ) AS content,
+      COALESCE(
+        NULLIF(collected_traffic_source.gclid, ''),
+        NULLIF(collected_traffic_source.dclid, ''),
+        NULLIF(collected_traffic_source.srsltid, ''),
+        NULLIF((SELECT value.string_value FROM UNNEST(event_params) WHERE key IN ('gclid', 'dclid', 'msclkid', 'fbclid') LIMIT 1), '')
+      ) AS click_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_referrer' LIMIT 1) AS referrer,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_location' LIMIT 1) AS page_location,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'page_title' LIMIT 1) AS page_title,
+      device.category AS device_category,
+      device.operating_system AS operating_system,
+      device.web_info.browser AS browser,
+      device.language AS language,
+      geo.country AS country,
+      geo.region AS region,
+      geo.city AS city,
+      geo.continent AS continent,
+      geo.sub_continent AS subcontinent,
+      geo.metro AS metro,
+      app_info.id AS app_id,
+      app_info.version AS app_version,
+      privacy_info.analytics_storage AS analytics_storage_consent,
+      privacy_info.ads_storage AS ads_storage_consent,
+      privacy_info.uses_transient_token AS uses_transient_token,
+      traffic_source.source AS first_user_source,
+      traffic_source.medium AS first_user_medium,
+      traffic_source.name AS first_user_campaign
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date)
+                            AND FORMAT_DATE('%Y%m%d', @end_date)
+      AND event_name = 'page_view'
+  ),
+  classified AS (
+    SELECT
+      *,
+      CASE
+        WHEN explicit_acquisition_channel IS NOT NULL THEN LOWER(TRIM(explicit_acquisition_channel))
+        WHEN click_id IS NOT NULL OR medium IN ('cpc', 'ppc', 'paidsearch', 'paid_search') THEN 'paid search'
+        WHEN medium IN ('paid_social', 'paidsocial', 'social-paid') THEN 'paid social'
+        WHEN medium IN ('display', 'cpm', 'banner', 'programmatic') THEN 'display'
+        WHEN medium IN ('affiliate', 'affiliates') THEN 'affiliate'
+        WHEN medium IN ('email', 'e-mail', 'newsletter') THEN 'email'
+        WHEN medium IN ('sms', 'text') THEN 'sms'
+        WHEN medium IN ('push', 'notification') THEN 'push notification'
+        WHEN medium IN ('organic', 'organic_search') THEN 'organic search'
+        WHEN medium IN ('organic_social', 'social', 'social-network', 'social-media') THEN 'organic social'
+        WHEN medium IN ('referral', 'link') THEN 'referral'
+        WHEN source IN ('(direct)', 'direct') AND medium IN ('(none)', 'none', 'not set') THEN 'direct'
+        ELSE 'other'
+      END AS preliminary_channel,
+      FIRST_VALUE(page_location IGNORE NULLS) OVER (
+        PARTITION BY user_pseudo_id, session_id
+        ORDER BY event_timestamp, event_id
+        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+      ) AS landing_page
+    FROM event_base
+  ),
+  normalized AS (
+    SELECT
+      *,
+      CASE
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'paid.*search|search.*paid|sem') THEN 'Paid Search'
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'paid.*social|social.*paid') THEN 'Paid Social'
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'organic.*search|seo') THEN 'Organic Search'
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'organic.*social') THEN 'Organic Social'
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'display|programmatic|banner') THEN 'Display'
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'affiliate') THEN 'Affiliate'
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'email|e-mail|newsletter') THEN 'Email'
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'sms|text') THEN 'SMS'
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'push') THEN 'Push Notification'
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'referral') THEN 'Referral'
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'direct') THEN 'Direct'
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'partner') THEN 'Partner'
+        WHEN REGEXP_CONTAINS(preliminary_channel, r'offline|call center|retail|branch') THEN 'Offline'
+        ELSE 'Other'
+      END AS traveler_acquisition_channel
+    FROM classified
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    event_name,
+    event_id,
+    user_pseudo_id,
+    user_id,
+    traveler_id,
+    session_id,
+    session_number,
+    platform,
+    stream_id,
+    property_id,
+    explicit_acquisition_channel AS acquisition_channel_raw,
+    traveler_acquisition_channel,
+    CASE
+      WHEN traveler_acquisition_channel IN ('Paid Search', 'Paid Social', 'Display', 'Affiliate') THEN 'Paid'
+      WHEN traveler_acquisition_channel IN ('Organic Search', 'Organic Social', 'Referral') THEN 'Earned'
+      WHEN traveler_acquisition_channel IN ('Email', 'SMS', 'Push Notification', 'Direct') THEN 'Owned'
+      WHEN traveler_acquisition_channel = 'Offline' THEN 'Offline'
+      ELSE 'Other'
+    END AS acquisition_channel_group,
+    source,
+    medium,
+    campaign,
+    campaign_id,
+    term,
+    content,
+    click_id,
+    referrer,
+    page_location,
+    page_title,
+    landing_page,
+    NET.HOST(page_location) AS host_name,
+    device_category,
+    operating_system,
+    browser,
+    language,
+    country,
+    region,
+    city,
+    continent,
+    subcontinent,
+    metro,
+    app_id,
+    app_version,
+    analytics_storage_consent,
+    ads_storage_consent,
+    uses_transient_token,
+    first_user_source,
+    first_user_medium,
+    first_user_campaign,
+    IF(explicit_acquisition_channel IS NOT NULL, 'collected_user_property', 'derived_traffic_source') AS channel_origin,
+    traveler_acquisition_channel IN ('Paid Search', 'Paid Social', 'Display', 'Affiliate') AS is_paid_channel,
+    traveler_acquisition_channel = 'Direct' AS is_direct_channel,
+    CURRENT_TIMESTAMP() AS record_updated_at
+  FROM normalized;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH identified_events AS (
+    SELECT
+      CAST("timestamp" AS DATE) AS event_date,
+      "timestamp" AS event_timestamp,
+      eventType AS event_name,
+      _id AS event_id,
+      identityMap['ECID'][0].id AS user_pseudo_id,
+      identityMap['CRMID'][0].id AS user_id,
+      COALESCE(identityMap['CRMID'][0].id, identityMap['ECID'][0].id) AS traveler_id,
+      implementationDetails.name AS platform,
+      implementationDetails.environment AS stream_id,
+      'aep_web_event_dataset' AS property_id,
+      NULLIF(TRIM(_experience.analytics.customDimensions.eVars.eVar1), '') AS explicit_acquisition_channel,
+      web.webReferrer.URL AS referrer,
+      web.webPageDetails.URL AS page_location,
+      web.webPageDetails.name AS page_title,
+      marketing.trackingCode AS tracking_code,
+      device.type AS device_category,
+      device.manufacturer AS device_manufacturer,
+      device.model AS device_model,
+      environment.operatingSystem AS operating_system,
+      environment.operatingSystemVersion AS operating_system_version,
+      environment.browserDetails.name AS browser,
+      environment.browserDetails.version AS browser_version,
+      environment.browserDetails.userAgent AS user_agent,
+      environment.language AS language,
+      placeContext.geo.countryCode AS country,
+      placeContext.geo.stateProvince AS region,
+      placeContext.geo.city AS city,
+      placeContext.geo.dmaID AS metro,
+      placeContext.localTime AS local_time,
+      consents.collect.val AS collection_consent,
+      consents.advertising.val AS advertising_consent,
+      LAG("timestamp") OVER (
+        PARTITION BY identityMap['ECID'][0].id
+        ORDER BY "timestamp", _id
+      ) AS previous_event_timestamp
+    FROM aep_web_event_dataset
+    WHERE "timestamp" >= CURRENT_TIMESTAMP - INTERVAL '30' DAY
+      AND "timestamp" < CURRENT_TIMESTAMP
+      AND eventType IN ('page_view', 'web.webpagedetails.pageViews')
+  ),
+  session_boundaries AS (
+    SELECT
+      *,
+      CASE
+        WHEN previous_event_timestamp IS NULL
+          OR event_timestamp > previous_event_timestamp + INTERVAL '30' MINUTE
+        THEN 1
+        ELSE 0
+      END AS new_session_flag
+    FROM identified_events
+  ),
+  sessionized AS (
+    SELECT
+      *,
+      SUM(new_session_flag) OVER (
+        PARTITION BY user_pseudo_id
+        ORDER BY event_timestamp, event_id
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+      ) AS session_number
+    FROM session_boundaries
+  ),
+  enriched AS (
+    SELECT
+      *,
+      MD5(CONCAT(
+        COALESCE(user_pseudo_id, 'anonymous'), '|',
+        CAST(session_number AS VARCHAR)
+      )) AS session_id,
+      FIRST_VALUE(page_location) OVER (
+        PARTITION BY user_pseudo_id, session_number
+        ORDER BY event_timestamp, event_id
+        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+      ) AS landing_page,
+      CASE
+        WHEN explicit_acquisition_channel IS NOT NULL THEN LOWER(explicit_acquisition_channel)
+        WHEN tracking_code IS NOT NULL AND LOWER(tracking_code) LIKE '%social%' THEN 'paid social'
+        WHEN tracking_code IS NOT NULL AND LOWER(tracking_code) LIKE '%display%' THEN 'display'
+        WHEN tracking_code IS NOT NULL AND LOWER(tracking_code) LIKE '%affiliate%' THEN 'affiliate'
+        WHEN tracking_code IS NOT NULL AND LOWER(tracking_code) LIKE '%email%' THEN 'email'
+        WHEN tracking_code IS NOT NULL THEN 'paid search'
+        WHEN referrer IS NULL OR TRIM(referrer) = '' THEN 'direct'
+        WHEN LOWER(referrer) LIKE '%google.%'
+          OR LOWER(referrer) LIKE '%bing.%'
+          OR LOWER(referrer) LIKE '%yahoo.%'
+          OR LOWER(referrer) LIKE '%duckduckgo.%'
+        THEN 'organic search'
+        WHEN LOWER(referrer) LIKE '%facebook.%'
+          OR LOWER(referrer) LIKE '%instagram.%'
+          OR LOWER(referrer) LIKE '%linkedin.%'
+          OR LOWER(referrer) LIKE '%tiktok.%'
+          OR LOWER(referrer) LIKE '%twitter.%'
+          OR LOWER(referrer) LIKE '%x.com%'
+        THEN 'organic social'
+        ELSE 'referral'
+      END AS preliminary_channel
+    FROM sessionized
+  ),
+  normalized AS (
+    SELECT
+      *,
+      CASE
+        WHEN preliminary_channel LIKE '%paid%search%'
+          OR preliminary_channel = 'sem' THEN 'Paid Search'
+        WHEN preliminary_channel LIKE '%paid%social%'
+          OR preliminary_channel LIKE '%social%paid%' THEN 'Paid Social'
+        WHEN preliminary_channel LIKE '%organic%search%'
+          OR preliminary_channel = 'seo' THEN 'Organic Search'
+        WHEN preliminary_channel LIKE '%organic%social%' THEN 'Organic Social'
+        WHEN preliminary_channel LIKE '%display%'
+          OR preliminary_channel LIKE '%programmatic%'
+          OR preliminary_channel LIKE '%banner%' THEN 'Display'
+        WHEN preliminary_channel LIKE '%affiliate%' THEN 'Affiliate'
+        WHEN preliminary_channel LIKE '%email%'
+          OR preliminary_channel LIKE '%newsletter%' THEN 'Email'
+        WHEN preliminary_channel LIKE '%sms%'
+          OR preliminary_channel = 'text' THEN 'SMS'
+        WHEN preliminary_channel LIKE '%push%' THEN 'Push Notification'
+        WHEN preliminary_channel LIKE '%referral%' THEN 'Referral'
+        WHEN preliminary_channel LIKE '%direct%' THEN 'Direct'
+        WHEN preliminary_channel LIKE '%partner%' THEN 'Partner'
+        WHEN preliminary_channel LIKE '%offline%'
+          OR preliminary_channel LIKE '%call center%'
+          OR preliminary_channel LIKE '%retail%'
+          OR preliminary_channel LIKE '%branch%' THEN 'Offline'
+        ELSE 'Other'
+      END AS traveler_acquisition_channel
+    FROM enriched
+  )
+  SELECT
+    event_date,
+    event_timestamp,
+    event_name,
+    event_id,
+    user_pseudo_id,
+    user_id,
+    traveler_id,
+    session_id,
+    session_number,
+    platform,
+    stream_id,
+    property_id,
+    explicit_acquisition_channel AS acquisition_channel_raw,
+    traveler_acquisition_channel,
+    CASE
+      WHEN traveler_acquisition_channel IN ('Paid Search', 'Paid Social', 'Display', 'Affiliate') THEN 'Paid'
+      WHEN traveler_acquisition_channel IN ('Organic Search', 'Organic Social', 'Referral') THEN 'Earned'
+      WHEN traveler_acquisition_channel IN ('Email', 'SMS', 'Push Notification', 'Direct') THEN 'Owned'
+      WHEN traveler_acquisition_channel = 'Offline' THEN 'Offline'
+      ELSE 'Other'
+    END AS acquisition_channel_group,
+    referrer AS source,
+    CASE
+      WHEN traveler_acquisition_channel IN ('Paid Search', 'Paid Social') THEN 'cpc'
+      WHEN traveler_acquisition_channel = 'Display' THEN 'display'
+      WHEN traveler_acquisition_channel = 'Organic Search' THEN 'organic'
+      WHEN traveler_acquisition_channel = 'Organic Social' THEN 'organic_social'
+      WHEN traveler_acquisition_channel = 'Referral' THEN 'referral'
+      WHEN traveler_acquisition_channel = 'Direct' THEN '(none)'
+      ELSE LOWER(traveler_acquisition_channel)
+    END AS medium,
+    tracking_code AS campaign,
+    tracking_code AS campaign_id,
+    CAST(NULL AS VARCHAR) AS term,
+    CAST(NULL AS VARCHAR) AS content,
+    tracking_code AS click_id,
+    referrer,
+    page_location,
+    page_title,
+    landing_page,
+    REGEXP_SUBSTR(page_location, 'https?://([^/]+)', 1, 1, 'i', 1) AS host_name,
+    device_category,
+    operating_system,
+    browser,
+    language,
+    country,
+    region,
+    city,
+    CAST(NULL AS VARCHAR) AS continent,
+    CAST(NULL AS VARCHAR) AS subcontinent,
+    metro,
+    CAST(NULL AS VARCHAR) AS app_id,
+    implementationDetails.version AS app_version,
+    collection_consent AS analytics_storage_consent,
+    advertising_consent AS ads_storage_consent,
+    CAST(NULL AS VARCHAR) AS uses_transient_token,
+    referrer AS first_user_source,
+    CASE WHEN referrer IS NULL OR TRIM(referrer) = '' THEN '(none)' ELSE 'referral' END AS first_user_medium,
+    tracking_code AS first_user_campaign,
+    CASE
+      WHEN explicit_acquisition_channel IS NOT NULL THEN 'xdm_evar1'
+      ELSE 'derived_marketing_context'
+    END AS channel_origin,
+    CASE
+      WHEN traveler_acquisition_channel IN ('Paid Search', 'Paid Social', 'Display', 'Affiliate') THEN TRUE
+      ELSE FALSE
+    END AS is_paid_channel,
+    CASE WHEN traveler_acquisition_channel = 'Direct' THEN TRUE ELSE FALSE END AS is_direct_channel,
+    CURRENT_TIMESTAMP AS record_updated_at
+  FROM normalized;
+
+Calculation Notes: |
+  1️⃣ Assign channel based on earliest eligible digital interaction using event time and enterprise reporting time zone.  
+  2️⃣ Resolve campaign parameters and identifiers through a version-controlled channel taxonomy with recommended values.  
+  3️⃣ Apply deterministic rules for campaign and click identifiers before referrer-based rules; classify Direct only when no other qualifiers exist.  
+  4️⃣ Exclude bots, internal traffic, consent-denied events, duplicates, and blocked domains from analysis.  
+  5️⃣ Persist initial channel across sessions/devices when identity resolution links identifiers to the same traveler.  
+  6️⃣ Late-arriving events can restate values if they predate the current acquisition interaction within the data-reprocessing window.  
+  7️⃣ Use Unassigned for acquisition evidence that cannot be reliably mapped, and ensure taxonomy changes are effective-dated.
+
+Business Use Case: |
+  The Chief Marketing Officer compares booking conversion, net booking revenue, cancellation rate, repeat-booking behavior, and customer value across traveler acquisition channels to redirect budget toward channels that acquire durable, high-value travelers rather than channels that merely generate low-quality visits. Growth analytics teams also use acquisition-channel cohorts to identify taxonomy gaps, investigate rising Direct or Unassigned shares, and evaluate whether metasearch, paid search, affiliate, social, and owned messaging programs are expanding the traveler base.
+
+
+Source Data: Digital Analytics (GA4) + Digital Advertising Platforms + Customer Data Platform
+
+Report Attributes: |
+  ["Traveler Acquisition Source","Traveler Acquisition Medium","Traveler Acquisition Campaign","Traveler Acquisition Date","Traveler Acquisition Landing Page","Traveler Acquisition Platform","Traveler Acquisition Device Category","Traveler Country","Traveler Type","Destination","Origin Market","Travel Product Type","Booking Channel","Loyalty Membership Tier","New vs Returning Traveler","Conversion Status"]
+
+Dashboard Usage: [Traveler Acquisition Performance, Digital Marketing Executive Scorecard, First-Touch Channel Performance, Marketing Funnel and Booking Conversion, Traveler Cohort Quality, Customer Lifetime Value by Acquisition Channel, Paid Media Efficiency, Channel Taxonomy and Attribution Quality, New Traveler Growth, Cross-Device Acquisition]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Traveler Acquisition Source, Traveler Acquisition Medium, Traveler Acquisition Campaign, Traveler Acquisition Date, Traveler Acquisition Landing Page, Traveler Acquisition Platform, Traveler Acquisition Device Category, Traveler Country, Traveler Type, Booking Channel, Session Channel, Conversion Channel, Marketing Campaign, Referring Domain]
+
+Derived Dimensions: [Traveler Acquisition Channel Group, Traveler Acquisition Channel Type, Paid vs Organic Acquisition, Owned vs Earned vs Paid Acquisition, Acquisition Partner Category, Acquisition Cohort, Acquisition Channel Quality Tier, Cross-Channel Acquisition Path]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-13T22:30:30.101034+00:00
+
+Last Modified By: devyendarm
+
+
