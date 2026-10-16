@@ -1,0 +1,719 @@
+# Metric: Warehouse Order Processing Time
+# Generated: 2026-09-12T18:30:14.608Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Warehouse Order Processing Time
+Formula: AVG(TIMESTAMP_DIFF(order_ready_for_customer_handoff_at, warehouse_release_at, SECOND) / 60.0) FILTER (WHERE eligible_fulfillment_group = TRUE)
+
+Description: |
+  Warehouse Order Processing Time measures the average elapsed minutes from release of a paid, inventory-allocated customer order to the warehouse until the order is ready for carrier or customer handoff. It identifies fulfillment delays that can affect delivery promises, post-purchase engagement, cancellations, support contacts, retention, and customer lifetime value.
+
+Category: Efficiency
+
+Tags: [metric]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Measure Type: average
+
+Aggregation Window: Time based - Daily
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH wms_events_deduplicated AS (
+    SELECT
+      event_id,
+      customer_order_id,
+      fulfillment_group_id,
+      warehouse_id,
+      warehouse_name,
+      warehouse_timezone,
+      LOWER(status) AS warehouse_status,
+      status_timestamp,
+      ingested_at,
+      source_system
+    FROM `your-project.wms.warehouse_status_events`
+    WHERE customer_order_id IS NOT NULL
+      AND fulfillment_group_id IS NOT NULL
+      AND status_timestamp IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY event_id
+      ORDER BY ingested_at DESC
+    ) = 1
+  ),
+  wms_rollup AS (
+    SELECT
+      customer_order_id,
+      fulfillment_group_id,
+      ARRAY_AGG(warehouse_id IGNORE NULLS ORDER BY status_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS warehouse_id,
+      ARRAY_AGG(warehouse_name IGNORE NULLS ORDER BY status_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS warehouse_name,
+      ARRAY_AGG(warehouse_timezone IGNORE NULLS ORDER BY status_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS warehouse_timezone,
+      MIN(IF(warehouse_status IN ('received', 'accepted'), status_timestamp, NULL)) AS warehouse_received_at,
+      MIN(IF(warehouse_status IN ('processing', 'picking', 'packing'), status_timestamp, NULL)) AS processing_started_at,
+      MIN(IF(warehouse_status IN ('ready', 'ready_for_pickup', 'ready_to_ship'), status_timestamp, NULL)) AS ready_for_pickup_at,
+      ARRAY_AGG(IF(warehouse_status IN ('received', 'accepted'), event_id, NULL) IGNORE NULLS ORDER BY status_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS warehouse_received_event_id,
+      ARRAY_AGG(IF(warehouse_status IN ('processing', 'picking', 'packing'), event_id, NULL) IGNORE NULLS ORDER BY status_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS processing_start_event_id,
+      ARRAY_AGG(IF(warehouse_status IN ('ready', 'ready_for_pickup', 'ready_to_ship'), event_id, NULL) IGNORE NULLS ORDER BY status_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS processing_end_event_id,
+      ARRAY_AGG(warehouse_status ORDER BY status_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS latest_warehouse_status,
+      COUNT(*) AS warehouse_source_event_count,
+      COUNTIF(ingested_at > TIMESTAMP_ADD(status_timestamp, INTERVAL 24 HOUR)) > 0 AS has_late_arriving_warehouse_event,
+      MIN(status_timestamp) AS first_warehouse_event_at,
+      MAX(status_timestamp) AS last_warehouse_event_at,
+      MAX(ingested_at) AS latest_warehouse_ingested_at
+    FROM wms_events_deduplicated
+    GROUP BY customer_order_id, fulfillment_group_id
+  ),
+  payment_rollup AS (
+    SELECT
+      customer_order_id,
+      MIN(IF(LOWER(authorization_status) IN ('authorized', 'approved', 'successful'), authorization_timestamp, NULL)) AS payment_authorized_at,
+      ARRAY_AGG(payment_method IGNORE NULLS ORDER BY authorization_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS payment_method,
+      ARRAY_AGG(LOWER(authorization_status) ORDER BY authorization_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS latest_payment_authorization_status,
+      COUNT(*) AS payment_authorization_event_count
+    FROM `your-project.payments.authorization_events`
+    WHERE customer_order_id IS NOT NULL
+      AND authorization_timestamp IS NOT NULL
+    GROUP BY customer_order_id
+  ),
+  item_rollup AS (
+    SELECT
+      customer_order_id,
+      fulfillment_group_id,
+      COUNT(DISTINCT order_item_id) AS fulfillment_group_item_count,
+      SUM(quantity) AS fulfillment_group_unit_quantity,
+      SUM(item_net_amount) AS fulfillment_group_net_amount,
+      SUM(item_gross_amount) AS fulfillment_group_gross_amount
+    FROM `your-project.oms.fulfillment_group_items`
+    GROUP BY customer_order_id, fulfillment_group_id
+  ),
+  identity_current AS (
+    SELECT
+      customer_order_id,
+      unified_customer_id,
+      anonymous_customer_id,
+      journey_id,
+      identity_stitching_status,
+      identity_confidence_score
+    FROM `your-project.cdp.order_identity_map`
+    WHERE customer_order_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY customer_order_id
+      ORDER BY updated_at DESC
+    ) = 1
+  ),
+  carrier_validation AS (
+    SELECT
+      customer_order_id,
+      fulfillment_group_id,
+      MIN(IF(LOWER(carrier_status) IN ('picked_up', 'collected', 'in_transit'), carrier_event_timestamp, NULL)) AS carrier_pickup_at,
+      ARRAY_AGG(carrier_code IGNORE NULLS ORDER BY carrier_event_timestamp DESC LIMIT 1)[SAFE_OFFSET(0)] AS carrier_code,
+      COUNT(*) AS carrier_event_count
+    FROM `your-project.logistics.carrier_events`
+    WHERE customer_order_id IS NOT NULL
+      AND fulfillment_group_id IS NOT NULL
+    GROUP BY customer_order_id, fulfillment_group_id
+  ),
+  notification_validation AS (
+    SELECT
+      customer_order_id,
+      fulfillment_group_id,
+      MIN(IF(LOWER(notification_type) IN ('ready_for_pickup', 'ready_to_ship', 'shipment_ready'), sent_timestamp, NULL)) AS customer_notified_at,
+      COUNT(*) AS notification_event_count
+    FROM `your-project.customer_engagement.order_notifications`
+    WHERE customer_order_id IS NOT NULL
+      AND fulfillment_group_id IS NOT NULL
+    GROUP BY customer_order_id, fulfillment_group_id
+  ),
+  metric_base AS (
+    SELECT
+      o.customer_order_id,
+      fg.fulfillment_group_id,
+      o.order_number,
+      o.customer_id,
+      id.unified_customer_id,
+      id.anonymous_customer_id,
+      id.journey_id,
+      id.identity_stitching_status,
+      id.identity_confidence_score,
+      o.sales_channel,
+      o.order_channel,
+      o.device_type,
+      o.market,
+      o.country_code,
+      o.region_code,
+      o.currency_code,
+      o.order_created_at,
+      p.payment_authorized_at,
+      fg.created_at AS fulfillment_group_created_at,
+      fg.released_to_warehouse_at AS fulfillment_released_at,
+      w.warehouse_received_at,
+      w.processing_started_at,
+      w.ready_for_pickup_at,
+      COALESCE(w.processing_started_at, w.warehouse_received_at) AS processing_start_at,
+      w.ready_for_pickup_at AS processing_end_at,
+      cv.carrier_pickup_at,
+      nv.customer_notified_at,
+      w.first_warehouse_event_at,
+      w.last_warehouse_event_at,
+      w.latest_warehouse_ingested_at,
+      w.warehouse_received_event_id,
+      w.processing_start_event_id,
+      w.processing_end_event_id,
+      w.warehouse_id,
+      w.warehouse_name,
+      w.warehouse_timezone,
+      fg.fulfillment_type,
+      fg.shipping_method,
+      cv.carrier_code,
+      p.payment_method,
+      p.latest_payment_authorization_status,
+      fg.fulfillment_status,
+      w.latest_warehouse_status,
+      fg.processing_sla_minutes,
+      ir.fulfillment_group_item_count,
+      ir.fulfillment_group_unit_quantity,
+      ir.fulfillment_group_net_amount,
+      ir.fulfillment_group_gross_amount,
+      o.order_item_count,
+      o.order_unit_quantity,
+      o.order_net_amount,
+      o.order_gross_amount,
+      w.warehouse_source_event_count,
+      p.payment_authorization_event_count,
+      cv.carrier_event_count,
+      nv.notification_event_count,
+      w.has_late_arriving_warehouse_event
+    FROM `your-project.commerce.customer_orders` AS o
+    INNER JOIN `your-project.oms.fulfillment_groups` AS fg
+      ON fg.customer_order_id = o.customer_order_id
+    LEFT JOIN wms_rollup AS w
+      ON w.customer_order_id = fg.customer_order_id
+     AND w.fulfillment_group_id = fg.fulfillment_group_id
+    LEFT JOIN payment_rollup AS p
+      ON p.customer_order_id = o.customer_order_id
+    LEFT JOIN item_rollup AS ir
+      ON ir.customer_order_id = fg.customer_order_id
+     AND ir.fulfillment_group_id = fg.fulfillment_group_id
+    LEFT JOIN identity_current AS id
+      ON id.customer_order_id = o.customer_order_id
+    LEFT JOIN carrier_validation AS cv
+      ON cv.customer_order_id = fg.customer_order_id
+     AND cv.fulfillment_group_id = fg.fulfillment_group_id
+    LEFT JOIN notification_validation AS nv
+      ON nv.customer_order_id = fg.customer_order_id
+     AND nv.fulfillment_group_id = fg.fulfillment_group_id
+    WHERE COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_deleted, FALSE) = FALSE
+      AND COALESCE(fg.is_deleted, FALSE) = FALSE
+  ),
+  metric_measured AS (
+    SELECT
+      *,
+      IF(
+        processing_start_at IS NOT NULL
+        AND processing_end_at IS NOT NULL
+        AND processing_end_at >= processing_start_at,
+        TIMESTAMP_DIFF(processing_end_at, processing_start_at, SECOND),
+        NULL
+      ) AS processing_time_seconds
+    FROM metric_base
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT(customer_order_id, '|', fulfillment_group_id))) AS metric_record_id,
+    'Warehouse Order Processing Time' AS metric_name,
+    'fulfillment_group' AS metric_grain,
+    customer_order_id,
+    fulfillment_group_id,
+    order_number,
+    customer_id,
+    unified_customer_id,
+    anonymous_customer_id,
+    journey_id,
+    identity_stitching_status,
+    identity_confidence_score,
+    sales_channel,
+    order_channel,
+    device_type,
+    market,
+    country_code,
+    region_code,
+    currency_code,
+    order_created_at,
+    payment_authorized_at,
+    fulfillment_group_created_at,
+    fulfillment_released_at,
+    warehouse_received_at,
+    processing_started_at,
+    ready_for_pickup_at,
+    processing_start_at,
+    processing_end_at,
+    carrier_pickup_at,
+    customer_notified_at,
+    first_warehouse_event_at,
+    last_warehouse_event_at,
+    latest_warehouse_ingested_at,
+    warehouse_received_event_id,
+    processing_start_event_id,
+    processing_end_event_id,
+    processing_time_seconds,
+    SAFE_DIVIDE(processing_time_seconds, 60.0) AS processing_time_minutes,
+    SAFE_DIVIDE(processing_time_seconds, 3600.0) AS processing_time_hours,
+    processing_sla_minutes,
+    CASE
+      WHEN processing_time_seconds IS NULL OR processing_sla_minutes IS NULL THEN NULL
+      ELSE processing_time_seconds <= processing_sla_minutes * 60
+    END AS is_processing_sla_met,
+    processing_time_seconds IS NOT NULL AS is_duration_valid,
+    CASE
+      WHEN processing_start_at IS NULL THEN 'missing_warehouse_processing_start'
+      WHEN processing_end_at IS NULL THEN 'missing_warehouse_ready_timestamp'
+      WHEN processing_end_at < processing_start_at THEN 'negative_duration'
+      ELSE NULL
+    END AS exclusion_reason,
+    warehouse_id,
+    warehouse_name,
+    warehouse_timezone,
+    fulfillment_type,
+    shipping_method,
+    carrier_code,
+    payment_method,
+    latest_payment_authorization_status,
+    fulfillment_status,
+    latest_warehouse_status,
+    fulfillment_group_item_count,
+    fulfillment_group_unit_quantity,
+    fulfillment_group_net_amount,
+    fulfillment_group_gross_amount,
+    order_item_count,
+    order_unit_quantity,
+    order_net_amount,
+    order_gross_amount,
+    warehouse_source_event_count,
+    payment_authorization_event_count,
+    carrier_event_count,
+    notification_event_count,
+    has_late_arriving_warehouse_event,
+    CASE
+      WHEN carrier_pickup_at IS NULL OR processing_end_at IS NULL THEN NULL
+      ELSE carrier_pickup_at >= processing_end_at
+    END AS is_carrier_sequence_valid,
+    CASE
+      WHEN customer_notified_at IS NULL OR processing_end_at IS NULL THEN NULL
+      ELSE customer_notified_at >= processing_end_at
+    END AS is_notification_sequence_valid,
+    DATE(processing_end_at) AS metric_date,
+    CURRENT_TIMESTAMP() AS calculated_at
+  FROM metric_measured;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH wms_events_ranked AS (
+    SELECT
+      event_id,
+      customer_order_id,
+      fulfillment_group_id,
+      warehouse_id,
+      warehouse_name,
+      warehouse_timezone,
+      LOWER(status) AS warehouse_status,
+      status_timestamp,
+      ingested_at,
+      source_system,
+      ROW_NUMBER() OVER (
+        PARTITION BY event_id
+        ORDER BY ingested_at DESC
+      ) AS event_version_rank
+    FROM aep_backend_wms_warehouse_status_events
+    WHERE customer_order_id IS NOT NULL
+      AND fulfillment_group_id IS NOT NULL
+      AND status_timestamp IS NOT NULL
+  ),
+  wms_events_deduplicated AS (
+    SELECT *
+    FROM wms_events_ranked
+    WHERE event_version_rank = 1
+  ),
+  wms_rollup AS (
+    SELECT
+      customer_order_id,
+      fulfillment_group_id,
+      MAX(warehouse_id) AS warehouse_id,
+      MAX(warehouse_name) AS warehouse_name,
+      MAX(warehouse_timezone) AS warehouse_timezone,
+      MIN(CASE WHEN warehouse_status IN ('received', 'accepted') THEN status_timestamp END) AS warehouse_received_at,
+      MIN(CASE WHEN warehouse_status IN ('processing', 'picking', 'packing') THEN status_timestamp END) AS processing_started_at,
+      MIN(CASE WHEN warehouse_status IN ('ready', 'ready_for_pickup', 'ready_to_ship') THEN status_timestamp END) AS ready_for_pickup_at,
+      MIN(CASE WHEN warehouse_status IN ('received', 'accepted') THEN event_id END) AS warehouse_received_event_id,
+      MIN(CASE WHEN warehouse_status IN ('processing', 'picking', 'packing') THEN event_id END) AS processing_start_event_id,
+      MIN(CASE WHEN warehouse_status IN ('ready', 'ready_for_pickup', 'ready_to_ship') THEN event_id END) AS processing_end_event_id,
+      COUNT(*) AS warehouse_source_event_count,
+      MAX(CASE WHEN ingested_at > status_timestamp + INTERVAL '24' HOUR THEN 1 ELSE 0 END) AS has_late_arriving_warehouse_event,
+      MIN(status_timestamp) AS first_warehouse_event_at,
+      MAX(status_timestamp) AS last_warehouse_event_at,
+      MAX(ingested_at) AS latest_warehouse_ingested_at
+    FROM wms_events_deduplicated
+    GROUP BY customer_order_id, fulfillment_group_id
+  ),
+  wms_latest_status_ranked AS (
+    SELECT
+      customer_order_id,
+      fulfillment_group_id,
+      warehouse_status,
+      ROW_NUMBER() OVER (
+        PARTITION BY customer_order_id, fulfillment_group_id
+        ORDER BY status_timestamp DESC, ingested_at DESC
+      ) AS status_rank
+    FROM wms_events_deduplicated
+  ),
+  wms_latest_status AS (
+    SELECT
+      customer_order_id,
+      fulfillment_group_id,
+      warehouse_status AS latest_warehouse_status
+    FROM wms_latest_status_ranked
+    WHERE status_rank = 1
+  ),
+  payment_rollup AS (
+    SELECT
+      customer_order_id,
+      MIN(CASE
+        WHEN LOWER(authorization_status) IN ('authorized', 'approved', 'successful')
+        THEN authorization_timestamp
+      END) AS payment_authorized_at,
+      MAX(payment_method) AS payment_method,
+      COUNT(*) AS payment_authorization_event_count
+    FROM aep_backend_payment_authorization_events
+    WHERE customer_order_id IS NOT NULL
+      AND authorization_timestamp IS NOT NULL
+    GROUP BY customer_order_id
+  ),
+  payment_latest_ranked AS (
+    SELECT
+      customer_order_id,
+      LOWER(authorization_status) AS authorization_status,
+      ROW_NUMBER() OVER (
+        PARTITION BY customer_order_id
+        ORDER BY authorization_timestamp DESC, ingested_at DESC
+      ) AS payment_rank
+    FROM aep_backend_payment_authorization_events
+    WHERE customer_order_id IS NOT NULL
+  ),
+  payment_latest AS (
+    SELECT
+      customer_order_id,
+      authorization_status AS latest_payment_authorization_status
+    FROM payment_latest_ranked
+    WHERE payment_rank = 1
+  ),
+  item_rollup AS (
+    SELECT
+      customer_order_id,
+      fulfillment_group_id,
+      COUNT(DISTINCT order_item_id) AS fulfillment_group_item_count,
+      SUM(quantity) AS fulfillment_group_unit_quantity,
+      SUM(item_net_amount) AS fulfillment_group_net_amount,
+      SUM(item_gross_amount) AS fulfillment_group_gross_amount
+    FROM aep_backend_oms_fulfillment_group_items
+    GROUP BY customer_order_id, fulfillment_group_id
+  ),
+  identity_ranked AS (
+    SELECT
+      customer_order_id,
+      unified_customer_id,
+      anonymous_customer_id,
+      journey_id,
+      identity_stitching_status,
+      identity_confidence_score,
+      ROW_NUMBER() OVER (
+        PARTITION BY customer_order_id
+        ORDER BY updated_at DESC
+      ) AS identity_rank
+    FROM aep_backend_cdp_order_identity_map
+    WHERE customer_order_id IS NOT NULL
+  ),
+  identity_current AS (
+    SELECT
+      customer_order_id,
+      unified_customer_id,
+      anonymous_customer_id,
+      journey_id,
+      identity_stitching_status,
+      identity_confidence_score
+    FROM identity_ranked
+    WHERE identity_rank = 1
+  ),
+  carrier_validation AS (
+    SELECT
+      customer_order_id,
+      fulfillment_group_id,
+      MIN(CASE
+        WHEN LOWER(carrier_status) IN ('picked_up', 'collected', 'in_transit')
+        THEN carrier_event_timestamp
+      END) AS carrier_pickup_at,
+      MAX(carrier_code) AS carrier_code,
+      COUNT(*) AS carrier_event_count
+    FROM aep_backend_carrier_events
+    WHERE customer_order_id IS NOT NULL
+      AND fulfillment_group_id IS NOT NULL
+    GROUP BY customer_order_id, fulfillment_group_id
+  ),
+  notification_validation AS (
+    SELECT
+      customer_order_id,
+      fulfillment_group_id,
+      MIN(CASE
+        WHEN LOWER(notification_type) IN ('ready_for_pickup', 'ready_to_ship', 'shipment_ready')
+        THEN sent_timestamp
+      END) AS customer_notified_at,
+      COUNT(*) AS notification_event_count
+    FROM aep_backend_order_notifications
+    WHERE customer_order_id IS NOT NULL
+      AND fulfillment_group_id IS NOT NULL
+    GROUP BY customer_order_id, fulfillment_group_id
+  ),
+  metric_base AS (
+    SELECT
+      o.customer_order_id,
+      fg.fulfillment_group_id,
+      o.order_number,
+      o.customer_id,
+      id.unified_customer_id,
+      id.anonymous_customer_id,
+      id.journey_id,
+      id.identity_stitching_status,
+      id.identity_confidence_score,
+      o.sales_channel,
+      o.order_channel,
+      o.device_type,
+      o.market,
+      o.country_code,
+      o.region_code,
+      o.currency_code,
+      o.order_created_at,
+      p.payment_authorized_at,
+      fg.created_at AS fulfillment_group_created_at,
+      fg.released_to_warehouse_at AS fulfillment_released_at,
+      w.warehouse_received_at,
+      w.processing_started_at,
+      w.ready_for_pickup_at,
+      COALESCE(w.processing_started_at, w.warehouse_received_at) AS processing_start_at,
+      w.ready_for_pickup_at AS processing_end_at,
+      cv.carrier_pickup_at,
+      nv.customer_notified_at,
+      w.first_warehouse_event_at,
+      w.last_warehouse_event_at,
+      w.latest_warehouse_ingested_at,
+      w.warehouse_received_event_id,
+      w.processing_start_event_id,
+      w.processing_end_event_id,
+      w.warehouse_id,
+      w.warehouse_name,
+      w.warehouse_timezone,
+      fg.fulfillment_type,
+      fg.shipping_method,
+      cv.carrier_code,
+      p.payment_method,
+      pl.latest_payment_authorization_status,
+      fg.fulfillment_status,
+      wls.latest_warehouse_status,
+      fg.processing_sla_minutes,
+      ir.fulfillment_group_item_count,
+      ir.fulfillment_group_unit_quantity,
+      ir.fulfillment_group_net_amount,
+      ir.fulfillment_group_gross_amount,
+      o.order_item_count,
+      o.order_unit_quantity,
+      o.order_net_amount,
+      o.order_gross_amount,
+      w.warehouse_source_event_count,
+      p.payment_authorization_event_count,
+      cv.carrier_event_count,
+      nv.notification_event_count,
+      w.has_late_arriving_warehouse_event
+    FROM aep_backend_commerce_customer_orders o
+    INNER JOIN aep_backend_oms_fulfillment_groups fg
+      ON fg.customer_order_id = o.customer_order_id
+    LEFT JOIN wms_rollup w
+      ON w.customer_order_id = fg.customer_order_id
+     AND w.fulfillment_group_id = fg.fulfillment_group_id
+    LEFT JOIN wms_latest_status wls
+      ON wls.customer_order_id = fg.customer_order_id
+     AND wls.fulfillment_group_id = fg.fulfillment_group_id
+    LEFT JOIN payment_rollup p
+      ON p.customer_order_id = o.customer_order_id
+    LEFT JOIN payment_latest pl
+      ON pl.customer_order_id = o.customer_order_id
+    LEFT JOIN item_rollup ir
+      ON ir.customer_order_id = fg.customer_order_id
+     AND ir.fulfillment_group_id = fg.fulfillment_group_id
+    LEFT JOIN identity_current id
+      ON id.customer_order_id = o.customer_order_id
+    LEFT JOIN carrier_validation cv
+      ON cv.customer_order_id = fg.customer_order_id
+     AND cv.fulfillment_group_id = fg.fulfillment_group_id
+    LEFT JOIN notification_validation nv
+      ON nv.customer_order_id = fg.customer_order_id
+     AND nv.fulfillment_group_id = fg.fulfillment_group_id
+    WHERE COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_deleted, FALSE) = FALSE
+      AND COALESCE(fg.is_deleted, FALSE) = FALSE
+  ),
+  metric_measured AS (
+    SELECT
+      metric_base.*,
+      CASE
+        WHEN processing_start_at IS NOT NULL
+         AND processing_end_at IS NOT NULL
+         AND processing_end_at >= processing_start_at
+        THEN EXTRACT(EPOCH FROM (processing_end_at - processing_start_at))
+        ELSE NULL
+      END AS processing_time_seconds
+    FROM metric_base
+  )
+  SELECT
+    MD5(CONCAT(customer_order_id, '|', fulfillment_group_id)) AS metric_record_id,
+    'Warehouse Order Processing Time' AS metric_name,
+    'fulfillment_group' AS metric_grain,
+    customer_order_id,
+    fulfillment_group_id,
+    order_number,
+    customer_id,
+    unified_customer_id,
+    anonymous_customer_id,
+    journey_id,
+    identity_stitching_status,
+    identity_confidence_score,
+    sales_channel,
+    order_channel,
+    device_type,
+    market,
+    country_code,
+    region_code,
+    currency_code,
+    order_created_at,
+    payment_authorized_at,
+    fulfillment_group_created_at,
+    fulfillment_released_at,
+    warehouse_received_at,
+    processing_started_at,
+    ready_for_pickup_at,
+    processing_start_at,
+    processing_end_at,
+    carrier_pickup_at,
+    customer_notified_at,
+    first_warehouse_event_at,
+    last_warehouse_event_at,
+    latest_warehouse_ingested_at,
+    warehouse_received_event_id,
+    processing_start_event_id,
+    processing_end_event_id,
+    processing_time_seconds,
+    processing_time_seconds / 60.0 AS processing_time_minutes,
+    processing_time_seconds / 3600.0 AS processing_time_hours,
+    processing_sla_minutes,
+    CASE
+      WHEN processing_time_seconds IS NULL OR processing_sla_minutes IS NULL THEN NULL
+      WHEN processing_time_seconds <= processing_sla_minutes * 60 THEN TRUE
+      ELSE FALSE
+    END AS is_processing_sla_met,
+    CASE WHEN processing_time_seconds IS NOT NULL THEN TRUE ELSE FALSE END AS is_duration_valid,
+    CASE
+      WHEN processing_start_at IS NULL THEN 'missing_warehouse_processing_start'
+      WHEN processing_end_at IS NULL THEN 'missing_warehouse_ready_timestamp'
+      WHEN processing_end_at < processing_start_at THEN 'negative_duration'
+      ELSE NULL
+    END AS exclusion_reason,
+    warehouse_id,
+    warehouse_name,
+    warehouse_timezone,
+    fulfillment_type,
+    shipping_method,
+    carrier_code,
+    payment_method,
+    latest_payment_authorization_status,
+    fulfillment_status,
+    latest_warehouse_status,
+    fulfillment_group_item_count,
+    fulfillment_group_unit_quantity,
+    fulfillment_group_net_amount,
+    fulfillment_group_gross_amount,
+    order_item_count,
+    order_unit_quantity,
+    order_net_amount,
+    order_gross_amount,
+    warehouse_source_event_count,
+    payment_authorization_event_count,
+    carrier_event_count,
+    notification_event_count,
+    CASE WHEN has_late_arriving_warehouse_event = 1 THEN TRUE ELSE FALSE END AS has_late_arriving_warehouse_event,
+    CASE
+      WHEN carrier_pickup_at IS NULL OR processing_end_at IS NULL THEN NULL
+      WHEN carrier_pickup_at >= processing_end_at THEN TRUE
+      ELSE FALSE
+    END AS is_carrier_sequence_valid,
+    CASE
+      WHEN customer_notified_at IS NULL OR processing_end_at IS NULL THEN NULL
+      WHEN customer_notified_at >= processing_end_at THEN TRUE
+      ELSE FALSE
+    END AS is_notification_sequence_valid,
+    CAST(processing_end_at AS DATE) AS metric_date,
+    CURRENT_TIMESTAMP AS calculated_at
+  FROM metric_measured;
+
+Calculation Notes: |
+  1️⃣ Calculate fulfillment-group grain before aggregation to prevent overweighting orders.  
+  2️⃣ For split orders, assess each fulfillment group independently.  
+  3️⃣ Use the final qualifying ready event for groups with multiple packages.  
+  4️⃣ Assign results to the calendar date of the end event.  
+  5️⃣ Measure continuous elapsed customer time, including all delays.  
+  6️⃣ Do not subtract pauses from the official metric.  
+  7️⃣ Exclude backorder waiting from this metric; measure separately as order release delay.
+
+Business Use Case: |
+  The Omnichannel Fulfillment executive reviews this metric by channel, location, promise type, and customer value tier. If expedited mobile orders at a specific fulfillment location enter the red threshold, the team can rebalance eligible orders to alternate locations, adjust same-day checkout promises, increase pick-pack capacity, and trigger proactive delay communications or service recovery offers for affected customers; analytics then measures the effect on cancellations, billing contacts, repeat purchases, and LTV.
+
+
+Source Data: E-commerce and mobile order events, Customer Data Platform identity and journey data, payment authorization events, Order Management System fulfillment groups, and warehouse readiness events stitched by customer_order_id and fulfillment_group_id; carrier and customer-notification events are used for validation but not as substitute timestamps.
+
+Report Attributes: |
+  ["Order channel","Fulfillment method","Fulfillment location","Delivery service level","Customer promise type","New versus returning customer","Loyalty tier","Product category","Order value band","Item count band","Split-order indicator","Marketplace seller","Destination region","Order day and hour","Promotion or campaign","Subscription versus one-time order"]
+
+Dashboard Usage: [Omnichannel Customer Promise Dashboard, Post-Purchase Journey Performance, Executive Fulfillment and Retention Scorecard, Click-and-Collect Experience Dashboard, Order Cancellation and Service Recovery Monitor, Customer LTV and Fulfillment Experience]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Order Release Delay, Order-to-Ship Time, Perfect Order Rate, On-Time Shipment Rate, On-Time Delivery Rate, Order Cancellation Rate, Post-Purchase Contact Rate, Fulfillment Error Rate, Click-and-Collect Ready Time, Repeat Purchase Rate]
+
+Derived KPIs: [Warehouse Processing SLA Attainment Rate, Processing Time Variance to Target, 90th Percentile Warehouse Order Processing Time, Late Promise Risk Rate, Customer Cancellation Risk by Processing Time, Incremental Repeat Purchase Rate for On-Time Fulfillment]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-12T18:30:14.112059+00:00
+
+Last Modified By: devyendarm
+
+
