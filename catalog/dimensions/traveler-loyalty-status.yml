@@ -1,0 +1,460 @@
+# Dimension: Traveler Loyalty Status
+# Generated: 2026-09-09T21:30:41.692Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Traveler Loyalty Status
+
+Description: |
+  Classifies the loyalty program standing recognized for a traveler when a digital interaction occurs, using the authenticated account state available to the website or mobile application. It enables analysis of how tier recognition influences discovery, booking conversion, ancillary engagement, service behavior, and digital retention without requiring offline identity stitching.
+
+Category: Retention
+
+Tags: [dimension]
+
+Industry: Travel & Hospitality
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  traveler_loyalty_status
+
+Adobe Event: |
+  login
+
+W3 Data Layer: |
+  {"digitalData":{"user":[{"profile":[{"attributes":{"authenticationStatus":"authenticated","travelerLoyaltyStatus":"gold"}}]}],"event":[{"eventInfo":{"eventName":"login"},"attributes":{"travelerLoyaltyStatus":"gold"}}]}}
+
+GA4 Data Layer: |
+  {"event":"login","method":"authenticated_account","traveler_loyalty_status":"gold"}
+
+Adobe Client Data Layer: |
+  {"data":{"user":{"authenticationStatus":"authenticated","travelerLoyaltyStatus":"gold"}},"event":"login"}
+
+XDM Mapping: |
+  {"loyalty":{"tier":"gold"}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH extracted AS (
+    SELECT
+      COALESCE(NULLIF(user_id, ''), user_pseudo_id) AS traveler_key,
+      NULLIF(user_id, '') AS authenticated_user_id,
+      user_pseudo_id AS anonymous_user_id,
+      CASE
+        WHEN NULLIF(user_id, '') IS NOT NULL THEN 'user_id'
+        ELSE 'user_pseudo_id'
+      END AS identity_namespace,
+      COALESCE(
+        (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'authentication_status' LIMIT 1),
+        (SELECT up.value.string_value FROM UNNEST(user_properties) up WHERE up.key = 'authentication_status' LIMIT 1),
+        IF(NULLIF(user_id, '') IS NOT NULL, 'authenticated', 'anonymous')
+      ) AS authentication_status,
+      COALESCE(
+        (SELECT COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING), CAST(ep.value.float_value AS STRING)) FROM UNNEST(event_params) ep WHERE ep.key = 'traveler_loyalty_status' LIMIT 1),
+        (SELECT COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING), CAST(ep.value.double_value AS STRING), CAST(ep.value.float_value AS STRING)) FROM UNNEST(event_params) ep WHERE ep.key = 'loyalty_tier' LIMIT 1),
+        (SELECT COALESCE(up.value.string_value, CAST(up.value.int_value AS STRING), CAST(up.value.double_value AS STRING), CAST(up.value.float_value AS STRING)) FROM UNNEST(user_properties) up WHERE up.key = 'traveler_loyalty_status' LIMIT 1),
+        (SELECT COALESCE(up.value.string_value, CAST(up.value.int_value AS STRING), CAST(up.value.double_value AS STRING), CAST(up.value.float_value AS STRING)) FROM UNNEST(user_properties) up WHERE up.key = 'loyalty_tier' LIMIT 1)
+      ) AS status_raw_value,
+      CASE
+        WHEN EXISTS (SELECT 1 FROM UNNEST(event_params) ep WHERE ep.key = 'traveler_loyalty_status' AND ep.value.string_value IS NOT NULL) THEN 'event_param.traveler_loyalty_status'
+        WHEN EXISTS (SELECT 1 FROM UNNEST(event_params) ep WHERE ep.key = 'loyalty_tier' AND ep.value.string_value IS NOT NULL) THEN 'event_param.loyalty_tier'
+        WHEN EXISTS (SELECT 1 FROM UNNEST(user_properties) up WHERE up.key = 'traveler_loyalty_status' AND up.value.string_value IS NOT NULL) THEN 'user_property.traveler_loyalty_status'
+        WHEN EXISTS (SELECT 1 FROM UNNEST(user_properties) up WHERE up.key = 'loyalty_tier' AND up.value.string_value IS NOT NULL) THEN 'user_property.loyalty_tier'
+      END AS status_source,
+      event_name,
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS event_timestamp_utc,
+      IF(event_previous_timestamp > 0, TIMESTAMP_MICROS(event_previous_timestamp), NULL) AS event_previous_timestamp_utc,
+      event_bundle_sequence_id,
+      batch_event_index,
+      platform,
+      stream_id,
+      'analytics_123456789' AS property_id,
+      device.category AS device_category,
+      device.mobile_brand_name AS device_mobile_brand_name,
+      device.mobile_model_name AS device_mobile_model_name,
+      device.operating_system AS device_operating_system,
+      device.operating_system_version AS device_operating_system_version,
+      device.web_info.browser AS device_browser,
+      device.web_info.browser_version AS device_browser_version,
+      device.language AS device_language,
+      device.is_limited_ad_tracking AS device_is_limited_ad_tracking,
+      geo.continent AS geo_continent,
+      geo.sub_continent AS geo_sub_continent,
+      geo.country AS geo_country,
+      geo.region AS geo_region,
+      geo.city AS geo_city,
+      traffic_source.name AS traffic_source_name,
+      traffic_source.medium AS traffic_source_medium,
+      traffic_source.source AS traffic_source_source,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'page_location' LIMIT 1) AS page_location,
+      (SELECT ep.value.string_value FROM UNNEST(event_params) ep WHERE ep.key = 'page_referrer' LIMIT 1) AS page_referrer,
+      app_info.id AS app_id,
+      app_info.version AS app_version,
+      PARSE_DATE('%Y%m%d', event_date) AS collection_date
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE REGEXP_CONTAINS(_TABLE_SUFFIX, r'^\d{8}$')
+  ),
+  normalized AS (
+    SELECT
+      *,
+      REGEXP_REPLACE(LOWER(TRIM(status_raw_value)), r'[\s-]+', '_') AS status_normalized_value
+    FROM extracted
+    WHERE traveler_key IS NOT NULL
+      AND NULLIF(TRIM(status_raw_value), '') IS NOT NULL
+  ),
+  classified AS (
+    SELECT
+      *,
+      status_normalized_value AS traveler_loyalty_status,
+      status_normalized_value AS loyalty_tier_code,
+      INITCAP(REPLACE(status_normalized_value, '_', ' ')) AS loyalty_tier_name,
+      CASE status_normalized_value
+        WHEN 'non_member' THEN 0
+        WHEN 'none' THEN 0
+        WHEN 'member' THEN 1
+        WHEN 'basic' THEN 1
+        WHEN 'blue' THEN 1
+        WHEN 'bronze' THEN 2
+        WHEN 'silver' THEN 3
+        WHEN 'gold' THEN 4
+        WHEN 'platinum' THEN 5
+        WHEN 'diamond' THEN 6
+        WHEN 'titanium' THEN 7
+        WHEN 'elite' THEN 8
+      END AS loyalty_tier_rank,
+      status_normalized_value NOT IN ('none', 'non_member', 'not_enrolled', 'guest', 'anonymous') AS loyalty_member_flag,
+      REGEXP_CONTAINS(status_normalized_value, r'^[a-z0-9][a-z0-9_]*$')
+        AND status_normalized_value NOT IN ('unknown', 'null', 'undefined', 'not_set', '(not_set)') AS status_valid_flag,
+      status_raw_value IS NULL AS status_missing_flag
+    FROM normalized
+  ),
+  deduplicated AS (
+    SELECT *
+    FROM classified
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY traveler_key, event_timestamp_utc, status_normalized_value
+      ORDER BY IF(status_source LIKE 'event_param.%', 1, 2), event_name
+    ) = 1
+  ),
+  sequenced AS (
+    SELECT
+      *,
+      LAG(status_normalized_value) OVER (
+        PARTITION BY traveler_key
+        ORDER BY event_timestamp_utc, event_bundle_sequence_id, batch_event_index
+      ) AS previous_status_normalized_value
+    FROM deduplicated
+  ),
+  status_changes AS (
+    SELECT *
+    FROM sequenced
+    WHERE previous_status_normalized_value IS NULL
+       OR previous_status_normalized_value != status_normalized_value
+  ),
+  versioned AS (
+    SELECT
+      *,
+      event_timestamp_utc AS effective_from_timestamp,
+      LEAD(event_timestamp_utc) OVER (
+        PARTITION BY traveler_key
+        ORDER BY event_timestamp_utc, event_bundle_sequence_id, batch_event_index
+      ) AS effective_to_timestamp
+    FROM status_changes
+  )
+  SELECT
+    traveler_key,
+    authenticated_user_id,
+    anonymous_user_id,
+    identity_namespace,
+    LOWER(TRIM(authentication_status)) AS authentication_status,
+    traveler_loyalty_status,
+    loyalty_tier_code,
+    loyalty_tier_name,
+    loyalty_tier_rank,
+    loyalty_member_flag,
+    status_source,
+    status_raw_value,
+    status_normalized_value,
+    status_valid_flag,
+    status_missing_flag,
+    event_name,
+    event_date,
+    event_timestamp_utc,
+    event_previous_timestamp_utc,
+    event_bundle_sequence_id,
+    batch_event_index,
+    platform,
+    stream_id,
+    property_id,
+    device_category,
+    device_mobile_brand_name,
+    device_mobile_model_name,
+    device_operating_system,
+    device_operating_system_version,
+    device_browser,
+    device_browser_version,
+    device_language,
+    device_is_limited_ad_tracking,
+    geo_continent,
+    geo_sub_continent,
+    geo_country,
+    geo_region,
+    geo_city,
+    traffic_source_name,
+    traffic_source_medium,
+    traffic_source_source,
+    page_location,
+    page_referrer,
+    app_id,
+    app_version,
+    collection_date,
+    effective_from_timestamp,
+    effective_to_timestamp,
+    effective_to_timestamp IS NULL AS is_current
+  FROM versioned;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH extracted AS (
+    SELECT
+      COALESCE(
+        identityMap['LoyaltyID'][0].id,
+        identityMap['CRMID'][0].id,
+        identityMap['ECID'][0].id
+      ) AS traveler_key,
+      COALESCE(identityMap['LoyaltyID'][0].id, identityMap['CRMID'][0].id) AS authenticated_user_id,
+      identityMap['ECID'][0].id AS anonymous_user_id,
+      CASE
+        WHEN identityMap['LoyaltyID'][0].id IS NOT NULL THEN 'LoyaltyID'
+        WHEN identityMap['CRMID'][0].id IS NOT NULL THEN 'CRMID'
+        ELSE 'ECID'
+      END AS identity_namespace,
+      CASE
+        WHEN identityMap['LoyaltyID'][0].id IS NOT NULL OR identityMap['CRMID'][0].id IS NOT NULL THEN 'authenticated'
+        ELSE 'anonymous'
+      END AS authentication_status,
+      CAST(loyalty.tier AS STRING) AS status_raw_value,
+      'xdm.loyalty.tier' AS status_source,
+      eventType AS event_name,
+      CAST(timestamp AS DATE) AS event_date,
+      CAST(timestamp AS TIMESTAMP) AS event_timestamp_utc,
+      LAG(CAST(timestamp AS TIMESTAMP)) OVER (
+        PARTITION BY COALESCE(identityMap['LoyaltyID'][0].id, identityMap['CRMID'][0].id, identityMap['ECID'][0].id)
+        ORDER BY CAST(timestamp AS TIMESTAMP), _id
+      ) AS event_previous_timestamp_utc,
+      CAST(NULL AS BIGINT) AS event_bundle_sequence_id,
+      CAST(NULL AS BIGINT) AS batch_event_index,
+      CAST(environment.type AS STRING) AS platform,
+      CAST(NULL AS STRING) AS stream_id,
+      'aep_web_event_dataset' AS property_id,
+      CAST(device.type AS STRING) AS device_category,
+      CAST(device.manufacturer AS STRING) AS device_mobile_brand_name,
+      CAST(device.model AS STRING) AS device_mobile_model_name,
+      CAST(environment.operatingSystem AS STRING) AS device_operating_system,
+      CAST(environment.operatingSystemVersion AS STRING) AS device_operating_system_version,
+      CAST(environment.browserDetails.name AS STRING) AS device_browser,
+      CAST(environment.browserDetails.version AS STRING) AS device_browser_version,
+      CAST(environment.language AS STRING) AS device_language,
+      CAST(device.isLimitedAdTracking AS STRING) AS device_is_limited_ad_tracking,
+      CAST(NULL AS STRING) AS geo_continent,
+      CAST(NULL AS STRING) AS geo_sub_continent,
+      CAST(placeContext.geo.countryCode AS STRING) AS geo_country,
+      CAST(placeContext.geo.stateProvince AS STRING) AS geo_region,
+      CAST(placeContext.geo.city AS STRING) AS geo_city,
+      CAST(NULL AS STRING) AS traffic_source_name,
+      CAST(NULL AS STRING) AS traffic_source_medium,
+      CAST(marketing.trackingCode AS STRING) AS traffic_source_source,
+      CAST(web.webPageDetails.URL AS STRING) AS page_location,
+      CAST(web.webReferrer.URL AS STRING) AS page_referrer,
+      CAST(application.id AS STRING) AS app_id,
+      CAST(application.version AS STRING) AS app_version,
+      CAST(timestamp AS DATE) AS collection_date,
+      _id AS source_event_id
+    FROM aep_web_event_dataset
+    WHERE loyalty.tier IS NOT NULL
+  ),
+  normalized AS (
+    SELECT
+      *,
+      REGEXP_REPLACE(LOWER(TRIM(status_raw_value)), '[ -]+', '_') AS status_normalized_value
+    FROM extracted
+    WHERE traveler_key IS NOT NULL
+      AND TRIM(status_raw_value) <> ''
+  ),
+  classified AS (
+    SELECT
+      *,
+      status_normalized_value AS traveler_loyalty_status,
+      status_normalized_value AS loyalty_tier_code,
+      INITCAP(REPLACE(status_normalized_value, '_', ' ')) AS loyalty_tier_name,
+      CASE status_normalized_value
+        WHEN 'non_member' THEN 0
+        WHEN 'none' THEN 0
+        WHEN 'member' THEN 1
+        WHEN 'basic' THEN 1
+        WHEN 'blue' THEN 1
+        WHEN 'bronze' THEN 2
+        WHEN 'silver' THEN 3
+        WHEN 'gold' THEN 4
+        WHEN 'platinum' THEN 5
+        WHEN 'diamond' THEN 6
+        WHEN 'titanium' THEN 7
+        WHEN 'elite' THEN 8
+      END AS loyalty_tier_rank,
+      CASE
+        WHEN status_normalized_value IN ('none', 'non_member', 'not_enrolled', 'guest', 'anonymous') THEN FALSE
+        ELSE TRUE
+      END AS loyalty_member_flag,
+      CASE
+        WHEN status_normalized_value RLIKE '^[a-z0-9][a-z0-9_]*$'
+         AND status_normalized_value NOT IN ('unknown', 'null', 'undefined', 'not_set', '(not_set)') THEN TRUE
+        ELSE FALSE
+      END AS status_valid_flag,
+      status_raw_value IS NULL AS status_missing_flag
+    FROM normalized
+  ),
+  ranked AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY traveler_key, event_timestamp_utc, status_normalized_value
+        ORDER BY source_event_id
+      ) AS duplicate_rank
+    FROM classified
+  ),
+  deduplicated AS (
+    SELECT *
+    FROM ranked
+    WHERE duplicate_rank = 1
+  ),
+  sequenced AS (
+    SELECT
+      *,
+      LAG(status_normalized_value) OVER (
+        PARTITION BY traveler_key
+        ORDER BY event_timestamp_utc, source_event_id
+      ) AS previous_status_normalized_value
+    FROM deduplicated
+  ),
+  status_changes AS (
+    SELECT *
+    FROM sequenced
+    WHERE previous_status_normalized_value IS NULL
+       OR previous_status_normalized_value <> status_normalized_value
+  ),
+  versioned AS (
+    SELECT
+      *,
+      event_timestamp_utc AS effective_from_timestamp,
+      LEAD(event_timestamp_utc) OVER (
+        PARTITION BY traveler_key
+        ORDER BY event_timestamp_utc, source_event_id
+      ) AS effective_to_timestamp
+    FROM status_changes
+  )
+  SELECT
+    traveler_key,
+    authenticated_user_id,
+    anonymous_user_id,
+    identity_namespace,
+    LOWER(TRIM(authentication_status)) AS authentication_status,
+    traveler_loyalty_status,
+    loyalty_tier_code,
+    loyalty_tier_name,
+    loyalty_tier_rank,
+    loyalty_member_flag,
+    status_source,
+    status_raw_value,
+    status_normalized_value,
+    status_valid_flag,
+    status_missing_flag,
+    event_name,
+    event_date,
+    event_timestamp_utc,
+    event_previous_timestamp_utc,
+    event_bundle_sequence_id,
+    batch_event_index,
+    platform,
+    stream_id,
+    property_id,
+    device_category,
+    device_mobile_brand_name,
+    device_mobile_model_name,
+    device_operating_system,
+    device_operating_system_version,
+    device_browser,
+    device_browser_version,
+    device_language,
+    device_is_limited_ad_tracking,
+    geo_continent,
+    geo_sub_continent,
+    geo_country,
+    geo_region,
+    geo_city,
+    traffic_source_name,
+    traffic_source_medium,
+    traffic_source_source,
+    page_location,
+    page_referrer,
+    app_id,
+    app_version,
+    collection_date,
+    effective_from_timestamp,
+    effective_to_timestamp,
+    effective_to_timestamp IS NULL AS is_current
+  FROM versioned;
+
+Calculation Notes: |
+  1️⃣ Capture status at event timestamp; do not overwrite historical values.  
+  2️⃣ Use governed domains: Non-Member, Enrolled, Active Member, etc.  
+  3️⃣ Assign Non-Member only if no active membership is confirmed.  
+  4️⃣ Use Unknown for unresolved authentication or profile lookup issues.  
+  5️⃣ Prefer authoritative API responses for conflicting values.  
+  6️⃣ Exclude non-traveler accounts from reporting using filters.  
+  7️⃣ Normalize invalid source codes to Unknown for data quality.
+
+Business Use Case: |
+  The Chief Loyalty Officer compares authenticated digital search-to-booking progression, ancillary adoption, benefit interaction, and abandonment across recognized loyalty statuses. Product and Loyalty teams can then prioritize tier-specific benefit messaging, remediate recognition failures, and optimize enrollment or re-engagement experiences for high-value traveler groups.
+
+
+Source Data: Digital only: first-party website and mobile-app analytics events enriched at collection time by the digital identity service, authenticated account profile, and loyalty-profile API
+
+Report Attributes: |
+  ["Traveler Loyalty Program","Traveler Loyalty Tier","Traveler Authentication Status","Traveler Loyalty Recognition Source","Traveler Loyalty Activity Status","Traveler Loyalty Tenure Band","Traveler Digital Channel","Traveler Platform","Traveler Device Type","Booking Journey Stage","Booking Status","Brand","Origin Market","Destination Market","Route","Property","Cabin Class","Fare Class","Room Type","Rate Plan","Ancillary Product Type","Campaign","Promotion","Offer Type","Traveler Country","Traveler Preferred Language","App Version","Site Experience","Event Date"]
+
+Dashboard Usage: [Digital Loyalty Performance, Member Recognition and Authentication, Loyalty Enrollment Funnel, Traveler Search-to-Booking Conversion, Digital Booking Journey, Elite Member Experience, Loyalty Benefit Engagement, Ancillary Adoption by Loyalty Status, Member Retention and Re-engagement, Digital Personalization Effectiveness, Loyalty Data Quality and Recognition Coverage]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Traveler Loyalty Program, Traveler Loyalty Tier, Traveler Authentication Status, Traveler Membership Identifier Availability, Traveler Account Type, Traveler Profile Status, Traveler Enrollment Status, Traveler Loyalty Recognition Source, Traveler Loyalty Status Effective Date, Traveler Loyalty Status Expiration Date, Traveler Loyalty Tier Qualification Method, Traveler Loyalty Points Balance Band, Traveler Loyalty Activity Status, Traveler Loyalty Tenure Band, Traveler Loyalty Benefit Eligibility, Traveler Home Market, Traveler Country, Traveler Preferred Language, Traveler Device Type, Traveler Platform, Traveler Digital Channel, Traveler Consent Status, Traveler Personalization Eligibility, Traveler Marketing Eligibility, Booking Status, Booking Channel, Booking Journey Stage, Trip Purpose, Travel Party Type, Origin Market, Destination Market, Route, Property, Brand, Fare Class, Cabin Class, Room Type, Rate Plan, Ancillary Product Type, Promotion, Campaign, Session Authentication State, Digital Experience Variant, Search Type, Offer Type, Payment Method Type, App Version, Site Experience, Event Timestamp]
+
+Derived Dimensions: [Traveler Loyalty Recognition Flag, Traveler Loyalty Status Group, Traveler Active Member Flag, Traveler Elite Status Flag, Traveler Non-Member Flag, Traveler Loyalty Status Known Flag, Traveler Loyalty Status Change Indicator, Traveler Loyalty Status Recency Band, Traveler Loyalty Status Expiry Band, Traveler Loyalty Engagement Segment]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T21:30:41.240527+00:00
+
+Last Modified By: devyendarm
+
+
