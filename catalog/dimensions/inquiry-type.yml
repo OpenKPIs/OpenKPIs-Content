@@ -1,0 +1,300 @@
+# Dimension: Inquiry Type
+# Generated: 2026-09-13T22:30:26.724Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Inquiry Type
+
+Description: |
+  Inquiry Type identifies the standardized primary purpose of a property-related inquiry submitted by a prospect, customer, owner, or partner. It enables comparison of inquiry volume, response performance, lead quality, and downstream conversion by expressed intent.
+
+Category: Conversion
+
+Tags: [dimension]
+
+Industry: Real Estate Tech
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  generate_lead
+
+Adobe Event: |
+  generate_lead
+
+W3 Data Layer: |
+  {"event":[{"eventInfo":{"eventId":"<event_id>","eventName":"generate_lead","eventType":"lead","timeStamp":"<ISO-8601_timestamp>","eventAction":"submit"},"attributes":{"inquiryType":"<standardized_inquiry_type>"}}],"version":"1.0"}
+
+GA4 Data Layer: |
+  {"event":"generate_lead","inquiry_type":"<standardized_inquiry_type>"}
+
+Adobe Client Data Layer: |
+  {"data":{"inquiry":{"type":"<standardized_inquiry_type>"}},"event":"generate_lead"}
+
+XDM Mapping: |
+  {"eventType":"web.formFilledOut","_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"<standardized_inquiry_type>"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH source_events AS (
+    SELECT
+      TIMESTAMP_MICROS(e.event_timestamp) AS event_timestamp,
+      (
+        SELECT COALESCE(
+          NULLIF(TRIM(ep.value.string_value), ''),
+          CAST(ep.value.int_value AS STRING),
+          CAST(ep.value.double_value AS STRING),
+          CAST(ep.value.float_value AS STRING)
+        )
+        FROM UNNEST(e.event_params) AS ep
+        WHERE ep.key = 'inquiry_type'
+        LIMIT 1
+      ) AS raw_inquiry_type
+    FROM `your-project.analytics_123456789.events_*` AS e
+    WHERE REGEXP_CONTAINS(_TABLE_SUFFIX, r'^\d{8}$')
+      AND e.event_name = 'generate_lead'
+  ),
+  normalized_events AS (
+    SELECT
+      event_timestamp,
+      raw_inquiry_type,
+      CASE
+        WHEN raw_inquiry_type IS NULL
+          OR TRIM(raw_inquiry_type) = ''
+          OR LOWER(TRIM(raw_inquiry_type)) IN (
+            '(not set)', 'not set', 'null', 'undefined', 'unknown', 'n/a'
+          )
+        THEN 'unknown'
+        ELSE LOWER(
+          REGEXP_REPLACE(
+            TRIM(NORMALIZE(raw_inquiry_type, NFKC)),
+            r'[\s_-]+',
+            '_'
+          )
+        )
+      END AS inquiry_type_code
+    FROM source_events
+  ),
+  dimension_statistics AS (
+    SELECT
+      inquiry_type_code,
+      MIN(event_timestamp) AS first_seen_timestamp,
+      MAX(event_timestamp) AS last_seen_timestamp,
+      COUNT(*) AS source_event_count,
+      COUNTIF(raw_inquiry_type IS NULL OR TRIM(raw_inquiry_type) = '') AS missing_attribute_event_count,
+      COUNT(DISTINCT NULLIF(TRIM(raw_inquiry_type), '')) AS source_variant_count
+    FROM normalized_events
+    GROUP BY inquiry_type_code
+  ),
+  dimension_codes AS (
+    SELECT inquiry_type_code
+    FROM dimension_statistics
+  
+    UNION DISTINCT
+  
+    SELECT 'unknown' AS inquiry_type_code
+  )
+  SELECT
+    LOWER(TO_HEX(MD5(CONCAT('inquiry_type|', c.inquiry_type_code)))) AS inquiry_type_key,
+    c.inquiry_type_code,
+    CASE
+      WHEN c.inquiry_type_code = 'unknown' THEN 'Unknown'
+      ELSE INITCAP(REPLACE(c.inquiry_type_code, '_', ' '))
+    END AS inquiry_type_name,
+    CASE
+      WHEN c.inquiry_type_code = 'unknown' THEN 'Unknown or unreported inquiry type'
+      ELSE CONCAT('Inquiry type: ', INITCAP(REPLACE(c.inquiry_type_code, '_', ' ')))
+    END AS inquiry_type_description,
+    c.inquiry_type_code = 'unknown' AS is_unknown,
+    TRUE AS is_active,
+    CASE
+      WHEN c.inquiry_type_code = 'unknown' THEN 0.0
+      ELSE 1.0
+    END AS attribute_completeness_score,
+    CASE
+      WHEN c.inquiry_type_code = 'unknown' THEN 'INCOMPLETE'
+      ELSE 'COMPLETE'
+    END AS attribute_completeness_status,
+    COALESCE(
+      s.first_seen_timestamp,
+      TIMESTAMP '1970-01-01 00:00:00+00'
+    ) AS valid_from_timestamp,
+    TIMESTAMP '9999-12-31 23:59:59.999999+00' AS valid_to_timestamp,
+    s.first_seen_timestamp,
+    s.last_seen_timestamp,
+    COALESCE(s.source_event_count, 0) AS source_event_count,
+    COALESCE(s.missing_attribute_event_count, 0) AS missing_attribute_event_count,
+    COALESCE(s.source_variant_count, 0) AS source_variant_count,
+    'GA4' AS source_system,
+    'generate_lead' AS source_event_name,
+    'event_params.inquiry_type' AS source_attribute_name,
+    'ga4_generate_lead' AS record_source,
+    'v1' AS normalization_rule_version,
+    CURRENT_TIMESTAMP() AS created_timestamp,
+    CURRENT_TIMESTAMP() AS updated_timestamp
+  FROM dimension_codes AS c
+  LEFT JOIN dimension_statistics AS s
+    USING (inquiry_type_code);
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH source_events AS (
+    SELECT
+      CAST(timestamp AS TIMESTAMP) AS event_timestamp,
+      NULLIF(
+        TRIM(
+          CAST(
+            _experience.analytics.customDimensions.eVars.eVar1 AS VARCHAR
+          )
+        ),
+        ''
+      ) AS raw_inquiry_type
+    FROM aep_web_event_dataset
+    WHERE eventType = 'web.formFilledOut'
+  ),
+  normalized_events AS (
+    SELECT
+      event_timestamp,
+      raw_inquiry_type,
+      CASE
+        WHEN raw_inquiry_type IS NULL
+          OR TRIM(raw_inquiry_type) = ''
+          OR LOWER(TRIM(raw_inquiry_type)) IN (
+            '(not set)', 'not set', 'null', 'undefined', 'unknown', 'n/a'
+          )
+        THEN 'unknown'
+        ELSE LOWER(
+          REGEXP_REPLACE(
+            TRIM(raw_inquiry_type),
+            '[[:space:]_-]+',
+            '_',
+            'g'
+          )
+        )
+      END AS inquiry_type_code
+    FROM source_events
+  ),
+  dimension_statistics AS (
+    SELECT
+      inquiry_type_code,
+      MIN(event_timestamp) AS first_seen_timestamp,
+      MAX(event_timestamp) AS last_seen_timestamp,
+      COUNT(*) AS source_event_count,
+      SUM(
+        CASE
+          WHEN raw_inquiry_type IS NULL OR TRIM(raw_inquiry_type) = '' THEN 1
+          ELSE 0
+        END
+      ) AS missing_attribute_event_count,
+      COUNT(DISTINCT NULLIF(TRIM(raw_inquiry_type), '')) AS source_variant_count
+    FROM normalized_events
+    GROUP BY inquiry_type_code
+  ),
+  dimension_codes AS (
+    SELECT inquiry_type_code
+    FROM dimension_statistics
+  
+    UNION
+  
+    SELECT 'unknown' AS inquiry_type_code
+  )
+  SELECT
+    MD5(CONCAT('inquiry_type|', c.inquiry_type_code)) AS inquiry_type_key,
+    c.inquiry_type_code,
+    CASE
+      WHEN c.inquiry_type_code = 'unknown' THEN 'Unknown'
+      ELSE INITCAP(REPLACE(c.inquiry_type_code, '_', ' '))
+    END AS inquiry_type_name,
+    CASE
+      WHEN c.inquiry_type_code = 'unknown' THEN 'Unknown or unreported inquiry type'
+      ELSE CONCAT(
+        'Inquiry type: ',
+        INITCAP(REPLACE(c.inquiry_type_code, '_', ' '))
+      )
+    END AS inquiry_type_description,
+    CASE
+      WHEN c.inquiry_type_code = 'unknown' THEN TRUE
+      ELSE FALSE
+    END AS is_unknown,
+    TRUE AS is_active,
+    CASE
+      WHEN c.inquiry_type_code = 'unknown' THEN CAST(0.0 AS DECIMAL(3,2))
+      ELSE CAST(1.0 AS DECIMAL(3,2))
+    END AS attribute_completeness_score,
+    CASE
+      WHEN c.inquiry_type_code = 'unknown' THEN 'INCOMPLETE'
+      ELSE 'COMPLETE'
+    END AS attribute_completeness_status,
+    COALESCE(
+      s.first_seen_timestamp,
+      TIMESTAMP '1970-01-01 00:00:00'
+    ) AS valid_from_timestamp,
+    TIMESTAMP '9999-12-31 23:59:59' AS valid_to_timestamp,
+    s.first_seen_timestamp,
+    s.last_seen_timestamp,
+    COALESCE(s.source_event_count, 0) AS source_event_count,
+    COALESCE(s.missing_attribute_event_count, 0) AS missing_attribute_event_count,
+    COALESCE(s.source_variant_count, 0) AS source_variant_count,
+    'ADOBE_AEP' AS source_system,
+    'web.formFilledOut' AS source_event_name,
+    '_experience.analytics.customDimensions.eVars.eVar1' AS source_attribute_name,
+    'aep_form_filled_out' AS record_source,
+    'v1' AS normalization_rule_version,
+    CURRENT_TIMESTAMP AS created_timestamp,
+    CURRENT_TIMESTAMP AS updated_timestamp
+  FROM dimension_codes AS c
+  LEFT JOIN dimension_statistics AS s
+    ON c.inquiry_type_code = s.inquiry_type_code;
+
+Calculation Notes: |
+  1️⃣ Assign one normalized Inquiry Type per valid inquiry submission.  
+  2️⃣ User selections take precedence over routing codes or text-based classification.  
+  3️⃣ Choose the most action-oriented purpose from the governed precedence order.  
+  4️⃣ Use "other" for valid but uncategorized purposes; use "unknown" for null or invalid values.  
+  5️⃣ Follow-up messages retain the original inquiry type unless a materially different request is made.  
+  6️⃣ Exclude internal tests, duplicates, monitoring traffic, and confirmed bot activity from reporting.  
+  7️⃣ Create a new inquiry event for materially different requests.
+
+Business Use Case: |
+  Sales leadership compares viewing-request and pricing-or-offer inquiries by market, property, source, response time, and conversion outcome to prioritize agent staffing and listing follow-up. Product teams use high volumes of availability or property-information inquiries to identify listing content gaps and improve self-service property details.
+
+
+Source Data: CRM and Digital Analytics
+
+Report Attributes: |
+  ["Inquiry Channel","Lead Source","Property","Property Type","Listing Type","Transaction Type","Market","Agent","Inquiry Status","Response Time Band","Conversion Status"]
+
+Dashboard Usage: [Inquiry Funnel Dashboard, Lead Conversion Dashboard, Sales Response Performance Dashboard, Property Demand Dashboard, Marketplace Engagement Dashboard, Inquiry Quality Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Inquiry Channel, Inquiry Status, Property, Property Type, Listing Type, Transaction Type, Lead Source, Contact Method, Market, Agent, Customer Type]
+
+Derived Dimensions: [Inquiry Intent Group, Inquiry Commercial Intent, Inquiry Service Category, Inquiry Routing Group]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-13T22:30:26.214713+00:00
+
+Last Modified By: devyendarm
+
+
