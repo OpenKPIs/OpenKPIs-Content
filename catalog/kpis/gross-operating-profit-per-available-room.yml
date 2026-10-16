@@ -1,0 +1,666 @@
+# KPI: Gross Operating Profit per Available Room
+# Generated: 2026-09-10T22:30:20.882Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Gross Operating Profit per Available Room
+Formula: (Total Operating Revenue - Departmental Operating Expenses - Undistributed Operating Expenses) / Total Available Room Nights
+
+Description: |
+  Gross Operating Profit per Available Room measures the gross operating profit generated for each room night available for sale during a reporting period, whether or not the room was occupied. It combines operating profitability and room-inventory utilization to show how effectively a hotel converts its available capacity into operating profit.
+
+Category: Efficiency
+
+Tags: [kpi]
+
+Industry: [Travel & Hospitality]
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Global
+
+Measure Type: currency
+
+Aggregation Window: Time based - Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH inventory_ranked AS (
+    SELECT
+      property_id,
+      business_date AS reporting_date,
+      physical_rooms,
+      out_of_order_rooms,
+      available_rooms,
+      occupied_rooms,
+      complimentary_rooms,
+      house_use_rooms,
+      sold_rooms,
+      ROW_NUMBER() OVER (
+        PARTITION BY property_id, business_date
+        ORDER BY updated_at DESC, ingestion_timestamp DESC
+      ) AS row_num
+    FROM `your-project.pms.daily_room_inventory`
+    WHERE business_date IS NOT NULL
+  ),
+  inventory AS (
+    SELECT
+      property_id,
+      reporting_date,
+      GREATEST(COALESCE(physical_rooms, 0), 0) AS physical_rooms,
+      GREATEST(COALESCE(out_of_order_rooms, 0), 0) AS out_of_order_rooms,
+      GREATEST(
+        COALESCE(
+          available_rooms,
+          COALESCE(physical_rooms, 0) - COALESCE(out_of_order_rooms, 0)
+        ),
+        0
+      ) AS available_rooms,
+      GREATEST(COALESCE(occupied_rooms, 0), 0) AS occupied_rooms,
+      GREATEST(COALESCE(complimentary_rooms, 0), 0) AS complimentary_rooms,
+      GREATEST(COALESCE(house_use_rooms, 0), 0) AS house_use_rooms,
+      GREATEST(COALESCE(sold_rooms, 0), 0) AS sold_rooms
+    FROM inventory_ranked
+    WHERE row_num = 1
+  ),
+  gl_latest AS (
+    SELECT * EXCEPT (row_num)
+    FROM (
+      SELECT
+        g.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY journal_line_id
+          ORDER BY updated_at DESC, ingestion_timestamp DESC
+        ) AS row_num
+      FROM `your-project.erp.gl_postings` AS g
+      WHERE posting_status = 'POSTED'
+        AND ledger_type = 'ACTUAL'
+        AND posting_date IS NOT NULL
+    )
+    WHERE row_num = 1
+  ),
+  financial_actuals AS (
+    SELECT
+      g.property_id,
+      g.posting_date AS reporting_date,
+      SUM(IF(m.kpi_component = 'ROOMS_REVENUE', g.amount_local * m.display_sign, 0)) AS rooms_revenue_local,
+      SUM(IF(m.kpi_component = 'FOOD_BEVERAGE_REVENUE', g.amount_local * m.display_sign, 0)) AS food_beverage_revenue_local,
+      SUM(IF(m.kpi_component = 'OTHER_OPERATING_REVENUE', g.amount_local * m.display_sign, 0)) AS other_operating_revenue_local,
+      SUM(IF(m.kpi_component IN (
+        'ROOMS_REVENUE', 'FOOD_BEVERAGE_REVENUE', 'OTHER_OPERATING_REVENUE'
+      ), g.amount_local * m.display_sign, 0)) AS total_operating_revenue_local,
+      SUM(IF(m.kpi_component = 'DEPARTMENTAL_EXPENSE', g.amount_local * m.display_sign, 0)) AS departmental_expense_local,
+      SUM(IF(m.kpi_component = 'UNDISTRIBUTED_OPERATING_EXPENSE', g.amount_local * m.display_sign, 0)) AS undistributed_operating_expense_local,
+      SUM(IF(m.included_in_gop, g.amount_local * m.statement_sign, 0)) AS gross_operating_profit_local
+    FROM gl_latest AS g
+    INNER JOIN `your-project.finance.account_kpi_mapping` AS m
+      ON g.account_id = m.account_id
+     AND g.posting_date >= m.effective_from
+     AND g.posting_date < COALESCE(m.effective_to, DATE '9999-12-31')
+    WHERE m.included_in_gop
+       OR m.kpi_component IN (
+         'ROOMS_REVENUE',
+         'FOOD_BEVERAGE_REVENUE',
+         'OTHER_OPERATING_REVENUE',
+         'DEPARTMENTAL_EXPENSE',
+         'UNDISTRIBUTED_OPERATING_EXPENSE'
+       )
+    GROUP BY g.property_id, g.posting_date
+  ),
+  plan_latest AS (
+    SELECT * EXCEPT (row_num)
+    FROM (
+      SELECT
+        p.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY plan_record_id
+          ORDER BY version_number DESC, updated_at DESC, ingestion_timestamp DESC
+        ) AS row_num
+      FROM `your-project.planning.daily_property_plan` AS p
+      WHERE scenario IN ('BUDGET', 'FORECAST')
+        AND plan_date IS NOT NULL
+        AND approval_status IN ('APPROVED', 'PUBLISHED')
+    )
+    WHERE row_num = 1
+  ),
+  plans AS (
+    SELECT
+      property_id,
+      plan_date AS reporting_date,
+      SUM(IF(scenario = 'BUDGET', gross_operating_profit_local, 0)) AS budget_gop_local,
+      SUM(IF(scenario = 'BUDGET', available_room_nights, 0)) AS budget_available_room_nights,
+      SUM(IF(scenario = 'FORECAST', gross_operating_profit_local, 0)) AS forecast_gop_local,
+      SUM(IF(scenario = 'FORECAST', available_room_nights, 0)) AS forecast_available_room_nights
+    FROM plan_latest
+    GROUP BY property_id, plan_date
+  ),
+  fx_ranked AS (
+    SELECT
+      from_currency,
+      to_currency,
+      rate_date,
+      exchange_rate,
+      ROW_NUMBER() OVER (
+        PARTITION BY from_currency, to_currency, rate_date
+        ORDER BY published_at DESC, ingestion_timestamp DESC
+      ) AS row_num
+    FROM `your-project.finance.daily_fx_rates`
+    WHERE rate_type = 'CORPORATE_CLOSING'
+      AND to_currency = 'USD'
+      AND exchange_rate > 0
+  ),
+  fx_effective AS (
+    SELECT
+      from_currency,
+      to_currency,
+      rate_date AS effective_from,
+      LEAD(rate_date) OVER (
+        PARTITION BY from_currency, to_currency
+        ORDER BY rate_date
+      ) AS effective_to,
+      exchange_rate
+    FROM fx_ranked
+    WHERE row_num = 1
+  ),
+  property_history AS (
+    SELECT
+      property_id,
+      property_code,
+      property_name,
+      brand_code,
+      brand_name,
+      management_company,
+      ownership_type,
+      hotel_type,
+      market,
+      submarket,
+      city,
+      state_region,
+      country_code,
+      region,
+      currency_code,
+      effective_from,
+      effective_to
+    FROM `your-project.mdm.dim_property`
+    WHERE is_deleted = FALSE
+  ),
+  spine AS (
+    SELECT property_id, reporting_date FROM inventory
+    UNION DISTINCT
+    SELECT property_id, reporting_date FROM financial_actuals
+    UNION DISTINCT
+    SELECT property_id, reporting_date FROM plans
+  ),
+  joined AS (
+    SELECT
+      s.reporting_date,
+      c.fiscal_year,
+      c.fiscal_quarter,
+      c.fiscal_month,
+      c.fiscal_week,
+      s.property_id,
+      p.property_code,
+      p.property_name,
+      p.brand_code,
+      p.brand_name,
+      p.management_company,
+      p.ownership_type,
+      p.hotel_type,
+      p.market,
+      p.submarket,
+      p.city,
+      p.state_region,
+      p.country_code,
+      p.region,
+      p.currency_code,
+      'USD' AS reporting_currency,
+      CASE
+        WHEN p.currency_code = 'USD' THEN 1.0
+        ELSE fx.exchange_rate
+      END AS fx_rate,
+      i.physical_rooms,
+      i.out_of_order_rooms,
+      i.available_rooms,
+      i.occupied_rooms,
+      i.complimentary_rooms,
+      i.house_use_rooms,
+      i.sold_rooms,
+      f.rooms_revenue_local,
+      f.food_beverage_revenue_local,
+      f.other_operating_revenue_local,
+      f.total_operating_revenue_local,
+      f.departmental_expense_local,
+      f.undistributed_operating_expense_local,
+      f.gross_operating_profit_local,
+      pl.budget_gop_local,
+      pl.budget_available_room_nights,
+      pl.forecast_gop_local,
+      pl.forecast_available_room_nights
+    FROM spine AS s
+    LEFT JOIN property_history AS p
+      ON s.property_id = p.property_id
+     AND s.reporting_date >= p.effective_from
+     AND s.reporting_date < COALESCE(p.effective_to, DATE '9999-12-31')
+    LEFT JOIN `your-project.mdm.dim_property_calendar` AS c
+      ON s.property_id = c.property_id
+     AND s.reporting_date = c.calendar_date
+    LEFT JOIN inventory AS i
+      ON s.property_id = i.property_id
+     AND s.reporting_date = i.reporting_date
+    LEFT JOIN financial_actuals AS f
+      ON s.property_id = f.property_id
+     AND s.reporting_date = f.reporting_date
+    LEFT JOIN plans AS pl
+      ON s.property_id = pl.property_id
+     AND s.reporting_date = pl.reporting_date
+    LEFT JOIN fx_effective AS fx
+      ON p.currency_code = fx.from_currency
+     AND fx.to_currency = 'USD'
+     AND s.reporting_date >= fx.effective_from
+     AND s.reporting_date < COALESCE(fx.effective_to, DATE '9999-12-31')
+  )
+  SELECT
+    reporting_date,
+    fiscal_year,
+    fiscal_quarter,
+    fiscal_month,
+    fiscal_week,
+    property_id,
+    property_code,
+    property_name,
+    brand_code,
+    brand_name,
+    management_company,
+    ownership_type,
+    hotel_type,
+    market,
+    submarket,
+    city,
+    state_region,
+    country_code,
+    region,
+    currency_code,
+    reporting_currency,
+    fx_rate,
+    physical_rooms,
+    out_of_order_rooms,
+    available_rooms,
+    available_rooms AS available_room_nights,
+    occupied_rooms,
+    complimentary_rooms,
+    house_use_rooms,
+    sold_rooms,
+    SAFE_DIVIDE(occupied_rooms, available_rooms) AS occupancy_rate,
+    rooms_revenue_local,
+    food_beverage_revenue_local,
+    other_operating_revenue_local,
+    total_operating_revenue_local,
+    departmental_expense_local,
+    undistributed_operating_expense_local,
+    gross_operating_profit_local,
+    total_operating_revenue_local * fx_rate AS total_operating_revenue_reporting,
+    gross_operating_profit_local * fx_rate AS gross_operating_profit_reporting,
+    SAFE_DIVIDE(gross_operating_profit_local, available_rooms) AS goppar_local,
+    SAFE_DIVIDE(gross_operating_profit_local * fx_rate, available_rooms) AS goppar_reporting,
+    budget_gop_local * fx_rate AS budget_gop_reporting,
+    budget_available_room_nights,
+    SAFE_DIVIDE(budget_gop_local * fx_rate, budget_available_room_nights) AS budget_goppar_reporting,
+    forecast_gop_local * fx_rate AS forecast_gop_reporting,
+    forecast_available_room_nights,
+    SAFE_DIVIDE(forecast_gop_local * fx_rate, forecast_available_room_nights) AS forecast_goppar_reporting,
+    CASE
+      WHEN property_code IS NULL THEN 'MISSING_PROPERTY_MASTER'
+      WHEN available_rooms IS NULL THEN 'MISSING_ROOM_INVENTORY'
+      WHEN available_rooms <= 0 THEN 'INVALID_AVAILABLE_ROOMS'
+      WHEN gross_operating_profit_local IS NULL THEN 'MISSING_FINANCIAL_ACTUALS'
+      WHEN currency_code <> 'USD' AND fx_rate IS NULL THEN 'MISSING_FX_RATE'
+      WHEN occupied_rooms > available_rooms THEN 'OCCUPIED_EXCEEDS_AVAILABLE'
+      ELSE 'VALID'
+    END AS data_quality_status
+  FROM joined;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH inventory_ranked AS (
+    SELECT
+      property_id,
+      business_date AS reporting_date,
+      physical_rooms,
+      out_of_order_rooms,
+      available_rooms,
+      occupied_rooms,
+      complimentary_rooms,
+      house_use_rooms,
+      sold_rooms,
+      ROW_NUMBER() OVER (
+        PARTITION BY property_id, business_date
+        ORDER BY updated_at DESC, ingestion_timestamp DESC
+      ) AS row_num
+    FROM pms_daily_room_inventory
+    WHERE business_date IS NOT NULL
+  ),
+  inventory AS (
+    SELECT
+      property_id,
+      reporting_date,
+      GREATEST(COALESCE(physical_rooms, 0), 0) AS physical_rooms,
+      GREATEST(COALESCE(out_of_order_rooms, 0), 0) AS out_of_order_rooms,
+      GREATEST(
+        COALESCE(
+          available_rooms,
+          COALESCE(physical_rooms, 0) - COALESCE(out_of_order_rooms, 0)
+        ),
+        0
+      ) AS available_rooms,
+      GREATEST(COALESCE(occupied_rooms, 0), 0) AS occupied_rooms,
+      GREATEST(COALESCE(complimentary_rooms, 0), 0) AS complimentary_rooms,
+      GREATEST(COALESCE(house_use_rooms, 0), 0) AS house_use_rooms,
+      GREATEST(COALESCE(sold_rooms, 0), 0) AS sold_rooms
+    FROM inventory_ranked
+    WHERE row_num = 1
+  ),
+  gl_ranked AS (
+    SELECT
+      g.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY journal_line_id
+        ORDER BY updated_at DESC, ingestion_timestamp DESC
+      ) AS row_num
+    FROM erp_gl_postings AS g
+    WHERE posting_status = 'POSTED'
+      AND ledger_type = 'ACTUAL'
+      AND posting_date IS NOT NULL
+  ),
+  gl_latest AS (
+    SELECT *
+    FROM gl_ranked
+    WHERE row_num = 1
+  ),
+  financial_actuals AS (
+    SELECT
+      g.property_id,
+      g.posting_date AS reporting_date,
+      SUM(CASE WHEN m.kpi_component = 'ROOMS_REVENUE' THEN g.amount_local * m.display_sign ELSE 0 END) AS rooms_revenue_local,
+      SUM(CASE WHEN m.kpi_component = 'FOOD_BEVERAGE_REVENUE' THEN g.amount_local * m.display_sign ELSE 0 END) AS food_beverage_revenue_local,
+      SUM(CASE WHEN m.kpi_component = 'OTHER_OPERATING_REVENUE' THEN g.amount_local * m.display_sign ELSE 0 END) AS other_operating_revenue_local,
+      SUM(CASE WHEN m.kpi_component IN (
+        'ROOMS_REVENUE', 'FOOD_BEVERAGE_REVENUE', 'OTHER_OPERATING_REVENUE'
+      ) THEN g.amount_local * m.display_sign ELSE 0 END) AS total_operating_revenue_local,
+      SUM(CASE WHEN m.kpi_component = 'DEPARTMENTAL_EXPENSE' THEN g.amount_local * m.display_sign ELSE 0 END) AS departmental_expense_local,
+      SUM(CASE WHEN m.kpi_component = 'UNDISTRIBUTED_OPERATING_EXPENSE' THEN g.amount_local * m.display_sign ELSE 0 END) AS undistributed_operating_expense_local,
+      SUM(CASE WHEN m.included_in_gop = TRUE THEN g.amount_local * m.statement_sign ELSE 0 END) AS gross_operating_profit_local
+    FROM gl_latest AS g
+    INNER JOIN finance_account_kpi_mapping AS m
+      ON g.account_id = m.account_id
+     AND g.posting_date >= m.effective_from
+     AND g.posting_date < COALESCE(m.effective_to, DATE '9999-12-31')
+    WHERE m.included_in_gop = TRUE
+       OR m.kpi_component IN (
+         'ROOMS_REVENUE',
+         'FOOD_BEVERAGE_REVENUE',
+         'OTHER_OPERATING_REVENUE',
+         'DEPARTMENTAL_EXPENSE',
+         'UNDISTRIBUTED_OPERATING_EXPENSE'
+       )
+    GROUP BY g.property_id, g.posting_date
+  ),
+  plan_ranked AS (
+    SELECT
+      p.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY plan_record_id
+        ORDER BY version_number DESC, updated_at DESC, ingestion_timestamp DESC
+      ) AS row_num
+    FROM planning_daily_property_plan AS p
+    WHERE scenario IN ('BUDGET', 'FORECAST')
+      AND plan_date IS NOT NULL
+      AND approval_status IN ('APPROVED', 'PUBLISHED')
+  ),
+  plan_latest AS (
+    SELECT *
+    FROM plan_ranked
+    WHERE row_num = 1
+  ),
+  plans AS (
+    SELECT
+      property_id,
+      plan_date AS reporting_date,
+      SUM(CASE WHEN scenario = 'BUDGET' THEN gross_operating_profit_local ELSE 0 END) AS budget_gop_local,
+      SUM(CASE WHEN scenario = 'BUDGET' THEN available_room_nights ELSE 0 END) AS budget_available_room_nights,
+      SUM(CASE WHEN scenario = 'FORECAST' THEN gross_operating_profit_local ELSE 0 END) AS forecast_gop_local,
+      SUM(CASE WHEN scenario = 'FORECAST' THEN available_room_nights ELSE 0 END) AS forecast_available_room_nights
+    FROM plan_latest
+    GROUP BY property_id, plan_date
+  ),
+  fx_ranked AS (
+    SELECT
+      from_currency,
+      to_currency,
+      rate_date,
+      exchange_rate,
+      ROW_NUMBER() OVER (
+        PARTITION BY from_currency, to_currency, rate_date
+        ORDER BY published_at DESC, ingestion_timestamp DESC
+      ) AS row_num
+    FROM finance_daily_fx_rates
+    WHERE rate_type = 'CORPORATE_CLOSING'
+      AND to_currency = 'USD'
+      AND exchange_rate > 0
+  ),
+  fx_effective AS (
+    SELECT
+      from_currency,
+      to_currency,
+      rate_date AS effective_from,
+      LEAD(rate_date) OVER (
+        PARTITION BY from_currency, to_currency
+        ORDER BY rate_date
+      ) AS effective_to,
+      exchange_rate
+    FROM fx_ranked
+    WHERE row_num = 1
+  ),
+  property_history AS (
+    SELECT
+      property_id,
+      property_code,
+      property_name,
+      brand_code,
+      brand_name,
+      management_company,
+      ownership_type,
+      hotel_type,
+      market,
+      submarket,
+      city,
+      state_region,
+      country_code,
+      region,
+      currency_code,
+      effective_from,
+      effective_to
+    FROM mdm_dim_property
+    WHERE is_deleted = FALSE
+  ),
+  spine AS (
+    SELECT property_id, reporting_date FROM inventory
+    UNION
+    SELECT property_id, reporting_date FROM financial_actuals
+    UNION
+    SELECT property_id, reporting_date FROM plans
+  ),
+  joined AS (
+    SELECT
+      s.reporting_date,
+      c.fiscal_year,
+      c.fiscal_quarter,
+      c.fiscal_month,
+      c.fiscal_week,
+      s.property_id,
+      p.property_code,
+      p.property_name,
+      p.brand_code,
+      p.brand_name,
+      p.management_company,
+      p.ownership_type,
+      p.hotel_type,
+      p.market,
+      p.submarket,
+      p.city,
+      p.state_region,
+      p.country_code,
+      p.region,
+      p.currency_code,
+      'USD' AS reporting_currency,
+      CASE WHEN p.currency_code = 'USD' THEN 1.0 ELSE fx.exchange_rate END AS fx_rate,
+      i.physical_rooms,
+      i.out_of_order_rooms,
+      i.available_rooms,
+      i.occupied_rooms,
+      i.complimentary_rooms,
+      i.house_use_rooms,
+      i.sold_rooms,
+      f.rooms_revenue_local,
+      f.food_beverage_revenue_local,
+      f.other_operating_revenue_local,
+      f.total_operating_revenue_local,
+      f.departmental_expense_local,
+      f.undistributed_operating_expense_local,
+      f.gross_operating_profit_local,
+      pl.budget_gop_local,
+      pl.budget_available_room_nights,
+      pl.forecast_gop_local,
+      pl.forecast_available_room_nights
+    FROM spine AS s
+    LEFT JOIN property_history AS p
+      ON s.property_id = p.property_id
+     AND s.reporting_date >= p.effective_from
+     AND s.reporting_date < COALESCE(p.effective_to, DATE '9999-12-31')
+    LEFT JOIN mdm_dim_property_calendar AS c
+      ON s.property_id = c.property_id
+     AND s.reporting_date = c.calendar_date
+    LEFT JOIN inventory AS i
+      ON s.property_id = i.property_id
+     AND s.reporting_date = i.reporting_date
+    LEFT JOIN financial_actuals AS f
+      ON s.property_id = f.property_id
+     AND s.reporting_date = f.reporting_date
+    LEFT JOIN plans AS pl
+      ON s.property_id = pl.property_id
+     AND s.reporting_date = pl.reporting_date
+    LEFT JOIN fx_effective AS fx
+      ON p.currency_code = fx.from_currency
+     AND fx.to_currency = 'USD'
+     AND s.reporting_date >= fx.effective_from
+     AND s.reporting_date < COALESCE(fx.effective_to, DATE '9999-12-31')
+  )
+  SELECT
+    reporting_date,
+    fiscal_year,
+    fiscal_quarter,
+    fiscal_month,
+    fiscal_week,
+    property_id,
+    property_code,
+    property_name,
+    brand_code,
+    brand_name,
+    management_company,
+    ownership_type,
+    hotel_type,
+    market,
+    submarket,
+    city,
+    state_region,
+    country_code,
+    region,
+    currency_code,
+    reporting_currency,
+    fx_rate,
+    physical_rooms,
+    out_of_order_rooms,
+    available_rooms,
+    available_rooms AS available_room_nights,
+    occupied_rooms,
+    complimentary_rooms,
+    house_use_rooms,
+    sold_rooms,
+    CAST(occupied_rooms AS DOUBLE) / NULLIF(CAST(available_rooms AS DOUBLE), 0) AS occupancy_rate,
+    rooms_revenue_local,
+    food_beverage_revenue_local,
+    other_operating_revenue_local,
+    total_operating_revenue_local,
+    departmental_expense_local,
+    undistributed_operating_expense_local,
+    gross_operating_profit_local,
+    total_operating_revenue_local * fx_rate AS total_operating_revenue_reporting,
+    gross_operating_profit_local * fx_rate AS gross_operating_profit_reporting,
+    CAST(gross_operating_profit_local AS DOUBLE) / NULLIF(CAST(available_rooms AS DOUBLE), 0) AS goppar_local,
+    CAST(gross_operating_profit_local * fx_rate AS DOUBLE) / NULLIF(CAST(available_rooms AS DOUBLE), 0) AS goppar_reporting,
+    budget_gop_local * fx_rate AS budget_gop_reporting,
+    budget_available_room_nights,
+    CAST(budget_gop_local * fx_rate AS DOUBLE) / NULLIF(CAST(budget_available_room_nights AS DOUBLE), 0) AS budget_goppar_reporting,
+    forecast_gop_local * fx_rate AS forecast_gop_reporting,
+    forecast_available_room_nights,
+    CAST(forecast_gop_local * fx_rate AS DOUBLE) / NULLIF(CAST(forecast_available_room_nights AS DOUBLE), 0) AS forecast_goppar_reporting,
+    CASE
+      WHEN property_code IS NULL THEN 'MISSING_PROPERTY_MASTER'
+      WHEN available_rooms IS NULL THEN 'MISSING_ROOM_INVENTORY'
+      WHEN available_rooms <= 0 THEN 'INVALID_AVAILABLE_ROOMS'
+      WHEN gross_operating_profit_local IS NULL THEN 'MISSING_FINANCIAL_ACTUALS'
+      WHEN currency_code <> 'USD' AND fx_rate IS NULL THEN 'MISSING_FX_RATE'
+      WHEN occupied_rooms > available_rooms THEN 'OCCUPIED_EXCEEDS_AVAILABLE'
+      ELSE 'VALID'
+    END AS data_quality_status
+  FROM joined;
+
+Calculation Notes: |
+  1️⃣ Calculate numerator from approved hotel operating statement using USALI chart-of-accounts.  
+  2️⃣ Total operating revenue includes rooms, food & beverage, and other operated-department revenue.  
+  3️⃣ Subtract departmental and undistributed operating expenses above the approved GOP line.  
+  4️⃣ Exclude non-operating income/expenses, depreciation, amortization, interest, and owner-specific charges.  
+  5️⃣ Denominator is the sum of daily saleable room inventory, excluding out-of-order or long-term closure rooms.  
+  6️⃣ Include complimentary, house-use, no-show, and unsold room nights in saleable inventory.  
+  7️⃣ For portfolios, divide aggregated GOP by aggregated available room nights, using finalized accruals.
+
+Business Use Case: |
+  A hotel chief operating officer compares monthly GOPPAR with budget, prior year, and peer properties to identify hotels where revenue growth is not translating into operating profit. If a property has stable RevPAR but declining GOPPAR, Finance and Operations investigate labor productivity, utilities, departmental margins, undistributed expenses, and inventory outages, then assign cost-control or revenue-mix actions and monitor the resulting variance.
+
+
+Source Data: Property Management System room-inventory data; ERP or General Ledger operating statements; hotel financial consolidation system; budgeting and forecasting platform; property master data; foreign-exchange rate repository
+
+Report Attributes: |
+  ["Reporting Period","Property","Property Cluster","Brand","Management Company","Ownership Type","Country","Region","Market","Property Type","Service Level","Chain Scale","Operating Status","Currency","Financial Period Status","Budget Scenario","Comparable Property Flag"]
+
+Dashboard Usage: [Hotel Executive Performance Dashboard, Property Profitability Dashboard, Operations Efficiency Dashboard, Monthly Financial Review, Portfolio Benchmarking Dashboard, Budget and Forecast Variance Dashboard, Owner and Asset Management Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Gross Operating Profit, Gross Operating Profit Margin, Revenue per Available Room, Total Revenue per Available Room, Average Daily Rate, Occupancy Rate, Rooms Department Profit, EBITDA per Available Room, Cost per Occupied Room]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-10T22:30:20.451616+00:00
+
+Last Modified By: devyendarm
+
+
