@@ -1,0 +1,575 @@
+# Metric: Assessment Pass Rate
+# Generated: 2026-09-11T19:30:37.720Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Assessment Pass Rate
+Formula: 100 * COUNT(DISTINCT CASE WHEN attempt_status = 'graded' AND is_eligible_attempt = true AND is_passed = true THEN attempt_id END) / NULLIF(COUNT(DISTINCT CASE WHEN attempt_status = 'graded' AND is_eligible_attempt = true THEN attempt_id END), 0)
+
+Description: |
+  Assessment Pass Rate measures the percentage of eligible, completed, and graded assessment attempts that satisfy the pass criteria configured for the applicable assessment version. It indicates how consistently learners demonstrate the minimum required knowledge or proficiency across courses, cohorts, assessment types, and reporting periods.
+
+Category: Performance
+
+Tags: [metric]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily/Weekly/Monthly/Academic Term
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH ranked_attempts AS (
+    SELECT
+      a.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY a.tenant_id, a.attempt_id
+        ORDER BY a.updated_at DESC, a.ingested_at DESC
+      ) AS row_num
+    FROM `your-project.lms.assessment_attempts` AS a
+    WHERE a.attempt_date BETWEEN @start_date AND @end_date
+  ),
+  latest_attempts AS (
+    SELECT * EXCEPT (row_num)
+    FROM ranked_attempts
+    WHERE row_num = 1
+  ),
+  ranked_grades AS (
+    SELECT
+      g.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY g.tenant_id, g.attempt_id
+        ORDER BY g.graded_at DESC, g.updated_at DESC, g.ingested_at DESC
+      ) AS row_num
+    FROM `your-project.grading_engine.assessment_grades` AS g
+  ),
+  latest_grades AS (
+    SELECT * EXCEPT (row_num)
+    FROM ranked_grades
+    WHERE row_num = 1
+  ),
+  ranked_lrs_records AS (
+    SELECT
+      l.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY l.tenant_id, l.attempt_id
+        ORDER BY l.occurred_at DESC, l.ingested_at DESC
+      ) AS row_num
+    FROM `your-project.lrs.learning_records` AS l
+    WHERE l.attempt_id IS NOT NULL
+  ),
+  latest_lrs_records AS (
+    SELECT * EXCEPT (row_num)
+    FROM ranked_lrs_records
+    WHERE row_num = 1
+  ),
+  attempt_config_candidates AS (
+    SELECT
+      a.*,
+      c.assessment_name AS config_assessment_name,
+      c.assessment_type AS config_assessment_type,
+      c.delivery_mode AS config_delivery_mode,
+      c.assessment_language AS config_assessment_language,
+      c.subject_area AS config_subject_area,
+      c.difficulty_level AS config_difficulty_level,
+      c.grading_method AS config_grading_method,
+      c.score_scale AS config_score_scale,
+      c.passing_score AS config_passing_score,
+      c.max_score AS config_max_score,
+      c.max_attempts AS config_max_attempts,
+      ROW_NUMBER() OVER (
+        PARTITION BY a.tenant_id, a.attempt_id
+        ORDER BY c.effective_start_at DESC, c.updated_at DESC
+      ) AS config_row_num
+    FROM latest_attempts AS a
+    LEFT JOIN `your-project.assessment_service.assessment_configurations` AS c
+      ON c.tenant_id = a.tenant_id
+     AND c.assessment_id = a.assessment_id
+     AND (
+          a.assessment_version_id = c.assessment_version_id
+          OR a.assessment_version_id IS NULL
+     )
+     AND COALESCE(a.completed_at, a.submitted_at, a.started_at, a.updated_at)
+         >= c.effective_start_at
+     AND COALESCE(a.completed_at, a.submitted_at, a.started_at, a.updated_at)
+         < COALESCE(c.effective_end_at, TIMESTAMP('9999-12-31'))
+  ),
+  attempts_with_config AS (
+    SELECT * EXCEPT (config_row_num)
+    FROM attempt_config_candidates
+    WHERE config_row_num = 1
+  ),
+  scored_attempts AS (
+    SELECT
+      a.*,
+      g.grade_status AS raw_grade_status,
+      g.final_score,
+      g.is_passed,
+      CASE
+        WHEN g.is_passed IS NOT NULL THEN IF(g.is_passed, 1, 0)
+        WHEN LOWER(g.grade_status) IN ('passed', 'pass', 'successful') THEN 1
+        WHEN LOWER(g.grade_status) IN ('failed', 'fail', 'unsuccessful') THEN 0
+        WHEN COALESCE(g.final_score, a.score) IS NOT NULL
+         AND COALESCE(a.config_passing_score, a.passing_score) IS NOT NULL
+          THEN IF(
+            COALESCE(g.final_score, a.score)
+              >= COALESCE(a.config_passing_score, a.passing_score),
+            1,
+            0
+          )
+        ELSE NULL
+      END AS passed_flag
+    FROM attempts_with_config AS a
+    LEFT JOIN latest_grades AS g
+      ON g.tenant_id = a.tenant_id
+     AND g.attempt_id = a.attempt_id
+  ),
+  eligible_attempts AS (
+    SELECT *
+    FROM scored_attempts
+    WHERE passed_flag IS NOT NULL
+      AND (
+        LOWER(attempt_status) IN ('submitted', 'completed', 'graded', 'passed', 'failed')
+        OR LOWER(raw_grade_status) IN (
+          'final', 'finalized', 'completed', 'graded',
+          'passed', 'pass', 'successful',
+          'failed', 'fail', 'unsuccessful'
+        )
+      )
+  ),
+  normalized_attempts AS (
+    SELECT
+      DATE(COALESCE(a.completed_at, a.submitted_at, a.started_at, a.updated_at)) AS metric_date,
+      a.tenant_id,
+      a.institution_id,
+      a.organization_id,
+      a.business_unit_id,
+      a.region,
+      a.country_code,
+      a.lms_id,
+      a.program_id,
+      a.program_name,
+      a.course_id,
+      a.course_version_id,
+      a.course_name,
+      a.module_id,
+      a.module_name,
+      a.assessment_id,
+      a.assessment_version_id,
+      COALESCE(a.config_assessment_name, a.assessment_name) AS assessment_name,
+      COALESCE(a.config_assessment_type, a.assessment_type, 'assessment') AS assessment_type,
+      COALESCE(a.config_delivery_mode, a.delivery_mode, 'unspecified') AS assessment_delivery_mode,
+      COALESCE(a.config_assessment_language, a.assessment_language, 'unspecified') AS assessment_language,
+      COALESCE(a.config_subject_area, a.subject_area, 'unspecified') AS subject_area,
+      COALESCE(a.config_difficulty_level, a.difficulty_level, 'unspecified') AS difficulty_level,
+      COALESCE(a.config_grading_method, a.grading_method, 'unspecified') AS grading_method,
+      COALESCE(a.config_score_scale, a.score_scale, 'unspecified') AS score_scale,
+      COALESCE(a.config_passing_score, a.passing_score) AS passing_score,
+      COALESCE(a.config_max_score, a.max_score) AS max_score,
+      COALESCE(a.config_max_attempts, a.max_attempts) AS max_attempts,
+      a.cohort_id,
+      COALESCE(a.learner_type, 'unspecified') AS learner_type,
+      COALESCE(a.enrollment_status, 'unspecified') AS enrollment_status,
+      COALESCE(a.academic_term, 'unspecified') AS academic_term,
+      a.instructor_id,
+      COALESCE(a.source_system, 'LMS') AS source_system,
+      COALESCE(l.record_source, 'LMS_GRADING_ENGINE') AS record_source,
+      COALESCE(l.activity_type, 'assessment') AS activity_type,
+      'completed' AS completion_status,
+      'finalized' AS grade_status,
+      COALESCE(l.channel, a.attempt_channel, 'unspecified') AS attempt_channel,
+      COALESCE(l.device_type, a.device_type, 'unspecified') AS device_type,
+      a.learner_id,
+      a.attempt_id,
+      a.passed_flag
+    FROM eligible_attempts AS a
+    LEFT JOIN latest_lrs_records AS l
+      ON l.tenant_id = a.tenant_id
+     AND l.attempt_id = a.attempt_id
+  )
+  SELECT
+    'Assessment Pass Rate' AS metric_name,
+    'Percentage of finalized assessment attempts that received a passing outcome' AS metric_definition,
+    'daily assessment segment' AS metric_grain,
+    metric_date,
+    metric_date AS period_start_date,
+    metric_date AS period_end_date,
+    tenant_id,
+    institution_id,
+    organization_id,
+    business_unit_id,
+    region,
+    country_code,
+    lms_id,
+    program_id,
+    program_name,
+    course_id,
+    course_version_id,
+    course_name,
+    module_id,
+    module_name,
+    assessment_id,
+    assessment_version_id,
+    assessment_name,
+    assessment_type,
+    assessment_delivery_mode,
+    assessment_language,
+    subject_area,
+    difficulty_level,
+    grading_method,
+    score_scale,
+    passing_score,
+    max_score,
+    max_attempts,
+    cohort_id,
+    learner_type,
+    enrollment_status,
+    academic_term,
+    instructor_id,
+    source_system,
+    record_source,
+    activity_type,
+    completion_status,
+    grade_status,
+    attempt_channel,
+    device_type,
+    COUNT(DISTINCT learner_id) AS distinct_learners,
+    COUNT(DISTINCT attempt_id) AS total_assessment_attempts,
+    COUNT(DISTINCT IF(passed_flag = 1, attempt_id, NULL)) AS passed_assessment_attempts,
+    ROUND(
+      100 * SAFE_DIVIDE(
+        COUNT(DISTINCT IF(passed_flag = 1, attempt_id, NULL)),
+        COUNT(DISTINCT attempt_id)
+      ),
+      2
+    ) AS assessment_pass_rate
+  FROM normalized_attempts
+  GROUP BY ALL;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH ranked_attempts AS (
+    SELECT
+      a.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY a.tenant_id, a.attempt_id
+        ORDER BY a.updated_at DESC, a.ingested_at DESC
+      ) AS row_num
+    FROM lms_assessment_attempts AS a
+    WHERE a.attempt_date BETWEEN CAST(:start_date AS DATE) AND CAST(:end_date AS DATE)
+  ),
+  latest_attempts AS (
+    SELECT *
+    FROM ranked_attempts
+    WHERE row_num = 1
+  ),
+  ranked_grades AS (
+    SELECT
+      g.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY g.tenant_id, g.attempt_id
+        ORDER BY g.graded_at DESC, g.updated_at DESC, g.ingested_at DESC
+      ) AS row_num
+    FROM grading_engine_assessment_grades AS g
+  ),
+  latest_grades AS (
+    SELECT *
+    FROM ranked_grades
+    WHERE row_num = 1
+  ),
+  ranked_lrs_records AS (
+    SELECT
+      l.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY l.tenant_id, l.attempt_id
+        ORDER BY l.occurred_at DESC, l.ingested_at DESC
+      ) AS row_num
+    FROM learning_record_store_records AS l
+    WHERE l.attempt_id IS NOT NULL
+  ),
+  latest_lrs_records AS (
+    SELECT *
+    FROM ranked_lrs_records
+    WHERE row_num = 1
+  ),
+  attempt_config_candidates AS (
+    SELECT
+      a.*,
+      c.assessment_name AS config_assessment_name,
+      c.assessment_type AS config_assessment_type,
+      c.delivery_mode AS config_delivery_mode,
+      c.assessment_language AS config_assessment_language,
+      c.subject_area AS config_subject_area,
+      c.difficulty_level AS config_difficulty_level,
+      c.grading_method AS config_grading_method,
+      c.score_scale AS config_score_scale,
+      c.passing_score AS config_passing_score,
+      c.max_score AS config_max_score,
+      c.max_attempts AS config_max_attempts,
+      ROW_NUMBER() OVER (
+        PARTITION BY a.tenant_id, a.attempt_id
+        ORDER BY c.effective_start_at DESC, c.updated_at DESC
+      ) AS config_row_num
+    FROM latest_attempts AS a
+    LEFT JOIN assessment_service_configurations AS c
+      ON c.tenant_id = a.tenant_id
+     AND c.assessment_id = a.assessment_id
+     AND (
+          a.assessment_version_id = c.assessment_version_id
+          OR a.assessment_version_id IS NULL
+     )
+     AND COALESCE(a.completed_at, a.submitted_at, a.started_at, a.updated_at)
+         >= c.effective_start_at
+     AND COALESCE(a.completed_at, a.submitted_at, a.started_at, a.updated_at)
+         < COALESCE(c.effective_end_at, TIMESTAMP '9999-12-31 00:00:00')
+  ),
+  attempts_with_config AS (
+    SELECT *
+    FROM attempt_config_candidates
+    WHERE config_row_num = 1
+  ),
+  scored_attempts AS (
+    SELECT
+      a.*,
+      g.grade_status AS raw_grade_status,
+      g.final_score,
+      g.is_passed,
+      CASE
+        WHEN g.is_passed IS NOT NULL THEN
+          CASE WHEN g.is_passed = TRUE THEN 1 ELSE 0 END
+        WHEN LOWER(g.grade_status) IN ('passed', 'pass', 'successful') THEN 1
+        WHEN LOWER(g.grade_status) IN ('failed', 'fail', 'unsuccessful') THEN 0
+        WHEN COALESCE(g.final_score, a.score) IS NOT NULL
+         AND COALESCE(a.config_passing_score, a.passing_score) IS NOT NULL
+          THEN CASE
+            WHEN COALESCE(g.final_score, a.score)
+                   >= COALESCE(a.config_passing_score, a.passing_score)
+            THEN 1 ELSE 0
+          END
+        ELSE NULL
+      END AS passed_flag
+    FROM attempts_with_config AS a
+    LEFT JOIN latest_grades AS g
+      ON g.tenant_id = a.tenant_id
+     AND g.attempt_id = a.attempt_id
+  ),
+  eligible_attempts AS (
+    SELECT *
+    FROM scored_attempts
+    WHERE passed_flag IS NOT NULL
+      AND (
+        LOWER(attempt_status) IN ('submitted', 'completed', 'graded', 'passed', 'failed')
+        OR LOWER(raw_grade_status) IN (
+          'final', 'finalized', 'completed', 'graded',
+          'passed', 'pass', 'successful',
+          'failed', 'fail', 'unsuccessful'
+        )
+      )
+  ),
+  normalized_attempts AS (
+    SELECT
+      CAST(COALESCE(a.completed_at, a.submitted_at, a.started_at, a.updated_at) AS DATE) AS metric_date,
+      a.tenant_id,
+      a.institution_id,
+      a.organization_id,
+      a.business_unit_id,
+      a.region,
+      a.country_code,
+      a.lms_id,
+      a.program_id,
+      a.program_name,
+      a.course_id,
+      a.course_version_id,
+      a.course_name,
+      a.module_id,
+      a.module_name,
+      a.assessment_id,
+      a.assessment_version_id,
+      COALESCE(a.config_assessment_name, a.assessment_name) AS assessment_name,
+      COALESCE(a.config_assessment_type, a.assessment_type, 'assessment') AS assessment_type,
+      COALESCE(a.config_delivery_mode, a.delivery_mode, 'unspecified') AS assessment_delivery_mode,
+      COALESCE(a.config_assessment_language, a.assessment_language, 'unspecified') AS assessment_language,
+      COALESCE(a.config_subject_area, a.subject_area, 'unspecified') AS subject_area,
+      COALESCE(a.config_difficulty_level, a.difficulty_level, 'unspecified') AS difficulty_level,
+      COALESCE(a.config_grading_method, a.grading_method, 'unspecified') AS grading_method,
+      COALESCE(a.config_score_scale, a.score_scale, 'unspecified') AS score_scale,
+      COALESCE(a.config_passing_score, a.passing_score) AS passing_score,
+      COALESCE(a.config_max_score, a.max_score) AS max_score,
+      COALESCE(a.config_max_attempts, a.max_attempts) AS max_attempts,
+      a.cohort_id,
+      COALESCE(a.learner_type, 'unspecified') AS learner_type,
+      COALESCE(a.enrollment_status, 'unspecified') AS enrollment_status,
+      COALESCE(a.academic_term, 'unspecified') AS academic_term,
+      a.instructor_id,
+      COALESCE(a.source_system, 'LMS') AS source_system,
+      COALESCE(l.record_source, 'LMS_GRADING_ENGINE') AS record_source,
+      COALESCE(l.activity_type, 'assessment') AS activity_type,
+      'completed' AS completion_status,
+      'finalized' AS grade_status,
+      COALESCE(l.channel, a.attempt_channel, 'unspecified') AS attempt_channel,
+      COALESCE(l.device_type, a.device_type, 'unspecified') AS device_type,
+      a.learner_id,
+      a.attempt_id,
+      a.passed_flag
+    FROM eligible_attempts AS a
+    LEFT JOIN latest_lrs_records AS l
+      ON l.tenant_id = a.tenant_id
+     AND l.attempt_id = a.attempt_id
+  )
+  SELECT
+    'Assessment Pass Rate' AS metric_name,
+    'Percentage of finalized assessment attempts that received a passing outcome' AS metric_definition,
+    'daily assessment segment' AS metric_grain,
+    n.metric_date,
+    n.metric_date AS period_start_date,
+    n.metric_date AS period_end_date,
+    n.tenant_id,
+    n.institution_id,
+    n.organization_id,
+    n.business_unit_id,
+    n.region,
+    n.country_code,
+    n.lms_id,
+    n.program_id,
+    n.program_name,
+    n.course_id,
+    n.course_version_id,
+    n.course_name,
+    n.module_id,
+    n.module_name,
+    n.assessment_id,
+    n.assessment_version_id,
+    n.assessment_name,
+    n.assessment_type,
+    n.assessment_delivery_mode,
+    n.assessment_language,
+    n.subject_area,
+    n.difficulty_level,
+    n.grading_method,
+    n.score_scale,
+    n.passing_score,
+    n.max_score,
+    n.max_attempts,
+    n.cohort_id,
+    n.learner_type,
+    n.enrollment_status,
+    n.academic_term,
+    n.instructor_id,
+    n.source_system,
+    n.record_source,
+    n.activity_type,
+    n.completion_status,
+    n.grade_status,
+    n.attempt_channel,
+    n.device_type,
+    COUNT(DISTINCT n.learner_id) AS distinct_learners,
+    COUNT(DISTINCT n.attempt_id) AS total_assessment_attempts,
+    COUNT(DISTINCT CASE WHEN n.passed_flag = 1 THEN n.attempt_id END) AS passed_assessment_attempts,
+    CAST(
+      ROUND(
+        100.0 * COUNT(DISTINCT CASE WHEN n.passed_flag = 1 THEN n.attempt_id END)
+        / NULLIF(COUNT(DISTINCT n.attempt_id), 0),
+        2
+      ) AS DECIMAL(9,2)
+    ) AS assessment_pass_rate
+  FROM normalized_attempts AS n
+  GROUP BY
+    n.metric_date,
+    n.tenant_id,
+    n.institution_id,
+    n.organization_id,
+    n.business_unit_id,
+    n.region,
+    n.country_code,
+    n.lms_id,
+    n.program_id,
+    n.program_name,
+    n.course_id,
+    n.course_version_id,
+    n.course_name,
+    n.module_id,
+    n.module_name,
+    n.assessment_id,
+    n.assessment_version_id,
+    n.assessment_name,
+    n.assessment_type,
+    n.assessment_delivery_mode,
+    n.assessment_language,
+    n.subject_area,
+    n.difficulty_level,
+    n.grading_method,
+    n.score_scale,
+    n.passing_score,
+    n.max_score,
+    n.max_attempts,
+    n.cohort_id,
+    n.learner_type,
+    n.enrollment_status,
+    n.academic_term,
+    n.instructor_id,
+    n.source_system,
+    n.record_source,
+    n.activity_type,
+    n.completion_status,
+    n.grade_status,
+    n.attempt_channel,
+    n.device_type;
+
+Calculation Notes: |
+  1️⃣ Count each eligible graded submission as one assessment attempt with a unique attempt_id.  
+  2️⃣ Determine pass status based on pass threshold, grading rule, and effective assessment version at submission.  
+  3️⃣ Exclude attempts that are in progress, abandoned, saved but not submitted, pending grading, invalidated, voided, deleted, fraudulent, or created for testing.  
+  4️⃣ Include manually graded attempts only after grading is finalized.  
+  5️⃣ Count each valid retake separately; first or final attempts must select the earliest or latest eligible graded attempt.  
+  6️⃣ Deduplicate repeated events by attempt_id and retain the latest finalized grading record.  
+  7️⃣ Assign an attempt to a reporting period using graded_at; use submitted_at only if graded_at is unavailable and result is finalized synchronously.
+
+Business Use Case: |
+  A Chief Learning Officer reviews monthly pass rates by course, assessment, cohort, and question domain. If a required assessment falls below the 70% warning threshold while completion remains stable, the learning team investigates item difficulty, instructional coverage, learner segment gaps, and instructor delivery, then revises content, provides remediation, or recalibrates defective questions before the next cohort begins.
+
+
+Source Data: Learning Management System assessment attempts, assessment configuration service, grading engine, and Learning Record Store
+
+Report Attributes: |
+  ["Assessment","Assessment Version","Course","Program","Subject","Question Domain","Assessment Type","Difficulty Level","Cohort","Academic Term","Instructor","Organization","Delivery Mode","Enrollment Type","Learner Region","Learner Grade Level","Attempt Number","Device Type","Grading Method"]
+
+Dashboard Usage: [Learning Outcomes Executive Dashboard, Assessment Performance Dashboard, Course Quality Dashboard, Cohort Performance Dashboard, Certification Readiness Dashboard, Instructor Effectiveness Dashboard, Learner Success Operations Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Assessment Completion Rate, Assessment Failure Rate, Average Assessment Score, First-Attempt Pass Rate, Final-Attempt Pass Rate, Assessment Retake Rate, Course Completion Rate, Learner Proficiency Rate, Question Correct Response Rate, Time to Pass Assessment]
+
+Derived KPIs: [Pass Rate by Course, Pass Rate by Cohort, Pass Rate by Assessment, Pass Rate by Instructor, First-Attempt Pass Rate, Certification Exam Pass Rate, Pass Rate Improvement, Pass Rate Gap by Learner Segment, Assessment Effectiveness Index]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-11T19:30:36.720886+00:00
+
+Last Modified By: devyendarm
+
+
