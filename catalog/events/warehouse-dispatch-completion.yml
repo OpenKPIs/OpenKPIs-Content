@@ -1,0 +1,79 @@
+# Event: Warehouse Dispatch Completion
+# Generated: 2026-09-10T20:30:24.879Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Warehouse Dispatch Completion
+Event Serialization: once per dispatch_id per completion lifecycle
+
+Description: |
+  Records the authoritative completion of an outbound dispatch when the approved load has cleared required release controls and physical departure or custody transfer is confirmed. It measures dispatch completion timing, throughput, cutoff compliance, and operational context for digitally initiated orders and stitched warehouse transportation activity.
+
+Category: Efficiency
+
+Tags: [event]
+
+Industry: Other
+
+Priority: High
+
+Core Area: Generic
+
+
+Event Type: custom
+
+Aggregation Window: Event; Time based - Hourly/Daily/Weekly/Monthly/Yearly
+
+
+
+
+
+
+
+Parameters: |
+  {"load_id":"string - identifier for the physical or logical outbound transport load","wave_id":"string - identifier of the fulfillment wave that released the outbound work","event_id":"string - globally unique identifier for the event occurrence","route_id":"string - identifier of the planned transportation route or delivery run","carrier_id":"string - enterprise identifier of the carrier or internal transport provider","trailer_id":"string - enterprise identifier of the trailer or transport container","vehicle_id":"string - enterprise identifier of the vehicle assigned to the dispatch","dispatch_id":"string - unique identifier for the outbound dispatch lifecycle and primary event grain","manifest_id":"string - identifier of the finalized shipment or carrier manifest","order_count":"integer - number of distinct digital or operational orders included in the dispatch","shipment_id":"string - operational identifier for a shipment included in the dispatch","weight_unit":"string - standardized unit associated with gross_weight","dock_door_id":"string - identifier of the dock door from which the load departed","gross_weight":"number - total gross weight of the completed dispatch","on_time_flag":"boolean - indicates whether actual dispatch occurred within the approved departure tolerance","pallet_count":"integer - number of pallets in the completed dispatch","warehouse_id":"string - enterprise identifier of the warehouse completing the dispatch","event_version":"string - semantic version of the event payload schema","item_quantity":"integer - total quantity of inventory units included in the dispatch","package_count":"integer - number of packages, cartons, or handling units in the completed dispatch","shipment_type":"string - classification such as customer order, replenishment, transfer, return, or supplier movement","source_system":"string - authoritative system that supplied the completion evidence","correlation_id":"string - cross-system trace identifier linking digital order, fulfillment, dispatch, load, and carrier records","exception_code":"string - highest-priority exception code associated with the completed dispatch","transport_mode":"string - normalized mode such as parcel, less-than-truckload, full truckload, air, rail, or ocean","dispatch_status":"string - normalized terminal status, expected to be DISPATCHED or an approved equivalent","event_timestamp":"string - ISO 8601 UTC timestamp when dispatch completion occurred","exception_count":"integer - number of active, waived, or accepted operational exceptions at completion","idempotency_key":"string - stable key used to suppress duplicate publications of the same completion","staging_zone_id":"string - identifier of the outbound staging zone used before loading","cutoff_timestamp":"string - ISO 8601 timestamp of the applicable warehouse, carrier, or service-level cutoff","destination_type":"string - destination classification such as customer, store, distribution center, cross-dock, or supplier","bill_of_lading_id":"string - identifier of the bill of lading or equivalent transport document","warehouse_timezone":"string - IANA timezone used for local operating calendars and cutoff evaluation","completion_evidence":"string - controlled evidence type establishing completion, such as gate exit, load departure, carrier possession, or approved WMS confirmation","fulfillment_channel":"string - normalized channel such as e-commerce, retail, wholesale, marketplace, or internal transfer","carrier_service_level":"string - normalized contracted transportation service level","completion_reason_code":"string - controlled code explaining why and under what operating condition completion was recorded","destination_location_id":"string - enterprise destination identifier excluding personal address details","loading_start_timestamp":"string - ISO 8601 UTC timestamp when physical loading began","destination_country_code":"string - ISO 3166-1 alpha-2 destination country code","actual_dispatch_timestamp":"string - ISO 8601 UTC timestamp of confirmed physical departure or accepted custody transfer","handoff_confirmation_type":"string - method used to validate departure or custody transfer","pack_completion_timestamp":"string - ISO 8601 UTC timestamp when required packing completed","pick_completion_timestamp":"string - ISO 8601 UTC timestamp when required picking completed","planned_dispatch_timestamp":"string - ISO 8601 timestamp of the approved planned departure","dispatch_lifecycle_sequence":"integer - sequential version identifying an authorized completion after reversal or reopening","inventory_commitment_status":"string - reconciliation status indicating whether dispatched inventory was fully relieved, partially relieved, or pending","loading_completion_timestamp":"string - ISO 8601 UTC timestamp when approved loading completed","staging_completion_timestamp":"string - ISO 8601 UTC timestamp when required handling units reached outbound staging"}
+
+Calculation Notes: |
+  1️⃣ Activate only after required loading, release controls, and shipping documentation are complete and departure or custody transfer is authoritatively confirmed.
+  2️⃣ Use dispatch_id plus dispatch_lifecycle_sequence as the business uniqueness key; use idempotency_key to suppress technical retries and duplicate source messages.
+  3️⃣ Prefer completed gate exit or TMS load departure evidence, followed by confirmed carrier possession; accept WMS status alone only when formally approved as an equivalent control.
+  4️⃣ Exclude canceled, voided, test, training, simulated, and incomplete dispatches, as well as status changes lacking a valid completion timestamp.
+  5️⃣ Record one completion per dispatch lifecycle; a reopened dispatch requires an explicit reversal before a subsequent completion can be counted as a new lifecycle.
+  6️⃣ Evaluate timeliness against the approved planned departure or applicable cutoff in the warehouse timezone, while retaining event_timestamp in UTC.
+  7️⃣ Preserve the original completion timestamp for late-arriving records; attribute volume to actual dispatch time, and process non-event attribute corrections without creating another completion.
+
+Business Use Case: |
+  The Vice President of Warehouse Operations monitors on-time dispatch and cutoff compliance for digitally initiated orders by warehouse, shift, dock door, carrier, and service level. Persistent delays concentrated at a facility, release wave, or carrier pickup window trigger labor reallocation, earlier wave release, dock-capacity changes, carrier escalation, or revised customer delivery promises.
+
+
+Source Data: Digital Commerce Order and Fulfillment Events + Warehouse Management System (WMS) + Transportation Management System (TMS) + Yard or Gate Management + Carrier Handoff Integrations
+
+    Report Attributes: |
+  ["Warehouse","Dispatch Completion Date","Warehouse Local Completion Shift","Dispatch Timeliness Status","Cutoff Compliance Status","Fulfillment Channel","Shipment Type","Carrier","Carrier Service Level","Transport Mode","Dock Door","Staging Zone","Fulfillment Wave","Route","Destination Type","Destination Country","Completion Evidence","Completion Reason","Exception Code","Load Size Band","Source System"]
+
+    Dashboard Usage: [Digital Order Fulfillment Control Tower, Warehouse Operations Control Tower, Outbound Fulfillment Performance, On-Time Dispatch and Cutoff Compliance, Carrier Handoff Performance, Dock and Loading Productivity, Warehouse Throughput Executive Scorecard, Dispatch Exception Management]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [Warehouse, Warehouse Timezone, Dispatch, Dispatch Lifecycle Sequence, Shipment, Load, Fulfillment Channel, Shipment Type, Carrier, Carrier Service Level, Transport Mode, Route, Dock Door, Staging Zone, Fulfillment Wave, Destination Type, Destination Location, Destination Country, Completion Evidence, Completion Reason, Exception Code, Inventory Commitment Status, Source System]
+
+    Derived Dimensions: [Dispatch Completion Date, Dispatch Completion Hour, Warehouse Local Completion Date, Warehouse Local Completion Shift, Dispatch Timeliness Status, Cutoff Compliance Status, Dispatch Delay Duration Band, Loading Duration Band, Pick-to-Dispatch Duration Band, Load Size Band, Exception Severity Band, Destination Region, Domestic or International Dispatch, Carrier Handoff Method Group]
+
+    Derived Metrics: [Completed Dispatch Count, Completed Shipment Count, Completed Load Count, Dispatched Order Count, Dispatched Package Count, Dispatched Pallet Count, Dispatched Item Quantity, Dispatched Gross Weight, On-Time Dispatch Count, Late Dispatch Count, Cutoff Miss Count, Exception-Free Dispatch Count, Dispatch Delay Duration, Pick-to-Dispatch Duration, Pack-to-Dispatch Duration, Stage-to-Dispatch Duration, Loading Duration]
+
+    Derived KPIs: [On-Time Dispatch Rate, Dispatch Plan Attainment, Carrier Cutoff Compliance Rate, Exception-Free Dispatch Rate, Average Dispatch Delay, Average Pick-to-Dispatch Cycle Time, Average Loading Cycle Time, Warehouse Dispatch Throughput, Orders per Completed Dispatch, Packages per Completed Dispatch, Dock Door Throughput, Inventory Dispatch Reconciliation Rate]
+
+    Data Sensitivity: confidential
+
+    Contains PII: No
+
+    Status: draft
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-10T20:30:23.588633+00:00
+
+    Last Modified By: devyendarm
+
+    
