@@ -1,0 +1,668 @@
+# Metric: Average Assessment Score
+# Generated: 2026-09-11T18:30:21.585Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Average Assessment Score
+Formula: SUM(100 * earned_points / max_points) / COUNT(DISTINCT attempt_id), calculated over eligible deduplicated attempts where attempt_status = 'finalized' and max_points > 0
+
+Description: |
+  Average Assessment Score measures the mean percentage of available points earned across valid, finalized learner assessment attempts in the selected reporting period. It indicates demonstrated mastery on scored quizzes, tests, exams, and graded assignments, with each eligible attempt contributing equal weight regardless of the assessment's point scale.
+
+Category: Performance
+
+Tags: [metric]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Measure Type: average
+
+Aggregation Window: Time based - Daily/Weekly/Monthly/Academic Term
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH
+  parameters AS (
+    SELECT
+      DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) AS start_date,
+      CURRENT_DATE() AS end_date
+  ),
+  assessment_configurations AS (
+    SELECT * EXCEPT (configuration_rank)
+    FROM (
+      SELECT
+        c.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY c.course_id, c.assessment_id
+          ORDER BY c.updated_at DESC, c.assessment_version DESC
+        ) AS configuration_rank
+      FROM `your-project.lms.assessment_configurations` AS c
+      WHERE COALESCE(c.is_deleted, FALSE) = FALSE
+    )
+    WHERE configuration_rank = 1
+  ),
+  identity_accounts AS (
+    SELECT * EXCEPT (identity_rank)
+    FROM (
+      SELECT
+        i.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY i.learner_id
+          ORDER BY i.updated_at DESC
+        ) AS identity_rank
+      FROM `your-project.lms.identity_accounts` AS i
+      WHERE COALESCE(i.is_deleted, FALSE) = FALSE
+    )
+    WHERE identity_rank = 1
+  ),
+  enrollments AS (
+    SELECT * EXCEPT (enrollment_rank)
+    FROM (
+      SELECT
+        e.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY e.learner_id, e.course_id
+          ORDER BY
+            CASE WHEN LOWER(e.enrollment_status) IN ('active', 'completed') THEN 0 ELSE 1 END,
+            e.updated_at DESC,
+            e.enrollment_id DESC
+        ) AS enrollment_rank
+      FROM `your-project.lms.enrollments` AS e
+      WHERE COALESCE(e.is_deleted, FALSE) = FALSE
+    )
+    WHERE enrollment_rank = 1
+  ),
+  valid_attempts AS (
+    SELECT
+      a.attempt_id,
+      a.learner_id,
+      a.course_id,
+      a.assessment_id,
+      COALESCE(a.attempt_completed_at, a.attempt_submitted_at, a.attempt_started_at) AS activity_at,
+      CASE
+        WHEN a.score_percentage IS NOT NULL THEN GREATEST(CAST(a.score_percentage AS NUMERIC), 0)
+        WHEN COALESCE(a.points_possible, c.points_possible) > 0
+          THEN GREATEST(
+            SAFE_DIVIDE(
+              CAST(a.points_earned AS NUMERIC),
+              CAST(COALESCE(a.points_possible, c.points_possible) AS NUMERIC)
+            ) * 100,
+            0
+          )
+      END AS attempt_score_percentage
+    FROM `your-project.lms.assessment_attempts` AS a
+    JOIN assessment_configurations AS c
+      ON c.course_id = a.course_id
+     AND c.assessment_id = a.assessment_id
+    CROSS JOIN parameters AS p
+    WHERE DATE(COALESCE(a.attempt_completed_at, a.attempt_submitted_at, a.attempt_started_at))
+          BETWEEN p.start_date AND p.end_date
+      AND LOWER(a.attempt_status) IN ('completed', 'submitted', 'graded')
+      AND COALESCE(a.is_voided, FALSE) = FALSE
+      AND COALESCE(a.is_deleted, FALSE) = FALSE
+      AND COALESCE(a.is_practice_attempt, FALSE) = FALSE
+  ),
+  ranked_attempts AS (
+    SELECT
+      v.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY v.learner_id, v.course_id, v.assessment_id
+        ORDER BY v.activity_at, v.attempt_id
+      ) AS first_attempt_rank,
+      ROW_NUMBER() OVER (
+        PARTITION BY v.learner_id, v.course_id, v.assessment_id
+        ORDER BY v.activity_at DESC, v.attempt_id DESC
+      ) AS latest_attempt_rank
+    FROM valid_attempts AS v
+    WHERE v.attempt_score_percentage IS NOT NULL
+  ),
+  attempt_rollup AS (
+    SELECT
+      learner_id,
+      course_id,
+      assessment_id,
+      DATE(MAX(activity_at)) AS activity_date,
+      COUNT(*) AS completed_attempt_count,
+      AVG(attempt_score_percentage) AS mean_attempt_score,
+      MAX(attempt_score_percentage) AS highest_attempt_score,
+      MAX(IF(first_attempt_rank = 1, attempt_score_percentage, NULL)) AS first_attempt_score,
+      MAX(IF(latest_attempt_rank = 1, attempt_score_percentage, NULL)) AS latest_attempt_score
+    FROM ranked_attempts
+    GROUP BY learner_id, course_id, assessment_id
+  ),
+  gradebook_records AS (
+    SELECT * EXCEPT (grade_rank)
+    FROM (
+      SELECT
+        g.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY g.learner_id, g.course_id, g.assessment_id
+          ORDER BY
+            CASE WHEN LOWER(g.grade_status) IN ('final', 'posted', 'graded') THEN 0 ELSE 1 END,
+            g.updated_at DESC,
+            g.gradebook_record_id DESC
+        ) AS grade_rank
+      FROM `your-project.lms.gradebook_records` AS g
+      WHERE COALESCE(g.is_deleted, FALSE) = FALSE
+        AND COALESCE(g.is_excused, FALSE) = FALSE
+    )
+    WHERE grade_rank = 1
+  ),
+  scored_records AS (
+    SELECT
+      r.*,
+      c.* EXCEPT (course_id, assessment_id),
+      CASE LOWER(COALESCE(c.attempt_scoring_policy, 'latest'))
+        WHEN 'highest' THEN r.highest_attempt_score
+        WHEN 'best' THEN r.highest_attempt_score
+        WHEN 'first' THEN r.first_attempt_score
+        WHEN 'average' THEN r.mean_attempt_score
+        WHEN 'mean' THEN r.mean_attempt_score
+        ELSE r.latest_attempt_score
+      END AS policy_attempt_score
+    FROM attempt_rollup AS r
+    JOIN assessment_configurations AS c
+      ON c.course_id = r.course_id
+     AND c.assessment_id = r.assessment_id
+  ),
+  final_records AS (
+    SELECT
+      s.activity_date,
+      e.institution_id,
+      e.institution_name,
+      i.account_id,
+      i.account_name,
+      i.account_type,
+      i.user_classification,
+      s.learner_id,
+      i.learner_external_id,
+      s.course_id,
+      e.course_code,
+      e.course_name,
+      e.course_status,
+      e.term_id,
+      e.term_name,
+      e.academic_year,
+      e.enrollment_id,
+      e.enrollment_status,
+      e.enrollment_role,
+      e.enrollment_type,
+      e.delivery_mode,
+      e.campus_id,
+      e.campus_name,
+      e.department_id,
+      e.department_name,
+      e.program_id,
+      e.program_name,
+      s.assessment_id,
+      s.assessment_external_id,
+      s.assessment_name,
+      s.assessment_type,
+      s.assessment_category,
+      s.assessment_version,
+      s.assessment_status,
+      s.grading_method,
+      COALESCE(s.attempt_scoring_policy, 'latest') AS attempt_scoring_policy,
+      s.max_attempts,
+      s.time_limit_minutes,
+      s.points_possible,
+      g.gradebook_item_id,
+      g.gradebook_item_name,
+      g.gradebook_category,
+      COALESCE(g.grade_status, 'attempt_only') AS grade_status,
+      CASE
+        WHEN LOWER(g.grade_status) IN ('final', 'posted', 'graded')
+         AND (g.score_percentage IS NOT NULL OR COALESCE(g.points_possible, s.points_possible) > 0)
+          THEN 'gradebook'
+        ELSE 'assessment_attempt'
+      END AS final_score_source,
+      'PERCENT_0_100' AS score_scale,
+      COALESCE(i.locale, 'unknown') AS locale,
+      COALESCE(i.timezone, 'UTC') AS timezone,
+      COALESCE(i.is_test_account, FALSE) AS is_test_account,
+      COALESCE(i.is_staff_account, FALSE) AS is_staff_account,
+      s.completed_attempt_count,
+      CASE
+        WHEN LOWER(g.grade_status) IN ('final', 'posted', 'graded')
+         AND g.score_percentage IS NOT NULL
+          THEN GREATEST(CAST(g.score_percentage AS NUMERIC), 0)
+        WHEN LOWER(g.grade_status) IN ('final', 'posted', 'graded')
+         AND COALESCE(g.points_possible, s.points_possible) > 0
+          THEN GREATEST(
+            SAFE_DIVIDE(
+              CAST(g.points_earned AS NUMERIC),
+              CAST(COALESCE(g.points_possible, s.points_possible) AS NUMERIC)
+            ) * 100,
+            0
+          )
+        ELSE s.policy_attempt_score
+      END AS final_assessment_score
+    FROM scored_records AS s
+    JOIN enrollments AS e
+      ON e.learner_id = s.learner_id
+     AND e.course_id = s.course_id
+    JOIN identity_accounts AS i
+      ON i.learner_id = s.learner_id
+    LEFT JOIN gradebook_records AS g
+      ON g.learner_id = s.learner_id
+     AND g.course_id = s.course_id
+     AND g.assessment_id = s.assessment_id
+    WHERE COALESCE(i.is_test_account, FALSE) = FALSE
+      AND COALESCE(i.is_staff_account, FALSE) = FALSE
+  )
+  SELECT
+    activity_date,
+    institution_id,
+    institution_name,
+    account_id,
+    account_name,
+    account_type,
+    user_classification,
+    learner_id,
+    learner_external_id,
+    course_id,
+    course_code,
+    course_name,
+    course_status,
+    term_id,
+    term_name,
+    academic_year,
+    enrollment_id,
+    enrollment_status,
+    enrollment_role,
+    enrollment_type,
+    delivery_mode,
+    campus_id,
+    campus_name,
+    department_id,
+    department_name,
+    program_id,
+    program_name,
+    assessment_id,
+    assessment_external_id,
+    assessment_name,
+    assessment_type,
+    assessment_category,
+    assessment_version,
+    assessment_status,
+    grading_method,
+    attempt_scoring_policy,
+    max_attempts,
+    time_limit_minutes,
+    points_possible,
+    gradebook_item_id,
+    gradebook_item_name,
+    gradebook_category,
+    grade_status,
+    final_score_source,
+    score_scale,
+    locale,
+    timezone,
+    is_test_account,
+    is_staff_account,
+    ROUND(AVG(final_assessment_score), 2) AS average_assessment_score,
+    COUNT(*) AS learner_assessment_count,
+    COUNT(DISTINCT learner_id) AS assessed_learner_count,
+    SUM(completed_attempt_count) AS completed_attempt_count
+  FROM final_records
+  WHERE final_assessment_score IS NOT NULL
+  GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH
+  assessment_configuration_ranked AS (
+    SELECT
+      c.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY c.course_id, c.assessment_id
+        ORDER BY c.updated_at DESC, c.assessment_version DESC
+      ) AS configuration_rank
+    FROM lms_assessment_configurations AS c
+    WHERE COALESCE(c.is_deleted, false) = false
+  ),
+  assessment_configurations AS (
+    SELECT *
+    FROM assessment_configuration_ranked
+    WHERE configuration_rank = 1
+  ),
+  identity_ranked AS (
+    SELECT
+      i.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY i.learner_id
+        ORDER BY i.updated_at DESC
+      ) AS identity_rank
+    FROM lms_identity_accounts AS i
+    WHERE COALESCE(i.is_deleted, false) = false
+  ),
+  identity_accounts AS (
+    SELECT *
+    FROM identity_ranked
+    WHERE identity_rank = 1
+  ),
+  enrollment_ranked AS (
+    SELECT
+      e.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY e.learner_id, e.course_id
+        ORDER BY
+          CASE WHEN LOWER(e.enrollment_status) IN ('active', 'completed') THEN 0 ELSE 1 END,
+          e.updated_at DESC,
+          e.enrollment_id DESC
+      ) AS enrollment_rank
+    FROM lms_enrollments AS e
+    WHERE COALESCE(e.is_deleted, false) = false
+  ),
+  enrollments AS (
+    SELECT *
+    FROM enrollment_ranked
+    WHERE enrollment_rank = 1
+  ),
+  valid_attempts AS (
+    SELECT
+      a.attempt_id,
+      a.learner_id,
+      a.course_id,
+      a.assessment_id,
+      COALESCE(a.attempt_completed_at, a.attempt_submitted_at, a.attempt_started_at) AS activity_at,
+      CASE
+        WHEN a.score_percentage IS NOT NULL
+          THEN GREATEST(CAST(a.score_percentage AS DECIMAL(18,6)), CAST(0 AS DECIMAL(18,6)))
+        WHEN COALESCE(a.points_possible, c.points_possible) > 0
+          THEN GREATEST(
+            CAST(a.points_earned AS DECIMAL(18,6))
+            / NULLIF(CAST(COALESCE(a.points_possible, c.points_possible) AS DECIMAL(18,6)), 0)
+            * 100,
+            CAST(0 AS DECIMAL(18,6))
+          )
+      END AS attempt_score_percentage
+    FROM lms_assessment_attempts AS a
+    JOIN assessment_configurations AS c
+      ON c.course_id = a.course_id
+     AND c.assessment_id = a.assessment_id
+    WHERE CAST(COALESCE(a.attempt_completed_at, a.attempt_submitted_at, a.attempt_started_at) AS DATE)
+          BETWEEN CURRENT_DATE - INTERVAL '30' DAY AND CURRENT_DATE
+      AND LOWER(a.attempt_status) IN ('completed', 'submitted', 'graded')
+      AND COALESCE(a.is_voided, false) = false
+      AND COALESCE(a.is_deleted, false) = false
+      AND COALESCE(a.is_practice_attempt, false) = false
+  ),
+  ranked_attempts AS (
+    SELECT
+      v.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY v.learner_id, v.course_id, v.assessment_id
+        ORDER BY v.activity_at, v.attempt_id
+      ) AS first_attempt_rank,
+      ROW_NUMBER() OVER (
+        PARTITION BY v.learner_id, v.course_id, v.assessment_id
+        ORDER BY v.activity_at DESC, v.attempt_id DESC
+      ) AS latest_attempt_rank
+    FROM valid_attempts AS v
+    WHERE v.attempt_score_percentage IS NOT NULL
+  ),
+  attempt_rollup AS (
+    SELECT
+      learner_id,
+      course_id,
+      assessment_id,
+      CAST(MAX(activity_at) AS DATE) AS activity_date,
+      COUNT(*) AS completed_attempt_count,
+      AVG(attempt_score_percentage) AS mean_attempt_score,
+      MAX(attempt_score_percentage) AS highest_attempt_score,
+      MAX(CASE WHEN first_attempt_rank = 1 THEN attempt_score_percentage END) AS first_attempt_score,
+      MAX(CASE WHEN latest_attempt_rank = 1 THEN attempt_score_percentage END) AS latest_attempt_score
+    FROM ranked_attempts
+    GROUP BY learner_id, course_id, assessment_id
+  ),
+  gradebook_ranked AS (
+    SELECT
+      g.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY g.learner_id, g.course_id, g.assessment_id
+        ORDER BY
+          CASE WHEN LOWER(g.grade_status) IN ('final', 'posted', 'graded') THEN 0 ELSE 1 END,
+          g.updated_at DESC,
+          g.gradebook_record_id DESC
+      ) AS grade_rank
+    FROM lms_gradebook_records AS g
+    WHERE COALESCE(g.is_deleted, false) = false
+      AND COALESCE(g.is_excused, false) = false
+  ),
+  gradebook_records AS (
+    SELECT *
+    FROM gradebook_ranked
+    WHERE grade_rank = 1
+  ),
+  scored_records AS (
+    SELECT
+      r.activity_date,
+      r.completed_attempt_count,
+      r.mean_attempt_score,
+      r.highest_attempt_score,
+      r.first_attempt_score,
+      r.latest_attempt_score,
+      r.learner_id,
+      r.course_id,
+      r.assessment_id,
+      c.assessment_external_id,
+      c.assessment_name,
+      c.assessment_type,
+      c.assessment_category,
+      c.assessment_version,
+      c.assessment_status,
+      c.grading_method,
+      c.attempt_scoring_policy,
+      c.max_attempts,
+      c.time_limit_minutes,
+      c.points_possible,
+      CASE LOWER(COALESCE(c.attempt_scoring_policy, 'latest'))
+        WHEN 'highest' THEN r.highest_attempt_score
+        WHEN 'best' THEN r.highest_attempt_score
+        WHEN 'first' THEN r.first_attempt_score
+        WHEN 'average' THEN r.mean_attempt_score
+        WHEN 'mean' THEN r.mean_attempt_score
+        ELSE r.latest_attempt_score
+      END AS policy_attempt_score
+    FROM attempt_rollup AS r
+    JOIN assessment_configurations AS c
+      ON c.course_id = r.course_id
+     AND c.assessment_id = r.assessment_id
+  ),
+  final_records AS (
+    SELECT
+      s.activity_date,
+      e.institution_id,
+      e.institution_name,
+      i.account_id,
+      i.account_name,
+      i.account_type,
+      i.user_classification,
+      s.learner_id,
+      i.learner_external_id,
+      s.course_id,
+      e.course_code,
+      e.course_name,
+      e.course_status,
+      e.term_id,
+      e.term_name,
+      e.academic_year,
+      e.enrollment_id,
+      e.enrollment_status,
+      e.enrollment_role,
+      e.enrollment_type,
+      e.delivery_mode,
+      e.campus_id,
+      e.campus_name,
+      e.department_id,
+      e.department_name,
+      e.program_id,
+      e.program_name,
+      s.assessment_id,
+      s.assessment_external_id,
+      s.assessment_name,
+      s.assessment_type,
+      s.assessment_category,
+      s.assessment_version,
+      s.assessment_status,
+      s.grading_method,
+      COALESCE(s.attempt_scoring_policy, 'latest') AS attempt_scoring_policy,
+      s.max_attempts,
+      s.time_limit_minutes,
+      s.points_possible,
+      g.gradebook_item_id,
+      g.gradebook_item_name,
+      g.gradebook_category,
+      COALESCE(g.grade_status, 'attempt_only') AS grade_status,
+      CASE
+        WHEN LOWER(g.grade_status) IN ('final', 'posted', 'graded')
+         AND (g.score_percentage IS NOT NULL OR COALESCE(g.points_possible, s.points_possible) > 0)
+          THEN 'gradebook'
+        ELSE 'assessment_attempt'
+      END AS final_score_source,
+      'PERCENT_0_100' AS score_scale,
+      COALESCE(i.locale, 'unknown') AS locale,
+      COALESCE(i.timezone, 'UTC') AS timezone,
+      COALESCE(i.is_test_account, false) AS is_test_account,
+      COALESCE(i.is_staff_account, false) AS is_staff_account,
+      s.completed_attempt_count,
+      CASE
+        WHEN LOWER(g.grade_status) IN ('final', 'posted', 'graded')
+         AND g.score_percentage IS NOT NULL
+          THEN GREATEST(CAST(g.score_percentage AS DECIMAL(18,6)), CAST(0 AS DECIMAL(18,6)))
+        WHEN LOWER(g.grade_status) IN ('final', 'posted', 'graded')
+         AND COALESCE(g.points_possible, s.points_possible) > 0
+          THEN GREATEST(
+            CAST(g.points_earned AS DECIMAL(18,6))
+            / NULLIF(CAST(COALESCE(g.points_possible, s.points_possible) AS DECIMAL(18,6)), 0)
+            * 100,
+            CAST(0 AS DECIMAL(18,6))
+          )
+        ELSE s.policy_attempt_score
+      END AS final_assessment_score
+    FROM scored_records AS s
+    JOIN enrollments AS e
+      ON e.learner_id = s.learner_id
+     AND e.course_id = s.course_id
+    JOIN identity_accounts AS i
+      ON i.learner_id = s.learner_id
+    LEFT JOIN gradebook_records AS g
+      ON g.learner_id = s.learner_id
+     AND g.course_id = s.course_id
+     AND g.assessment_id = s.assessment_id
+    WHERE COALESCE(i.is_test_account, false) = false
+      AND COALESCE(i.is_staff_account, false) = false
+  )
+  SELECT
+    activity_date,
+    institution_id,
+    institution_name,
+    account_id,
+    account_name,
+    account_type,
+    user_classification,
+    learner_id,
+    learner_external_id,
+    course_id,
+    course_code,
+    course_name,
+    course_status,
+    term_id,
+    term_name,
+    academic_year,
+    enrollment_id,
+    enrollment_status,
+    enrollment_role,
+    enrollment_type,
+    delivery_mode,
+    campus_id,
+    campus_name,
+    department_id,
+    department_name,
+    program_id,
+    program_name,
+    assessment_id,
+    assessment_external_id,
+    assessment_name,
+    assessment_type,
+    assessment_category,
+    assessment_version,
+    assessment_status,
+    grading_method,
+    attempt_scoring_policy,
+    max_attempts,
+    time_limit_minutes,
+    points_possible,
+    gradebook_item_id,
+    gradebook_item_name,
+    gradebook_category,
+    grade_status,
+    final_score_source,
+    score_scale,
+    locale,
+    timezone,
+    is_test_account,
+    is_staff_account,
+    ROUND(AVG(final_assessment_score), 2) AS average_assessment_score,
+    COUNT(*) AS learner_assessment_count,
+    COUNT(DISTINCT learner_id) AS assessed_learner_count,
+    SUM(completed_attempt_count) AS completed_attempt_count
+  FROM final_records
+  WHERE final_assessment_score IS NOT NULL
+  GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49;
+
+Calculation Notes: |
+  1️⃣ Normalize eligible attempts to a 0-100 scale for comparability.  
+  2️⃣ Include finalized, machine-scored, or instructor-graded attempts only.  
+  3️⃣ Exclude drafts, previews, practice attempts, abandoned attempts, deleted records, ungraded submissions, zero-point assessments, and attempts with missing points.  
+  4️⃣ Each attempt has equal weight in the average calculation.  
+  5️⃣ Quarantine scores above 100 or below 0 unless extra credit or negative marking is allowed.
+
+Business Use Case: |
+  Academic Operations reviews Average Assessment Score by course, assessment, learning objective, instructor, and cohort after each assessment cycle. If a required assessment's average falls below its configured mastery threshold, the team inspects item-level performance, assigns remediation content to affected learners, reviews instructional material for weak objectives, and evaluates whether ambiguous questions require correction or regrading.
+
+
+Source Data: Learning Management System assessment attempt records, assessment configuration data, gradebook records, enrollment data, and identity/account classification data
+
+Report Attributes: |
+  ["Reporting Date","Academic Term","Institution","Program","Department","Course","Course Version","Section","Instructor","Assessment","Assessment Type","Assessment Version","Learning Objective","Competency","Learner Cohort","Enrollment Type","Delivery Mode","Attempt Number","Device Type","Geography"]
+
+Dashboard Usage: [Executive Learning Performance Dashboard, Academic Outcomes Dashboard, Course Effectiveness Dashboard, Assessment Quality Dashboard, Instructor Performance Dashboard, Learner Progress and Intervention Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Assessment Completion Rate, Assessment Pass Rate, Median Assessment Score, Assessment Score Standard Deviation, Assessment Attempt Count, Average Number of Assessment Attempts, Course Completion Rate, Learner Progress Rate]
+
+Derived KPIs: [Assessment Proficiency Rate, Learning Outcome Attainment Index, Score Improvement Rate, At-Risk Learner Rate, Course Mastery Index]
+
+Data Sensitivity: confidential
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-11T18:30:19.739347+00:00
+
+Last Modified By: devyendarm
+
+
