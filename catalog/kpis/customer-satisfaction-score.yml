@@ -1,0 +1,240 @@
+# KPI: Customer Satisfaction Score
+# Generated: 2026-09-20T19:59:22.369Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Customer Satisfaction Score
+Formula: (Survey Responses Rated 4 or 5 on the 5-Point Scale / Total Completed Survey Responses) × 100
+
+Description: |
+  Customer Satisfaction Score is the percentage of post-interaction survey respondents who rate a support, chat or return experience in the top-2 box — 4 (Satisfied) or 5 (Very Satisfied) — of the standard 5-point satisfaction scale, measured against the full base of respondents in the reporting window. It is the canonical, cross-industry satisfaction definition that the published Guest Satisfaction Score (Hospitality) specialises, and surveys fielded on 1–7 or 1–10 scales are deliberately excluded from this KPI rather than rescaled so values stay comparable across channels, vendors and external benchmarks such as ACSI.
+
+Category: Experience
+
+Tags: [kpi, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: [["E-commerce"]]
+
+Priority: High
+
+Core Area: Generic
+
+Scope: User
+
+Measure Type: Percentage
+
+Aggregation Window: Daily, Weekly, Monthly, Quarterly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Offline source: survey platform + service desk. The score is computed from the mirrored backend
+  -- tables; no clickstream events are read or joined.
+  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
+  DECLARE end_date DATE DEFAULT CURRENT_DATE();
+  
+  -- Post-interaction trigger population: tickets resolved or closed, chats ended, return cases completed.
+  -- A re-opened ticket is issued a new interaction_id by the service desk and counts as a new interaction.
+  WITH closed_interactions AS (
+    SELECT
+      interaction_id,
+      DATE(closed_at) AS interaction_date,
+      closed_at,
+      support_channel,
+      ticket_category,
+      return_reason,
+      queue_name,
+      is_test_ticket,
+      account_type,
+      is_incident_window
+    FROM `your-project.service_desk.interactions`
+    WHERE DATE(closed_at) BETWEEN start_date AND end_date
+      AND closure_status IN ('resolved', 'closed', 'chat_ended', 'return_completed')
+  ),
+  
+  -- Eligible surveys: 5-point instrument only (1-7 and 1-10 instruments are excluded, never rescaled),
+  -- without internal test tickets, employee or partner accounts, or agent-solicited invitations.
+  -- A response counts only when it is completed, carries a rating and lands inside the 72-hour window.
+  eligible_surveys AS (
+    SELECT
+      i.interaction_date,
+      i.support_channel,
+      i.ticket_category,
+      i.return_reason,
+      i.queue_name,
+      i.is_incident_window,
+      s.interaction_id,
+      s.rating,
+      s.responded_at,
+      (s.response_status = 'completed'
+        AND s.rating IS NOT NULL
+        AND s.responded_at BETWEEN i.closed_at AND TIMESTAMP_ADD(i.closed_at, INTERVAL 72 HOUR)) AS is_valid_response
+    FROM `your-project.survey_platform.survey_responses` AS s
+    JOIN closed_interactions AS i USING (interaction_id)
+    WHERE s.survey_scale = '5_point'
+      AND NOT i.is_test_ticket
+      AND i.account_type NOT IN ('employee', 'partner')
+      AND NOT s.is_agent_solicited
+  ),
+  
+  -- Deduplication at interaction grain: keep the first completed response per interaction; an interaction
+  -- with no valid response stays as a surveyed-but-unanswered row for the response rate.
+  ranked_surveys AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY interaction_id
+        ORDER BY IF(is_valid_response, 0, 1), responded_at
+      ) AS response_rank
+    FROM eligible_surveys
+  )
+  
+  -- Top-2-box share of the full base of completed responses, attributed to the interaction date, with the
+  -- response rate, the fraud/legal/abuse and incident annotation, and the sub-30-response directional flag.
+  SELECT
+    interaction_date,
+    support_channel,
+    ticket_category,
+    return_reason,
+    COUNTIF(is_valid_response) AS completed_responses,
+    COUNTIF(is_valid_response AND rating IN (4, 5)) AS top_2_box_responses,
+    ROUND(SAFE_DIVIDE(COUNTIF(is_valid_response AND rating IN (4, 5)), COUNTIF(is_valid_response)) * 100, 2) AS customer_satisfaction_score,
+    ROUND(SAFE_DIVIDE(COUNTIF(is_valid_response), COUNT(*)) * 100, 2) AS survey_response_rate,
+    COUNTIF(is_valid_response AND (queue_name IN ('fraud', 'legal', 'abuse') OR is_incident_window)) AS annotated_responses,
+    COUNTIF(is_valid_response) < 30 AS directional_only
+  FROM ranked_surveys
+  WHERE response_rank = 1
+  GROUP BY interaction_date, support_channel, ticket_category, return_reason
+  ORDER BY interaction_date DESC, completed_responses DESC;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Offline source: the ingested survey-response and service-desk datasets are queried directly;
+  -- no web ExperienceEvent dataset is read or joined. Relative window: trailing 90 days to today.
+  
+  -- Post-interaction trigger population: tickets resolved or closed, chats ended, return cases completed.
+  -- A re-opened ticket is issued a new interaction_id by the service desk and counts as a new interaction.
+  WITH closed_interactions AS (
+    SELECT
+      interaction_id,
+      CAST(closed_at AS DATE) AS interaction_date,
+      closed_at,
+      support_channel,
+      ticket_category,
+      return_reason,
+      queue_name,
+      is_test_ticket,
+      account_type,
+      is_incident_window
+    FROM service_desk_interactions_dataset
+    WHERE CAST(closed_at AS DATE) BETWEEN CURRENT_DATE - INTERVAL '90' DAY AND CURRENT_DATE
+      AND closure_status IN ('resolved', 'closed', 'chat_ended', 'return_completed')
+  ),
+  
+  -- Eligible surveys: 5-point instrument only (1-7 and 1-10 instruments are excluded, never rescaled),
+  -- without internal test tickets, employee or partner accounts, or agent-solicited invitations.
+  -- A response counts only when it is completed, carries a rating and lands inside the 72-hour window.
+  eligible_surveys AS (
+    SELECT
+      i.interaction_date,
+      i.support_channel,
+      i.ticket_category,
+      i.return_reason,
+      i.queue_name,
+      i.is_incident_window,
+      s.interaction_id,
+      s.rating,
+      s.responded_at,
+      CASE
+        WHEN s.response_status = 'completed'
+         AND s.rating IS NOT NULL
+         AND s.responded_at BETWEEN i.closed_at AND i.closed_at + INTERVAL '72' HOUR
+        THEN TRUE ELSE FALSE
+      END AS is_valid_response
+    FROM survey_responses_dataset AS s
+    JOIN closed_interactions AS i
+      ON s.interaction_id = i.interaction_id
+    WHERE s.survey_scale = '5_point'
+      AND i.is_test_ticket = FALSE
+      AND i.account_type NOT IN ('employee', 'partner')
+      AND s.is_agent_solicited = FALSE
+  ),
+  
+  -- Deduplication at interaction grain: keep the first completed response per interaction; an interaction
+  -- with no valid response stays as a surveyed-but-unanswered row for the response rate.
+  ranked_surveys AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY interaction_id
+        ORDER BY CASE WHEN is_valid_response THEN 0 ELSE 1 END, responded_at
+      ) AS response_rank
+    FROM eligible_surveys
+  )
+  
+  -- Top-2-box share of the full base of completed responses, attributed to the interaction date, with the
+  -- response rate, the fraud/legal/abuse and incident annotation, and the sub-30-response directional flag.
+  SELECT
+    interaction_date,
+    support_channel,
+    ticket_category,
+    return_reason,
+    SUM(CASE WHEN is_valid_response THEN 1 ELSE 0 END) AS completed_responses,
+    SUM(CASE WHEN is_valid_response AND rating IN (4, 5) THEN 1 ELSE 0 END) AS top_2_box_responses,
+    ROUND(100.0 * SUM(CASE WHEN is_valid_response AND rating IN (4, 5) THEN 1 ELSE 0 END)
+      / NULLIF(SUM(CASE WHEN is_valid_response THEN 1 ELSE 0 END), 0), 2) AS customer_satisfaction_score,
+    ROUND(100.0 * SUM(CASE WHEN is_valid_response THEN 1 ELSE 0 END)
+      / NULLIF(COUNT(*), 0), 2) AS survey_response_rate,
+    SUM(CASE WHEN is_valid_response AND (queue_name IN ('fraud', 'legal', 'abuse') OR is_incident_window) THEN 1 ELSE 0 END) AS annotated_responses,
+    CASE WHEN SUM(CASE WHEN is_valid_response THEN 1 ELSE 0 END) < 30 THEN TRUE ELSE FALSE END AS directional_only
+  FROM ranked_surveys
+  WHERE response_rank = 1
+  GROUP BY interaction_date, support_channel, ticket_category, return_reason
+  ORDER BY interaction_date DESC, completed_responses DESC;
+
+Calculation Notes: |
+  1️⃣ Top-2-box only: ratings of 4 and 5 on the 5-point scale enter the numerator, ratings of 1–3 stay in the denominator and never earn partial credit. Responses collected on 1–7 or 1–10 instruments are excluded from this KPI instead of being rescaled, because rescaled scales shift the score by several points and break trend and benchmark comparability.,2️⃣ The denominator is the full base population of completed survey responses in the window — every respondent, not only escalations, detractors or verbatim writers. Surveys opened but abandoned without a rating, blank submissions, internal test tickets and interactions on employee or partner accounts are removed before the rate is computed.,3️⃣ Survey trigger point is post-interaction: the invitation is dispatched when the ticket reaches a resolved or closed status, when the chat session ends, or when the return/refund case is completed — never mid-interaction and never on a recurring schedule. A 72-hour response window applies; late responses are attributed to the interaction date, so daily reporting restates the trailing three days.,4️⃣ Response-rate caveat and non-response bias: post-interaction response rates typically land between 10% and 30%, and respondents skew toward customers with strongly positive or strongly negative experiences, which inflates both the level and the volatility of the score. Always publish response rate next to the score, and treat any breakdown with fewer than 30 responses as directional only.,5️⃣ Deduplication is at interaction grain, not customer grain: one response per ticket, chat or return case. When a customer answers several surveys in the same window each distinct interaction still counts once; repeat submissions against the same interaction keep the first completed response, and a re-opened ticket that triggers a fresh survey counts as a new interaction.,6️⃣ Value action by industry: E-commerce and Retail = closure of a support ticket, chat or return case; Hospitality = post-stay checkout (see Guest Satisfaction Score); SaaS = support case resolution or onboarding milestone completion; Finance = claim or dispute resolution; Healthcare = post-appointment discharge; Media = subscription or billing support contact.,7️⃣ Suppress and annotate rather than silently exclude: interactions routed to fraud, legal or abuse queues, and surveys sent during a declared incident, are flagged so the reported score is not read as steady-state performance. Agent-solicited or agent-forwarded surveys are excluded because they self-select satisfied customers and are treated as a survey-integrity breach.
+
+Business Use Case: |
+  1️⃣ The Customer Service Operations Manager reviews the score weekly split by Support Channel and Ticket Category; when a channel sits below target for two consecutive weeks, they rebalance agent staffing to that queue and open a coaching cycle on the failing category.,2️⃣ The Returns and Reverse Logistics lead watches the score for return- and refund-related contacts; when it falls while Return Rate and WISMO Rate climb, they rewrite the return policy page and enable prepaid label self-service for the top Return Reason driving the contacts.,3️⃣ The Quality and Training lead runs the monthly agent- and team-level rollup, places agents in the bottom quintile into a structured coaching plan, and turns the verbatims behind top-quintile interactions into macros and playbooks for the whole floor.,4️⃣ The VP of Customer Service reports the quarterly score against ACSI and vendor benchmarks in the operating review and funds self-service and deflection investment in the categories where both this score and First Contact Resolution Rate lag the target.
+
+Dependencies:
+  Events: [chat-start, return-initiated]
+  Metrics: [support-tickets, chat-sessions]
+  Dimensions: [support-channel, ticket-category, return-reason]
+
+Source Data: Survey Platform Backend + Service Desk CRM (Zendesk / Salesforce Service Cloud)
+
+Report Attributes: |
+  Support Channel; Ticket Category; Return Reason
+
+Dashboard Usage: [Customer Service Performance Dashboard, Returns & Refunds Executive Scorecard, Voice of the Customer Monthly Review]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [guest-satisfaction-score, first-contact-resolution-rate, wismo-rate, return-rate, refund-rate, chat-conversion-rate]
+
+Data Sensitivity: Restricted
+
+Contains PII: Yes
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-20T19:59:12.176+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-20T19:59:21.793+00:00
+
