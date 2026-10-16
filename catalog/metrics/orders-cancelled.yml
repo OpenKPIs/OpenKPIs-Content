@@ -1,0 +1,396 @@
+# Metric: Orders Cancelled
+# Generated: 2026-09-18T17:22:26.783Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Orders Cancelled
+Formula: COUNT(DISTINCT order_id) WHERE order_status = 'cancelled' AND cancelled_at BETWEEN period_start AND period_end AND checkout_completed_at IS NOT NULL AND is_test_order = FALSE
+
+Description: |
+  Orders Cancelled counts the distinct orders that completed checkout and were then cancelled in full before fulfillment, whether the customer or the merchant started it (fraud review, inventory shortfall, payment void), dated by the cancellation timestamp rather than the order date. It is the numerator of Order Cancellation Rate and the volume signal Customer Service, Finance and Fulfillment Operations use to size the revenue lost between checkout and shipment and to trace it to a root-cause reason.
+
+Category: Operations
+
+Tags: [metric, Post-Purchase Logistics & Fulfillment]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Event
+
+Measure Type: Counter
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  refund
+
+Adobe Event: |
+  order:cancel
+
+W3 Data Layer: |
+  {
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "order:cancel",
+          "eventAction": "refund",
+          "timeStamp": "2026-09-18T14:32:05-05:00"
+        },
+        "category": {
+          "primaryCategory": "order_management"
+        },
+        "attributes": {
+          "refund_type": "order_cancellation",
+          "cancel_initiator": "customer",
+          "cancellation_reason": "changed_mind",
+          "order_status_at_cancel": "processing",
+          "fulfillment_type": "ship_to_home",
+          "payment_type": "credit_card",
+          "minutes_since_order": 42
+        }
+      }
+    ],
+    "transaction": {
+      "transactionID": "ORD-100482",
+      "total": {
+        "basePrice": 119.98,
+        "shipping": 9.99,
+        "tax": 9.6,
+        "currency": "USD",
+        "transactionTotal": 139.57
+      },
+      "item": [
+        {
+          "productInfo": {
+            "productID": "SKU-48213",
+            "productName": "Trail Running Shoe"
+          },
+          "category": {
+            "primaryCategory": "Footwear"
+          },
+          "quantity": 2,
+          "price": {
+            "basePrice": 59.99
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "refund",
+    "ecommerce": {
+      "transaction_id": "ORD-100482",
+      "value": 139.57,
+      "currency": "USD",
+      "tax": 9.6,
+      "shipping": 9.99,
+      "items": [
+        {
+          "item_id": "SKU-48213",
+          "item_name": "Trail Running Shoe",
+          "item_category": "Footwear",
+          "price": 59.99,
+          "quantity": 2
+        }
+      ]
+    },
+    "refund_type": "order_cancellation",
+    "cancel_initiator": "customer",
+    "cancellation_reason": "changed_mind",
+    "order_status_at_cancel": "processing",
+    "fulfillment_type": "ship_to_home",
+    "payment_type": "credit_card",
+    "minutes_since_order": 42
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "order:cancel",
+    "eventInfo": {
+      "eventName": "order:cancel",
+      "refund_type": "order_cancellation",
+      "cancel_initiator": "customer",
+      "cancellation_reason": "changed_mind",
+      "order_status_at_cancel": "processing",
+      "fulfillment_type": "ship_to_home",
+      "payment_type": "credit_card",
+      "minutes_since_order": 42
+    },
+    "transaction": {
+      "transaction_id": "ORD-100482",
+      "value": 139.57,
+      "currency": "USD",
+      "tax": 9.6,
+      "shipping": 9.99,
+      "items": [
+        {
+          "item_id": "SKU-48213",
+          "item_name": "Trail Running Shoe",
+          "item_category": "Footwear",
+          "price": 59.99,
+          "quantity": 2
+        }
+      ]
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "web.webinteraction.linkClicks",
+    "web": {
+      "webInteraction": {
+        "name": "order:cancel",
+        "type": "other",
+        "linkClicks": {
+          "value": 1
+        }
+      }
+    },
+    "commerce": {
+      "order": {
+        "purchaseID": "ORD-100482",
+        "currencyCode": "USD",
+        "priceTotal": 139.57,
+        "taxAmount": 9.6,
+        "payments": [
+          {
+            "paymentType": "credit_card",
+            "currencyCode": "USD",
+            "paymentAmount": 139.57
+          }
+        ]
+      },
+      "shipping": {
+        "shippingAmount": 9.99
+      }
+    },
+    "productListItems": [
+      {
+        "SKU": "SKU-48213",
+        "name": "Trail Running Shoe",
+        "productCategories": [
+          {
+            "categoryID": "Footwear"
+          }
+        ],
+        "quantity": 2,
+        "priceTotal": 119.98
+      }
+    ],
+    "_tenant": {
+      "refund_type": "order_cancellation",
+      "cancel_initiator": "customer",
+      "cancellation_reason": "changed_mind",
+      "order_status_at_cancel": "processing",
+      "fulfillment_type": "ship_to_home",
+      "payment_type": "credit_card",
+      "minutes_since_order": 42
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Orders Cancelled: distinct OMS orders whose status moved to 'cancelled' (full order, after checkout, before any shipment),
+  -- dated by cancelled_at in the store reporting timezone. The OMS is the system of record; the first GA4 refund event
+  -- with refund_type = order_cancellation per order is LEFT JOINed only to enrich initiator, reason and self-service context.
+  -- Reprocess daily partitions with a 72-hour lookback (event scan starts 3 days before @start_date).
+  WITH oms_cancelled AS (
+    SELECT
+      o.order_id,
+      DATE(o.cancelled_at, 'America/New_York') AS cancel_date,
+      o.cancel_initiator AS oms_cancel_initiator,
+      o.cancel_reason AS oms_cancel_reason,
+      o.is_marketplace_operator_cancel
+    FROM `your-project.oms.orders` AS o
+    WHERE o.order_status = 'cancelled'
+      AND o.cancelled_at >= TIMESTAMP(@start_date, 'America/New_York')
+      AND o.cancelled_at < TIMESTAMP(DATE_ADD(@end_date, INTERVAL 1 DAY), 'America/New_York')
+      AND o.checkout_completed_at IS NOT NULL
+      AND o.first_shipped_at IS NULL
+      AND COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_staff_order, FALSE) = FALSE
+      AND COALESCE(o.is_draft_order, FALSE) = FALSE
+      AND NOT EXISTS (
+        SELECT 1 FROM `your-project.oms.orders` AS reissue
+        WHERE reissue.relation_parent_id = o.order_id
+      )
+  ),
+  refund_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_day,
+      event_timestamp,
+      user_pseudo_id,
+      COALESCE(
+        NULLIF(ecommerce.transaction_id, '(not set)'),
+        (SELECT MAX(IF(ep.key = 'transaction_id', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep)
+      ) AS transaction_id,
+      (SELECT MAX(IF(ep.key = 'refund_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS refund_type,
+      (SELECT MAX(IF(ep.key = 'cancel_initiator', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS cancel_initiator,
+      (SELECT MAX(IF(ep.key = 'cancellation_reason', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS cancellation_reason,
+      (SELECT MAX(IF(ep.key = 'fulfillment_type', ep.value.string_value, NULL)) FROM UNNEST(event_params) AS ep) AS fulfillment_type,
+      device.category AS device_category
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(@start_date, INTERVAL 3 DAY))
+                            AND FORMAT_DATE('%Y%m%d', @end_date)
+      AND event_name = 'refund'
+  ),
+  first_cancel_per_order AS (
+    SELECT *
+    FROM refund_events
+    WHERE refund_type = 'order_cancellation'
+      AND transaction_id IS NOT NULL
+      AND transaction_id <> ''
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_timestamp ASC) = 1
+  ),
+  enriched AS (
+    SELECT
+      c.order_id,
+      c.cancel_date,
+      c.is_marketplace_operator_cancel,
+      COALESCE(e.cancel_initiator, c.oms_cancel_initiator) AS cancel_initiator,
+      COALESCE(e.cancellation_reason, c.oms_cancel_reason) AS cancellation_reason,
+      (e.transaction_id IS NOT NULL AND e.cancel_initiator = 'customer') AS is_self_service,
+      e.device_category
+    FROM oms_cancelled AS c
+    LEFT JOIN first_cancel_per_order AS e
+      ON e.transaction_id = c.order_id
+  )
+  SELECT
+    cancel_date,
+    COUNT(DISTINCT IF(NOT COALESCE(is_marketplace_operator_cancel, FALSE), order_id, NULL)) AS orders_cancelled,
+    COUNT(DISTINCT IF(NOT COALESCE(is_marketplace_operator_cancel, FALSE) AND cancel_initiator = 'customer', order_id, NULL)) AS orders_cancelled_customer,
+    COUNT(DISTINCT IF(NOT COALESCE(is_marketplace_operator_cancel, FALSE) AND is_self_service, order_id, NULL)) AS orders_cancelled_self_service,
+    COUNT(DISTINCT IF(NOT COALESCE(is_marketplace_operator_cancel, FALSE) AND cancel_initiator IN ('merchant', 'system', 'agent'), order_id, NULL)) AS orders_cancelled_merchant_or_agent,
+    COUNT(DISTINCT IF(NOT COALESCE(is_marketplace_operator_cancel, FALSE) AND cancellation_reason IN ('out_of_stock', 'unable_to_fulfil'), order_id, NULL)) AS orders_cancelled_inventory,
+    COUNT(DISTINCT IF(NOT COALESCE(is_marketplace_operator_cancel, FALSE) AND cancellation_reason IN ('fraud', 'risk_review'), order_id, NULL)) AS orders_cancelled_fraud_risk,
+    COUNT(DISTINCT IF(COALESCE(is_marketplace_operator_cancel, FALSE), order_id, NULL)) AS orders_cancelled_marketplace_operator
+  FROM enriched
+  GROUP BY cancel_date
+  ORDER BY cancel_date;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Orders Cancelled: distinct OMS orders whose status moved to 'cancelled' (full order, after checkout, before any shipment),
+  -- dated by cancelled_at in the store reporting timezone. The OMS is the system of record; the first order:cancel event
+  -- per commerce.order.purchaseID is LEFT JOINed only to enrich initiator, reason and self-service context.
+  -- Reprocess daily partitions with a 72-hour lookback (event scan starts 3 days before {start_date}).
+  WITH oms_cancelled AS (
+    SELECT
+      o.order_id,
+      to_date(from_utc_timestamp(o.cancelled_at, 'America/New_York')) AS cancel_date,
+      o.cancel_initiator AS oms_cancel_initiator,
+      o.cancel_reason AS oms_cancel_reason,
+      o.is_marketplace_operator_cancel
+    FROM oms_orders_dataset AS o
+    WHERE o.order_status = 'cancelled'
+      AND to_date(from_utc_timestamp(o.cancelled_at, 'America/New_York')) BETWEEN to_date('{start_date}') AND to_date('{end_date}')
+      AND o.checkout_completed_at IS NOT NULL
+      AND o.first_shipped_at IS NULL
+      AND COALESCE(o.is_test_order, FALSE) = FALSE
+      AND COALESCE(o.is_staff_order, FALSE) = FALSE
+      AND COALESCE(o.is_draft_order, FALSE) = FALSE
+      AND NOT EXISTS (
+        SELECT 1 FROM oms_orders_dataset AS reissue
+        WHERE reissue.relation_parent_id = o.order_id
+      )
+  ),
+  cancel_events AS (
+    SELECT
+      timestamp AS event_ts,
+      to_date(from_utc_timestamp(timestamp, 'America/New_York')) AS event_day,
+      commerce.order.purchaseID AS transaction_id,
+      _tenant.refund_type AS refund_type,
+      _tenant.cancel_initiator AS cancel_initiator,
+      _tenant.cancellation_reason AS cancellation_reason,
+      _tenant.fulfillment_type AS fulfillment_type
+    FROM aep_web_events_dataset
+    WHERE timestamp >= date_sub(to_timestamp('{start_date}'), 3)
+      AND timestamp < date_add(to_timestamp('{end_date}'), 1)
+      AND web.webInteraction.name = 'order:cancel'
+      AND _tenant.refund_type = 'order_cancellation'
+      AND commerce.order.purchaseID IS NOT NULL
+      AND commerce.order.purchaseID <> ''
+  ),
+  first_cancel_per_order AS (
+    SELECT
+      event_day,
+      transaction_id,
+      cancel_initiator,
+      cancellation_reason,
+      fulfillment_type,
+      ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY event_ts ASC) AS rn
+    FROM cancel_events
+  ),
+  enriched AS (
+    SELECT
+      c.order_id,
+      c.cancel_date,
+      COALESCE(c.is_marketplace_operator_cancel, FALSE) AS is_marketplace_operator_cancel,
+      COALESCE(e.cancel_initiator, c.oms_cancel_initiator) AS cancel_initiator,
+      COALESCE(e.cancellation_reason, c.oms_cancel_reason) AS cancellation_reason,
+      CASE WHEN e.transaction_id IS NOT NULL AND e.cancel_initiator = 'customer' THEN TRUE ELSE FALSE END AS is_self_service
+    FROM oms_cancelled AS c
+    LEFT JOIN (SELECT * FROM first_cancel_per_order WHERE rn = 1) AS e
+      ON e.transaction_id = c.order_id
+  )
+  SELECT
+    cancel_date,
+    COUNT(DISTINCT CASE WHEN NOT is_marketplace_operator_cancel THEN order_id END) AS orders_cancelled,
+    COUNT(DISTINCT CASE WHEN NOT is_marketplace_operator_cancel AND cancel_initiator = 'customer' THEN order_id END) AS orders_cancelled_customer,
+    COUNT(DISTINCT CASE WHEN NOT is_marketplace_operator_cancel AND is_self_service THEN order_id END) AS orders_cancelled_self_service,
+    COUNT(DISTINCT CASE WHEN NOT is_marketplace_operator_cancel AND cancel_initiator IN ('merchant', 'system', 'agent') THEN order_id END) AS orders_cancelled_merchant_or_agent,
+    COUNT(DISTINCT CASE WHEN NOT is_marketplace_operator_cancel AND cancellation_reason IN ('out_of_stock', 'unable_to_fulfil') THEN order_id END) AS orders_cancelled_inventory,
+    COUNT(DISTINCT CASE WHEN NOT is_marketplace_operator_cancel AND cancellation_reason IN ('fraud', 'risk_review') THEN order_id END) AS orders_cancelled_fraud_risk,
+    COUNT(DISTINCT CASE WHEN is_marketplace_operator_cancel THEN order_id END) AS orders_cancelled_marketplace_operator
+  FROM enriched
+  GROUP BY cancel_date
+  ORDER BY cancel_date;
+
+Calculation Notes: |
+  1️⃣ Timing: each order is attributed to the reporting day of cancelled_at in the store's reporting timezone, not to created_at. An order placed on 30 June and cancelled on 2 July counts in July. Cohort views that tie cancellations back to the order date are a separate cut and must be labelled as such, because they restate closed periods.,2️⃣ Population: only orders that completed checkout and exist in the OMS (Shopify order, Adobe Commerce sales_order increment_id) are eligible. Abandoned checkouts, declined payment attempts that never created an order, and Shopify draft orders are excluded. Both initiators are counted: customer self-service (the published order-cancellation event), agent-assisted cancels, and merchant or system cancels (fraud or risk review, stock-out, payment authorization void or expiry, address verification failure). Always report the split through the cancellation initiator and order-cancellation-reason.,3️⃣ Full orders only: an order counts once, and only when it reaches a terminal cancelled state for the whole order. Cancelling some lines (Shopify line-item refund before fulfillment, Adobe Commerce credit memo against unshipped items) is excluded here and belongs in cancelled units and cancelled revenue. An order that is partly cancelled and later cancelled in full counts once, on the date of the final transition.,4️⃣ System of record and deduplication: the OMS status change to cancelled is authoritative. The digital order-cancellation event (GA4 refund with refund_type = order_cancellation, Adobe order:cancel) is joined on transaction_id to attach device, channel and self-service context, and is never counted by itself. A web cancel request with no confirmed OMS transition (pending review, rejected because the order was already picked) is excluded. Duplicate submits and webhook retries collapse to one order_id.,5️⃣ Exclusions: test and staff orders, orders that were edited through cancel-and-reissue (Adobe Commerce order edit creates a new increment_id with relation_parent_id and cancels the original, and Shopify order edit flows on some OMS integrations behave the same way), and marketplace orders cancelled by the marketplace operator where the merchant has no disposition. Keep the last group in a separate marketplace breakdown instead of dropping it silently.,6️⃣ Boundary with returns: once any fulfillment on the order has shipped or been handed to the carrier, a later reversal is a return or refund (return-initiated, refund-issued), not a cancellation, even if the OMS labels it 'cancelled'. For BOPIS or ship-from-store, an order that is not collected by the end of the pickup window and is then auto-cancelled counts here with reason 'not collected', so it can be separated from demand-side cancels.,7️⃣ Late data and reinstatement: fraud-review and payment-expiry cancels often arrive 24–72 hours after the event, so reprocess daily partitions with a 72-hour lookback and freeze monthly figures at close + 5 business days. If a cancelled order is reinstated (OMS reopen, or a manual re-authorization that restores the same order_id), remove it from the period that has not yet closed. After close, record it as a negative adjustment in the current period instead of restating.
+
+Business Use Case: |
+  1️⃣ Fulfillment Operations: when daily Orders Cancelled with reason 'out of stock' or 'unable to fulfil' goes more than two standard deviations above its 28-day baseline, the inventory planning lead opens an audit of storefront versus OMS available-to-sell for the affected SKUs and pauses those SKUs until the oversell is resolved.,2️⃣ Finance (Payments & Risk): after any change to the fraud-screening rules, the payments manager reviews merchant-initiated cancels with reason 'fraud' or 'risk review' week over week. If they climb without a matching rise in chargebacks, the manager loosens thresholds to win back false-positive declines.,3️⃣ Customer Service: every week the CS operations lead compares self-service cancels (from the order-cancellation event) with agent-handled cancels. If agent share goes above target, the lead widens the self-service cancellation window in the order-status page and moves agent capacity to WISMO and returns queues.,4️⃣ Finance (FP&A): during the daily flash, the FP&A analyst subtracts the value of Orders Cancelled from gross booked demand to report net demand, and flags any day where cancelled value is above 3% of GMV so the revenue forecast can be adjusted before the weekly business review.
+
+Dependencies:
+  Events: [order-cancellation, purchase]
+  Dimensions: [order-cancellation-reason, order-status]
+
+Source Data: Digital + OMS (Shopify / Adobe Commerce)
+
+Report Attributes: |
+  Order Cancellation Reason; Cancellation Initiator; Fulfillment Method; Shipping Tier; Payment Method; Item Category; Default Channel Grouping; Device Category
+
+Dashboard Usage: [Order Management & Fulfillment Health, Daily Revenue Flash (Gross vs Net Demand), Payments & Fraud Operations, Customer Service Self-Service Performance]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [units-sold, average-order-value, discount-amount]
+
+Derived KPIs: [order-cancellation-rate, gross-merchandise-value, orders]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-18T17:22:16.907+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-18T17:22:26.045+00:00
+
