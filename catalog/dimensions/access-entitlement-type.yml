@@ -1,0 +1,553 @@
+# Dimension: Access Entitlement Type
+# Generated: 2026-09-13T19:30:07.033Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Access Entitlement Type
+
+Description: |
+  Classifies the contractual or policy-based right under which a learner, educator, or administrator is permitted to access a digital course, assessment, credential, or learning resource. It records the entitlement effective at the time of the access decision, enabling comparison of free, trial, individually paid, institution-sponsored, promotional, privileged, and non-entitled experiences.
+
+Category: Revenue
+
+Tags: [dimension]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Monetization
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  select_content
+
+Adobe Event: |
+  select_content
+
+W3 Data Layer: |
+  {"event":[{"category":{"primaryCategory":"learning_resource"},"eventInfo":{"eventName":"select_content","eventAction":"select_content"},"attributes":{"accessEntitlementType":"{{access_entitlement_type}}"}}]}
+
+GA4 Data Layer: |
+  {"event":"select_content","item_id":"{{learning_resource_id}}","content_type":"learning_resource","access_entitlement_type":"{{access_entitlement_type}}"}
+
+Adobe Client Data Layer: |
+  {"data":{"itemId":"{{learning_resource_id}}","contentType":"learning_resource","accessEntitlementType":"{{access_entitlement_type}}"},"event":"select_content"}
+
+XDM Mapping: |
+  {"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"{{access_entitlement_type}}"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH event_values AS (
+    SELECT
+      event_timestamp,
+      user_pseudo_id,
+      MAX(IF(ep.key = 'ga_session_id', ep.value.int_value, NULL)) AS ga_session_id,
+      MAX(IF(ep.key = 'item_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS item_id,
+      MAX(IF(ep.key = 'access_entitlement_type', ep.value.string_value, NULL)) AS raw_access_entitlement_type
+    FROM `your-project.analytics_123456789.events_*`
+    LEFT JOIN UNNEST(event_params) AS ep
+    WHERE _TABLE_SUFFIX BETWEEN '00000000' AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND event_name = 'select_content'
+    GROUP BY event_timestamp, user_pseudo_id
+  ),
+  normalized_events AS (
+    SELECT
+      *,
+      NULLIF(
+        REGEXP_REPLACE(
+          REGEXP_REPLACE(LOWER(TRIM(raw_access_entitlement_type)), r'[^a-z0-9]+', '_'),
+          r'^_+|_+$',
+          ''
+        ),
+        ''
+      ) AS normalized_value
+    FROM event_values
+  ),
+  classified_events AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_value IS NULL OR normalized_value IN ('unknown', 'not_set', 'not_provided') THEN 'unknown'
+        WHEN normalized_value IN ('free', 'open', 'open_access', 'public', 'unrestricted') THEN 'free'
+        WHEN normalized_value IN ('registered', 'registration', 'authenticated', 'signed_in') THEN 'registered'
+        WHEN normalized_value IN ('trial', 'free_trial', 'preview') THEN 'trial'
+        WHEN normalized_value IN ('subscription', 'subscriber', 'premium', 'member', 'membership') THEN 'subscription'
+        WHEN normalized_value IN ('institutional', 'institution', 'institutional_license', 'library', 'campus', 'organization', 'organisational') THEN 'institutional'
+        WHEN normalized_value IN ('purchased', 'purchase', 'owned', 'perpetual', 'one_time_purchase') THEN 'purchased'
+        WHEN normalized_value IN ('metered', 'pay_per_view', 'payg', 'credits', 'credit_based') THEN 'metered'
+        WHEN normalized_value IN ('guest', 'anonymous') THEN 'guest'
+        ELSE 'other'
+      END AS canonical_code
+    FROM normalized_events
+  ),
+  aggregated AS (
+    SELECT
+      canonical_code,
+      MIN(raw_access_entitlement_type) AS raw_access_entitlement_type,
+      MIN(TIMESTAMP_MICROS(event_timestamp)) AS first_seen_timestamp,
+      MAX(TIMESTAMP_MICROS(event_timestamp)) AS last_seen_timestamp,
+      COUNT(*) AS observed_event_count,
+      COUNT(DISTINCT user_pseudo_id) AS observed_user_count,
+      COUNT(DISTINCT IF(
+        user_pseudo_id IS NOT NULL AND ga_session_id IS NOT NULL,
+        CONCAT(user_pseudo_id, ':', CAST(ga_session_id AS STRING)),
+        NULL
+      )) AS observed_session_count,
+      COUNT(DISTINCT item_id) AS distinct_item_count
+    FROM classified_events
+    GROUP BY canonical_code
+  ),
+  dimension_rows AS (
+    SELECT
+      canonical_code,
+      raw_access_entitlement_type,
+      first_seen_timestamp,
+      last_seen_timestamp,
+      observed_event_count,
+      observed_user_count,
+      observed_session_count,
+      distinct_item_count,
+      CASE canonical_code
+        WHEN 'free' THEN 'Free Access'
+        WHEN 'registered' THEN 'Registered User Access'
+        WHEN 'trial' THEN 'Trial Access'
+        WHEN 'subscription' THEN 'Subscription Access'
+        WHEN 'institutional' THEN 'Institutional Access'
+        WHEN 'purchased' THEN 'Purchased Access'
+        WHEN 'metered' THEN 'Metered Access'
+        WHEN 'guest' THEN 'Guest Access'
+        WHEN 'unknown' THEN 'Unknown'
+        ELSE 'Other'
+      END AS display_name,
+      CASE canonical_code
+        WHEN 'free' THEN 'Learning resource is available without payment.'
+        WHEN 'registered' THEN 'Learning resource requires an authenticated account.'
+        WHEN 'trial' THEN 'Learning resource is available under a trial entitlement.'
+        WHEN 'subscription' THEN 'Learning resource requires an active subscription or membership.'
+        WHEN 'institutional' THEN 'Learning resource is licensed through an institution or organization.'
+        WHEN 'purchased' THEN 'Learning resource is available through an individual purchase or perpetual license.'
+        WHEN 'metered' THEN 'Learning resource access is usage-based, credit-based, or pay-per-view.'
+        WHEN 'guest' THEN 'Learning resource is available through guest or anonymous access.'
+        WHEN 'unknown' THEN 'No access entitlement type was supplied.'
+        ELSE 'A supplied access entitlement type is not mapped to the governed taxonomy.'
+      END AS description
+    FROM aggregated
+  )
+  SELECT
+    TO_HEX(SHA256(canonical_code)) AS access_entitlement_type_key,
+    display_name AS access_entitlement_type,
+    raw_access_entitlement_type,
+    canonical_code,
+    display_name,
+    description,
+    CASE
+      WHEN canonical_code IN ('free', 'guest', 'registered') THEN 'open_or_identity_based'
+      WHEN canonical_code IN ('trial', 'subscription', 'institutional', 'purchased', 'metered') THEN 'commercial_or_licensed'
+      WHEN canonical_code = 'unknown' THEN 'unknown'
+      ELSE 'other'
+    END AS entitlement_family,
+    CASE canonical_code
+      WHEN 'free' THEN 'unrestricted'
+      WHEN 'guest' THEN 'anonymous'
+      WHEN 'registered' THEN 'authenticated'
+      WHEN 'institutional' THEN 'organization_licensed'
+      WHEN 'metered' THEN 'usage_based'
+      WHEN 'unknown' THEN 'unknown'
+      ELSE 'individual_entitlement'
+    END AS access_model,
+    CASE
+      WHEN canonical_code IN ('free', 'guest', 'registered') THEN 'no_payment'
+      WHEN canonical_code = 'trial' THEN 'trial'
+      WHEN canonical_code IN ('subscription', 'institutional') THEN 'recurring_or_contractual'
+      WHEN canonical_code = 'purchased' THEN 'one_time_purchase'
+      WHEN canonical_code = 'metered' THEN 'usage_based'
+      WHEN canonical_code = 'unknown' THEN 'unknown'
+      ELSE 'other'
+    END AS payment_model,
+    CASE
+      WHEN canonical_code = 'institutional' THEN 'organization'
+      WHEN canonical_code IN ('free', 'guest') THEN 'public'
+      WHEN canonical_code = 'unknown' THEN 'unknown'
+      ELSE 'individual'
+    END AS audience_scope,
+    CASE
+      WHEN canonical_code = 'purchased' THEN 'owned_or_perpetual'
+      WHEN canonical_code IN ('subscription', 'trial', 'metered') THEN 'temporary_entitlement'
+      WHEN canonical_code = 'institutional' THEN 'institution_licensed'
+      WHEN canonical_code IN ('free', 'guest', 'registered') THEN 'not_applicable'
+      WHEN canonical_code = 'unknown' THEN 'unknown'
+      ELSE 'other'
+    END AS ownership_model,
+    CASE
+      WHEN canonical_code IN ('trial', 'subscription', 'institutional', 'metered') THEN 'limited_or_renewable'
+      WHEN canonical_code = 'purchased' THEN 'perpetual_or_product_defined'
+      WHEN canonical_code IN ('free', 'guest', 'registered') THEN 'not_applicable'
+      WHEN canonical_code = 'unknown' THEN 'unknown'
+      ELSE 'other'
+    END AS duration_model,
+    CASE
+      WHEN canonical_code IN ('free', 'guest') THEN 'basic'
+      WHEN canonical_code = 'trial' THEN 'trial'
+      WHEN canonical_code IN ('subscription', 'institutional', 'purchased', 'metered') THEN 'entitled'
+      WHEN canonical_code = 'registered' THEN 'authenticated'
+      WHEN canonical_code = 'unknown' THEN 'unknown'
+      ELSE 'other'
+    END AS access_level,
+    canonical_code IN ('registered', 'trial', 'subscription', 'institutional', 'purchased', 'metered') AS is_authenticated_required,
+    canonical_code = 'subscription' AS is_subscription_required,
+    canonical_code IN ('purchased', 'metered') AS is_purchase_required,
+    canonical_code = 'institutional' AS is_institutional,
+    canonical_code = 'trial' AS is_trial,
+    canonical_code IN ('free', 'guest', 'registered') AS is_free,
+    canonical_code IN ('subscription', 'institutional', 'purchased', 'metered') AS is_paid,
+    canonical_code = 'metered' AS is_metered,
+    canonical_code IN ('trial', 'subscription', 'institutional', 'metered') AS is_time_limited,
+    canonical_code = 'purchased' AS is_perpetual,
+    canonical_code = 'guest' AS is_guest_access,
+    canonical_code = 'unknown' AS is_unknown,
+    canonical_code = 'other' AS is_other,
+    CASE canonical_code
+      WHEN 'free' THEN 10
+      WHEN 'guest' THEN 20
+      WHEN 'registered' THEN 30
+      WHEN 'trial' THEN 40
+      WHEN 'subscription' THEN 50
+      WHEN 'institutional' THEN 60
+      WHEN 'purchased' THEN 70
+      WHEN 'metered' THEN 80
+      WHEN 'other' THEN 90
+      ELSE 99
+    END AS entitlement_rank,
+    CASE canonical_code
+      WHEN 'free' THEN 1
+      WHEN 'guest' THEN 2
+      WHEN 'registered' THEN 3
+      WHEN 'trial' THEN 4
+      WHEN 'subscription' THEN 5
+      WHEN 'institutional' THEN 6
+      WHEN 'purchased' THEN 7
+      WHEN 'metered' THEN 8
+      WHEN 'other' THEN 98
+      ELSE 99
+    END AS reporting_sort_order,
+    CASE
+      WHEN canonical_code IN ('free', 'guest', 'registered') THEN 'Non-Paid Access'
+      WHEN canonical_code IN ('trial', 'subscription', 'institutional', 'purchased', 'metered') THEN 'Entitled Access'
+      WHEN canonical_code = 'unknown' THEN 'Unknown'
+      ELSE 'Other'
+    END AS reporting_group,
+    CASE
+      WHEN canonical_code IN ('free', 'guest') THEN 'Open Access'
+      WHEN canonical_code = 'registered' THEN 'Identity-Based Access'
+      WHEN canonical_code = 'trial' THEN 'Promotional Access'
+      WHEN canonical_code IN ('subscription', 'institutional') THEN 'Licensed Access'
+      WHEN canonical_code = 'purchased' THEN 'Owned Access'
+      WHEN canonical_code = 'metered' THEN 'Usage-Based Access'
+      WHEN canonical_code = 'unknown' THEN 'Unknown'
+      ELSE 'Unmapped'
+    END AS reporting_subgroup,
+    'Digital Analytics' AS source_system,
+    'GA4' AS source_platform,
+    'select_content' AS source_event_name,
+    'access_entitlement_type' AS source_parameter_name,
+    DATE(first_seen_timestamp) AS first_seen_date,
+    DATE(last_seen_timestamp) AS last_seen_date,
+    first_seen_timestamp,
+    last_seen_timestamp,
+    observed_event_count,
+    observed_user_count,
+    observed_session_count,
+    distinct_item_count,
+    canonical_code <> 'unknown' AS value_is_present,
+    canonical_code NOT IN ('unknown', 'other') AS value_is_valid,
+    CASE
+      WHEN canonical_code = 'unknown' THEN 'missing'
+      WHEN canonical_code = 'other' THEN 'unmapped'
+      ELSE 'valid'
+    END AS data_quality_status,
+    'active' AS record_status,
+    DATE(first_seen_timestamp) AS effective_start_date,
+    DATE '9999-12-31' AS effective_end_date,
+    TRUE AS is_current
+  FROM dimension_rows;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH event_values AS (
+    SELECT
+      timestamp AS event_timestamp,
+      COALESCE(
+        identityMap['ECID'][0].id,
+        identityMap['CRMID'][0].id
+      ) AS person_id,
+      TRIM(CAST(_experience.analytics.customDimensions.eVars.eVar1 AS VARCHAR)) AS raw_access_entitlement_type
+    FROM your_aep_dataset
+    WHERE eventType = 'select_content'
+      AND timestamp <= CURRENT_TIMESTAMP
+  ),
+  normalized_events AS (
+    SELECT
+      event_timestamp,
+      person_id,
+      raw_access_entitlement_type,
+      NULLIF(
+        REGEXP_REPLACE(
+          REGEXP_REPLACE(LOWER(TRIM(raw_access_entitlement_type)), '[^a-z0-9]+', '_'),
+          '^_+|_+$',
+          ''
+        ),
+        ''
+      ) AS normalized_value
+    FROM event_values
+  ),
+  classified_events AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_value IS NULL OR normalized_value IN ('unknown', 'not_set', 'not_provided') THEN 'unknown'
+        WHEN normalized_value IN ('free', 'open', 'open_access', 'public', 'unrestricted') THEN 'free'
+        WHEN normalized_value IN ('registered', 'registration', 'authenticated', 'signed_in') THEN 'registered'
+        WHEN normalized_value IN ('trial', 'free_trial', 'preview') THEN 'trial'
+        WHEN normalized_value IN ('subscription', 'subscriber', 'premium', 'member', 'membership') THEN 'subscription'
+        WHEN normalized_value IN ('institutional', 'institution', 'institutional_license', 'library', 'campus', 'organization', 'organisational') THEN 'institutional'
+        WHEN normalized_value IN ('purchased', 'purchase', 'owned', 'perpetual', 'one_time_purchase') THEN 'purchased'
+        WHEN normalized_value IN ('metered', 'pay_per_view', 'payg', 'credits', 'credit_based') THEN 'metered'
+        WHEN normalized_value IN ('guest', 'anonymous') THEN 'guest'
+        ELSE 'other'
+      END AS canonical_code
+    FROM normalized_events
+  ),
+  aggregated AS (
+    SELECT
+      canonical_code,
+      MIN(raw_access_entitlement_type) AS raw_access_entitlement_type,
+      MIN(event_timestamp) AS first_seen_timestamp,
+      MAX(event_timestamp) AS last_seen_timestamp,
+      COUNT(*) AS observed_event_count,
+      COUNT(DISTINCT person_id) AS observed_user_count
+    FROM classified_events
+    GROUP BY canonical_code
+  ),
+  dimension_rows AS (
+    SELECT
+      canonical_code,
+      raw_access_entitlement_type,
+      first_seen_timestamp,
+      last_seen_timestamp,
+      observed_event_count,
+      observed_user_count,
+      CASE canonical_code
+        WHEN 'free' THEN 'Free Access'
+        WHEN 'registered' THEN 'Registered User Access'
+        WHEN 'trial' THEN 'Trial Access'
+        WHEN 'subscription' THEN 'Subscription Access'
+        WHEN 'institutional' THEN 'Institutional Access'
+        WHEN 'purchased' THEN 'Purchased Access'
+        WHEN 'metered' THEN 'Metered Access'
+        WHEN 'guest' THEN 'Guest Access'
+        WHEN 'unknown' THEN 'Unknown'
+        ELSE 'Other'
+      END AS display_name,
+      CASE canonical_code
+        WHEN 'free' THEN 'Learning resource is available without payment.'
+        WHEN 'registered' THEN 'Learning resource requires an authenticated account.'
+        WHEN 'trial' THEN 'Learning resource is available under a trial entitlement.'
+        WHEN 'subscription' THEN 'Learning resource requires an active subscription or membership.'
+        WHEN 'institutional' THEN 'Learning resource is licensed through an institution or organization.'
+        WHEN 'purchased' THEN 'Learning resource is available through an individual purchase or perpetual license.'
+        WHEN 'metered' THEN 'Learning resource access is usage-based, credit-based, or pay-per-view.'
+        WHEN 'guest' THEN 'Learning resource is available through guest or anonymous access.'
+        WHEN 'unknown' THEN 'No access entitlement type was supplied.'
+        ELSE 'A supplied access entitlement type is not mapped to the governed taxonomy.'
+      END AS description
+    FROM aggregated
+  )
+  SELECT
+    MD5(canonical_code) AS access_entitlement_type_key,
+    display_name AS access_entitlement_type,
+    raw_access_entitlement_type,
+    canonical_code,
+    display_name,
+    description,
+    CASE
+      WHEN canonical_code IN ('free', 'guest', 'registered') THEN 'open_or_identity_based'
+      WHEN canonical_code IN ('trial', 'subscription', 'institutional', 'purchased', 'metered') THEN 'commercial_or_licensed'
+      WHEN canonical_code = 'unknown' THEN 'unknown'
+      ELSE 'other'
+    END AS entitlement_family,
+    CASE canonical_code
+      WHEN 'free' THEN 'unrestricted'
+      WHEN 'guest' THEN 'anonymous'
+      WHEN 'registered' THEN 'authenticated'
+      WHEN 'institutional' THEN 'organization_licensed'
+      WHEN 'metered' THEN 'usage_based'
+      WHEN 'unknown' THEN 'unknown'
+      ELSE 'individual_entitlement'
+    END AS access_model,
+    CASE
+      WHEN canonical_code IN ('free', 'guest', 'registered') THEN 'no_payment'
+      WHEN canonical_code = 'trial' THEN 'trial'
+      WHEN canonical_code IN ('subscription', 'institutional') THEN 'recurring_or_contractual'
+      WHEN canonical_code = 'purchased' THEN 'one_time_purchase'
+      WHEN canonical_code = 'metered' THEN 'usage_based'
+      WHEN canonical_code = 'unknown' THEN 'unknown'
+      ELSE 'other'
+    END AS payment_model,
+    CASE
+      WHEN canonical_code = 'institutional' THEN 'organization'
+      WHEN canonical_code IN ('free', 'guest') THEN 'public'
+      WHEN canonical_code = 'unknown' THEN 'unknown'
+      ELSE 'individual'
+    END AS audience_scope,
+    CASE
+      WHEN canonical_code = 'purchased' THEN 'owned_or_perpetual'
+      WHEN canonical_code IN ('subscription', 'trial', 'metered') THEN 'temporary_entitlement'
+      WHEN canonical_code = 'institutional' THEN 'institution_licensed'
+      WHEN canonical_code IN ('free', 'guest', 'registered') THEN 'not_applicable'
+      WHEN canonical_code = 'unknown' THEN 'unknown'
+      ELSE 'other'
+    END AS ownership_model,
+    CASE
+      WHEN canonical_code IN ('trial', 'subscription', 'institutional', 'metered') THEN 'limited_or_renewable'
+      WHEN canonical_code = 'purchased' THEN 'perpetual_or_product_defined'
+      WHEN canonical_code IN ('free', 'guest', 'registered') THEN 'not_applicable'
+      WHEN canonical_code = 'unknown' THEN 'unknown'
+      ELSE 'other'
+    END AS duration_model,
+    CASE
+      WHEN canonical_code IN ('free', 'guest') THEN 'basic'
+      WHEN canonical_code = 'trial' THEN 'trial'
+      WHEN canonical_code IN ('subscription', 'institutional', 'purchased', 'metered') THEN 'entitled'
+      WHEN canonical_code = 'registered' THEN 'authenticated'
+      WHEN canonical_code = 'unknown' THEN 'unknown'
+      ELSE 'other'
+    END AS access_level,
+    canonical_code IN ('registered', 'trial', 'subscription', 'institutional', 'purchased', 'metered') AS is_authenticated_required,
+    canonical_code = 'subscription' AS is_subscription_required,
+    canonical_code IN ('purchased', 'metered') AS is_purchase_required,
+    canonical_code = 'institutional' AS is_institutional,
+    canonical_code = 'trial' AS is_trial,
+    canonical_code IN ('free', 'guest', 'registered') AS is_free,
+    canonical_code IN ('subscription', 'institutional', 'purchased', 'metered') AS is_paid,
+    canonical_code = 'metered' AS is_metered,
+    canonical_code IN ('trial', 'subscription', 'institutional', 'metered') AS is_time_limited,
+    canonical_code = 'purchased' AS is_perpetual,
+    canonical_code = 'guest' AS is_guest_access,
+    canonical_code = 'unknown' AS is_unknown,
+    canonical_code = 'other' AS is_other,
+    CASE canonical_code
+      WHEN 'free' THEN 10
+      WHEN 'guest' THEN 20
+      WHEN 'registered' THEN 30
+      WHEN 'trial' THEN 40
+      WHEN 'subscription' THEN 50
+      WHEN 'institutional' THEN 60
+      WHEN 'purchased' THEN 70
+      WHEN 'metered' THEN 80
+      WHEN 'other' THEN 90
+      ELSE 99
+    END AS entitlement_rank,
+    CASE canonical_code
+      WHEN 'free' THEN 1
+      WHEN 'guest' THEN 2
+      WHEN 'registered' THEN 3
+      WHEN 'trial' THEN 4
+      WHEN 'subscription' THEN 5
+      WHEN 'institutional' THEN 6
+      WHEN 'purchased' THEN 7
+      WHEN 'metered' THEN 8
+      WHEN 'other' THEN 98
+      ELSE 99
+    END AS reporting_sort_order,
+    CASE
+      WHEN canonical_code IN ('free', 'guest', 'registered') THEN 'Non-Paid Access'
+      WHEN canonical_code IN ('trial', 'subscription', 'institutional', 'purchased', 'metered') THEN 'Entitled Access'
+      WHEN canonical_code = 'unknown' THEN 'Unknown'
+      ELSE 'Other'
+    END AS reporting_group,
+    CASE
+      WHEN canonical_code IN ('free', 'guest') THEN 'Open Access'
+      WHEN canonical_code = 'registered' THEN 'Identity-Based Access'
+      WHEN canonical_code = 'trial' THEN 'Promotional Access'
+      WHEN canonical_code IN ('subscription', 'institutional') THEN 'Licensed Access'
+      WHEN canonical_code = 'purchased' THEN 'Owned Access'
+      WHEN canonical_code = 'metered' THEN 'Usage-Based Access'
+      WHEN canonical_code = 'unknown' THEN 'Unknown'
+      ELSE 'Unmapped'
+    END AS reporting_subgroup,
+    'Digital Analytics' AS source_system,
+    'Adobe Experience Platform' AS source_platform,
+    'select_content' AS source_event_name,
+    '_experience.analytics.customDimensions.eVars.eVar1' AS source_parameter_name,
+    CAST(first_seen_timestamp AS DATE) AS first_seen_date,
+    CAST(last_seen_timestamp AS DATE) AS last_seen_date,
+    first_seen_timestamp,
+    last_seen_timestamp,
+    observed_event_count,
+    observed_user_count,
+    CAST(NULL AS BIGINT) AS observed_session_count,
+    CAST(NULL AS BIGINT) AS distinct_item_count,
+    canonical_code <> 'unknown' AS value_is_present,
+    canonical_code NOT IN ('unknown', 'other') AS value_is_valid,
+    CASE
+      WHEN canonical_code = 'unknown' THEN 'missing'
+      WHEN canonical_code = 'other' THEN 'unmapped'
+      ELSE 'valid'
+    END AS data_quality_status,
+    'active' AS record_status,
+    CAST(first_seen_timestamp AS DATE) AS effective_start_date,
+    CAST('9999-12-31' AS DATE) AS effective_end_date,
+    TRUE AS is_current
+  FROM dimension_rows;
+
+Calculation Notes: |
+  1️⃣ Assign the value from the entitlement selected by the authorization service for the specific resource at the time of the access decision.
+  2️⃣ Use the controlled taxonomy: free, trial, individual_subscription, institution_subscription, one_time_purchase, promotional, complimentary, instructor_staff, restricted_none, and unknown.
+  3️⃣ When multiple valid entitlements exist, apply the authorization service's winning entitlement; otherwise prioritize explicit purchase, individual subscription, institution subscription, trial, promotional, complimentary, and free access in that order.
+  4️⃣ Preserve the event-time value and do not restate historical events when subscriptions, licenses, roles, or entitlement policies subsequently change.
+  5️⃣ Record restricted_none only when the service explicitly determines that no valid entitlement permits access; reserve unknown for missing, malformed, delayed, or unmapped entitlement data.
+  6️⃣ Exclude preview, crawler, synthetic-monitoring, quality-assurance, and internal test activity unless those experiences are explicitly included in the governed reporting scope.
+  7️⃣ For unauthenticated access, classify the event as free only when the resource policy grants anonymous access; otherwise use restricted_none rather than inferring an entitlement.
+
+Business Use Case: |
+  The Chief Product Officer uses conversion, engagement, and completion rates broken down by Access Entitlement Type to determine whether trial users should receive broader course access, whether institution-sponsored learners are underutilizing assigned licenses, and whether individually paid subscribers encounter disproportionate authorization failures. Product and Revenue Management teams can then adjust paywall rules, trial allowances, packaging, and entitlement remediation workflows for the affected access model.
+
+
+Source Data: Digital Entitlement Service + Digital Analytics (GA4)
+
+Report Attributes: |
+  ["Access Decision Outcome","Entitlement Status","Subscription Plan","Product Access Tier","Learning Product","Course","Content Type","User Role","Organization","Institution Type","Enrollment Type","Authentication Method","Device Category","Platform","Country","Acquisition Channel","Promotion Type"]
+
+Dashboard Usage: [Digital Access and Entitlement Health, Subscription Conversion and Monetization, Trial-to-Paid Conversion, Institution License Utilization, Learning Product Engagement, Paywall and Authorization Performance, Course Access Funnel, Entitlement Expiration and Renewal, Executive Digital Learning Performance]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Subscription Plan, Subscription Status, Access Decision Outcome, Entitlement Status, Entitlement Start Date, Entitlement Expiration Date, Product Access Tier, Course, Learning Product, Content Type, User Role, Organization, Institution Type, Purchase Type, Promotion Type, Authentication Method, Enrollment Type, License Assignment Status]
+
+Derived Dimensions: [Paid Access Indicator, Sponsored Access Indicator, Access Funding Model, Entitlement Tier Group, Privileged Access Indicator, Temporary Access Indicator, Access Restriction Status, Entitlement Commerciality, Entitlement Sponsorship Type]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-13T19:30:05.394331+00:00
+
+Last Modified By: devyendarm
+
+
