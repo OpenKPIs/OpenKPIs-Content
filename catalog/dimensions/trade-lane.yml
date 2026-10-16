@@ -1,0 +1,564 @@
+# Dimension: Trade Lane
+# Generated: 2026-09-10T18:31:13.194Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Trade Lane
+
+Description: |
+  Identifies the standardized, directional transportation market between a defined origin and destination at the approved geographic or facility granularity. It enables consistent comparison of shipment volume, cost, service, capacity, transit time, and reliability across logistics corridors.
+
+Category: Efficiency
+
+Tags: [dimension]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH location_ranked AS (
+    SELECT
+      CAST(location_id AS STRING) AS location_id,
+      UPPER(TRIM(CAST(location_code AS STRING))) AS location_code,
+      TRIM(location_name) AS location_name,
+      UPPER(TRIM(location_type)) AS location_type,
+      TRIM(city_name) AS city_name,
+      UPPER(TRIM(state_province_code)) AS state_province_code,
+      TRIM(state_province_name) AS state_province_name,
+      UPPER(TRIM(postal_code)) AS postal_code,
+      UPPER(TRIM(country_code)) AS country_code,
+      TRIM(country_name) AS country_name,
+      UPPER(TRIM(country_iso3)) AS country_iso3,
+      TRIM(subregion_name) AS subregion_name,
+      TRIM(region_name) AS region_name,
+      SAFE_CAST(latitude AS NUMERIC) AS latitude,
+      SAFE_CAST(longitude AS NUMERIC) AS longitude,
+      UPPER(TRIM(un_locode)) AS un_locode,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(location_id AS STRING)
+        ORDER BY updated_at DESC, effective_start_at DESC
+      ) AS row_num
+    FROM `your-project.enterprise.location_master`
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+  ),
+  location_current AS (
+    SELECT * EXCEPT (row_num)
+    FROM location_ranked
+    WHERE row_num = 1
+  ),
+  shipment_base AS (
+    SELECT
+      CAST(s.shipment_id AS STRING) AS shipment_id,
+      CAST(s.origin_location_id AS STRING) AS origin_location_id,
+      CAST(s.destination_location_id AS STRING) AS destination_location_id,
+      CASE UPPER(TRIM(COALESCE(s.transportation_mode_code, s.transportation_mode, 'UNKNOWN')))
+        WHEN 'TRUCK' THEN 'ROAD'
+        WHEN 'LTL' THEN 'ROAD'
+        WHEN 'FTL' THEN 'ROAD'
+        WHEN 'SEA' THEN 'OCEAN'
+        WHEN 'VESSEL' THEN 'OCEAN'
+        WHEN 'INTERMODAL_RAIL' THEN 'INTERMODAL'
+        ELSE UPPER(TRIM(COALESCE(s.transportation_mode_code, s.transportation_mode, 'UNKNOWN')))
+      END AS transportation_mode_code,
+      UPPER(TRIM(COALESCE(s.service_level_code, 'UNKNOWN'))) AS service_level_code,
+      NULLIF(TRIM(s.service_level_name), '') AS source_service_level_name,
+      UPPER(TRIM(COALESCE(s.origin_port_code, ol.un_locode, 'UNKNOWN'))) AS origin_port_code,
+      UPPER(TRIM(COALESCE(s.destination_port_code, dl.un_locode, 'UNKNOWN'))) AS destination_port_code,
+      SAFE_CAST(s.distance_km AS NUMERIC) AS distance_km,
+      COALESCE(s.actual_pickup_timestamp, s.planned_pickup_timestamp, s.created_at) AS pickup_timestamp,
+      COALESCE(s.actual_delivery_timestamp, s.planned_delivery_timestamp) AS delivery_timestamp,
+      DATE(COALESCE(s.actual_pickup_timestamp, s.planned_pickup_timestamp, s.created_at)) AS observed_date,
+      ol.location_code AS origin_location_code,
+      ol.location_name AS origin_location_name,
+      ol.location_type AS origin_location_type,
+      ol.city_name AS origin_city,
+      ol.state_province_code AS origin_state_province_code,
+      ol.state_province_name AS origin_state_province_name,
+      ol.postal_code AS origin_postal_code,
+      ol.country_code AS origin_country_code,
+      ol.country_name AS origin_country_name,
+      ol.country_iso3 AS origin_country_iso3,
+      ol.subregion_name AS origin_subregion_name,
+      ol.region_name AS origin_region_name,
+      ol.latitude AS origin_latitude,
+      ol.longitude AS origin_longitude,
+      dl.location_code AS destination_location_code,
+      dl.location_name AS destination_location_name,
+      dl.location_type AS destination_location_type,
+      dl.city_name AS destination_city,
+      dl.state_province_code AS destination_state_province_code,
+      dl.state_province_name AS destination_state_province_name,
+      dl.postal_code AS destination_postal_code,
+      dl.country_code AS destination_country_code,
+      dl.country_name AS destination_country_name,
+      dl.country_iso3 AS destination_country_iso3,
+      dl.subregion_name AS destination_subregion_name,
+      dl.region_name AS destination_region_name,
+      dl.latitude AS destination_latitude,
+      dl.longitude AS destination_longitude
+    FROM `your-project.transportation.shipments` AS s
+    LEFT JOIN location_current AS ol
+      ON CAST(s.origin_location_id AS STRING) = ol.location_id
+    LEFT JOIN location_current AS dl
+      ON CAST(s.destination_location_id AS STRING) = dl.location_id
+    WHERE COALESCE(s.is_deleted, FALSE) = FALSE
+      AND s.origin_location_id IS NOT NULL
+      AND s.destination_location_id IS NOT NULL
+      AND COALESCE(s.actual_pickup_timestamp, s.planned_pickup_timestamp, s.created_at) IS NOT NULL
+  ),
+  lane_rollup AS (
+    SELECT
+      origin_location_id,
+      destination_location_id,
+      transportation_mode_code,
+      service_level_code,
+      origin_port_code,
+      destination_port_code,
+      MAX(COALESCE(origin_location_code, 'UNKNOWN')) AS origin_location_code,
+      MAX(COALESCE(origin_location_name, 'Unknown Origin')) AS origin_location_name,
+      MAX(COALESCE(origin_location_type, 'UNKNOWN')) AS origin_location_type,
+      MAX(COALESCE(origin_city, 'Unknown')) AS origin_city,
+      MAX(COALESCE(origin_state_province_code, 'UNKNOWN')) AS origin_state_province_code,
+      MAX(COALESCE(origin_state_province_name, 'Unknown')) AS origin_state_province_name,
+      MAX(COALESCE(origin_postal_code, 'UNKNOWN')) AS origin_postal_code,
+      MAX(COALESCE(origin_country_code, 'UNKNOWN')) AS origin_country_code,
+      MAX(COALESCE(origin_country_name, 'Unknown')) AS origin_country_name,
+      MAX(COALESCE(origin_country_iso3, 'UNK')) AS origin_country_iso3,
+      MAX(COALESCE(origin_subregion_name, 'Unknown')) AS origin_subregion_name,
+      MAX(COALESCE(origin_region_name, 'Unknown')) AS origin_region_name,
+      MAX(origin_latitude) AS origin_latitude,
+      MAX(origin_longitude) AS origin_longitude,
+      MAX(COALESCE(destination_location_code, 'UNKNOWN')) AS destination_location_code,
+      MAX(COALESCE(destination_location_name, 'Unknown Destination')) AS destination_location_name,
+      MAX(COALESCE(destination_location_type, 'UNKNOWN')) AS destination_location_type,
+      MAX(COALESCE(destination_city, 'Unknown')) AS destination_city,
+      MAX(COALESCE(destination_state_province_code, 'UNKNOWN')) AS destination_state_province_code,
+      MAX(COALESCE(destination_state_province_name, 'Unknown')) AS destination_state_province_name,
+      MAX(COALESCE(destination_postal_code, 'UNKNOWN')) AS destination_postal_code,
+      MAX(COALESCE(destination_country_code, 'UNKNOWN')) AS destination_country_code,
+      MAX(COALESCE(destination_country_name, 'Unknown')) AS destination_country_name,
+      MAX(COALESCE(destination_country_iso3, 'UNK')) AS destination_country_iso3,
+      MAX(COALESCE(destination_subregion_name, 'Unknown')) AS destination_subregion_name,
+      MAX(COALESCE(destination_region_name, 'Unknown')) AS destination_region_name,
+      MAX(destination_latitude) AS destination_latitude,
+      MAX(destination_longitude) AS destination_longitude,
+      MAX(source_service_level_name) AS source_service_level_name,
+      AVG(CASE WHEN distance_km > 0 THEN distance_km END) AS standard_distance_km,
+      AVG(
+        CASE
+          WHEN delivery_timestamp >= pickup_timestamp
+          THEN SAFE_DIVIDE(TIMESTAMP_DIFF(delivery_timestamp, pickup_timestamp, HOUR), 24.0)
+        END
+      ) AS standard_transit_days,
+      MIN(observed_date) AS first_observed_date,
+      MAX(observed_date) AS last_observed_date
+    FROM shipment_base
+    GROUP BY
+      origin_location_id,
+      destination_location_id,
+      transportation_mode_code,
+      service_level_code,
+      origin_port_code,
+      destination_port_code
+  ),
+  lane_formatted AS (
+    SELECT
+      *,
+      CONCAT(
+        origin_location_code, '|', destination_location_code, '|',
+        transportation_mode_code, '|', service_level_code, '|',
+        origin_port_code, '|', destination_port_code
+      ) AS natural_lane_code,
+      CASE transportation_mode_code
+        WHEN 'AIR' THEN 'Air'
+        WHEN 'OCEAN' THEN 'Ocean'
+        WHEN 'ROAD' THEN 'Road'
+        WHEN 'RAIL' THEN 'Rail'
+        WHEN 'INTERMODAL' THEN 'Intermodal'
+        WHEN 'PARCEL' THEN 'Parcel'
+        ELSE INITCAP(LOWER(transportation_mode_code))
+      END AS transportation_mode_name,
+      COALESCE(
+        source_service_level_name,
+        INITCAP(REPLACE(LOWER(service_level_code), '_', ' '))
+      ) AS service_level_name
+    FROM lane_rollup
+  )
+  SELECT
+    LOWER(TO_HEX(MD5(natural_lane_code))) AS trade_lane_key,
+    natural_lane_code AS trade_lane_code,
+    CONCAT(origin_location_name, ' to ', destination_location_name, ' - ', transportation_mode_name) AS trade_lane_name,
+    CONCAT(
+      origin_location_name, ' (', origin_country_code, ') to ',
+      destination_location_name, ' (', destination_country_code, ') via ',
+      transportation_mode_name, ' / ', service_level_name
+    ) AS trade_lane_description,
+    origin_location_id,
+    origin_location_code,
+    origin_location_name,
+    origin_location_type,
+    origin_city,
+    origin_state_province_code,
+    origin_state_province_name,
+    origin_postal_code,
+    origin_country_code,
+    origin_country_name,
+    origin_country_iso3,
+    origin_subregion_name,
+    origin_region_name,
+    origin_latitude,
+    origin_longitude,
+    destination_location_id,
+    destination_location_code,
+    destination_location_name,
+    destination_location_type,
+    destination_city,
+    destination_state_province_code,
+    destination_state_province_name,
+    destination_postal_code,
+    destination_country_code,
+    destination_country_name,
+    destination_country_iso3,
+    destination_subregion_name,
+    destination_region_name,
+    destination_latitude,
+    destination_longitude,
+    transportation_mode_code,
+    transportation_mode_name,
+    service_level_code,
+    service_level_name,
+    CASE
+      WHEN origin_country_code = 'UNKNOWN' OR destination_country_code = 'UNKNOWN' THEN 'UNKNOWN'
+      WHEN origin_country_code = destination_country_code THEN 'DOMESTIC'
+      ELSE 'INTERNATIONAL'
+    END AS lane_scope,
+    CASE
+      WHEN origin_country_code = 'UNKNOWN' OR destination_country_code = 'UNKNOWN' THEN NULL
+      ELSE origin_country_code <> destination_country_code
+    END AS cross_border_flag,
+    origin_port_code,
+    destination_port_code,
+    CONCAT(origin_country_code, '-', destination_country_code) AS country_pair_code,
+    CONCAT(UPPER(REPLACE(origin_region_name, ' ', '_')), '-', UPPER(REPLACE(destination_region_name, ' ', '_'))) AS region_pair_code,
+    ROUND(standard_distance_km, 2) AS standard_distance_km,
+    ROUND(standard_transit_days, 2) AS standard_transit_days,
+    last_observed_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 365 DAY) AS is_active,
+    TIMESTAMP(first_observed_date) AS effective_start_timestamp,
+    CASE
+      WHEN last_observed_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 365 DAY) THEN CAST(NULL AS TIMESTAMP)
+      ELSE TIMESTAMP(DATE_ADD(last_observed_date, INTERVAL 1 DAY))
+    END AS effective_end_timestamp
+  FROM lane_formatted;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH location_ranked AS (
+    SELECT
+      CAST(location_id AS VARCHAR) AS location_id,
+      UPPER(TRIM(CAST(location_code AS VARCHAR))) AS location_code,
+      TRIM(location_name) AS location_name,
+      UPPER(TRIM(location_type)) AS location_type,
+      TRIM(city_name) AS city_name,
+      UPPER(TRIM(state_province_code)) AS state_province_code,
+      TRIM(state_province_name) AS state_province_name,
+      UPPER(TRIM(postal_code)) AS postal_code,
+      UPPER(TRIM(country_code)) AS country_code,
+      TRIM(country_name) AS country_name,
+      UPPER(TRIM(country_iso3)) AS country_iso3,
+      TRIM(subregion_name) AS subregion_name,
+      TRIM(region_name) AS region_name,
+      CAST(latitude AS DECIMAL(18,8)) AS latitude,
+      CAST(longitude AS DECIMAL(18,8)) AS longitude,
+      UPPER(TRIM(un_locode)) AS un_locode,
+      ROW_NUMBER() OVER (
+        PARTITION BY CAST(location_id AS VARCHAR)
+        ORDER BY updated_at DESC, effective_start_at DESC
+      ) AS row_num
+    FROM enterprise_location_master_dataset
+    WHERE COALESCE(is_deleted, FALSE) = FALSE
+  ),
+  location_current AS (
+    SELECT
+      location_id,
+      location_code,
+      location_name,
+      location_type,
+      city_name,
+      state_province_code,
+      state_province_name,
+      postal_code,
+      country_code,
+      country_name,
+      country_iso3,
+      subregion_name,
+      region_name,
+      latitude,
+      longitude,
+      un_locode
+    FROM location_ranked
+    WHERE row_num = 1
+  ),
+  shipment_base AS (
+    SELECT
+      CAST(s.shipment_id AS VARCHAR) AS shipment_id,
+      CAST(s.origin_location_id AS VARCHAR) AS origin_location_id,
+      CAST(s.destination_location_id AS VARCHAR) AS destination_location_id,
+      CASE UPPER(TRIM(COALESCE(s.transportation_mode_code, s.transportation_mode, 'UNKNOWN')))
+        WHEN 'TRUCK' THEN 'ROAD'
+        WHEN 'LTL' THEN 'ROAD'
+        WHEN 'FTL' THEN 'ROAD'
+        WHEN 'SEA' THEN 'OCEAN'
+        WHEN 'VESSEL' THEN 'OCEAN'
+        WHEN 'INTERMODAL_RAIL' THEN 'INTERMODAL'
+        ELSE UPPER(TRIM(COALESCE(s.transportation_mode_code, s.transportation_mode, 'UNKNOWN')))
+      END AS transportation_mode_code,
+      UPPER(TRIM(COALESCE(s.service_level_code, 'UNKNOWN'))) AS service_level_code,
+      NULLIF(TRIM(s.service_level_name), '') AS source_service_level_name,
+      UPPER(TRIM(COALESCE(s.origin_port_code, ol.un_locode, 'UNKNOWN'))) AS origin_port_code,
+      UPPER(TRIM(COALESCE(s.destination_port_code, dl.un_locode, 'UNKNOWN'))) AS destination_port_code,
+      CAST(s.distance_km AS DECIMAL(18,4)) AS distance_km,
+      COALESCE(s.actual_pickup_timestamp, s.planned_pickup_timestamp, s.created_at) AS pickup_timestamp,
+      COALESCE(s.actual_delivery_timestamp, s.planned_delivery_timestamp) AS delivery_timestamp,
+      CAST(COALESCE(s.actual_pickup_timestamp, s.planned_pickup_timestamp, s.created_at) AS DATE) AS observed_date,
+      ol.location_code AS origin_location_code,
+      ol.location_name AS origin_location_name,
+      ol.location_type AS origin_location_type,
+      ol.city_name AS origin_city,
+      ol.state_province_code AS origin_state_province_code,
+      ol.state_province_name AS origin_state_province_name,
+      ol.postal_code AS origin_postal_code,
+      ol.country_code AS origin_country_code,
+      ol.country_name AS origin_country_name,
+      ol.country_iso3 AS origin_country_iso3,
+      ol.subregion_name AS origin_subregion_name,
+      ol.region_name AS origin_region_name,
+      ol.latitude AS origin_latitude,
+      ol.longitude AS origin_longitude,
+      dl.location_code AS destination_location_code,
+      dl.location_name AS destination_location_name,
+      dl.location_type AS destination_location_type,
+      dl.city_name AS destination_city,
+      dl.state_province_code AS destination_state_province_code,
+      dl.state_province_name AS destination_state_province_name,
+      dl.postal_code AS destination_postal_code,
+      dl.country_code AS destination_country_code,
+      dl.country_name AS destination_country_name,
+      dl.country_iso3 AS destination_country_iso3,
+      dl.subregion_name AS destination_subregion_name,
+      dl.region_name AS destination_region_name,
+      dl.latitude AS destination_latitude,
+      dl.longitude AS destination_longitude
+    FROM shipment_execution_dataset AS s
+    LEFT JOIN location_current AS ol
+      ON CAST(s.origin_location_id AS VARCHAR) = ol.location_id
+    LEFT JOIN location_current AS dl
+      ON CAST(s.destination_location_id AS VARCHAR) = dl.location_id
+    WHERE COALESCE(s.is_deleted, FALSE) = FALSE
+      AND s.origin_location_id IS NOT NULL
+      AND s.destination_location_id IS NOT NULL
+      AND COALESCE(s.actual_pickup_timestamp, s.planned_pickup_timestamp, s.created_at) IS NOT NULL
+  ),
+  lane_rollup AS (
+    SELECT
+      origin_location_id,
+      destination_location_id,
+      transportation_mode_code,
+      service_level_code,
+      origin_port_code,
+      destination_port_code,
+      MAX(COALESCE(origin_location_code, 'UNKNOWN')) AS origin_location_code,
+      MAX(COALESCE(origin_location_name, 'Unknown Origin')) AS origin_location_name,
+      MAX(COALESCE(origin_location_type, 'UNKNOWN')) AS origin_location_type,
+      MAX(COALESCE(origin_city, 'Unknown')) AS origin_city,
+      MAX(COALESCE(origin_state_province_code, 'UNKNOWN')) AS origin_state_province_code,
+      MAX(COALESCE(origin_state_province_name, 'Unknown')) AS origin_state_province_name,
+      MAX(COALESCE(origin_postal_code, 'UNKNOWN')) AS origin_postal_code,
+      MAX(COALESCE(origin_country_code, 'UNKNOWN')) AS origin_country_code,
+      MAX(COALESCE(origin_country_name, 'Unknown')) AS origin_country_name,
+      MAX(COALESCE(origin_country_iso3, 'UNK')) AS origin_country_iso3,
+      MAX(COALESCE(origin_subregion_name, 'Unknown')) AS origin_subregion_name,
+      MAX(COALESCE(origin_region_name, 'Unknown')) AS origin_region_name,
+      MAX(origin_latitude) AS origin_latitude,
+      MAX(origin_longitude) AS origin_longitude,
+      MAX(COALESCE(destination_location_code, 'UNKNOWN')) AS destination_location_code,
+      MAX(COALESCE(destination_location_name, 'Unknown Destination')) AS destination_location_name,
+      MAX(COALESCE(destination_location_type, 'UNKNOWN')) AS destination_location_type,
+      MAX(COALESCE(destination_city, 'Unknown')) AS destination_city,
+      MAX(COALESCE(destination_state_province_code, 'UNKNOWN')) AS destination_state_province_code,
+      MAX(COALESCE(destination_state_province_name, 'Unknown')) AS destination_state_province_name,
+      MAX(COALESCE(destination_postal_code, 'UNKNOWN')) AS destination_postal_code,
+      MAX(COALESCE(destination_country_code, 'UNKNOWN')) AS destination_country_code,
+      MAX(COALESCE(destination_country_name, 'Unknown')) AS destination_country_name,
+      MAX(COALESCE(destination_country_iso3, 'UNK')) AS destination_country_iso3,
+      MAX(COALESCE(destination_subregion_name, 'Unknown')) AS destination_subregion_name,
+      MAX(COALESCE(destination_region_name, 'Unknown')) AS destination_region_name,
+      MAX(destination_latitude) AS destination_latitude,
+      MAX(destination_longitude) AS destination_longitude,
+      MAX(source_service_level_name) AS source_service_level_name,
+      AVG(CASE WHEN distance_km > 0 THEN distance_km END) AS standard_distance_km,
+      AVG(
+        CASE
+          WHEN delivery_timestamp >= pickup_timestamp
+          THEN EXTRACT(EPOCH FROM (delivery_timestamp - pickup_timestamp)) / 86400.0
+        END
+      ) AS standard_transit_days,
+      MIN(observed_date) AS first_observed_date,
+      MAX(observed_date) AS last_observed_date
+    FROM shipment_base
+    GROUP BY
+      origin_location_id,
+      destination_location_id,
+      transportation_mode_code,
+      service_level_code,
+      origin_port_code,
+      destination_port_code
+  ),
+  lane_formatted AS (
+    SELECT
+      lane_rollup.*,
+      CONCAT(
+        origin_location_code, '|', destination_location_code, '|',
+        transportation_mode_code, '|', service_level_code, '|',
+        origin_port_code, '|', destination_port_code
+      ) AS natural_lane_code,
+      CASE transportation_mode_code
+        WHEN 'AIR' THEN 'Air'
+        WHEN 'OCEAN' THEN 'Ocean'
+        WHEN 'ROAD' THEN 'Road'
+        WHEN 'RAIL' THEN 'Rail'
+        WHEN 'INTERMODAL' THEN 'Intermodal'
+        WHEN 'PARCEL' THEN 'Parcel'
+        ELSE INITCAP(LOWER(transportation_mode_code))
+      END AS transportation_mode_name,
+      COALESCE(
+        source_service_level_name,
+        INITCAP(REPLACE(LOWER(service_level_code), '_', ' '))
+      ) AS service_level_name
+    FROM lane_rollup
+  )
+  SELECT
+    LOWER(MD5(natural_lane_code)) AS trade_lane_key,
+    natural_lane_code AS trade_lane_code,
+    CONCAT(origin_location_name, ' to ', destination_location_name, ' - ', transportation_mode_name) AS trade_lane_name,
+    CONCAT(
+      origin_location_name, ' (', origin_country_code, ') to ',
+      destination_location_name, ' (', destination_country_code, ') via ',
+      transportation_mode_name, ' / ', service_level_name
+    ) AS trade_lane_description,
+    origin_location_id,
+    origin_location_code,
+    origin_location_name,
+    origin_location_type,
+    origin_city,
+    origin_state_province_code,
+    origin_state_province_name,
+    origin_postal_code,
+    origin_country_code,
+    origin_country_name,
+    origin_country_iso3,
+    origin_subregion_name,
+    origin_region_name,
+    origin_latitude,
+    origin_longitude,
+    destination_location_id,
+    destination_location_code,
+    destination_location_name,
+    destination_location_type,
+    destination_city,
+    destination_state_province_code,
+    destination_state_province_name,
+    destination_postal_code,
+    destination_country_code,
+    destination_country_name,
+    destination_country_iso3,
+    destination_subregion_name,
+    destination_region_name,
+    destination_latitude,
+    destination_longitude,
+    transportation_mode_code,
+    transportation_mode_name,
+    service_level_code,
+    service_level_name,
+    CASE
+      WHEN origin_country_code = 'UNKNOWN' OR destination_country_code = 'UNKNOWN' THEN 'UNKNOWN'
+      WHEN origin_country_code = destination_country_code THEN 'DOMESTIC'
+      ELSE 'INTERNATIONAL'
+    END AS lane_scope,
+    CASE
+      WHEN origin_country_code = 'UNKNOWN' OR destination_country_code = 'UNKNOWN' THEN NULL
+      ELSE origin_country_code <> destination_country_code
+    END AS cross_border_flag,
+    origin_port_code,
+    destination_port_code,
+    CONCAT(origin_country_code, '-', destination_country_code) AS country_pair_code,
+    CONCAT(UPPER(REPLACE(origin_region_name, ' ', '_')), '-', UPPER(REPLACE(destination_region_name, ' ', '_'))) AS region_pair_code,
+    ROUND(standard_distance_km, 2) AS standard_distance_km,
+    ROUND(standard_transit_days, 2) AS standard_transit_days,
+    last_observed_date >= CURRENT_DATE - INTERVAL '365 days' AS is_active,
+    CAST(first_observed_date AS TIMESTAMP) AS effective_start_timestamp,
+    CASE
+      WHEN last_observed_date >= CURRENT_DATE - INTERVAL '365 days' THEN CAST(NULL AS TIMESTAMP)
+      ELSE CAST(last_observed_date + INTERVAL '1 day' AS TIMESTAMP)
+    END AS effective_end_timestamp
+  FROM lane_formatted;
+
+Calculation Notes: |
+  1️⃣ Assign trade lane based on origin and destination using hierarchy (facility, port, city, country, region).  
+  2️⃣ Preserve directionality: Origin A to Destination B is different from Origin B to Destination A.  
+  3️⃣ Use planned commercial origin and destination for end-to-end analysis; leg-level only for transport leg reporting.  
+  4️⃣ Normalize location identifiers via location master before lane assignment; use stable lane codes.  
+  5️⃣ For multiple modes, retain one end-to-end trade lane and analyze legs through Route or Transportation Mode.  
+  6️⃣ Apply lane definition effective at booking time; late corrections follow approved restatement policy.  
+  7️⃣ Assign 'Unknown Trade Lane' for one missing endpoint; 'Unmapped Trade Lane' for both endpoints not in location master.
+
+Business Use Case: |
+  Transportation Network Planning reviews cost, volume, capacity utilization, on-time delivery, and transit-time variability by trade lane to identify corridors with persistent cost or service issues. The team can then rebid carrier capacity, consolidate shipments, change routing guides, reposition equipment, adjust service commitments, or prioritize new consolidation hubs on the affected lanes.
+
+
+Source Data: Transportation Management System, ERP, shipment execution platform, freight booking system, carrier EDI or API feeds, and enterprise location master
+
+Report Attributes: |
+  ["Origin Location","Destination Location","Origin Country","Destination Country","Origin Region","Destination Region","Origin Port","Destination Port","Transportation Mode","Carrier","Service Level","Equipment Type","Commodity","Customer","Business Unit","Incoterm","Shipment Status","Freight Corridor","Route","Domestic or International Lane","Headhaul or Backhaul Lane","Booking Month","Departure Month","Delivery Month"]
+
+Dashboard Usage: [Global Transportation Control Tower, Trade Lane Performance, Freight Cost and Spend, Carrier Performance Scorecard, Transit Time and Reliability, Transportation Capacity and Utilization, Network Planning and Optimization, Shipment Volume by Corridor, International Logistics Performance, Lane Profitability and Margin, Logistics Service Exceptions, Freight Procurement and Tendering]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Origin Location, Destination Location, Origin Country, Destination Country, Origin Region, Destination Region, Origin Port, Destination Port, Transportation Mode, Carrier, Service Level, Shipment, Route, Freight Corridor, Equipment Type, Commodity, Customer, Incoterm, Business Unit, Booking Date, Shipment Date, Delivery Date]
+
+Derived Dimensions: [Trade Lane Direction, Trade Lane Region Pair, Trade Lane Country Pair, Trade Lane Port Pair, Domestic or International Lane, Intra-Regional or Inter-Regional Lane, Headhaul or Backhaul Lane, Primary Freight Corridor, Lane Distance Band, Lane Transit Time Band, Lane Volume Tier, Lane Cost Tier, Lane Service Risk Tier]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-10T18:31:12.590604+00:00
+
+Last Modified By: devyendarm
+
+
