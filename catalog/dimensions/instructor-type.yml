@@ -1,0 +1,410 @@
+# Dimension: Instructor Type
+# Generated: 2026-09-13T19:30:14.616Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Instructor Type
+
+Description: |
+  Classifies the instructional delivery model assigned to a digital course, class, cohort, or learning content item, distinguishing human-led, AI-led, peer-led, hybrid, recorded, and self-directed experiences. It enables consistent comparison of learner conversion, engagement, completion, satisfaction, and retention across materially different modes of instruction.
+
+Category: Engagement
+
+Tags: [dimension]
+
+Industry: EdTech & E-Learning
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Item
+
+Data Type: string
+
+Aggregation Window: Event (resolved from the course-offering version effective at event time)
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  view_item
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"view_item"}}],"product":[{"productInfo":{"productID":"COURSE-12345","productName":"Example Digital Course","productType":"course","instructorType":"human_led"}}]}}
+
+GA4 Data Layer: |
+  {"event":"view_item","ecommerce":{"items":[{"item_id":"COURSE-12345","item_name":"Example Digital Course","item_category":"course","instructor_type":"human_led"}]}}
+
+Adobe Client Data Layer: |
+  {"data":{"product":{"productID":"COURSE-12345","productName":"Example Digital Course","productType":"course","instructorType":"human_led"}},"event":"view_item"}
+
+XDM Mapping: |
+  {"eventType":"commerce.productViews","_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"human_led"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH item_events AS (
+    SELECT
+      PARSE_DATE('%Y%m%d', event_date) AS event_date,
+      TIMESTAMP_MICROS(event_timestamp) AS event_timestamp,
+      user_pseudo_id,
+      CONCAT(
+        COALESCE(user_pseudo_id, 'unknown'),
+        '.',
+        COALESCE(
+          CAST((
+            SELECT ep.value.int_value
+            FROM UNNEST(event_params) AS ep
+            WHERE ep.key = 'ga_session_id'
+            LIMIT 1
+          ) AS STRING),
+          'unknown'
+        )
+      ) AS session_id,
+      event_name,
+      item.item_id AS product_id,
+      item.item_name AS product_name,
+      COALESCE(NULLIF(item.item_category, ''), 'course') AS product_type,
+      item.item_brand,
+      item.item_category,
+      item.item_category2,
+      item.item_category3,
+      item.item_category4,
+      item.item_category5,
+      (
+        SELECT ip.value.string_value
+        FROM UNNEST(item.item_params) AS ip
+        WHERE ip.key = 'instructor_type'
+        LIMIT 1
+      ) AS item_instructor_type,
+      (
+        SELECT ep.value.string_value
+        FROM UNNEST(event_params) AS ep
+        WHERE ep.key = 'instructor_type'
+        LIMIT 1
+      ) AS event_instructor_type
+    FROM `your-project.analytics_123456789.events_*`
+    CROSS JOIN UNNEST(items) AS item
+    WHERE event_name = 'view_item'
+      AND item.item_id IS NOT NULL
+  ),
+  normalized AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_value IN ('human_led', 'human', 'instructor_led', 'instructor') THEN 'human_led'
+        WHEN normalized_value IN ('ai_led', 'ai', 'artificial_intelligence_led', 'machine_led') THEN 'ai_led'
+        WHEN normalized_value IN ('self_paced', 'self_service', 'on_demand', 'asynchronous') THEN 'self_paced'
+        WHEN normalized_value IN ('hybrid', 'blended', 'human_ai', 'human_and_ai') THEN 'hybrid'
+        ELSE 'unknown'
+      END AS instructor_type_code,
+      CASE
+        WHEN item_instructor_type IS NOT NULL THEN 'items.item_params.instructor_type'
+        WHEN event_instructor_type IS NOT NULL THEN 'event_params.instructor_type'
+        ELSE 'not_provided'
+      END AS source_field
+    FROM (
+      SELECT
+        *,
+        REGEXP_REPLACE(
+          LOWER(TRIM(COALESCE(item_instructor_type, event_instructor_type, 'unknown'))),
+          r'[^a-z0-9]+',
+          '_'
+        ) AS normalized_value
+      FROM item_events
+    )
+  ),
+  aggregated AS (
+    SELECT
+      product_id,
+      ANY_VALUE(product_name HAVING MAX event_timestamp) AS product_name,
+      ANY_VALUE(product_type HAVING MAX event_timestamp) AS product_type,
+      ANY_VALUE(item_brand HAVING MAX event_timestamp) AS item_brand,
+      ANY_VALUE(item_category HAVING MAX event_timestamp) AS item_category,
+      ANY_VALUE(item_category2 HAVING MAX event_timestamp) AS item_category2,
+      ANY_VALUE(item_category3 HAVING MAX event_timestamp) AS item_category3,
+      ANY_VALUE(item_category4 HAVING MAX event_timestamp) AS item_category4,
+      ANY_VALUE(item_category5 HAVING MAX event_timestamp) AS item_category5,
+      instructor_type_code,
+      ANY_VALUE(source_field HAVING MAX event_timestamp) AS source_field,
+      MAX(event_date) AS source_event_date,
+      MIN(event_timestamp) AS first_seen_timestamp,
+      MAX(event_timestamp) AS last_seen_timestamp,
+      COUNT(*) AS view_event_count,
+      COUNT(DISTINCT user_pseudo_id) AS distinct_user_count,
+      COUNT(DISTINCT session_id) AS distinct_session_count
+    FROM normalized
+    GROUP BY product_id, instructor_type_code
+  )
+  SELECT
+    TO_HEX(SHA256(CONCAT(product_id, '|', instructor_type_code))) AS instructor_type_key,
+    instructor_type_code,
+    CASE instructor_type_code
+      WHEN 'human_led' THEN 'Human Led'
+      WHEN 'ai_led' THEN 'AI Led'
+      WHEN 'self_paced' THEN 'Self Paced'
+      WHEN 'hybrid' THEN 'Hybrid'
+      ELSE 'Unknown'
+    END AS instructor_type_name,
+    CASE instructor_type_code
+      WHEN 'human_led' THEN 'Learning primarily delivered or facilitated by a human instructor.'
+      WHEN 'ai_led' THEN 'Learning primarily delivered or facilitated by an artificial intelligence system.'
+      WHEN 'self_paced' THEN 'Learner-directed instruction without a continuously present instructor.'
+      WHEN 'hybrid' THEN 'Learning delivered through a combination of human and automated instruction.'
+      ELSE 'Instructor type was not provided or could not be classified.'
+    END AS instructor_type_description,
+    CASE instructor_type_code
+      WHEN 'human_led' THEN 'Human'
+      WHEN 'ai_led' THEN 'Machine'
+      WHEN 'self_paced' THEN 'Independent'
+      WHEN 'hybrid' THEN 'Blended'
+      ELSE 'Unclassified'
+    END AS instructor_type_group,
+    CASE instructor_type_code
+      WHEN 'human_led' THEN 'instructor_led'
+      WHEN 'ai_led' THEN 'automated_instruction'
+      WHEN 'self_paced' THEN 'learner_directed'
+      WHEN 'hybrid' THEN 'blended_instruction'
+      ELSE 'unknown'
+    END AS delivery_model,
+    CASE instructor_type_code
+      WHEN 'human_led' THEN 'human'
+      WHEN 'ai_led' THEN 'artificial_intelligence'
+      WHEN 'self_paced' THEN 'none_continuous'
+      WHEN 'hybrid' THEN 'human_and_artificial_intelligence'
+      ELSE 'unknown'
+    END AS instructor_entity,
+    CASE instructor_type_code
+      WHEN 'human_led' THEN 'high'
+      WHEN 'ai_led' THEN 'low'
+      WHEN 'self_paced' THEN 'none_or_on_demand'
+      WHEN 'hybrid' THEN 'medium'
+      ELSE 'unknown'
+    END AS human_involvement_level,
+    CASE instructor_type_code
+      WHEN 'human_led' THEN 'low'
+      WHEN 'ai_led' THEN 'high'
+      WHEN 'self_paced' THEN 'medium'
+      WHEN 'hybrid' THEN 'medium'
+      ELSE 'unknown'
+    END AS automation_level,
+    CASE instructor_type_code
+      WHEN 'human_led' THEN 'interactive'
+      WHEN 'ai_led' THEN 'adaptive_interactive'
+      WHEN 'self_paced' THEN 'independent'
+      WHEN 'hybrid' THEN 'mixed'
+      ELSE 'unknown'
+    END AS interaction_mode,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'instructor_paced' WHEN instructor_type_code = 'self_paced' THEN 'learner_paced' WHEN instructor_type_code IN ('ai_led', 'hybrid') THEN 'adaptive_or_mixed' ELSE 'unknown' END AS pacing_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'scheduled_or_on_demand' WHEN instructor_type_code IN ('ai_led', 'self_paced') THEN 'on_demand' WHEN instructor_type_code = 'hybrid' THEN 'mixed' ELSE 'unknown' END AS schedule_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'supported' WHEN instructor_type_code = 'hybrid' THEN 'optional_or_supported' WHEN instructor_type_code IN ('ai_led', 'self_paced') THEN 'not_required' ELSE 'unknown' END AS cohort_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'human_facilitated' WHEN instructor_type_code = 'ai_led' THEN 'automated' WHEN instructor_type_code = 'self_paced' THEN 'unfacilitated' WHEN instructor_type_code = 'hybrid' THEN 'human_and_automated' ELSE 'unknown' END AS facilitation_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'human_feedback' WHEN instructor_type_code = 'ai_led' THEN 'automated_feedback' WHEN instructor_type_code = 'self_paced' THEN 'predefined_or_none' WHEN instructor_type_code = 'hybrid' THEN 'human_and_automated_feedback' ELSE 'unknown' END AS feedback_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'human_supported' WHEN instructor_type_code = 'ai_led' THEN 'automated' WHEN instructor_type_code = 'self_paced' THEN 'automated_or_none' WHEN instructor_type_code = 'hybrid' THEN 'mixed' ELSE 'unknown' END AS assessment_support_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'instructor_adjusted' WHEN instructor_type_code = 'ai_led' THEN 'adaptive' WHEN instructor_type_code = 'self_paced' THEN 'learner_selected' WHEN instructor_type_code = 'hybrid' THEN 'adaptive_and_instructor_adjusted' ELSE 'unknown' END AS personalization_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'present' WHEN instructor_type_code = 'ai_led' THEN 'virtual' WHEN instructor_type_code = 'self_paced' THEN 'not_continuously_present' WHEN instructor_type_code = 'hybrid' THEN 'mixed_presence' ELSE 'unknown' END AS instructor_presence,
+    instructor_type_code = 'human_led' AS is_human_led,
+    instructor_type_code = 'ai_led' AS is_ai_led,
+    instructor_type_code = 'self_paced' AS is_self_paced,
+    instructor_type_code = 'hybrid' AS is_hybrid,
+    instructor_type_code = 'unknown' AS is_unknown,
+    product_id,
+    product_name,
+    product_type,
+    item_brand,
+    item_category,
+    item_category2,
+    item_category3,
+    item_category4,
+    item_category5,
+    product_id AS course_id,
+    'view_item' AS source_event_name,
+    'commerce.productViews' AS source_event_type,
+    'GA4' AS source_platform,
+    source_field,
+    'your-project.analytics_123456789.events_*' AS source_dataset,
+    source_event_date,
+    first_seen_timestamp,
+    last_seen_timestamp,
+    view_event_count,
+    distinct_user_count,
+    distinct_session_count,
+    TRUE AS is_active,
+    first_seen_timestamp AS effective_start_timestamp,
+    CAST(NULL AS TIMESTAMP) AS effective_end_timestamp,
+    TRUE AS is_current,
+    CURRENT_TIMESTAMP() AS dw_updated_timestamp
+  FROM aggregated;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH exploded_events AS (
+    SELECT
+      timestamp AS event_timestamp,
+      _id AS event_id,
+      eventType AS event_type,
+      COALESCE(
+        identityMap['ECID'][0].id,
+        identityMap['FPID'][0].id
+      ) AS visitor_id,
+      _experience.analytics.customDimensions.eVars.eVar1 AS raw_instructor_type,
+      EXPLODE(productListItems) AS product_item
+    FROM your_aep_dataset
+    WHERE eventType = 'commerce.productViews'
+  ),
+  item_events AS (
+    SELECT
+      event_timestamp,
+      event_id,
+      visitor_id,
+      product_item.SKU AS product_id,
+      product_item.name AS product_name,
+      raw_instructor_type,
+      REGEXP_REPLACE(
+        LOWER(TRIM(COALESCE(raw_instructor_type, 'unknown'))),
+        '[^a-z0-9]+',
+        '_'
+      ) AS normalized_value
+    FROM exploded_events
+    WHERE product_item.SKU IS NOT NULL
+  ),
+  normalized AS (
+    SELECT
+      *,
+      CASE
+        WHEN normalized_value IN ('human_led', 'human', 'instructor_led', 'instructor') THEN 'human_led'
+        WHEN normalized_value IN ('ai_led', 'ai', 'artificial_intelligence_led', 'machine_led') THEN 'ai_led'
+        WHEN normalized_value IN ('self_paced', 'self_service', 'on_demand', 'asynchronous') THEN 'self_paced'
+        WHEN normalized_value IN ('hybrid', 'blended', 'human_ai', 'human_and_ai') THEN 'hybrid'
+        ELSE 'unknown'
+      END AS instructor_type_code
+    FROM item_events
+  ),
+  aggregated AS (
+    SELECT
+      product_id,
+      MAX(product_name) AS product_name,
+      instructor_type_code,
+      CAST(MAX(event_timestamp) AS DATE) AS source_event_date,
+      MIN(event_timestamp) AS first_seen_timestamp,
+      MAX(event_timestamp) AS last_seen_timestamp,
+      COUNT(DISTINCT event_id) AS view_event_count,
+      COUNT(DISTINCT visitor_id) AS distinct_user_count
+    FROM normalized
+    GROUP BY product_id, instructor_type_code
+  )
+  SELECT
+    MD5(CONCAT(product_id, '|', instructor_type_code)) AS instructor_type_key,
+    instructor_type_code,
+    CASE instructor_type_code
+      WHEN 'human_led' THEN 'Human Led'
+      WHEN 'ai_led' THEN 'AI Led'
+      WHEN 'self_paced' THEN 'Self Paced'
+      WHEN 'hybrid' THEN 'Hybrid'
+      ELSE 'Unknown'
+    END AS instructor_type_name,
+    CASE instructor_type_code
+      WHEN 'human_led' THEN 'Learning primarily delivered or facilitated by a human instructor.'
+      WHEN 'ai_led' THEN 'Learning primarily delivered or facilitated by an artificial intelligence system.'
+      WHEN 'self_paced' THEN 'Learner-directed instruction without a continuously present instructor.'
+      WHEN 'hybrid' THEN 'Learning delivered through a combination of human and automated instruction.'
+      ELSE 'Instructor type was not provided or could not be classified.'
+    END AS instructor_type_description,
+    CASE instructor_type_code
+      WHEN 'human_led' THEN 'Human'
+      WHEN 'ai_led' THEN 'Machine'
+      WHEN 'self_paced' THEN 'Independent'
+      WHEN 'hybrid' THEN 'Blended'
+      ELSE 'Unclassified'
+    END AS instructor_type_group,
+    CASE instructor_type_code WHEN 'human_led' THEN 'instructor_led' WHEN 'ai_led' THEN 'automated_instruction' WHEN 'self_paced' THEN 'learner_directed' WHEN 'hybrid' THEN 'blended_instruction' ELSE 'unknown' END AS delivery_model,
+    CASE instructor_type_code WHEN 'human_led' THEN 'human' WHEN 'ai_led' THEN 'artificial_intelligence' WHEN 'self_paced' THEN 'none_continuous' WHEN 'hybrid' THEN 'human_and_artificial_intelligence' ELSE 'unknown' END AS instructor_entity,
+    CASE instructor_type_code WHEN 'human_led' THEN 'high' WHEN 'ai_led' THEN 'low' WHEN 'self_paced' THEN 'none_or_on_demand' WHEN 'hybrid' THEN 'medium' ELSE 'unknown' END AS human_involvement_level,
+    CASE instructor_type_code WHEN 'human_led' THEN 'low' WHEN 'ai_led' THEN 'high' WHEN 'self_paced' THEN 'medium' WHEN 'hybrid' THEN 'medium' ELSE 'unknown' END AS automation_level,
+    CASE instructor_type_code WHEN 'human_led' THEN 'interactive' WHEN 'ai_led' THEN 'adaptive_interactive' WHEN 'self_paced' THEN 'independent' WHEN 'hybrid' THEN 'mixed' ELSE 'unknown' END AS interaction_mode,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'instructor_paced' WHEN instructor_type_code = 'self_paced' THEN 'learner_paced' WHEN instructor_type_code IN ('ai_led', 'hybrid') THEN 'adaptive_or_mixed' ELSE 'unknown' END AS pacing_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'scheduled_or_on_demand' WHEN instructor_type_code IN ('ai_led', 'self_paced') THEN 'on_demand' WHEN instructor_type_code = 'hybrid' THEN 'mixed' ELSE 'unknown' END AS schedule_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'supported' WHEN instructor_type_code = 'hybrid' THEN 'optional_or_supported' WHEN instructor_type_code IN ('ai_led', 'self_paced') THEN 'not_required' ELSE 'unknown' END AS cohort_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'human_facilitated' WHEN instructor_type_code = 'ai_led' THEN 'automated' WHEN instructor_type_code = 'self_paced' THEN 'unfacilitated' WHEN instructor_type_code = 'hybrid' THEN 'human_and_automated' ELSE 'unknown' END AS facilitation_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'human_feedback' WHEN instructor_type_code = 'ai_led' THEN 'automated_feedback' WHEN instructor_type_code = 'self_paced' THEN 'predefined_or_none' WHEN instructor_type_code = 'hybrid' THEN 'human_and_automated_feedback' ELSE 'unknown' END AS feedback_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'human_supported' WHEN instructor_type_code = 'ai_led' THEN 'automated' WHEN instructor_type_code = 'self_paced' THEN 'automated_or_none' WHEN instructor_type_code = 'hybrid' THEN 'mixed' ELSE 'unknown' END AS assessment_support_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'instructor_adjusted' WHEN instructor_type_code = 'ai_led' THEN 'adaptive' WHEN instructor_type_code = 'self_paced' THEN 'learner_selected' WHEN instructor_type_code = 'hybrid' THEN 'adaptive_and_instructor_adjusted' ELSE 'unknown' END AS personalization_model,
+    CASE WHEN instructor_type_code = 'human_led' THEN 'present' WHEN instructor_type_code = 'ai_led' THEN 'virtual' WHEN instructor_type_code = 'self_paced' THEN 'not_continuously_present' WHEN instructor_type_code = 'hybrid' THEN 'mixed_presence' ELSE 'unknown' END AS instructor_presence,
+    instructor_type_code = 'human_led' AS is_human_led,
+    instructor_type_code = 'ai_led' AS is_ai_led,
+    instructor_type_code = 'self_paced' AS is_self_paced,
+    instructor_type_code = 'hybrid' AS is_hybrid,
+    instructor_type_code = 'unknown' AS is_unknown,
+    product_id,
+    product_name,
+    'course' AS product_type,
+    CAST(NULL AS VARCHAR(255)) AS item_brand,
+    CAST(NULL AS VARCHAR(255)) AS item_category,
+    CAST(NULL AS VARCHAR(255)) AS item_category2,
+    CAST(NULL AS VARCHAR(255)) AS item_category3,
+    CAST(NULL AS VARCHAR(255)) AS item_category4,
+    CAST(NULL AS VARCHAR(255)) AS item_category5,
+    product_id AS course_id,
+    'view_item' AS source_event_name,
+    'commerce.productViews' AS source_event_type,
+    'Adobe AEP' AS source_platform,
+    '_experience.analytics.customDimensions.eVars.eVar1' AS source_field,
+    'your_aep_dataset' AS source_dataset,
+    source_event_date,
+    first_seen_timestamp,
+    last_seen_timestamp,
+    view_event_count,
+    distinct_user_count,
+    CAST(NULL AS BIGINT) AS distinct_session_count,
+    TRUE AS is_active,
+    first_seen_timestamp AS effective_start_timestamp,
+    CAST(NULL AS TIMESTAMP) AS effective_end_timestamp,
+    TRUE AS is_current,
+    CURRENT_TIMESTAMP AS dw_updated_timestamp
+  FROM aggregated;
+
+Calculation Notes: |
+  1️⃣ Use the governed values Human-Led Live, Human-Led Recorded, AI-Led, Peer-Led, Hybrid Human and AI, Self-Directed, and Unknown.
+  2️⃣ Resolve the value from the versioned course-offering or content catalog record effective at the event timestamp; do not overwrite historical events after taxonomy changes.
+  3️⃣ Classify an experience as Hybrid Human and AI only when both human and AI instruction materially guide learning, not when AI is limited to search, transcription, translation, or administrative support.
+  4️⃣ Use Self-Directed when the experience is intentionally designed without an instructional facilitator; reserve Unknown for missing, invalid, or unmapped source values.
+  5️⃣ For multiple instructors of the same type, retain that common type; when instructor types differ, apply the governed precedence or hybrid classification defined for the offering.
+  6️⃣ Do not infer Instructor Type from instructor names, free-text biographies, email domains, or job titles when an authoritative catalog classification exists.
+  7️⃣ Propagate the resolved value to enrollment, lesson-start, content-consumption, assessment, completion, and feedback events using the same course-offering version key.
+
+Business Use Case: |
+  The Chief Product Officer compares trial-to-enrollment conversion, lesson completion, learner satisfaction, and subscription renewal across human-led, AI-led, hybrid, and self-directed offerings. Product and Academic Operations then use the results to adjust the instructional portfolio, prioritize facilitator capacity, refine AI-assisted course designs, and retire delivery models that underperform for specific subjects or learner segments.
+
+
+Source Data: Digital Product Catalog + Learning Management System + Digital Analytics (GA4)
+
+Report Attributes: |
+  ["Course Subject","Course ID","Course Modality","Content Type","Learner Type","Acquisition Channel","Subscription Plan","Device Category","Geography","Enrollment Status","Completion Status","Assessment Outcome"]
+
+Dashboard Usage: [Digital Learning Engagement Dashboard, Course Conversion and Completion Dashboard, Instructional Model Performance Dashboard, AI Learning Experience Dashboard, Learner Satisfaction Dashboard, Subscription Retention Dashboard, Academic Portfolio Optimization Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Instructor ID, Course ID, Course Offering ID, Course Modality, Learning Delivery Mode, Content Type, Course Subject, Course Difficulty Level, Cohort ID, Subscription Plan]
+
+Derived Dimensions: [Human Involvement Level, AI Instruction Indicator, Synchronous Instruction Indicator, Instructor Delivery Mode, Facilitated Learning Indicator]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-13T19:30:14.086106+00:00
+
+Last Modified By: devyendarm
+
+
