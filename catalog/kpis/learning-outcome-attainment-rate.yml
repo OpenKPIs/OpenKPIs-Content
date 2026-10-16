@@ -1,0 +1,503 @@
+# KPI: Learning Outcome Attainment Rate
+# Generated: 2026-09-12T20:30:06.363Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Learning Outcome Attainment Rate
+Formula: (Number of Eligible Learner-Outcome Obligations Attained / Total Number of Eligible Learner-Outcome Obligations Due) × 100
+
+Description: |
+  Measures the percentage of eligible learner-outcome obligations for which the learner demonstrates mastery at or above the approved attainment threshold by the reporting cutoff. It evaluates achievement against defined learning outcomes rather than course completion, attendance, content consumption, or assessment participation alone.
+
+Category: Performance
+
+Tags: [kpi]
+
+Industry: [EdTech & E-Learning]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: User
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Monthly
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH eligible_learner_outcomes AS (
+    SELECT DISTINCT
+      e.enrollment_id,
+      e.learner_id,
+      o.academic_year,
+      o.academic_term,
+      o.institution_id,
+      o.institution_name,
+      o.campus_id,
+      o.campus_name,
+      o.school_id,
+      o.school_name,
+      o.department_id,
+      o.department_name,
+      p.program_id,
+      p.program_name,
+      c.course_id,
+      c.course_code,
+      c.course_name,
+      c.course_level,
+      o.delivery_mode,
+      o.offering_id,
+      o.section_id,
+      o.section_name,
+      lo.outcome_id,
+      lo.outcome_code,
+      lo.outcome_name,
+      lo.outcome_domain,
+      lo.outcome_level,
+      lo.outcome_version,
+      com.required_flag AS outcome_required_flag,
+      COALESCE(com.attainment_threshold_pct, lo.default_attainment_threshold_pct, 70.0) AS threshold_pct,
+      LOWER(e.enrollment_status) AS enrollment_status,
+      s.learner_level,
+      s.cohort_id,
+      ch.cohort_name
+    FROM `your-project.lms.enrollments` AS e
+    INNER JOIN `your-project.lms.course_offerings` AS o
+      ON o.offering_id = e.offering_id
+    INNER JOIN `your-project.curriculum.courses` AS c
+      ON c.course_id = o.course_id
+    LEFT JOIN `your-project.curriculum.programs` AS p
+      ON p.program_id = o.program_id
+    INNER JOIN `your-project.curriculum.course_outcome_mappings` AS com
+      ON com.course_id = c.course_id
+     AND com.required_flag = TRUE
+     AND DATE(o.start_at) >= COALESCE(com.effective_start_date, DATE '1900-01-01')
+     AND DATE(o.start_at) < COALESCE(com.effective_end_date, DATE '9999-12-31')
+    INNER JOIN `your-project.curriculum.learning_outcomes` AS lo
+      ON lo.outcome_id = com.outcome_id
+     AND lo.is_active = TRUE
+    INNER JOIN `your-project.sis.students` AS s
+      ON s.learner_id = e.learner_id
+    LEFT JOIN `your-project.sis.cohorts` AS ch
+      ON ch.cohort_id = s.cohort_id
+    WHERE LOWER(e.enrollment_status) IN ('enrolled', 'active', 'completed')
+      AND COALESCE(e.is_deleted, FALSE) = FALSE
+      AND DATE(o.start_at) <= CURRENT_DATE()
+  ),
+  ranked_assessment_attempts AS (
+    SELECT
+      a.attempt_id,
+      a.enrollment_id,
+      a.assessment_id,
+      a.graded_at,
+      COALESCE(
+        a.score_percent,
+        100.0 * SAFE_DIVIDE(a.points_earned, NULLIF(a.points_possible, 0))
+      ) AS score_pct,
+      ROW_NUMBER() OVER (
+        PARTITION BY a.enrollment_id, a.assessment_id
+        ORDER BY a.graded_at DESC, a.attempt_number DESC, a.attempt_id DESC
+      ) AS attempt_rank
+    FROM `your-project.assessment.assessment_attempts` AS a
+    WHERE LOWER(a.grading_status) IN ('graded', 'completed')
+      AND COALESCE(a.is_voided, FALSE) = FALSE
+      AND a.graded_at IS NOT NULL
+  ),
+  latest_assessment_attempts AS (
+    SELECT
+      attempt_id,
+      enrollment_id,
+      assessment_id,
+      graded_at,
+      score_pct
+    FROM ranked_assessment_attempts
+    WHERE attempt_rank = 1
+      AND score_pct IS NOT NULL
+  ),
+  outcome_evidence AS (
+    SELECT
+      la.enrollment_id,
+      aom.outcome_id,
+      SAFE_DIVIDE(
+        SUM(la.score_pct * COALESCE(aom.outcome_weight, 1.0)),
+        NULLIF(SUM(COALESCE(aom.outcome_weight, 1.0)), 0)
+      ) AS outcome_score_pct,
+      COUNT(*) AS graded_attempt_count,
+      COUNT(DISTINCT la.assessment_id) AS assessment_count,
+      MIN(la.graded_at) AS first_evidence_at,
+      MAX(la.graded_at) AS latest_evidence_at
+    FROM latest_assessment_attempts AS la
+    INNER JOIN `your-project.assessment.assessment_outcome_mappings` AS aom
+      ON aom.assessment_id = la.assessment_id
+     AND COALESCE(aom.is_active, TRUE) = TRUE
+    GROUP BY
+      la.enrollment_id,
+      aom.outcome_id
+  ),
+  scored_population AS (
+    SELECT
+      b.*,
+      ev.outcome_score_pct,
+      COALESCE(ev.graded_attempt_count, 0) AS graded_attempt_count,
+      COALESCE(ev.assessment_count, 0) AS assessment_count,
+      ev.first_evidence_at,
+      ev.latest_evidence_at,
+      ev.outcome_score_pct IS NOT NULL AS was_assessed,
+      COALESCE(ev.outcome_score_pct >= b.threshold_pct, FALSE) AS was_attained
+    FROM eligible_learner_outcomes AS b
+    LEFT JOIN outcome_evidence AS ev
+      ON ev.enrollment_id = b.enrollment_id
+     AND ev.outcome_id = b.outcome_id
+  )
+  SELECT
+    'Learning Outcome Attainment Rate' AS kpi_name,
+    CURRENT_DATE() AS as_of_date,
+    academic_year,
+    academic_term,
+    institution_id,
+    institution_name,
+    campus_id,
+    campus_name,
+    school_id,
+    school_name,
+    department_id,
+    department_name,
+    program_id,
+    program_name,
+    course_id,
+    course_code,
+    course_name,
+    course_level,
+    delivery_mode,
+    offering_id,
+    section_id,
+    section_name,
+    outcome_id,
+    outcome_code,
+    outcome_name,
+    outcome_domain,
+    outcome_level,
+    outcome_version,
+    outcome_required_flag,
+    threshold_pct,
+    enrollment_status,
+    learner_level,
+    cohort_id,
+    cohort_name,
+    'Eligible learner-outcomes with a weighted outcome score at or above the attainment threshold' AS numerator_definition,
+    'All required learner-outcomes for eligible enrolled, active, or completed course enrollments' AS denominator_definition,
+    COUNT(*) AS eligible_learner_outcomes,
+    COUNTIF(was_attained) AS attained_learner_outcomes,
+    COUNT(*) - COUNTIF(was_attained) AS not_attained_learner_outcomes,
+    COUNTIF(was_assessed) AS assessed_learner_outcomes,
+    COUNTIF(NOT was_assessed) AS unassessed_learner_outcomes,
+    SUM(graded_attempt_count) AS graded_assessment_attempts,
+    SUM(assessment_count) AS learner_assessment_evidences,
+    ROUND(AVG(outcome_score_pct), 2) AS average_outcome_score_pct,
+    ROUND(MIN(outcome_score_pct), 2) AS minimum_outcome_score_pct,
+    ROUND(MAX(outcome_score_pct), 2) AS maximum_outcome_score_pct,
+    ROUND(100.0 * SAFE_DIVIDE(COUNTIF(was_attained), COUNT(*)), 2) AS attainment_rate_pct,
+    ROUND(100.0 * SAFE_DIVIDE(COUNTIF(was_assessed), COUNT(*)), 2) AS assessment_coverage_rate_pct,
+    MIN(first_evidence_at) AS first_evidence_at,
+    MAX(latest_evidence_at) AS latest_evidence_at,
+    CURRENT_TIMESTAMP() AS calculated_at
+  FROM scored_population
+  GROUP BY
+    academic_year,
+    academic_term,
+    institution_id,
+    institution_name,
+    campus_id,
+    campus_name,
+    school_id,
+    school_name,
+    department_id,
+    department_name,
+    program_id,
+    program_name,
+    course_id,
+    course_code,
+    course_name,
+    course_level,
+    delivery_mode,
+    offering_id,
+    section_id,
+    section_name,
+    outcome_id,
+    outcome_code,
+    outcome_name,
+    outcome_domain,
+    outcome_level,
+    outcome_version,
+    outcome_required_flag,
+    threshold_pct,
+    enrollment_status,
+    learner_level,
+    cohort_id,
+    cohort_name;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH eligible_learner_outcomes AS (
+    SELECT DISTINCT
+      e.enrollment_id,
+      e.learner_id,
+      o.academic_year,
+      o.academic_term,
+      o.institution_id,
+      o.institution_name,
+      o.campus_id,
+      o.campus_name,
+      o.school_id,
+      o.school_name,
+      o.department_id,
+      o.department_name,
+      p.program_id,
+      p.program_name,
+      c.course_id,
+      c.course_code,
+      c.course_name,
+      c.course_level,
+      o.delivery_mode,
+      o.offering_id,
+      o.section_id,
+      o.section_name,
+      lo.outcome_id,
+      lo.outcome_code,
+      lo.outcome_name,
+      lo.outcome_domain,
+      lo.outcome_level,
+      lo.outcome_version,
+      com.required_flag AS outcome_required_flag,
+      COALESCE(com.attainment_threshold_pct, lo.default_attainment_threshold_pct, 70.0) AS threshold_pct,
+      LOWER(e.enrollment_status) AS enrollment_status,
+      s.learner_level,
+      s.cohort_id,
+      ch.cohort_name
+    FROM lms_enrollments AS e
+    INNER JOIN lms_course_offerings AS o
+      ON o.offering_id = e.offering_id
+    INNER JOIN curriculum_courses AS c
+      ON c.course_id = o.course_id
+    LEFT JOIN curriculum_programs AS p
+      ON p.program_id = o.program_id
+    INNER JOIN curriculum_course_outcome_mappings AS com
+      ON com.course_id = c.course_id
+     AND com.required_flag = TRUE
+     AND CAST(o.start_at AS DATE) >= COALESCE(com.effective_start_date, CAST('1900-01-01' AS DATE))
+     AND CAST(o.start_at AS DATE) < COALESCE(com.effective_end_date, CAST('9999-12-31' AS DATE))
+    INNER JOIN curriculum_learning_outcomes AS lo
+      ON lo.outcome_id = com.outcome_id
+     AND lo.is_active = TRUE
+    INNER JOIN sis_students AS s
+      ON s.learner_id = e.learner_id
+    LEFT JOIN sis_cohorts AS ch
+      ON ch.cohort_id = s.cohort_id
+    WHERE LOWER(e.enrollment_status) IN ('enrolled', 'active', 'completed')
+      AND COALESCE(e.is_deleted, FALSE) = FALSE
+      AND CAST(o.start_at AS DATE) <= CURRENT_DATE
+  ),
+  ranked_assessment_attempts AS (
+    SELECT
+      a.attempt_id,
+      a.enrollment_id,
+      a.assessment_id,
+      a.graded_at,
+      COALESCE(
+        a.score_percent,
+        100.0 * a.points_earned / NULLIF(a.points_possible, 0)
+      ) AS score_pct,
+      ROW_NUMBER() OVER (
+        PARTITION BY a.enrollment_id, a.assessment_id
+        ORDER BY a.graded_at DESC, a.attempt_number DESC, a.attempt_id DESC
+      ) AS attempt_rank
+    FROM assessment_attempts AS a
+    WHERE LOWER(a.grading_status) IN ('graded', 'completed')
+      AND COALESCE(a.is_voided, FALSE) = FALSE
+      AND a.graded_at IS NOT NULL
+  ),
+  latest_assessment_attempts AS (
+    SELECT
+      attempt_id,
+      enrollment_id,
+      assessment_id,
+      graded_at,
+      score_pct
+    FROM ranked_assessment_attempts
+    WHERE attempt_rank = 1
+      AND score_pct IS NOT NULL
+  ),
+  outcome_evidence AS (
+    SELECT
+      la.enrollment_id,
+      aom.outcome_id,
+      SUM(la.score_pct * COALESCE(aom.outcome_weight, 1.0))
+        / NULLIF(SUM(COALESCE(aom.outcome_weight, 1.0)), 0) AS outcome_score_pct,
+      COUNT(*) AS graded_attempt_count,
+      COUNT(DISTINCT la.assessment_id) AS assessment_count,
+      MIN(la.graded_at) AS first_evidence_at,
+      MAX(la.graded_at) AS latest_evidence_at
+    FROM latest_assessment_attempts AS la
+    INNER JOIN assessment_outcome_mappings AS aom
+      ON aom.assessment_id = la.assessment_id
+     AND COALESCE(aom.is_active, TRUE) = TRUE
+    GROUP BY
+      la.enrollment_id,
+      aom.outcome_id
+  ),
+  scored_population AS (
+    SELECT
+      b.*,
+      ev.outcome_score_pct,
+      COALESCE(ev.graded_attempt_count, 0) AS graded_attempt_count,
+      COALESCE(ev.assessment_count, 0) AS assessment_count,
+      ev.first_evidence_at,
+      ev.latest_evidence_at,
+      CASE WHEN ev.outcome_score_pct IS NOT NULL THEN 1 ELSE 0 END AS was_assessed,
+      CASE
+        WHEN ev.outcome_score_pct IS NOT NULL
+         AND ev.outcome_score_pct >= b.threshold_pct
+        THEN 1 ELSE 0
+      END AS was_attained
+    FROM eligible_learner_outcomes AS b
+    LEFT JOIN outcome_evidence AS ev
+      ON ev.enrollment_id = b.enrollment_id
+     AND ev.outcome_id = b.outcome_id
+  )
+  SELECT
+    'Learning Outcome Attainment Rate' AS kpi_name,
+    CURRENT_DATE AS as_of_date,
+    academic_year,
+    academic_term,
+    institution_id,
+    institution_name,
+    campus_id,
+    campus_name,
+    school_id,
+    school_name,
+    department_id,
+    department_name,
+    program_id,
+    program_name,
+    course_id,
+    course_code,
+    course_name,
+    course_level,
+    delivery_mode,
+    offering_id,
+    section_id,
+    section_name,
+    outcome_id,
+    outcome_code,
+    outcome_name,
+    outcome_domain,
+    outcome_level,
+    outcome_version,
+    outcome_required_flag,
+    threshold_pct,
+    enrollment_status,
+    learner_level,
+    cohort_id,
+    cohort_name,
+    'Eligible learner-outcomes with a weighted outcome score at or above the attainment threshold' AS numerator_definition,
+    'All required learner-outcomes for eligible enrolled, active, or completed course enrollments' AS denominator_definition,
+    COUNT(*) AS eligible_learner_outcomes,
+    SUM(was_attained) AS attained_learner_outcomes,
+    COUNT(*) - SUM(was_attained) AS not_attained_learner_outcomes,
+    SUM(was_assessed) AS assessed_learner_outcomes,
+    COUNT(*) - SUM(was_assessed) AS unassessed_learner_outcomes,
+    SUM(graded_attempt_count) AS graded_assessment_attempts,
+    SUM(assessment_count) AS learner_assessment_evidences,
+    ROUND(AVG(outcome_score_pct), 2) AS average_outcome_score_pct,
+    ROUND(MIN(outcome_score_pct), 2) AS minimum_outcome_score_pct,
+    ROUND(MAX(outcome_score_pct), 2) AS maximum_outcome_score_pct,
+    ROUND(100.0 * SUM(was_attained) / NULLIF(COUNT(*), 0), 2) AS attainment_rate_pct,
+    ROUND(100.0 * SUM(was_assessed) / NULLIF(COUNT(*), 0), 2) AS assessment_coverage_rate_pct,
+    MIN(first_evidence_at) AS first_evidence_at,
+    MAX(latest_evidence_at) AS latest_evidence_at,
+    CURRENT_TIMESTAMP AS calculated_at
+  FROM scored_population
+  GROUP BY
+    academic_year,
+    academic_term,
+    institution_id,
+    institution_name,
+    campus_id,
+    campus_name,
+    school_id,
+    school_name,
+    department_id,
+    department_name,
+    program_id,
+    program_name,
+    course_id,
+    course_code,
+    course_name,
+    course_level,
+    delivery_mode,
+    offering_id,
+    section_id,
+    section_name,
+    outcome_id,
+    outcome_code,
+    outcome_name,
+    outcome_domain,
+    outcome_level,
+    outcome_version,
+    outcome_required_flag,
+    threshold_pct,
+    enrollment_status,
+    learner_level,
+    cohort_id,
+    cohort_name;
+
+Calculation Notes: |
+  1️⃣ Create one obligation per learner-outcome combination based on valid enrollment.  
+  2️⃣ Use the latest valid evidence by the reporting cutoff to determine status.  
+  3️⃣ Do not count superseded attempts separately.  
+  4️⃣ Obligation is attained when score/rubric/competency meets the threshold by due date.  
+  5️⃣ Missing evidence or expired attempts count as not attained unless exempted.  
+  6️⃣ Recalculate historical periods for approved late results or changes within the restatement window.  
+  7️⃣ Recompute numerator and denominator from obligation grain, do not average course-level percentages.
+
+Business Use Case: |
+  The Chief Learning Officer reviews monthly attainment by program, outcome, course, instructor, and learner cohort. If a required outcome falls below target while course completion remains high, the Learning and Curriculum team investigates assessment alignment, content coverage, instructional delivery, and threshold calibration, then assigns remediation such as content redesign, instructor support, supplemental practice, or targeted learner intervention.
+
+
+Source Data: Learning Management System, Learning Record Store, Assessment Platform, Student Information System, and Curriculum Management System
+
+Report Attributes: |
+  ["Reporting Period","Academic Term","Program","Course","Course Version","Learning Outcome","Outcome Domain","Competency Level","Assessment","Assessment Type","Delivery Modality","Instructor","Institution","Department","Learner Cohort","Enrollment Type","Geography","Device Type","Accessibility Accommodation Status"]
+
+Dashboard Usage: [Executive Learning Effectiveness Dashboard, Academic Quality and Outcomes Dashboard, Program Performance Dashboard, Course and Curriculum Health Dashboard, Learner Mastery and Intervention Dashboard, Assessment Quality Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Assessment Pass Rate, Course Completion Rate, Competency Mastery Rate, Average Assessment Score, Learning Gain, Assessment Participation Rate, Learner Progression Rate, Content Completion Rate]
+
+Data Sensitivity: confidential
+
+Contains PII: Yes
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-12T20:30:05.278371+00:00
+
+Last Modified By: devyendarm
+
+
