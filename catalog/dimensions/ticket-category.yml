@@ -1,0 +1,462 @@
+# Dimension: Ticket Category
+# Generated: 2026-09-18T19:22:29.752Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Ticket Category
+
+Description: |
+  The main reason a customer contacted support by ticket, chat, call or email, taken from a fixed list: order_status, shipping_delay, returns_refunds, payment_issue, product_question, account_access and other. It records why the customer contacted support, which is different from Return Reason (why an item was sent back) and Order Cancellation Reason (why an order was cancelled): a returns_refunds ticket may or may not lead to a return. It is also not the same as the Zendesk Ticket Type field (question, incident, problem, task).
+
+Category: Experience
+
+Tags: [dimension, E-commerce: Returns, Refunds & Customer Support]
+
+Industry: E-commerce
+
+Priority: High
+
+Core Area: Generic
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Daily, Weekly, Monthly
+
+GA4 Event: |
+  submit_form
+
+Adobe Event: |
+  submit_form
+
+W3 Data Layer: |
+  {
+    "page": {
+      "pageInfo": {
+        "pageName": "help-centre:contact-us",
+        "pageType": "support"
+      },
+      "category": {
+        "primaryCategory": "customer_support"
+      }
+    },
+    "event": [
+      {
+        "eventInfo": {
+          "eventName": "submit_form",
+          "eventAction": "support_contact"
+        },
+        "attributes": {
+          "form_name": "support_contact",
+          "form_id": "help_centre_contact",
+          "contact_reason": "shipping_delay",
+          "ticket_id": "ZD-1048213",
+          "order_id": "ORD-558120"
+        }
+      }
+    ]
+  }
+
+GA4 Data Layer: |
+  {
+    "event": "submit_form",
+    "form_name": "support_contact",
+    "form_id": "help_centre_contact",
+    "contact_reason": "shipping_delay",
+    "ticket_id": "ZD-1048213",
+    "order_id": "ORD-558120"
+  }
+
+Adobe Client Data Layer: |
+  {
+    "event": "submit_form",
+    "eventInfo": {
+      "path": "component.support_contact_form"
+    },
+    "form": {
+      "form_name": "support_contact",
+      "form_id": "help_centre_contact",
+      "contact_reason": "shipping_delay",
+      "ticket_id": "ZD-1048213",
+      "order_id": "ORD-558120"
+    }
+  }
+
+XDM Mapping: |
+  {
+    "eventType": "submit_form",
+    "web": {
+      "webInteraction": {
+        "name": "submit_form",
+        "type": "other"
+      }
+    },
+    "_experience": {
+      "analytics": {
+        "customDimensions": {
+          "eVars": {
+            "eVar40": "shipping_delay",
+            "eVar41": "support_contact"
+          }
+        }
+      }
+    },
+    "_tenant": {
+      "support": {
+        "form_submitted": 1,
+        "form_name": "support_contact",
+        "contact_reason": "shipping_delay",
+        "ticket_id": "ZD-1048213",
+        "order_id": "ORD-558120"
+      }
+    }
+  }
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  -- Ticket Category: daily support tickets by governed category (last 90 days, store reporting timezone America/New_York).
+  -- The help desk is the source of truth; the web contact_reason (submit_form, form_name = support_contact) is used only when the help desk holds no category.
+  WITH params AS (
+    SELECT
+      DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 90 DAY) AS start_date,
+      CURRENT_DATE('America/New_York') AS end_date,
+      ['order_status', 'shipping_delay', 'returns_refunds', 'payment_issue', 'product_question', 'account_access', 'other'] AS governed_list
+  ),
+  web_submits AS (
+    SELECT
+      e.user_pseudo_id,
+      e.event_timestamp,
+      e.event_bundle_sequence_id,
+      MAX(IF(ep.key = 'form_name', ep.value.string_value, NULL)) AS form_name,
+      MAX(IF(ep.key = 'contact_reason', LOWER(TRIM(ep.value.string_value)), NULL)) AS contact_reason,
+      MAX(IF(ep.key = 'ticket_id', ep.value.string_value, NULL)) AS ticket_id,
+      MAX(IF(ep.key = 'order_id', COALESCE(ep.value.string_value, CAST(ep.value.int_value AS STRING)), NULL)) AS order_id
+    FROM `your-project.analytics_123456789.events_*` AS e
+    CROSS JOIN UNNEST(e.event_params) AS ep
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 98 DAY)) AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND e.event_name = 'submit_form'
+      AND ep.key IN ('form_name', 'contact_reason', 'ticket_id', 'order_id')
+    GROUP BY e.user_pseudo_id, e.event_timestamp, e.event_bundle_sequence_id
+  ),
+  web_contacts AS (
+    SELECT ticket_id, contact_reason AS web_reason, order_id AS web_order_id
+    FROM web_submits
+    WHERE form_name = 'support_contact'
+      AND ticket_id IS NOT NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY ticket_id ORDER BY event_timestamp) = 1
+  ),
+  -- Denominator for contacts per 100 orders: every order placed on the day, not only orders that generated a ticket.
+  web_orders AS (
+    SELECT
+      DATE(TIMESTAMP_MICROS(e.event_timestamp), 'America/New_York') AS order_date,
+      COUNT(DISTINCT e.ecommerce.transaction_id) AS orders_placed
+    FROM `your-project.analytics_123456789.events_*` AS e
+    CROSS JOIN params AS p
+    WHERE e._TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 98 DAY)) AND FORMAT_DATE('%Y%m%d', CURRENT_DATE())
+      AND e.event_name = 'purchase'
+      AND e.ecommerce.transaction_id IS NOT NULL
+      AND DATE(TIMESTAMP_MICROS(e.event_timestamp), 'America/New_York') BETWEEN p.start_date AND p.end_date
+    GROUP BY order_date
+  ),
+  base_tickets AS (
+    SELECT
+      t.ticket_id,
+      t.source_system,
+      t.channel,
+      t.created_at,
+      t.solved_at,
+      t.requester_email_sha256,
+      t.order_id,
+      LOWER(TRIM(t.category_at_creation)) AS creation_raw,
+      DATE(t.created_at, 'America/New_York') AS created_date
+    FROM `your-project.helpdesk.tickets` AS t
+    CROSS JOIN params AS p
+    WHERE DATE(t.created_at, 'America/New_York') BETWEEN p.start_date AND p.end_date
+      AND NOT COALESCE(t.is_spam, FALSE)
+      AND NOT COALESCE(t.is_auto_reply, FALSE)
+      AND NOT COALESCE(t.closed_by_merge, FALSE)
+      AND NOT COALESCE(t.is_internal, FALSE)
+      AND NOT COALESCE(t.is_test, FALSE)
+      AND NOT COALESCE(t.is_agent_outbound, FALSE)
+      AND NOT COALESCE(t.is_social_mention_only, FALSE)
+  ),
+  -- Value at solve: last category change up to 72 hours after solve; later edits are excluded from restated history.
+  solve_category AS (
+    SELECT h.ticket_id, LOWER(TRIM(h.category_value)) AS solve_raw
+    FROM `your-project.helpdesk.ticket_category_history` AS h
+    JOIN base_tickets AS b ON b.ticket_id = h.ticket_id
+    WHERE b.solved_at IS NOT NULL
+      AND h.changed_at <= TIMESTAMP_ADD(b.solved_at, INTERVAL 72 HOUR)
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY h.ticket_id ORDER BY h.changed_at DESC) = 1
+  ),
+  -- Same requester, same order, within 7 days of an earlier ticket: repeat contact, not a new contact driver.
+  repeat_flags AS (
+    SELECT
+      ticket_id,
+      order_id IS NOT NULL
+        AND requester_email_sha256 IS NOT NULL
+        AND COUNT(*) OVER (
+          PARTITION BY requester_email_sha256, order_id
+          ORDER BY UNIX_SECONDS(created_at)
+          RANGE BETWEEN 604800 PRECEDING AND 1 PRECEDING
+        ) > 0 AS is_repeat_contact
+    FROM base_tickets
+  ),
+  resolved AS (
+    SELECT
+      b.ticket_id,
+      b.created_date,
+      b.channel,
+      b.solved_at,
+      COALESCE(b.order_id, w.web_order_id) AS order_id,
+      r.is_repeat_contact,
+      CASE
+        WHEN COALESCE(s.solve_raw, b.creation_raw) IS NOT NULL
+          THEN IF(m_final.standard_value IN UNNEST(p.governed_list), m_final.standard_value, 'other')
+        WHEN w.web_reason IN UNNEST(p.governed_list) THEN w.web_reason
+        ELSE 'other'
+      END AS ticket_category,
+      CASE
+        WHEN b.creation_raw IS NOT NULL
+          THEN IF(m_init.standard_value IN UNNEST(p.governed_list), m_init.standard_value, 'other')
+        WHEN w.web_reason IN UNNEST(p.governed_list) THEN w.web_reason
+        ELSE 'other'
+      END AS initial_category
+    FROM base_tickets AS b
+    CROSS JOIN params AS p
+    JOIN repeat_flags AS r ON r.ticket_id = b.ticket_id
+    LEFT JOIN solve_category AS s ON s.ticket_id = b.ticket_id
+    LEFT JOIN web_contacts AS w ON w.ticket_id = b.ticket_id
+    LEFT JOIN `your-project.helpdesk.ticket_category_mapping` AS m_final
+      ON m_final.source_system = b.source_system
+      AND m_final.source_value = COALESCE(s.solve_raw, b.creation_raw)
+      AND m_final.is_active
+    LEFT JOIN `your-project.helpdesk.ticket_category_mapping` AS m_init
+      ON m_init.source_system = b.source_system
+      AND m_init.source_value = b.creation_raw
+      AND m_init.is_active
+  ),
+  daily AS (
+    SELECT
+      created_date,
+      ticket_category,
+      COUNT(DISTINCT IF(NOT is_repeat_contact, ticket_id, NULL)) AS new_contact_tickets,
+      COUNT(DISTINCT IF(is_repeat_contact, ticket_id, NULL)) AS repeat_contact_tickets,
+      COUNT(DISTINCT IF(solved_at IS NOT NULL, ticket_id, NULL)) AS solved_tickets,
+      COUNT(DISTINCT IF(solved_at IS NOT NULL AND initial_category = ticket_category, ticket_id, NULL)) AS solved_routed_correctly,
+      COUNT(DISTINCT IF(ticket_category IN ('order_status', 'shipping_delay', 'returns_refunds', 'payment_issue') AND order_id IS NULL, ticket_id, NULL)) AS order_linked_missing_order_id
+    FROM resolved
+    GROUP BY created_date, ticket_category
+  )
+  SELECT
+    d.created_date,
+    d.ticket_category,
+    d.new_contact_tickets,
+    d.repeat_contact_tickets,
+    SAFE_DIVIDE(d.new_contact_tickets, SUM(d.new_contact_tickets) OVER (PARTITION BY d.created_date)) AS share_of_new_contacts,
+    SAFE_DIVIDE(d.solved_routed_correctly, d.solved_tickets) AS routing_accuracy,
+    d.order_linked_missing_order_id,
+    o.orders_placed,
+    SAFE_DIVIDE(d.new_contact_tickets * 100, o.orders_placed) AS contacts_per_100_orders,
+    SAFE_DIVIDE(
+      SUM(IF(d.ticket_category = 'other', d.solved_tickets, 0)) OVER (PARTITION BY DATE_TRUNC(d.created_date, MONTH)),
+      SUM(d.solved_tickets) OVER (PARTITION BY DATE_TRUNC(d.created_date, MONTH))
+    ) AS other_share_of_solved_month
+  FROM daily AS d
+  LEFT JOIN web_orders AS o ON o.order_date = d.created_date
+  ORDER BY d.created_date, d.ticket_category;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  -- Ticket Category: daily support tickets by governed category (last 90 days, store reporting timezone America/New_York).
+  -- The help-desk dataset is the source of truth; the web contact_reason (_tenant.support) is used only when the help desk holds no category.
+  WITH web_contacts AS (
+    SELECT ticket_id, web_reason, web_order_id
+    FROM (
+      SELECT
+        _tenant.support.ticket_id AS ticket_id,
+        LOWER(TRIM(_tenant.support.contact_reason)) AS web_reason,
+        _tenant.support.order_id AS web_order_id,
+        ROW_NUMBER() OVER (PARTITION BY _tenant.support.ticket_id ORDER BY timestamp) AS rn
+      FROM aep_web_events_dataset
+      WHERE eventType = 'submit_form'
+        AND _tenant.support.form_name = 'support_contact'
+        AND _tenant.support.ticket_id IS NOT NULL
+        AND timestamp >= current_date() - INTERVAL 98 DAYS
+    ) x
+    WHERE rn = 1
+  ),
+  -- Denominator for contacts per 100 orders: every order placed on the day, not only orders that generated a ticket.
+  web_orders AS (
+    SELECT
+      to_date(from_utc_timestamp(timestamp, 'America/New_York')) AS order_date,
+      COUNT(DISTINCT commerce.order.purchaseID) AS orders_placed
+    FROM aep_web_events_dataset
+    WHERE eventType = 'purchase'
+      AND commerce.order.purchaseID IS NOT NULL
+      AND timestamp >= current_date() - INTERVAL 98 DAYS
+      AND to_date(from_utc_timestamp(timestamp, 'America/New_York')) >= date_sub(current_date(), 90)
+    GROUP BY to_date(from_utc_timestamp(timestamp, 'America/New_York'))
+  ),
+  base_tickets AS (
+    SELECT
+      t.ticket_id,
+      t.source_system,
+      t.channel,
+      t.created_at,
+      t.solved_at,
+      t.requester_email_sha256,
+      t.order_id,
+      LOWER(TRIM(t.category_at_creation)) AS creation_raw,
+      to_date(from_utc_timestamp(t.created_at, 'America/New_York')) AS created_date
+    FROM aep_helpdesk_tickets_dataset t
+    WHERE to_date(from_utc_timestamp(t.created_at, 'America/New_York')) >= date_sub(current_date(), 90)
+      AND NOT COALESCE(t.is_spam, FALSE)
+      AND NOT COALESCE(t.is_auto_reply, FALSE)
+      AND NOT COALESCE(t.closed_by_merge, FALSE)
+      AND NOT COALESCE(t.is_internal, FALSE)
+      AND NOT COALESCE(t.is_test, FALSE)
+      AND NOT COALESCE(t.is_agent_outbound, FALSE)
+      AND NOT COALESCE(t.is_social_mention_only, FALSE)
+  ),
+  -- Value at solve: last category change up to 72 hours after solve; later edits are excluded from restated history.
+  solve_category AS (
+    SELECT ticket_id, solve_raw
+    FROM (
+      SELECT
+        h.ticket_id,
+        LOWER(TRIM(h.category_value)) AS solve_raw,
+        ROW_NUMBER() OVER (PARTITION BY h.ticket_id ORDER BY h.changed_at DESC) AS rn
+      FROM aep_helpdesk_category_history_dataset h
+      JOIN base_tickets b ON b.ticket_id = h.ticket_id
+      WHERE b.solved_at IS NOT NULL
+        AND h.changed_at <= b.solved_at + INTERVAL 72 HOURS
+    ) x
+    WHERE rn = 1
+  ),
+  -- Same requester, same order, within 7 days of an earlier ticket: repeat contact, not a new contact driver.
+  repeat_flags AS (
+    SELECT
+      ticket_id,
+      (order_id IS NOT NULL
+        AND requester_email_sha256 IS NOT NULL
+        AND COUNT(*) OVER (
+          PARTITION BY requester_email_sha256, order_id
+          ORDER BY unix_timestamp(created_at)
+          RANGE BETWEEN 604800 PRECEDING AND 1 PRECEDING
+        ) > 0) AS is_repeat_contact
+    FROM base_tickets
+  ),
+  resolved AS (
+    SELECT
+      b.ticket_id,
+      b.created_date,
+      b.solved_at,
+      COALESCE(b.order_id, w.web_order_id) AS order_id,
+      r.is_repeat_contact,
+      CASE
+        WHEN COALESCE(s.solve_raw, b.creation_raw) IS NOT NULL THEN
+          CASE WHEN m_final.standard_value IN ('order_status', 'shipping_delay', 'returns_refunds', 'payment_issue', 'product_question', 'account_access', 'other')
+            THEN m_final.standard_value ELSE 'other' END
+        WHEN w.web_reason IN ('order_status', 'shipping_delay', 'returns_refunds', 'payment_issue', 'product_question', 'account_access', 'other') THEN w.web_reason
+        ELSE 'other'
+      END AS ticket_category,
+      CASE
+        WHEN b.creation_raw IS NOT NULL THEN
+          CASE WHEN m_init.standard_value IN ('order_status', 'shipping_delay', 'returns_refunds', 'payment_issue', 'product_question', 'account_access', 'other')
+            THEN m_init.standard_value ELSE 'other' END
+        WHEN w.web_reason IN ('order_status', 'shipping_delay', 'returns_refunds', 'payment_issue', 'product_question', 'account_access', 'other') THEN w.web_reason
+        ELSE 'other'
+      END AS initial_category
+    FROM base_tickets b
+    JOIN repeat_flags r ON r.ticket_id = b.ticket_id
+    LEFT JOIN solve_category s ON s.ticket_id = b.ticket_id
+    LEFT JOIN web_contacts w ON w.ticket_id = b.ticket_id
+    LEFT JOIN aep_helpdesk_category_mapping_dataset m_final
+      ON m_final.source_system = b.source_system
+      AND m_final.source_value = COALESCE(s.solve_raw, b.creation_raw)
+      AND m_final.is_active = TRUE
+    LEFT JOIN aep_helpdesk_category_mapping_dataset m_init
+      ON m_init.source_system = b.source_system
+      AND m_init.source_value = b.creation_raw
+      AND m_init.is_active = TRUE
+  ),
+  daily AS (
+    SELECT
+      created_date,
+      ticket_category,
+      COUNT(DISTINCT CASE WHEN NOT is_repeat_contact THEN ticket_id END) AS new_contact_tickets,
+      COUNT(DISTINCT CASE WHEN is_repeat_contact THEN ticket_id END) AS repeat_contact_tickets,
+      COUNT(DISTINCT CASE WHEN solved_at IS NOT NULL THEN ticket_id END) AS solved_tickets,
+      COUNT(DISTINCT CASE WHEN solved_at IS NOT NULL AND initial_category = ticket_category THEN ticket_id END) AS solved_routed_correctly,
+      COUNT(DISTINCT CASE WHEN ticket_category IN ('order_status', 'shipping_delay', 'returns_refunds', 'payment_issue') AND order_id IS NULL THEN ticket_id END) AS order_linked_missing_order_id
+    FROM resolved
+    GROUP BY created_date, ticket_category
+  )
+  SELECT
+    d.created_date,
+    d.ticket_category,
+    d.new_contact_tickets,
+    d.repeat_contact_tickets,
+    CAST(d.new_contact_tickets AS DOUBLE) / NULLIF(SUM(d.new_contact_tickets) OVER (PARTITION BY d.created_date), 0) AS share_of_new_contacts,
+    CAST(d.solved_routed_correctly AS DOUBLE) / NULLIF(d.solved_tickets, 0) AS routing_accuracy,
+    d.order_linked_missing_order_id,
+    o.orders_placed,
+    CAST(d.new_contact_tickets AS DOUBLE) * 100 / NULLIF(o.orders_placed, 0) AS contacts_per_100_orders,
+    CAST(SUM(CASE WHEN d.ticket_category = 'other' THEN d.solved_tickets ELSE 0 END) OVER (PARTITION BY date_trunc('MONTH', d.created_date)) AS DOUBLE)
+      / NULLIF(SUM(d.solved_tickets) OVER (PARTITION BY date_trunc('MONTH', d.created_date)), 0) AS other_share_of_solved_month
+  FROM daily d
+  LEFT JOIN web_orders o ON o.order_date = d.created_date
+  ORDER BY d.created_date, d.ticket_category;
+
+Calculation Notes: |
+  1️⃣ One primary value per ticket from the governed list (order_status, shipping_delay, returns_refunds, payment_issue, product_question, account_access, other). The customer's choice in the contact-form picklist or the chatbot intent sets the initial value. The agent confirms or corrects it at solve. Reporting uses the value at solve; the value at creation is kept in a separate field so routing accuracy can be measured. Secondary issues go to a subcategory or tag array and never split the ticket count.
+  2️⃣ Keep this field separate from the Zendesk Ticket Type field (question / incident / problem / task), priority, status and group. Never derive a category from any of those fields. Salesforce Service Cloud Case.Reason and the Gorgias contact reason map directly to this dimension.
+  3️⃣ Normalise values to lowercase snake_case through a governed mapping table that translates each help-desk's picklist values and macro tags to the standard list. Any value that is unmapped, null or retired goes to other. When other exceeds 10% of solved tickets in a month, Customer Service reviews the list; values are never added on the fly.
+  4️⃣ Exclusions: spam, auto-replies and out-of-office bounces, tickets closed by merge (the surviving ticket keeps its category), internal and test tickets, agent-created outbound or proactive tickets, and social-media mentions that never became a ticket.
+  5️⃣ Timing: attribute each ticket to its created_at date, and each order to its purchase timestamp date, in the store's reporting timezone (America/New_York in the SQL). A reopened ticket keeps its original date and category. A new contact from the same requester about the same order within 7 days counts as a repeat contact on the first ticket, not as a new contact driver. Category edits made more than 72 hours after solve are audited and excluded from restated history.
+  6️⃣ Digital capture: the help-centre contact form sends the unified submit_form event with form_name = support_contact and a contact_reason parameter holding the same controlled value. The event is joined to the help-desk ticket on ticket_id; submissions without a ticket_id are not joined. Chat, phone and email tickets come only from the help desk, so the help desk is the source of truth when the two values differ.
+  7️⃣ Order-linked categories (order_status, shipping_delay, returns_refunds, payment_issue) must carry order_id where the customer supplied one. Contacts-per-order ratios by category use all orders placed in the same dates and the same 90-day window as the tickets as the denominator, not only orders that generated a ticket.
+
+Business Use Case: |
+  1️⃣ The Head of Customer Service reviews the weekly contact-driver report. When shipping_delay or order_status tickets rise more than 20% week over week, they move agent capacity to those queues, publish proactive delay macros and escalate the affected carrier lanes to Fulfilment.
+  2️⃣ The E-commerce Product Manager tracks order_status and account_access contacts per 100 orders. When either category stays above target for two consecutive months, they prioritise self-service order tracking, password-reset improvements and proactive shipping notifications on the roadmap, then measure how many contacts these features prevent.
+  3️⃣ The Merchandising team reviews returns_refunds and product_question tickets by product category each month. When a category shows an above-average share, they update size guides, product-page specifications and imagery for the affected SKUs before the next buying cycle.
+  4️⃣ The Payments lead in Finance watches payment_issue tickets daily. When volume spikes after a checkout release or a payment-provider change, they open an incident with the payment service provider and pause the release until declines and double-charge reports return to baseline.
+
+Dependencies:
+  Events: [contact-form-submission, purchase]
+
+Source Data: Web + Help Desk (Zendesk / Salesforce Service Cloud / Gorgias)
+
+Report Attributes: |
+  Ticket Subcategory; Contact Channel; Order Status; Delivery Exception Type; Payment Method; Product Category; Customer Status; Device Category
+
+Dashboard Usage: [Customer Support Contact Drivers, Returns & Refunds Operations, Post-Purchase Experience Scorecard, Self-Service Deflection Tracker]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [inquiry-type, order-status, order-cancellation-reason, delivery-exception-type, payment-method]
+
+Derived Dimensions: [return-reason]
+
+Data Sensitivity: Internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-16T17:47:44.775+00:00
+
+Last Modified By: devyendarm
+
+Last Modified At: 2026-09-18T19:22:29.292+00:00
+
