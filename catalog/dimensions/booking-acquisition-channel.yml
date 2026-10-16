@@ -1,0 +1,362 @@
+# Dimension: Booking Acquisition Channel
+# Generated: 2026-09-13T21:30:28.328Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Dimension Name: Booking Acquisition Channel
+
+Description: |
+  Classifies the digital marketing or traffic channel credited with producing a confirmed travel booking, using governed source, medium, campaign, referrer, and direct-navigation signals. The value is assigned at the booking-confirmation event under the approved attribution model and channel-grouping taxonomy, enabling consistent comparison of acquisition performance across digital bookings.
+
+Category: Acquisition
+
+Tags: [dimension]
+
+Industry: Travel & Hospitality
+
+Priority: High
+
+Core Area: Checkout
+
+Scope: Event
+
+Data Type: string
+
+Aggregation Window: Event
+
+GA4 Event: |
+  purchase
+
+Adobe Event: |
+  purchase
+
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"purchase","eventType":"conversion","eventAction":"purchase"},"attributes":{"medium":"cpc","source":"google","campaign":"summer_travel","referrer":"https://www.google.com/","campaignId":"campaign_123","attributionModel":"Approved Attribution Model","isDirectNavigation":false,"channelGroupingTaxonomy":"Approved Channel Grouping","bookingAcquisitionChannel":"Paid Search"}}],"transaction":{"profile":{"attributes":{"bookingAcquisitionChannel":"Paid Search"}},"transactionID":"booking_12345"}}}
+
+GA4 Data Layer: |
+  {"event":"purchase","ecommerce":{"items":[{"item_id":"travel_product_123","item_name":"Travel Booking","item_category":"Travel"}],"value":1250,"currency":"USD","transaction_id":"booking_12345"},"campaign_id":"campaign_123","campaign_name":"summer_travel","page_referrer":"https://www.google.com/","campaign_medium":"cpc","campaign_source":"google","attribution_model":"Approved Attribution Model","direct_navigation":false,"channel_grouping_taxonomy":"Approved Channel Grouping","booking_acquisition_channel":"Paid Search"}
+
+Adobe Client Data Layer: |
+  {"data":{"booking":{"bookingId":"booking_12345","acquisition":{"medium":"cpc","source":"google","channel":"Paid Search","campaign":"summer_travel","referrer":"https://www.google.com/","campaignId":"campaign_123","attributionModel":"Approved Attribution Model","directNavigation":false,"channelGroupingTaxonomy":"Approved Channel Grouping"}},"commerce":{"order":{"priceTotal":1250,"currencyCode":"USD"}}},"event":"purchase"}
+
+XDM Mapping: |
+  {"web":{"webReferrer":{"URL":"https://www.google.com/"}},"channel":{"_id":"Paid Search"},"commerce":{"order":{"priceTotal":1250,"purchaseID":"booking_12345","currencyCode":"USD"},"purchases":{"value":1}},"eventType":"commerce.purchases","marketing":{"trackingCode":"campaign_123"},"_experience":{"analytics":{"customDimensions":{"eVars":{"eVar1":"Paid Search"}}}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH purchase_events AS (
+    SELECT
+      event_date,
+      event_timestamp,
+      event_name,
+      user_pseudo_id,
+      user_id,
+      platform,
+      stream_id,
+      device,
+      geo,
+      traffic_source,
+      collected_traffic_source,
+      session_traffic_source_last_click,
+      items,
+      (SELECT ARRAY_AGG(COALESCE(value.string_value, CAST(value.int_value AS STRING), CAST(value.double_value AS STRING)) IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'transaction_id') AS booking_id,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'booking_acquisition_channel') AS explicit_channel,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'attribution_model') AS attribution_model,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'channel_grouping_taxonomy') AS channel_grouping_taxonomy,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key IN ('campaign_source', 'source') ORDER BY IF(key = 'campaign_source', 1, 2) LIMIT 1)[SAFE_OFFSET(0)] AS parameter_source,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key IN ('campaign_medium', 'medium') ORDER BY IF(key = 'campaign_medium', 1, 2) LIMIT 1)[SAFE_OFFSET(0)] AS parameter_medium,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key IN ('campaign_name', 'campaign') ORDER BY IF(key = 'campaign_name', 1, 2) LIMIT 1)[SAFE_OFFSET(0)] AS parameter_campaign_name,
+      (SELECT ARRAY_AGG(COALESCE(value.string_value, CAST(value.int_value AS STRING)) IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'campaign_id') AS parameter_campaign_id,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key IN ('campaign_term', 'term')) AS campaign_term,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key IN ('campaign_content', 'content')) AS campaign_content,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'source_platform') AS parameter_source_platform,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key IN ('page_referrer', 'referrer')) AS referrer_url,
+      (SELECT ARRAY_AGG(LOWER(COALESCE(value.string_value, CAST(value.int_value AS STRING))) IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key IN ('direct_navigation', 'is_direct_navigation')) AS direct_navigation_value,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'gclid') AS gclid,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'dclid') AS dclid,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'srsltid') AS srsltid,
+      (SELECT ARRAY_AGG(value.int_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+      (SELECT ARRAY_AGG(value.int_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'ga_session_number') AS ga_session_number,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'currency') AS transaction_currency,
+      (SELECT ARRAY_AGG(COALESCE(value.double_value, value.float_value, CAST(value.int_value AS FLOAT64)) IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'value') AS booking_value,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key IN ('landing_page', 'session_landing_page')) AS landing_page,
+      (SELECT ARRAY_AGG(value.string_value IGNORE NULLS LIMIT 1)[SAFE_OFFSET(0)] FROM UNNEST(event_params) WHERE key = 'page_location') AS page_location
+    FROM `your-project.analytics_123456789.events_*`
+    WHERE event_name = 'purchase'
+  ),
+  resolved_attributes AS (
+    SELECT
+      *,
+      COALESCE(
+        NULLIF(parameter_source, ''),
+        NULLIF(collected_traffic_source.manual_source, ''),
+        NULLIF(session_traffic_source_last_click.manual_campaign.source, ''),
+        NULLIF(session_traffic_source_last_click.cross_channel_campaign.source, ''),
+        NULLIF(traffic_source.source, ''),
+        '(direct)'
+      ) AS resolved_source,
+      COALESCE(
+        NULLIF(parameter_medium, ''),
+        NULLIF(collected_traffic_source.manual_medium, ''),
+        NULLIF(session_traffic_source_last_click.manual_campaign.medium, ''),
+        NULLIF(session_traffic_source_last_click.cross_channel_campaign.medium, ''),
+        NULLIF(traffic_source.medium, ''),
+        '(none)'
+      ) AS resolved_medium,
+      COALESCE(
+        NULLIF(parameter_campaign_name, ''),
+        NULLIF(collected_traffic_source.manual_campaign_name, ''),
+        NULLIF(session_traffic_source_last_click.manual_campaign.campaign_name, ''),
+        NULLIF(session_traffic_source_last_click.cross_channel_campaign.campaign_name, ''),
+        NULLIF(traffic_source.name, '')
+      ) AS resolved_campaign_name,
+      COALESCE(
+        NULLIF(parameter_campaign_id, ''),
+        NULLIF(collected_traffic_source.manual_campaign_id, ''),
+        NULLIF(session_traffic_source_last_click.manual_campaign.campaign_id, ''),
+        NULLIF(session_traffic_source_last_click.cross_channel_campaign.campaign_id, '')
+      ) AS resolved_campaign_id,
+      COALESCE(
+        NULLIF(parameter_source_platform, ''),
+        NULLIF(session_traffic_source_last_click.cross_channel_campaign.source_platform, '')
+      ) AS resolved_source_platform,
+      NULLIF(session_traffic_source_last_click.cross_channel_campaign.default_channel_group, '') AS exported_default_channel_group
+    FROM purchase_events
+    WHERE NULLIF(booking_id, '') IS NOT NULL
+  ),
+  classified AS (
+    SELECT
+      *,
+      COALESCE(
+        NULLIF(explicit_channel, ''),
+        exported_default_channel_group,
+        CASE
+          WHEN LOWER(resolved_source) = '(direct)' AND LOWER(resolved_medium) IN ('(none)', '(not set)') THEN 'Direct'
+          WHEN LOWER(resolved_medium) IN ('cpc', 'ppc', 'paidsearch', 'paid_search') THEN 'Paid Search'
+          WHEN LOWER(resolved_medium) IN ('display', 'cpm', 'banner', 'programmatic') THEN 'Display'
+          WHEN LOWER(resolved_medium) IN ('paid_social', 'paidsocial', 'social_paid') THEN 'Paid Social'
+          WHEN LOWER(resolved_medium) IN ('social', 'social-network', 'social-media', 'sm') THEN 'Organic Social'
+          WHEN LOWER(resolved_medium) IN ('email', 'e-mail') THEN 'Email'
+          WHEN LOWER(resolved_medium) IN ('affiliate', 'affiliates') THEN 'Affiliates'
+          WHEN LOWER(resolved_medium) IN ('organic', 'seo') THEN 'Organic Search'
+          WHEN LOWER(resolved_medium) IN ('referral', 'app', 'link') THEN 'Referral'
+          WHEN LOWER(resolved_medium) IN ('sms', 'text') THEN 'SMS'
+          WHEN LOWER(resolved_medium) IN ('push', 'mobile_push', 'notification') THEN 'Mobile Push Notifications'
+          WHEN LOWER(resolved_medium) IN ('video', 'paid_video') THEN 'Video'
+          WHEN LOWER(resolved_medium) IN ('audio', 'paid_audio') THEN 'Audio'
+          WHEN LOWER(resolved_medium) IN ('cross-network', 'cross_network') THEN 'Cross-network'
+          ELSE 'Unassigned'
+        END
+      ) AS resolved_channel,
+      CASE
+        WHEN direct_navigation_value IN ('true', '1', 'yes') THEN TRUE
+        WHEN direct_navigation_value IN ('false', '0', 'no') THEN FALSE
+        ELSE LOWER(resolved_source) = '(direct)' AND LOWER(resolved_medium) IN ('(none)', '(not set)')
+      END AS resolved_direct_navigation,
+      COALESCE(
+        (SELECT SUM(COALESCE(quantity, 1)) FROM UNNEST(items)),
+        0
+      ) AS item_quantity
+    FROM resolved_attributes
+  ),
+  ranked AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY booking_id
+        ORDER BY event_timestamp DESC, user_pseudo_id DESC
+      ) AS booking_row_number
+    FROM classified
+  )
+  SELECT
+    booking_id,
+    resolved_channel AS booking_acquisition_channel,
+    LOWER(REGEXP_REPLACE(TRIM(resolved_channel), r'[^a-zA-Z0-9]+', '_')) AS channel_key,
+    attribution_model,
+    channel_grouping_taxonomy,
+    resolved_source AS source,
+    resolved_medium AS medium,
+    resolved_campaign_name AS campaign_name,
+    resolved_campaign_id AS campaign_id,
+    campaign_term AS term,
+    campaign_content AS content,
+    resolved_source_platform AS source_platform,
+    COALESCE(exported_default_channel_group, resolved_channel) AS default_channel_group,
+    referrer_url,
+    NET.HOST(referrer_url) AS referrer_host,
+    resolved_direct_navigation AS is_direct_navigation,
+    gclid,
+    dclid,
+    srsltid,
+    user_pseudo_id,
+    user_id,
+    ga_session_id,
+    ga_session_number,
+    PARSE_DATE('%Y%m%d', event_date) AS event_date,
+    event_timestamp,
+    TIMESTAMP_MICROS(event_timestamp) AS event_datetime_utc,
+    event_name,
+    platform,
+    stream_id,
+    device.category AS device_category,
+    device.operating_system AS device_os,
+    device.operating_system_version AS device_os_version,
+    device.web_info.browser AS browser,
+    device.web_info.browser_version AS browser_version,
+    device.language AS language,
+    geo.country AS country,
+    geo.region AS region,
+    geo.city AS city,
+    geo.continent AS continent,
+    geo.sub_continent AS sub_continent,
+    transaction_currency,
+    booking_value,
+    item_quantity,
+    landing_page,
+    page_location,
+    NET.HOST(page_location) AS hostname,
+    'GA4' AS data_source,
+    CURRENT_TIMESTAMP() AS record_loaded_at,
+    TO_HEX(SHA256(CONCAT('GA4|', LOWER(TRIM(resolved_channel))))) AS acquisition_channel_sk
+  FROM ranked
+  WHERE booking_row_number = 1;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH purchase_events AS (
+    SELECT
+      commerce.order.purchaseID AS booking_id,
+      COALESCE(
+        NULLIF(channel._id, ''),
+        NULLIF(_experience.analytics.customDimensions.eVars.eVar1, '')
+      ) AS explicit_channel,
+      marketing.trackingCode AS campaign_id,
+      web.webReferrer.URL AS referrer_url,
+      web.webPageDetails.URL AS page_location,
+      commerce.order.currencyCode AS transaction_currency,
+      CAST(commerce.order.priceTotal AS DOUBLE) AS booking_value,
+      CAST(commerce.purchases.value AS BIGINT) AS purchase_count,
+      CAST(timestamp AS TIMESTAMP) AS event_datetime_utc,
+      eventType AS event_name,
+      _id AS source_event_id
+    FROM your_aep_database.your_xdm_event_dataset
+    WHERE eventType = 'commerce.purchases'
+      AND NULLIF(commerce.order.purchaseID, '') IS NOT NULL
+  ),
+  classified AS (
+    SELECT
+      *,
+      COALESCE(NULLIF(explicit_channel, ''), 'Unassigned') AS resolved_channel,
+      CASE
+        WHEN explicit_channel = 'Direct' THEN TRUE
+        WHEN NULLIF(referrer_url, '') IS NULL AND explicit_channel IS NULL THEN TRUE
+        ELSE FALSE
+      END AS resolved_direct_navigation
+    FROM purchase_events
+  ),
+  ranked AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY booking_id
+        ORDER BY event_datetime_utc DESC, source_event_id DESC
+      ) AS booking_row_number
+    FROM classified
+  )
+  SELECT
+    booking_id,
+    resolved_channel AS booking_acquisition_channel,
+    LOWER(REGEXP_REPLACE(TRIM(resolved_channel), '[^a-zA-Z0-9]+', '_')) AS channel_key,
+    CAST(NULL AS STRING) AS attribution_model,
+    CAST(NULL AS STRING) AS channel_grouping_taxonomy,
+    CAST(NULL AS STRING) AS source,
+    CAST(NULL AS STRING) AS medium,
+    CAST(NULL AS STRING) AS campaign_name,
+    campaign_id,
+    CAST(NULL AS STRING) AS term,
+    CAST(NULL AS STRING) AS content,
+    CAST(NULL AS STRING) AS source_platform,
+    resolved_channel AS default_channel_group,
+    referrer_url,
+    PARSE_URL(referrer_url, 'HOST') AS referrer_host,
+    resolved_direct_navigation AS is_direct_navigation,
+    CAST(NULL AS STRING) AS gclid,
+    CAST(NULL AS STRING) AS dclid,
+    CAST(NULL AS STRING) AS srsltid,
+    CAST(NULL AS STRING) AS user_pseudo_id,
+    CAST(NULL AS STRING) AS user_id,
+    CAST(NULL AS BIGINT) AS ga_session_id,
+    CAST(NULL AS BIGINT) AS ga_session_number,
+    CAST(event_datetime_utc AS DATE) AS event_date,
+    event_datetime_utc AS event_timestamp,
+    event_datetime_utc,
+    event_name,
+    CAST(NULL AS STRING) AS platform,
+    CAST(NULL AS STRING) AS stream_id,
+    CAST(NULL AS STRING) AS device_category,
+    CAST(NULL AS STRING) AS device_os,
+    CAST(NULL AS STRING) AS device_os_version,
+    CAST(NULL AS STRING) AS browser,
+    CAST(NULL AS STRING) AS browser_version,
+    CAST(NULL AS STRING) AS language,
+    CAST(NULL AS STRING) AS country,
+    CAST(NULL AS STRING) AS region,
+    CAST(NULL AS STRING) AS city,
+    CAST(NULL AS STRING) AS continent,
+    CAST(NULL AS STRING) AS sub_continent,
+    transaction_currency,
+    booking_value,
+    COALESCE(purchase_count, 0) AS item_quantity,
+    page_location AS landing_page,
+    page_location,
+    PARSE_URL(page_location, 'HOST') AS hostname,
+    'ADOBE_AEP' AS data_source,
+    CURRENT_TIMESTAMP() AS record_loaded_at,
+    SHA2(CONCAT('ADOBE_AEP|', LOWER(TRIM(resolved_channel))), 256) AS acquisition_channel_sk
+  FROM ranked
+  WHERE booking_row_number = 1;
+
+Calculation Notes: |
+  1️⃣ Assign channel only with valid transaction identifier and after passing controls.  
+  2️⃣ Resolve source and medium using enterprise channel taxonomy and approved attribution model.  
+  3️⃣ Paid campaign identifiers take precedence over referrer-based inference.  
+  4️⃣ Classify booking as Direct only when no valid signals exist; do not overwrite known data.  
+  5️⃣ Exclude self-referrals and certain domains from referral classification.  
+  6️⃣ Assign Unassigned for missing or malformed channel inputs.  
+  7️⃣ Retain original channel through amendments unless a new transaction is created.
+
+Business Use Case: |
+  Marketing and Revenue Management compare confirmed bookings, booking revenue, cancellation rates, and acquisition efficiency by channel to determine where digital media investment should be increased, reduced, or reallocated. For example, if metasearch produces high booking volume but materially lower net revenue after cancellations than paid search, leadership can revise bidding, commission, and landing-page strategies using the governed channel classification.
+
+
+Source Data: Digital Analytics (GA4)
+
+Report Attributes: |
+  ["Booking Date","Booking Source","Booking Medium","Booking Campaign","Attribution Model","Brand","Property","Destination","Origin Market","Device Category","Landing Page","Booking Engine","Rate Plan","Room Type","Length of Stay Band","Advance Purchase Band","Loyalty Membership Status","New vs Returning Guest"]
+
+Dashboard Usage: [Digital Booking Acquisition Executive Dashboard, Marketing Channel Performance Dashboard, Booking Conversion Funnel Dashboard, Digital Revenue and ROAS Dashboard, Metasearch and Paid Media Performance Dashboard, Direct Booking Growth Dashboard, Booking Quality and Cancellation Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Dimensions: [Booking Source, Booking Medium, Booking Campaign, Marketing Channel Group, Attribution Model, Landing Page, Referring Domain, Device Category, Booking Engine, Brand, Property, Destination, Market, Rate Plan, Loyalty Membership Status]
+
+Derived Dimensions: [Paid vs Unpaid Booking Channel, Owned Earned or Paid Channel, Booking Channel Group, Booking Channel Subgroup, Direct vs Referred Booking, Search Channel Type, Social Channel Type, Affiliate Booking Indicator]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-13T21:30:27.765496+00:00
+
+Last Modified By: devyendarm
+
+
