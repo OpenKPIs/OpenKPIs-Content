@@ -1,0 +1,349 @@
+# KPI: Average Inquiry Response Time
+# Generated: 2026-09-10T18:31:05.645Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+KPI Name: Average Inquiry Response Time
+Formula: Σ(First Qualifying Human Response Timestamp − Inquiry Received Timestamp) in minutes / Count of eligible digital inquiries with a qualifying human response
+
+Description: |
+  Measures the arithmetic mean elapsed time, in minutes, between receipt of an eligible digital inquiry and the earliest qualifying customer-visible human response. It quantifies operational responsiveness while excluding unanswered inquiries from the average so response coverage must be evaluated separately.
+
+Category: Efficiency
+
+Tags: [kpi]
+
+Industry: [Technology]
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Event
+
+Measure Type: average
+
+Aggregation Window: Time based - Hourly/Daily/Monthly/Yearly
+
+GA4 Event: |
+  conversion
+
+Adobe Event: |
+  conversion
+
+W3 Data Layer: |
+  {"event":[{"eventInfo":{"eventID":"response_evt_12345","eventName":"conversion","timeStamp":"2025-01-15T14:42:30Z","eventAction":"qualifying_human_response"},"attributes":{"inquiry_id":"inq_12345","responder_type":"human","inquiry_channel":"web_messaging","customer_visible":true,"inquiry_eligible":true,"response_timestamp":"2025-01-15T14:42:30Z","response_time_minutes":12.5,"inquiry_received_timestamp":"2025-01-15T14:30:00Z","is_first_qualifying_response":true}}]}
+
+GA4 Data Layer: |
+  {"event":"conversion","event_id":"response_evt_12345","inquiry_id":"inq_12345","responder_type":"human","inquiry_channel":"web_messaging","customer_visible":true,"inquiry_eligible":true,"response_timestamp":"2025-01-15T14:42:30Z","response_time_minutes":12.5,"inquiry_received_timestamp":"2025-01-15T14:30:00Z","is_first_qualifying_response":true}
+
+Adobe Client Data Layer: |
+  {"event":"conversion","eventInfo":{"eventID":"response_evt_12345","inquiryID":"inq_12345","eventAction":"qualifying_human_response","responderType":"human","inquiryChannel":"web_messaging","customerVisible":true,"inquiryEligible":true,"responseTimestamp":"2025-01-15T14:42:30Z","responseTimeMinutes":12.5,"inquiryReceivedTimestamp":"2025-01-15T14:30:00Z","isFirstQualifyingResponse":true}}
+
+XDM Mapping: |
+  {"_id":"response_evt_12345","eventType":"conversion","timestamp":"2025-01-15T14:42:30Z","eventMergeId":"inq_12345","_inquiryOperations":{"inquiryResponse":{"channel":"web_messaging","inquiryId":"inq_12345","responderType":"human","customerVisible":true,"inquiryEligible":true,"receivedTimestamp":"2025-01-15T14:30:00Z","responseTimestamp":"2025-01-15T14:42:30Z","responseTimeMinutes":12.5,"isFirstQualifyingResponse":true}}}
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH event_parameters AS (
+    SELECT
+      e.event_date,
+      e.event_timestamp,
+      e.user_pseudo_id,
+      e.event_bundle_sequence_id,
+      _TABLE_SUFFIX AS export_table_suffix,
+      MAX(IF(
+        ep.key = 'event_id',
+        COALESCE(
+          ep.value.string_value,
+          CAST(ep.value.int_value AS STRING)
+        ),
+        NULL
+      )) AS event_id,
+      MAX(IF(ep.key = 'event_action', ep.value.string_value, NULL)) AS event_action,
+      MAX(IF(ep.key = 'inquiry_id', ep.value.string_value, NULL)) AS inquiry_id,
+      MAX(IF(ep.key = 'inquiry_channel', ep.value.string_value, NULL)) AS inquiry_channel,
+      MAX(IF(ep.key = 'inquiry_received_timestamp', ep.value.string_value, NULL)) AS inquiry_received_timestamp,
+      MAX(IF(ep.key = 'response_timestamp', ep.value.string_value, NULL)) AS response_timestamp,
+      MAX(IF(
+        ep.key = 'inquiry_eligible',
+        COALESCE(
+          ep.value.string_value,
+          CAST(ep.value.int_value AS STRING)
+        ),
+        NULL
+      )) AS inquiry_eligible,
+      MAX(IF(
+        ep.key = 'customer_visible',
+        COALESCE(
+          ep.value.string_value,
+          CAST(ep.value.int_value AS STRING)
+        ),
+        NULL
+      )) AS customer_visible,
+      MAX(IF(ep.key = 'responder_type', ep.value.string_value, NULL)) AS responder_type
+    FROM `your-project.analytics_123456789.events_*` AS e
+    LEFT JOIN UNNEST(e.event_params) AS ep
+    WHERE e.event_name = 'conversion'
+      AND (
+        _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', @start_date)
+                          AND FORMAT_DATE('%Y%m%d', CURRENT_DATE('UTC'))
+        OR _TABLE_SUFFIX = CONCAT(
+          'intraday_',
+          FORMAT_DATE('%Y%m%d', CURRENT_DATE('UTC'))
+        )
+      )
+    GROUP BY
+      e.event_date,
+      e.event_timestamp,
+      e.user_pseudo_id,
+      e.event_bundle_sequence_id,
+      export_table_suffix
+  ),
+  parsed_events AS (
+    SELECT
+      COALESCE(
+        NULLIF(event_id, ''),
+        CONCAT(
+          inquiry_id,
+          '|',
+          COALESCE(response_timestamp, CAST(event_timestamp AS STRING))
+        )
+      ) AS event_key,
+      event_id,
+      inquiry_id,
+      COALESCE(NULLIF(inquiry_channel, ''), 'unknown') AS inquiry_channel,
+      SAFE_CAST(inquiry_received_timestamp AS TIMESTAMP) AS inquiry_received_at,
+      COALESCE(
+        SAFE_CAST(response_timestamp AS TIMESTAMP),
+        TIMESTAMP_MICROS(event_timestamp)
+      ) AS response_at,
+      event_timestamp,
+      export_table_suffix
+    FROM event_parameters
+    WHERE LOWER(COALESCE(event_action, '')) = 'qualifying_human_response'
+      AND inquiry_id IS NOT NULL
+      AND LOWER(COALESCE(inquiry_eligible, '')) IN ('true', '1')
+      AND LOWER(COALESCE(customer_visible, '')) IN ('true', '1')
+      AND LOWER(COALESCE(responder_type, '')) IN (
+        'human', 'agent', 'employee', 'advisor', 'representative'
+      )
+  ),
+  event_deduplicated AS (
+    SELECT
+      * EXCEPT (event_record_rank)
+    FROM (
+      SELECT
+        p.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY p.event_key
+          ORDER BY p.export_table_suffix DESC, p.event_timestamp DESC
+        ) AS event_record_rank
+      FROM parsed_events AS p
+      WHERE p.event_key IS NOT NULL
+        AND p.inquiry_received_at IS NOT NULL
+        AND p.response_at IS NOT NULL
+    )
+    WHERE event_record_rank = 1
+  ),
+  qualifying_responses AS (
+    SELECT
+      event_key,
+      inquiry_id,
+      inquiry_channel,
+      inquiry_received_at,
+      response_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY inquiry_id
+        ORDER BY response_at, event_key
+      ) AS response_rank
+    FROM event_deduplicated
+    WHERE response_at >= inquiry_received_at
+  ),
+  first_qualifying_responses AS (
+    SELECT
+      DATE(inquiry_received_at, 'UTC') AS reporting_date,
+      DATE_TRUNC(DATE(inquiry_received_at, 'UTC'), MONTH) AS reporting_month,
+      inquiry_channel,
+      inquiry_id,
+      inquiry_received_at,
+      response_at AS first_response_at,
+      TIMESTAMP_DIFF(response_at, inquiry_received_at, MILLISECOND) / 1000.0 AS response_seconds
+    FROM qualifying_responses
+    WHERE response_rank = 1
+      AND DATE(inquiry_received_at, 'UTC') BETWEEN @start_date AND @end_date
+  )
+  SELECT
+    reporting_date,
+    reporting_month,
+    inquiry_channel,
+    COUNT(*) AS responded_inquiry_count,
+    ROUND(AVG(response_seconds), 2) AS average_response_time_seconds,
+    ROUND(AVG(response_seconds) / 60.0, 2) AS average_response_time_minutes,
+    APPROX_QUANTILES(response_seconds, 100)[SAFE_OFFSET(50)] AS median_response_time_seconds,
+    APPROX_QUANTILES(response_seconds, 100)[SAFE_OFFSET(90)] AS p90_response_time_seconds,
+    MIN(response_seconds) AS minimum_response_time_seconds,
+    MAX(response_seconds) AS maximum_response_time_seconds,
+    CURRENT_TIMESTAMP() AS calculated_at
+  FROM first_qualifying_responses
+  GROUP BY
+    reporting_date,
+    reporting_month,
+    inquiry_channel;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH parsed_events AS (
+    SELECT
+      COALESCE(
+        NULLIF(e._id, ''),
+        CONCAT(
+          e._inquiryOperations.inquiryResponse.inquiryId,
+          '|',
+          CAST(e._inquiryOperations.inquiryResponse.responseTimestamp AS VARCHAR)
+        )
+      ) AS event_key,
+      e._id AS event_id,
+      e.eventMergeId AS event_merge_id,
+      e.timestamp AS event_timestamp,
+      e._inquiryOperations.inquiryResponse.inquiryId AS inquiry_id,
+      COALESCE(
+        NULLIF(e._inquiryOperations.inquiryResponse.channel, ''),
+        'unknown'
+      ) AS inquiry_channel,
+      CAST(
+        e._inquiryOperations.inquiryResponse.receivedTimestamp AS TIMESTAMP
+      ) AS inquiry_received_at,
+      CAST(
+        e._inquiryOperations.inquiryResponse.responseTimestamp AS TIMESTAMP
+      ) AS response_at
+    FROM aep_analytics_dataset.experience_events AS e
+    WHERE LOWER(COALESCE(e.eventType, '')) = 'conversion'
+      AND e._inquiryOperations.inquiryResponse.inquiryId IS NOT NULL
+      AND e._inquiryOperations.inquiryResponse.receivedTimestamp IS NOT NULL
+      AND e._inquiryOperations.inquiryResponse.responseTimestamp IS NOT NULL
+      AND COALESCE(
+        e._inquiryOperations.inquiryResponse.inquiryEligible,
+        FALSE
+      ) = TRUE
+      AND COALESCE(
+        e._inquiryOperations.inquiryResponse.customerVisible,
+        FALSE
+      ) = TRUE
+      AND LOWER(COALESCE(
+        e._inquiryOperations.inquiryResponse.responderType,
+        ''
+      )) IN ('human', 'agent', 'employee', 'advisor', 'representative')
+  ),
+  event_deduplicated AS (
+    SELECT
+      event_key,
+      event_id,
+      event_merge_id,
+      event_timestamp,
+      inquiry_id,
+      inquiry_channel,
+      inquiry_received_at,
+      response_at
+    FROM (
+      SELECT
+        p.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY p.event_key
+          ORDER BY p.event_timestamp DESC NULLS LAST
+        ) AS event_record_rank
+      FROM parsed_events AS p
+      WHERE p.event_key IS NOT NULL
+    ) AS ranked_events
+    WHERE event_record_rank = 1
+  ),
+  qualifying_responses AS (
+    SELECT
+      event_key,
+      inquiry_id,
+      inquiry_channel,
+      inquiry_received_at,
+      response_at,
+      ROW_NUMBER() OVER (
+        PARTITION BY inquiry_id
+        ORDER BY response_at, event_key
+      ) AS response_rank
+    FROM event_deduplicated
+    WHERE response_at >= inquiry_received_at
+  ),
+  first_qualifying_responses AS (
+    SELECT
+      CAST(inquiry_received_at AS DATE) AS reporting_date,
+      CAST(DATE_TRUNC('month', inquiry_received_at) AS DATE) AS reporting_month,
+      inquiry_channel,
+      inquiry_id,
+      inquiry_received_at,
+      response_at AS first_response_at,
+      EXTRACT(EPOCH FROM (response_at - inquiry_received_at)) AS response_seconds
+    FROM qualifying_responses
+    WHERE response_rank = 1
+  )
+  SELECT
+    reporting_date,
+    reporting_month,
+    inquiry_channel,
+    COUNT(*) AS responded_inquiry_count,
+    ROUND(AVG(response_seconds), 2) AS average_response_time_seconds,
+    ROUND(AVG(response_seconds) / 60.0, 2) AS average_response_time_minutes,
+    PERCENTILE_CONT(0.50) WITHIN GROUP (
+      ORDER BY response_seconds
+    ) AS median_response_time_seconds,
+    PERCENTILE_CONT(0.90) WITHIN GROUP (
+      ORDER BY response_seconds
+    ) AS p90_response_time_seconds,
+    MIN(response_seconds) AS minimum_response_time_seconds,
+    MAX(response_seconds) AS maximum_response_time_seconds,
+    CURRENT_TIMESTAMP AS calculated_at
+  FROM first_qualifying_responses
+  GROUP BY
+    reporting_date,
+    reporting_month,
+    inquiry_channel;
+
+Calculation Notes: |
+  1️⃣ Assign each inquiry to the reporting period containing its original receipt timestamp.
+  2️⃣ Use the earliest trusted server-side receipt timestamp and the first subsequent qualifying human response timestamp.
+  3️⃣ Calculate 24x7 calendar elapsed time in UTC; publish business-hours-adjusted response time as a separate KPI.
+  4️⃣ Exclude automated acknowledgements, bot messages, internal notes, outbound campaigns, spam, tests, and non-customer-visible activity.
+  5️⃣ Exclude unanswered inquiries from the average, but retain them in Inquiry Response Rate and Unanswered Inquiry Rate denominators.
+  6️⃣ Deduplicate inquiries and responses using canonical identifiers; reject negative durations and flag durations over 30 days for review.
+  7️⃣ Recalculate affected receipt-date cohorts when qualifying responses or corrections arrive late.
+
+Business Use Case: |
+  Customer Experience leadership compares response time, response rate, SLA compliance, and downstream conversion across digital channels and operating hours. If paid web inquiries received during evening periods show elevated response times and weaker conversion, leadership can adjust digital queue routing or staffing and measure whether the intervention improves both responsiveness and commercial outcomes.
+
+
+Source Data: Digital Analytics (GA4) + digital inquiry and messaging platforms
+
+Report Attributes: |
+  ["Inquiry received date","Inquiry received hour","Digital inquiry channel","Response channel","Inquiry type","Inquiry priority","Acquisition source","Campaign","Landing page","Customer journey stage","New versus returning customer","Market","Language","Device category","Platform","Assigned team","Business-hours indicator","SLA status"]
+
+Dashboard Usage: [Executive Customer Journey Dashboard, Digital Inquiry Operations Dashboard, Digital Engagement Performance Dashboard, Response SLA Dashboard, Inquiry Conversion Dashboard, Customer Experience Performance Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related KPIs: [Median Inquiry Response Time, 90th Percentile Inquiry Response Time, Inquiry Response Rate, Inquiry SLA Compliance Rate, Unanswered Inquiry Rate, Inquiry-to-Conversion Rate, Customer Satisfaction Score]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-10T18:31:04.637986+00:00
+
+Last Modified By: devyendarm
+
+
