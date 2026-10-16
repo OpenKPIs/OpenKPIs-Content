@@ -1,0 +1,709 @@
+# Metric: Course Completion Rate
+# Generated: 2026-09-09T22:30:40.293Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Metric Name: Course Completion Rate
+Formula: 100 * COUNT(DISTINCT CASE WHEN is_completion_eligible = TRUE AND completion_window_end_timestamp <= reporting_cutoff_timestamp AND completion_status = 'COMPLETED' AND completion_timestamp >= access_start_timestamp AND completion_timestamp <= completion_window_end_timestamp THEN learner_course_enrollment_id END) / NULLIF(COUNT(DISTINCT CASE WHEN is_completion_eligible = TRUE AND completion_window_end_timestamp <= reporting_cutoff_timestamp THEN learner_course_enrollment_id END), 0)
+
+Description: |
+  Measures the percentage of completion-eligible learner-course enrollments that satisfy all mandatory requirements for the applicable course version within the permitted completion window. The denominator includes only matured digital enrollments whose completion windows have closed by the reporting cutoff, ensuring that active learners are not prematurely classified as non-completers.
+
+Category: Conversion
+
+Tags: [metric]
+
+Industry: Education
+
+Priority: High
+
+Core Area: Engagement
+
+Scope: Item
+
+Measure Type: percentage
+
+Aggregation Window: Time based - Daily refresh with Monthly enrollment cohorts
+
+
+
+
+
+
+
+Google Analytics SQL: |
+  -- ==========================================
+  -- 1. GOOGLE BIGQUERY SQL
+  -- ==========================================
+  WITH runtime AS (
+    SELECT CURRENT_TIMESTAMP() AS metric_as_of_timestamp
+  ),
+  enrollment_ranked AS (
+    SELECT
+      e.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY e.enrollment_id
+        ORDER BY
+          e.updated_at DESC,
+          e.ingested_at DESC,
+          e.enrollment_timestamp DESC
+      ) AS row_num
+    FROM `your-project.learning_warehouse.lms_enrollments` AS e
+    WHERE e.enrollment_id IS NOT NULL
+  ),
+  enrollment_latest AS (
+    SELECT *
+    FROM enrollment_ranked
+    WHERE row_num = 1
+  
+    UNION ALL
+  
+    SELECT
+      e.*,
+      CAST(1 AS INT64) AS row_num
+    FROM `your-project.learning_warehouse.lms_enrollments` AS e
+    WHERE e.enrollment_id IS NULL
+  ),
+  lrs_completion AS (
+    SELECT
+      s.enrollment_id,
+      MIN(s.event_timestamp) AS lrs_completion_timestamp,
+      MAX(GREATEST(COALESCE(s.duration_seconds, 0), 0)) / 60.0 AS lrs_completed_duration_minutes
+    FROM `your-project.learning_warehouse.lrs_statements` AS s
+    INNER JOIN enrollment_latest AS e
+      ON s.enrollment_id = e.enrollment_id
+    CROSS JOIN runtime AS r
+    WHERE s.verb_id IN (
+        'http://adlnet.gov/expapi/verbs/completed',
+        'https://w3id.org/xapi/dod-isd/verbs/completed'
+      )
+      AND COALESCE(s.is_voided, FALSE) = FALSE
+      AND e.enrollment_timestamp IS NOT NULL
+      AND s.event_timestamp >= e.enrollment_timestamp
+      AND s.event_timestamp <= r.metric_as_of_timestamp
+    GROUP BY s.enrollment_id
+  ),
+  completion_candidates AS (
+    SELECT
+      e.*,
+      CASE
+        WHEN e.completion_timestamp >= e.enrollment_timestamp
+         AND e.completion_timestamp <= r.metric_as_of_timestamp
+        THEN e.completion_timestamp
+        ELSE NULL
+      END AS valid_lms_completion_timestamp,
+      lc.lrs_completion_timestamp,
+      lc.lrs_completed_duration_minutes,
+      r.metric_as_of_timestamp
+    FROM enrollment_latest AS e
+    LEFT JOIN lrs_completion AS lc
+      ON e.enrollment_id = lc.enrollment_id
+    CROSS JOIN runtime AS r
+    WHERE e.enrollment_timestamp IS NOT NULL
+      AND e.enrollment_timestamp <= r.metric_as_of_timestamp
+  ),
+  prepared AS (
+    SELECT
+      DATE_TRUNC(DATE(e.enrollment_timestamp), MONTH) AS reporting_period_start,
+      LAST_DAY(DATE(e.enrollment_timestamp), MONTH) AS reporting_period_end,
+      e.enrollment_id,
+      e.user_id,
+      e.course_id,
+      e.enrollment_timestamp,
+      CASE
+        WHEN e.valid_lms_completion_timestamp IS NULL THEN e.lrs_completion_timestamp
+        WHEN e.lrs_completion_timestamp IS NULL THEN e.valid_lms_completion_timestamp
+        ELSE LEAST(e.valid_lms_completion_timestamp, e.lrs_completion_timestamp)
+      END AS completion_timestamp,
+      CASE
+        WHEN e.enrollment_id IS NOT NULL
+         AND e.user_id IS NOT NULL
+         AND e.course_id IS NOT NULL
+         AND COALESCE(e.is_deleted, FALSE) = FALSE
+         AND COALESCE(e.is_test_record, FALSE) = FALSE
+         AND UPPER(TRIM(COALESCE(e.enrollment_status, 'ENROLLED'))) NOT IN
+             ('CANCELLED', 'CANCELED', 'VOIDED', 'DELETED')
+        THEN TRUE
+        ELSE FALSE
+      END AS is_eligible,
+      CASE
+        WHEN e.enrollment_id IS NULL
+          OR e.user_id IS NULL
+          OR e.course_id IS NULL
+        THEN TRUE
+        ELSE FALSE
+      END AS is_data_quality_excluded,
+      c.course_code,
+      c.course_title,
+      c.course_version,
+      c.course_type,
+      c.delivery_mode,
+      c.subject_area,
+      c.difficulty_level,
+      c.language_code,
+      c.instructor_id,
+      c.instructor_name,
+      c.department_id,
+      c.department_name,
+      c.program_id,
+      c.program_name,
+      e.organization_id,
+      o.organization_name,
+      e.tenant_id,
+      u.country_code AS learner_country_code,
+      u.region AS learner_region,
+      u.learner_segment,
+      e.enrollment_channel,
+      e.enrollment_type,
+      COALESCE(e.cohort_name, FORMAT_DATE('%Y-%m', DATE(e.enrollment_timestamp))) AS enrollment_cohort,
+      COALESCE(e.required_course_flag, FALSE) AS required_course_flag,
+      COALESCE(c.certification_flag, FALSE) AS certification_flag,
+      COALESCE(c.credit_bearing_flag, FALSE) AS credit_bearing_flag,
+      COALESCE(c.is_active, FALSE) AS course_active_flag,
+      DATE(c.publish_timestamp) AS course_publish_date,
+      DATE(c.retire_timestamp) AS course_retire_date,
+      c.duration_minutes AS total_duration_minutes,
+      GREATEST(
+        COALESCE(e.completed_duration_minutes, e.lrs_completed_duration_minutes, 0),
+        0
+      ) AS completed_duration_minutes
+    FROM completion_candidates AS e
+    LEFT JOIN `your-project.learning_warehouse.course_catalog` AS c
+      ON e.course_id = c.course_id
+    LEFT JOIN `your-project.learning_warehouse.learner_profiles` AS u
+      ON e.user_id = u.user_id
+    LEFT JOIN `your-project.learning_warehouse.organizations` AS o
+      ON e.organization_id = o.organization_id
+  ),
+  aggregated AS (
+    SELECT
+      reporting_period_start,
+      reporting_period_end,
+      course_id,
+      course_code,
+      course_title,
+      course_version,
+      course_type,
+      delivery_mode,
+      subject_area,
+      difficulty_level,
+      language_code,
+      instructor_id,
+      instructor_name,
+      department_id,
+      department_name,
+      program_id,
+      program_name,
+      organization_id,
+      organization_name,
+      tenant_id,
+      learner_country_code,
+      learner_region,
+      learner_segment,
+      enrollment_channel,
+      enrollment_type,
+      enrollment_cohort,
+      required_course_flag,
+      certification_flag,
+      credit_bearing_flag,
+      course_active_flag,
+      course_publish_date,
+      course_retire_date,
+      total_duration_minutes,
+      COUNTIF(is_eligible AND completion_timestamp IS NOT NULL) AS completed_enrollment_count,
+      COUNTIF(is_eligible) AS eligible_enrollment_count,
+      SUM(
+        IF(
+          is_eligible AND completion_timestamp IS NOT NULL,
+          completed_duration_minutes,
+          0
+        )
+      ) AS completed_duration_minutes,
+      AVG(
+        IF(
+          is_eligible AND completion_timestamp IS NOT NULL,
+          TIMESTAMP_DIFF(completion_timestamp, enrollment_timestamp, SECOND) / 86400.0,
+          NULL
+        )
+      ) AS average_days_to_complete,
+      APPROX_QUANTILES(
+        IF(
+          is_eligible AND completion_timestamp IS NOT NULL,
+          TIMESTAMP_DIFF(completion_timestamp, enrollment_timestamp, SECOND) / 86400.0,
+          NULL
+        ),
+        100 IGNORE NULLS
+      )[SAFE_OFFSET(50)] AS median_days_to_complete,
+      MIN(IF(is_eligible, enrollment_timestamp, NULL)) AS first_enrollment_timestamp,
+      MAX(
+        IF(
+          is_eligible AND completion_timestamp IS NOT NULL,
+          completion_timestamp,
+          NULL
+        )
+      ) AS last_completion_timestamp,
+      COUNTIF(is_data_quality_excluded) AS data_quality_excluded_count
+    FROM prepared
+    GROUP BY
+      reporting_period_start,
+      reporting_period_end,
+      course_id,
+      course_code,
+      course_title,
+      course_version,
+      course_type,
+      delivery_mode,
+      subject_area,
+      difficulty_level,
+      language_code,
+      instructor_id,
+      instructor_name,
+      department_id,
+      department_name,
+      program_id,
+      program_name,
+      organization_id,
+      organization_name,
+      tenant_id,
+      learner_country_code,
+      learner_region,
+      learner_segment,
+      enrollment_channel,
+      enrollment_type,
+      enrollment_cohort,
+      required_course_flag,
+      certification_flag,
+      credit_bearing_flag,
+      course_active_flag,
+      course_publish_date,
+      course_retire_date,
+      total_duration_minutes
+  )
+  SELECT
+    a.reporting_period_start,
+    a.reporting_period_end,
+    r.metric_as_of_timestamp,
+    'Course Completion Rate' AS metric_name,
+    'PERCENT' AS metric_unit,
+    'Completed eligible enrollments' AS numerator_name,
+    'All eligible enrollments' AS denominator_name,
+    a.completed_enrollment_count,
+    a.eligible_enrollment_count,
+    SAFE_DIVIDE(a.completed_enrollment_count, a.eligible_enrollment_count) AS course_completion_rate,
+    ROUND(
+      100 * SAFE_DIVIDE(a.completed_enrollment_count, a.eligible_enrollment_count),
+      2
+    ) AS rate_percentage,
+    CASE
+      WHEN a.eligible_enrollment_count = 0 THEN 'NO_ELIGIBLE_ENROLLMENTS'
+      WHEN a.completed_enrollment_count = a.eligible_enrollment_count THEN 'FULLY_COMPLETED'
+      WHEN a.completed_enrollment_count > 0 THEN 'PARTIALLY_COMPLETED'
+      ELSE 'NO_COMPLETIONS'
+    END AS completion_status,
+    a.course_id,
+    a.course_code,
+    a.course_title,
+    a.course_version,
+    a.course_type,
+    a.delivery_mode,
+    a.subject_area,
+    a.difficulty_level,
+    a.language_code,
+    a.instructor_id,
+    a.instructor_name,
+    a.department_id,
+    a.department_name,
+    a.program_id,
+    a.program_name,
+    a.organization_id,
+    a.organization_name,
+    a.tenant_id,
+    a.learner_country_code,
+    a.learner_region,
+    a.learner_segment,
+    a.enrollment_channel,
+    a.enrollment_type,
+    a.enrollment_cohort,
+    a.required_course_flag,
+    a.certification_flag,
+    a.credit_bearing_flag,
+    a.course_active_flag,
+    a.course_publish_date,
+    a.course_retire_date,
+    a.total_duration_minutes,
+    a.completed_duration_minutes,
+    ROUND(a.average_days_to_complete, 2) AS average_days_to_complete,
+    ROUND(a.median_days_to_complete, 2) AS median_days_to_complete,
+    a.first_enrollment_timestamp,
+    a.last_completion_timestamp,
+    a.data_quality_excluded_count
+  FROM aggregated AS a
+  CROSS JOIN runtime AS r;
+
+AEP Query Service SQL: |
+  -- ==========================================
+  -- 2. ADOBE AEP QUERY SERVICE SQL
+  -- ==========================================
+  WITH runtime AS (
+    SELECT CURRENT_TIMESTAMP AS metric_as_of_timestamp
+  ),
+  enrollment_ranked AS (
+    SELECT
+      e.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY e.enrollment_id
+        ORDER BY
+          e.updated_at DESC,
+          e.ingested_at DESC,
+          e.enrollment_timestamp DESC
+      ) AS row_num
+    FROM aep_backend_lms_enrollments AS e
+    WHERE e.enrollment_id IS NOT NULL
+  ),
+  enrollment_latest AS (
+    SELECT *
+    FROM enrollment_ranked
+    WHERE row_num = 1
+  
+    UNION ALL
+  
+    SELECT
+      e.*,
+      CAST(1 AS BIGINT) AS row_num
+    FROM aep_backend_lms_enrollments AS e
+    WHERE e.enrollment_id IS NULL
+  ),
+  lrs_completion AS (
+    SELECT
+      s.enrollment_id,
+      MIN(s.event_timestamp) AS lrs_completion_timestamp,
+      MAX(GREATEST(COALESCE(s.duration_seconds, 0), 0)) / 60.0 AS lrs_completed_duration_minutes
+    FROM aep_backend_lrs_statements AS s
+    INNER JOIN enrollment_latest AS e
+      ON s.enrollment_id = e.enrollment_id
+    CROSS JOIN runtime AS r
+    WHERE s.verb_id IN (
+        'http://adlnet.gov/expapi/verbs/completed',
+        'https://w3id.org/xapi/dod-isd/verbs/completed'
+      )
+      AND COALESCE(s.is_voided, FALSE) = FALSE
+      AND e.enrollment_timestamp IS NOT NULL
+      AND s.event_timestamp >= e.enrollment_timestamp
+      AND s.event_timestamp <= r.metric_as_of_timestamp
+    GROUP BY s.enrollment_id
+  ),
+  completion_candidates AS (
+    SELECT
+      e.*,
+      CASE
+        WHEN e.completion_timestamp >= e.enrollment_timestamp
+         AND e.completion_timestamp <= r.metric_as_of_timestamp
+        THEN e.completion_timestamp
+        ELSE NULL
+      END AS valid_lms_completion_timestamp,
+      lc.lrs_completion_timestamp,
+      lc.lrs_completed_duration_minutes,
+      r.metric_as_of_timestamp
+    FROM enrollment_latest AS e
+    LEFT JOIN lrs_completion AS lc
+      ON e.enrollment_id = lc.enrollment_id
+    CROSS JOIN runtime AS r
+    WHERE e.enrollment_timestamp IS NOT NULL
+      AND e.enrollment_timestamp <= r.metric_as_of_timestamp
+  ),
+  prepared AS (
+    SELECT
+      CAST(DATE_TRUNC('month', e.enrollment_timestamp) AS DATE) AS reporting_period_start,
+      CAST(
+        DATE_TRUNC('month', e.enrollment_timestamp)
+          + INTERVAL '1 month'
+          - INTERVAL '1 day'
+        AS DATE
+      ) AS reporting_period_end,
+      e.enrollment_id,
+      e.user_id,
+      e.course_id,
+      e.enrollment_timestamp,
+      CASE
+        WHEN e.valid_lms_completion_timestamp IS NULL THEN e.lrs_completion_timestamp
+        WHEN e.lrs_completion_timestamp IS NULL THEN e.valid_lms_completion_timestamp
+        WHEN e.valid_lms_completion_timestamp <= e.lrs_completion_timestamp
+        THEN e.valid_lms_completion_timestamp
+        ELSE e.lrs_completion_timestamp
+      END AS completion_timestamp,
+      CASE
+        WHEN e.enrollment_id IS NOT NULL
+         AND e.user_id IS NOT NULL
+         AND e.course_id IS NOT NULL
+         AND COALESCE(e.is_deleted, FALSE) = FALSE
+         AND COALESCE(e.is_test_record, FALSE) = FALSE
+         AND UPPER(TRIM(COALESCE(e.enrollment_status, 'ENROLLED'))) NOT IN
+             ('CANCELLED', 'CANCELED', 'VOIDED', 'DELETED')
+        THEN 1
+        ELSE 0
+      END AS is_eligible,
+      CASE
+        WHEN e.enrollment_id IS NULL
+          OR e.user_id IS NULL
+          OR e.course_id IS NULL
+        THEN 1
+        ELSE 0
+      END AS is_data_quality_excluded,
+      c.course_code,
+      c.course_title,
+      c.course_version,
+      c.course_type,
+      c.delivery_mode,
+      c.subject_area,
+      c.difficulty_level,
+      c.language_code,
+      c.instructor_id,
+      c.instructor_name,
+      c.department_id,
+      c.department_name,
+      c.program_id,
+      c.program_name,
+      e.organization_id,
+      o.organization_name,
+      e.tenant_id,
+      u.country_code AS learner_country_code,
+      u.region AS learner_region,
+      u.learner_segment,
+      e.enrollment_channel,
+      e.enrollment_type,
+      COALESCE(e.cohort_name, TO_CHAR(e.enrollment_timestamp, 'YYYY-MM')) AS enrollment_cohort,
+      COALESCE(e.required_course_flag, FALSE) AS required_course_flag,
+      COALESCE(c.certification_flag, FALSE) AS certification_flag,
+      COALESCE(c.credit_bearing_flag, FALSE) AS credit_bearing_flag,
+      COALESCE(c.is_active, FALSE) AS course_active_flag,
+      CAST(c.publish_timestamp AS DATE) AS course_publish_date,
+      CAST(c.retire_timestamp AS DATE) AS course_retire_date,
+      c.duration_minutes AS total_duration_minutes,
+      GREATEST(
+        COALESCE(e.completed_duration_minutes, e.lrs_completed_duration_minutes, 0),
+        0
+      ) AS completed_duration_minutes
+    FROM completion_candidates AS e
+    LEFT JOIN aep_backend_course_catalog AS c
+      ON e.course_id = c.course_id
+    LEFT JOIN aep_backend_learner_profiles AS u
+      ON e.user_id = u.user_id
+    LEFT JOIN aep_backend_organizations AS o
+      ON e.organization_id = o.organization_id
+  ),
+  aggregated AS (
+    SELECT
+      reporting_period_start,
+      reporting_period_end,
+      course_id,
+      course_code,
+      course_title,
+      course_version,
+      course_type,
+      delivery_mode,
+      subject_area,
+      difficulty_level,
+      language_code,
+      instructor_id,
+      instructor_name,
+      department_id,
+      department_name,
+      program_id,
+      program_name,
+      organization_id,
+      organization_name,
+      tenant_id,
+      learner_country_code,
+      learner_region,
+      learner_segment,
+      enrollment_channel,
+      enrollment_type,
+      enrollment_cohort,
+      required_course_flag,
+      certification_flag,
+      credit_bearing_flag,
+      course_active_flag,
+      course_publish_date,
+      course_retire_date,
+      total_duration_minutes,
+      SUM(
+        CASE
+          WHEN is_eligible = 1 AND completion_timestamp IS NOT NULL THEN 1
+          ELSE 0
+        END
+      ) AS completed_enrollment_count,
+      SUM(CASE WHEN is_eligible = 1 THEN 1 ELSE 0 END) AS eligible_enrollment_count,
+      SUM(
+        CASE
+          WHEN is_eligible = 1 AND completion_timestamp IS NOT NULL
+          THEN completed_duration_minutes
+          ELSE 0
+        END
+      ) AS completed_duration_minutes,
+      AVG(
+        CASE
+          WHEN is_eligible = 1 AND completion_timestamp IS NOT NULL
+          THEN EXTRACT(EPOCH FROM (completion_timestamp - enrollment_timestamp)) / 86400.0
+          ELSE NULL
+        END
+      ) AS average_days_to_complete,
+      PERCENTILE_CONT(0.5) WITHIN GROUP (
+        ORDER BY CASE
+          WHEN is_eligible = 1 AND completion_timestamp IS NOT NULL
+          THEN EXTRACT(EPOCH FROM (completion_timestamp - enrollment_timestamp)) / 86400.0
+          ELSE NULL
+        END
+      ) AS median_days_to_complete,
+      MIN(
+        CASE
+          WHEN is_eligible = 1 THEN enrollment_timestamp
+          ELSE NULL
+        END
+      ) AS first_enrollment_timestamp,
+      MAX(
+        CASE
+          WHEN is_eligible = 1 AND completion_timestamp IS NOT NULL
+          THEN completion_timestamp
+          ELSE NULL
+        END
+      ) AS last_completion_timestamp,
+      SUM(is_data_quality_excluded) AS data_quality_excluded_count
+    FROM prepared
+    GROUP BY
+      reporting_period_start,
+      reporting_period_end,
+      course_id,
+      course_code,
+      course_title,
+      course_version,
+      course_type,
+      delivery_mode,
+      subject_area,
+      difficulty_level,
+      language_code,
+      instructor_id,
+      instructor_name,
+      department_id,
+      department_name,
+      program_id,
+      program_name,
+      organization_id,
+      organization_name,
+      tenant_id,
+      learner_country_code,
+      learner_region,
+      learner_segment,
+      enrollment_channel,
+      enrollment_type,
+      enrollment_cohort,
+      required_course_flag,
+      certification_flag,
+      credit_bearing_flag,
+      course_active_flag,
+      course_publish_date,
+      course_retire_date,
+      total_duration_minutes
+  )
+  SELECT
+    a.reporting_period_start,
+    a.reporting_period_end,
+    r.metric_as_of_timestamp,
+    'Course Completion Rate' AS metric_name,
+    'PERCENT' AS metric_unit,
+    'Completed eligible enrollments' AS numerator_name,
+    'All eligible enrollments' AS denominator_name,
+    a.completed_enrollment_count,
+    a.eligible_enrollment_count,
+    CAST(a.completed_enrollment_count AS DECIMAL(18,6))
+      / NULLIF(a.eligible_enrollment_count, 0) AS course_completion_rate,
+    ROUND(
+      100.0 * a.completed_enrollment_count
+        / NULLIF(a.eligible_enrollment_count, 0),
+      2
+    ) AS rate_percentage,
+    CASE
+      WHEN a.eligible_enrollment_count = 0 THEN 'NO_ELIGIBLE_ENROLLMENTS'
+      WHEN a.completed_enrollment_count = a.eligible_enrollment_count THEN 'FULLY_COMPLETED'
+      WHEN a.completed_enrollment_count > 0 THEN 'PARTIALLY_COMPLETED'
+      ELSE 'NO_COMPLETIONS'
+    END AS completion_status,
+    a.course_id,
+    a.course_code,
+    a.course_title,
+    a.course_version,
+    a.course_type,
+    a.delivery_mode,
+    a.subject_area,
+    a.difficulty_level,
+    a.language_code,
+    a.instructor_id,
+    a.instructor_name,
+    a.department_id,
+    a.department_name,
+    a.program_id,
+    a.program_name,
+    a.organization_id,
+    a.organization_name,
+    a.tenant_id,
+    a.learner_country_code,
+    a.learner_region,
+    a.learner_segment,
+    a.enrollment_channel,
+    a.enrollment_type,
+    a.enrollment_cohort,
+    a.required_course_flag,
+    a.certification_flag,
+    a.credit_bearing_flag,
+    a.course_active_flag,
+    a.course_publish_date,
+    a.course_retire_date,
+    a.total_duration_minutes,
+    a.completed_duration_minutes,
+    ROUND(a.average_days_to_complete, 2) AS average_days_to_complete,
+    ROUND(a.median_days_to_complete, 2) AS median_days_to_complete,
+    a.first_enrollment_timestamp,
+    a.last_completion_timestamp,
+    a.data_quality_excluded_count
+  FROM aggregated AS a
+  CROSS JOIN runtime AS r;
+
+Calculation Notes: |
+  1️⃣ Calculate at the distinct learner-course-enrollment grain and count each eligible enrollment once.
+  2️⃣ Include only enrollments whose completion window ended on or before the reporting cutoff; exclude still-active completion opportunities.
+  3️⃣ Recognize completion only when every mandatory rule for the applicable course version is satisfied within the allowed window.
+  4️⃣ Use the earliest valid completion timestamp when duplicate or conflicting completion events exist.
+  5️⃣ Exclude test, sandbox, QA, bot, administrator, instructor, deleted, fraudulent, canceled, and administratively ineligible enrollments.
+  6️⃣ Exclude records missing eligibility, access-start, course-version, or completion-window data from the metric and route them to data-quality reporting.
+  7️⃣ Return null when the eligible denominator is zero and restate affected cohorts when authoritative late-arriving events or corrections are received.
+
+Business Use Case: |
+  The Learning Product organization monitors monthly matured-cohort completion rates by course version, delivery format, learner segment, and assessment path. When a high-volume course falls below target, the team identifies the modules or assessments associated with abandonment, deploys content, reminder, or instructional changes, and compares completion-rate lift across subsequent matured cohorts.
+
+
+Source Data: Digital Learning Platforms (LMS + LRS + Course Catalog)
+
+Report Attributes: |
+  ["Enrollment Cohort","Course","Course Version","Program","Subject Area","Instructor","Digital Delivery Format","Learner Segment","Enrollment Channel","Enrollment Type","Organization","Geography","Language","Required Course Flag","Certification Flag","Completion Window"]
+
+Dashboard Usage: [Executive Learning Outcomes Dashboard, Digital Course Portfolio Performance Dashboard, Learner Engagement Dashboard, Instructor Effectiveness Dashboard, Enterprise Training Compliance Dashboard]
+
+Segment Eligibility: |
+  true
+
+Related Metrics: [Course Enrollment Count, Course Completion Count, Course Abandonment Rate, Course Withdrawal Rate, Assessment Pass Rate, Average Time to Course Completion, On-Time Course Completion Rate]
+
+Derived KPIs: [Course Completion Rate vs Target, Course Completion Rate Change, Course Completion Rate Lift, On-Time Course Completion Index, Completion-Adjusted Enrollment Yield]
+
+Data Sensitivity: internal
+
+Contains PII: No
+
+Status: draft
+
+Contributed By: devyendarm
+
+Created At: 2026-09-09T22:30:39.745031+00:00
+
+Last Modified By: devyendarm
+
+
