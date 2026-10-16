@@ -1,0 +1,79 @@
+# Event: Proof of Delivery Confirmation
+# Generated: 2026-09-12T19:30:05.263Z
+# Contributed by: devyendarm
+# Last modified by: devyendarm
+
+Event Name: Proof of Delivery Confirmation
+Event Serialization: once per delivery_id per accepted confirmation outcome
+
+Description: |
+  Records the verified confirmation that a shipment or package was delivered, including the confirmation method, recipient evidence, delivery time, location, and exception details. It measures completion of the physical delivery obligation and the availability and quality of evidence required for customer service, settlement, compliance, and claims resolution.
+
+Category: Conversion
+
+Tags: [event]
+
+Industry: Logistics & Supply Chain
+
+Priority: High
+
+Core Area: Generic
+
+
+Event Type: custom
+
+Aggregation Window: Event; Time based - Hourly/Daily/Monthly/Yearly
+
+
+
+
+
+
+
+Parameters: |
+  {"stop_id":"string - identifier of the route stop at which the delivery confirmation was recorded","currency":"string - ISO 4217 currency code for the cash-on-delivery amount","event_id":"string - globally unique identifier assigned to the proof-of-delivery confirmation event","latitude":"number - latitude of the confirmation location in decimal degrees when location capture is permitted","order_id":"string - identifier of the customer or fulfillment order associated with the delivery","route_id":"string - identifier of the planned or executed delivery route","timezone":"string - IANA timezone associated with the delivery location and local operating calendar","device_id":"string - governed identifier of the scanner, handheld device, or mobile application instance submitting the confirmation","driver_id":"string - governed identifier of the driver, courier, or delivery associate recording the confirmation","longitude":"number - longitude of the confirmation location in decimal degrees when location capture is permitted","carrier_id":"string - enterprise identifier for the carrier or logistics service provider performing the delivery","package_id":"string - unique identifier for the physical package, parcel, pallet, or handling unit being confirmed","vehicle_id":"string - governed identifier of the vehicle used for the delivery","delivery_id":"string - unique identifier for the planned delivery obligation or delivery execution record","shipment_id":"string - unique identifier for the end-to-end shipment containing the delivered goods","carrier_scac":"string - Standard Carrier Alpha Code identifying the carrier when applicable","service_level":"string - contracted transportation service level such as same-day, next-day, express, or standard","source_system":"string - authoritative application or integration that supplied the confirmation record","attempt_number":"integer - sequential delivery attempt number associated with the accepted confirmation","exception_code":"string - normalized code for an issue recorded with the confirmation, such as damaged, short, refused, inaccessible, or proof_missing","photo_captured":"boolean - indicates whether a delivery evidence photograph was captured","recipient_name":"string - name or recorded identifier of the person acknowledging receipt when collected","recipient_type":"string - classification of the receiving party, such as named_recipient, household_member, receptionist, dock_agent, neighbor, locker, or unattended","damage_reported":"boolean - indicates whether visible shipment or item damage was reported at delivery","delivery_status":"string - normalized delivery outcome at confirmation, such as delivered, partially_delivered, refused, or delivery_failed","event_timestamp":"string - UTC timestamp in ISO 8601 format when the event was created or emitted by the source system","idempotency_key":"string - source-provided key used to identify retries and prevent duplicate processing of the same confirmation","photo_reference":"string - protected reference or URI pointing to the stored delivery photograph rather than embedding the image","safe_place_code":"string - normalized code identifying an approved unattended delivery location such as porch, garage, mailroom, or reception","tracking_number":"string - carrier-facing tracking identifier used to trace the shipment","exception_reason":"string - controlled or free-text explanation supporting the delivery exception code","confirmation_type":"string - proof method used, such as signature, photo, PIN, barcode_scan, geofence, recipient_attestation, or driver_attestation","shortage_reported":"boolean - indicates whether the recipient or driver reported missing packages, units, or quantities","delivery_timestamp":"string - UTC timestamp in ISO 8601 format when physical delivery was reported to have occurred","signature_captured":"boolean - indicates whether a valid recipient signature was captured with the confirmation","signature_required":"boolean - indicates whether a recipient signature was contractually or operationally required","confirmation_source":"string - channel that produced the confirmation, such as driver_app, carrier_api, EDI, handheld_scanner, customer_portal, or manual_entry","delivery_address_id":"string - governed identifier for the delivery destination address without exposing the full street address","signature_reference":"string - protected reference or URI pointing to the stored signature artifact rather than the signature image itself","geolocation_captured":"boolean - indicates whether device coordinates were captured at confirmation time","confirmation_timestamp":"string - UTC timestamp in ISO 8601 format when proof of delivery was captured or accepted","delivery_location_type":"string - physical destination classification such as residence, commercial_site, loading_dock, locker, pickup_point, or safe_place","recipient_relationship":"string - relationship of the recipient to the consignee, such as self, employee, household_member, neighbor, or authorized_agent","cash_on_delivery_amount":"number - monetary amount expected or recorded for cash-on-delivery settlement","destination_postal_code":"string - postal or ZIP code of the delivery destination, subject to privacy and regional retention controls","destination_country_code":"string - ISO 3166-1 alpha-2 country code of the delivery destination","geofence_distance_meters":"number - distance in meters between the captured confirmation coordinates and the approved delivery point","cash_on_delivery_required":"boolean - indicates whether payment collection was required before completing delivery","cash_on_delivery_collected":"boolean - indicates whether the required cash-on-delivery payment was successfully collected"}
+
+Calculation Notes: |
+  1️⃣ Treat event as proof-of-delivery only if delivery_id, confirmation_timestamp, delivery_status, confirmation_type, and source_system are validated.  
+  2️⃣ Deduplicate retries using idempotency_key; if unavailable, use delivery_id, package_id, confirmation_type, confirmation_timestamp, and source_system.  
+  3️⃣ Count separate packages independently for package-level confirmations; use delivery_id for delivery-level reporting.  
+  4️⃣ A corrected confirmation supersedes earlier versions; retain both for audit history while reporting the latest non-reversed state.  
+  5️⃣ Exclude test shipments, deleted records, and confirmations without valid delivery obligations from production KPIs.  
+  6️⃣ Use delivery_timestamp for operational reporting, confirmation_timestamp for proof-capture timeliness, and event_timestamp for ingestion monitoring.  
+  7️⃣ Protect sensitive data through role-based access, masking, retention, and regional privacy controls.
+
+Business Use Case: |
+  The Vice President of Last-Mile Operations reviews proof-of-delivery completion, evidence completeness, confirmation latency, and geofence compliance by carrier, depot, route, service level, and confirmation source. Carriers or routes with elevated missing-proof, off-geofence, late-submission, damage, or shortage rates are assigned corrective actions such as driver retraining, mobile-device remediation, contract service-credit review, enhanced recipient verification, or temporary shipment reallocation; customer service teams also use the accepted confirmation record to resolve delivery disputes and claims.
+
+
+Source Data: Delivery Management System, Transportation Management System, Carrier EDI/API, Driver Mobile Application, Handheld Scanners, Order Management System, and Proof-of-Delivery Evidence Repository
+
+    Report Attributes: |
+  ["Delivery Date","Carrier","Carrier SCAC","Service Level","Delivery Status","Confirmation Type","Confirmation Source","Proof of Delivery Completeness Status","Proof of Delivery Validity Status","Geofence Compliance Status","Signature Compliance Status","Photo Evidence Status","Recipient Type","Delivery Country","Delivery Postal Code","Delivery Location Type","Delivery Exception Category","Attempt Number","Route","Driver","Source System"]
+
+    Dashboard Usage: [Executive Last-Mile Delivery Performance, Proof of Delivery Compliance, Carrier Service Quality Scorecard, Delivery Exceptions and Claims, First-Attempt Delivery Performance, Driver and Route Execution, Customer Delivery Experience, Cash on Delivery Compliance, Operational Data Quality Monitoring]
+
+    Segment Eligibility: |
+  true
+
+    Related Dimensions: [Delivery Date, Delivery Time, Shipment, Package, Order, Carrier, Carrier SCAC, Service Level, Delivery Status, Confirmation Type, Confirmation Source, Recipient Type, Delivery Country, Delivery Postal Code, Delivery Location Type, Safe Place, Delivery Exception, Driver, Route, Vehicle, Delivery Attempt Number, Source System]
+
+    Derived Dimensions: [Proof of Delivery Completeness Status, Proof of Delivery Validity Status, Confirmation Latency Band, Geofence Compliance Status, Signature Compliance Status, Photo Evidence Status, Recipient Verification Status, Delivery Exception Category, Delivery Day of Week, Delivery Hour Band, First-Attempt Delivery Status, Cash on Delivery Compliance Status, Late-Arriving Confirmation Status, Unattended Delivery Status]
+
+    Derived Metrics: [Proof of Delivery Confirmation Count, Confirmed Delivery Count, Unique Confirmed Shipment Count, Unique Confirmed Package Count, Signature Confirmation Count, Photo Confirmation Count, Geolocated Confirmation Count, Incomplete Proof of Delivery Count, Invalid Proof of Delivery Count, Delivery Exception Confirmation Count, First-Attempt Confirmed Delivery Count, Proof of Delivery Confirmation Latency, Geofence-Compliant Confirmation Count, Cash on Delivery Confirmed Collection Count, Damage Report Count, Shortage Report Count]
+
+    Derived KPIs: [Proof of Delivery Completion Rate, Proof of Delivery Evidence Completeness Rate, Proof of Delivery Validity Rate, Signature Compliance Rate, Photo Evidence Compliance Rate, Geofence Compliance Rate, First-Attempt Delivery Success Rate, On-Time Proof of Delivery Submission Rate, Delivery Exception Rate, Damage at Delivery Rate, Shortage at Delivery Rate, Cash on Delivery Collection Compliance Rate, Confirmed Delivery Conversion Rate]
+
+    Data Sensitivity: restricted
+
+    Contains PII: Yes
+
+    Status: draft
+
+    Contributed By: devyendarm
+
+    Created At: 2026-09-12T19:30:04.333845+00:00
+
+    Last Modified By: devyendarm
+
+    
