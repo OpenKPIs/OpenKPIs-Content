@@ -1,7 +1,7 @@
 # Event: Product Viewed
-# Generated: 2026-10-28T19:54:20.465Z
+# Generated: 2026-10-28T23:56:47.286Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Event Name: Product Viewed
 
@@ -14,33 +14,185 @@ Category: Engagement
 
 Tags: [view-item, commerce event]
 
+Industry: [Retail, E-commerce]
+
+Business Criticality: High
+
+Journey / Navigation Area: [Discovery, Product Experience]
+
+Owning Function: E-commerce Operations
+
+Scope: Event
+
+Measurement Channels: [Web]
+
+GA4 Event Type: Recommended
+
+Adobe Event Type: Standard XDM
+
+Trigger Condition: WHEN product viewed completes, THEN emit view_item.
+
+GA4 Event: |
+  view_item
+
+Adobe Event: |
+  commerce.productViews
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "product": [
+        {
+          "productInfo": {
+            "productID": "SKU-1"
+          }
+        }
+      ],
+      "user": [
+        {
+          "profile": [
+            {
+              "profileInfo": {
+                "profileID": "VISITOR-123"
+              }
+            }
+          ]
+        }
+      ],
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "view_item",
+            "eventID": "view-item-1"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  [
+    {
+      "event": "view_item",
+      "event_id": "view-item-1",
+      "visitor_id": "VISITOR-123",
+      "ecommerce": {
+        "items": [
+          {
+            "item_id": "SKU-1"
+          }
+        ]
+      }
+    }
+  ]
+
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "commerce.productViews",
+      "eventInfo": {
+        "eventId": "view-item-1",
+        "visitorId": "VISITOR-123",
+        "itemId": "SKU-1"
+      }
+    }
+  ]
+
+XDM Mapping: |
+  [
+    {
+      "_id": "view-item-1",
+      "timestamp": "2026-10-16T12:00:00Z",
+      "eventType": "commerce.productViews",
+      "identityMap": {
+        "ECID": [
+          {
+            "id": "VISITOR-123",
+            "primary": true
+          }
+        ]
+      },
+      "commerce": {
+        "productViews": {
+          "value": 1
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1"
+        }
+      ]
+    }
+  ]
+
+Parameters: |
+  {
+    "item_id": {
+      "type": "string",
+      "paths": {
+        "w3": "digitalData.product.0.productInfo.productID",
+        "ga4": "ecommerce.items.0.item_id",
+        "xdm": "productListItems.0.SKU",
+        "adobe": "eventInfo.itemId"
+      },
+      "meaning": "Product identifier involved in the action",
+      "required": true
+    },
+    "event_id": {
+      "type": "string",
+      "paths": {
+        "w3": "digitalData.event.0.eventInfo.eventID",
+        "ga4": "event_id",
+        "xdm": "_id",
+        "adobe": "eventInfo.eventId"
+      },
+      "meaning": "Stable identifier for this event instance",
+      "purposes": [
+        "event_identity",
+        "deduplication"
+      ],
+      "required": true,
+      "justification": "Identifies one event and prevents duplicate processing during retries."
+    },
+    "visitor_id": {
+      "type": "string",
+      "paths": {
+        "w3": "digitalData.user.0.profile.0.profileInfo.profileID",
+        "ga4": "visitor_id",
+        "xdm": "identityMap.ECID.0.id",
+        "adobe": "eventInfo.visitorId"
+      },
+      "meaning": "Pseudonymous identity used to connect journey events",
+      "purposes": [
+        "event_identity",
+        "calculation"
+      ],
+      "required": true,
+      "justification": "Connects the same shopper across the required commerce events."
+    }
+  }
+
+Calculation Notes: |
+  1️⃣ Emit after the business action succeeds. 2️⃣ Keep the event key stable across retries. 3️⃣ Exclude test activity.
+
+Business Use Case: |
+  1️⃣ Analysts use this event in product-discovery reporting. 2️⃣ Teams compare the action across products and devices.
+
+
+Source Data: [Digital Analytics, Commerce Platform]
+
+Report Attributes: [Device Category, Customer Type]
+
+Segment Eligibility: |
+  Item ID EXISTS
 
 
 
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -48,5 +200,7 @@ Contributed By: devyendarm
 
 Created At: 2026-10-28T19:54:18.956+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-10-28T23:56:45.487+00:00
 
