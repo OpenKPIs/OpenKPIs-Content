@@ -1,9 +1,10 @@
 # Dimension: Viewed Product ID
-# Generated: 2026-10-29T00:07:02.428Z
+# Generated: 2026-10-29T00:07:24.736Z
 # Contributed by: devyendarm
-
+# Last modified by: devyendarm
 
 Dimension Name: Viewed Product ID
+Aliases: [Viewed Item ID]
 
 
 Description: |
@@ -13,31 +14,151 @@ Category: Engagement
 
 Tags: [product identifier, product views, product performance]
 
+Industry: [Retail, E-commerce]
+
+Business Criticality: High
+
+Journey / Navigation Area: [Discovery, Product Experience]
+
+Owning Function: Merchandising
+
+Scope: Product
+
+Measurement Channels: [Web, Mobile App]
+
+Data Type: string
+
+
+GA4 Event: |
+  view_item — records a product detail view
+
+Adobe Event: |
+  commerce.productViews — records a product detail view
+
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "product": [
+        {
+          "productInfo": {
+            "productID": "SKU-1"
+          }
+        }
+      ],
+      "user": [
+        {
+          "profile": [
+            {
+              "profileInfo": {
+                "profileID": "VISITOR-123"
+              }
+            }
+          ]
+        }
+      ],
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "view_item",
+            "eventID": "view-item-1"
+          }
+        }
+      ]
+    }
+  }
+
+GA4 Data Layer: |
+  [
+    {
+      "event": "view_item",
+      "event_id": "view-item-1",
+      "visitor_id": "VISITOR-123",
+      "ecommerce": {
+        "items": [
+          {
+            "item_id": "SKU-1"
+          }
+        ]
+      }
+    }
+  ]
+
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "commerce.productViews",
+      "eventInfo": {
+        "eventId": "view-item-1",
+        "visitorId": "VISITOR-123",
+        "itemId": "SKU-1"
+      }
+    }
+  ]
+
+XDM Mapping: |
+  [
+    {
+      "_id": "view-item-1",
+      "timestamp": "2026-10-16T12:00:00Z",
+      "eventType": "commerce.productViews",
+      "identityMap": {
+        "ECID": [
+          {
+            "id": "VISITOR-123",
+            "primary": true
+          }
+        ]
+      },
+      "commerce": {
+        "productViews": {
+          "value": 1
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1"
+        }
+      ]
+    }
+  ]
+
+Google Analytics SQL: |
+  SELECT event_timestamp, user_pseudo_id, item.item_id AS viewed_product_id
+  FROM `project.analytics.events_*`, UNNEST(items) AS item
+  WHERE _TABLE_SUFFIX BETWEEN @start_date AND @end_date
+    AND event_name = 'view_item'
+    AND item.item_id IS NOT NULL
+
+AEP Query Service SQL: |
+  SELECT timestamp, _id, item.SKU AS viewed_product_id
+  FROM {{AEP_EXPERIENCE_EVENT_DATASET}}
+  LATERAL VIEW EXPLODE(productListItems) items AS item
+  WHERE timestamp >= :start_timestamp
+    AND timestamp < :end_timestamp
+    AND eventType = 'commerce.productViews'
+    AND item.SKU IS NOT NULL
+
+Calculation Notes: |
+  1️⃣ Preserve the captured product identifier. 2️⃣ Keep missing values null. 3️⃣ Apply one governed identifier format across reports.
+
+Business Use Case: |
+  1️⃣ Merchandising teams compare interest by product. 2️⃣ Product teams find viewed products with weak cart progression.
+
+Dependencies:
+  Events: [view-item]
+
+Source Data: [Digital Analytics, Product Information]
+
+Report Attributes: [Product Name, Product Category, Brand, Device Category]
+
+Segment Eligibility: |
+  Item ID EXISTS
 
 
 
+Data Sensitivity: Internal
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Contains PII: No
 
 Status: draft
 
@@ -45,5 +166,7 @@ Contributed By: devyendarm
 
 Created At: 2026-10-29T00:07:01.72+00:00
 
+Last Modified By: devyendarm
 
+Last Modified At: 2026-10-29T00:07:24.212+00:00
 
