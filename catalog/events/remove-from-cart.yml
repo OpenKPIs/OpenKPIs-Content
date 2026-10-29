@@ -1,189 +1,244 @@
 # Event: Remove from Cart
-# Generated: 2026-09-23T15:49:54.089Z
+# Generated: 2026-10-29T21:07:12.598Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Event Name: Remove from Cart
-Event Serialization: always
+Aliases: [Cart Removal, Remove from Bag, Remove from Basket]
+
+Event Serialization: Fire once per confirmed removal; deduplicate by event_id. Reuse on retry; new ID for each new action.
 
 Description: |
-  Captures every confirmed removal of one or more product units from the cart, aligned to GA4 remove_from_cart and Adobe scRemove. Source event for Cart Removals and cart-edit analysis.
+  Records a confirmed removal of one or more product units from a shopping cart. It helps teams understand changes to cart contents and investigate removal patterns.
 
-Category: Conversion
+Category: Engagement
 
-Tags: [event, E-commerce: Cart & Checkout Funnel Analytics]
+Tags: [cart, cart removal, shopping behavior]
 
-Industry: E-commerce
+Industry: [E-commerce, Retail]
 
-Priority: Medium
+Business Criticality: Medium
 
-Core Area: Checkout
+Journey / Navigation Area: [Cart]
 
+Owning Function: Product Management
 
-Event Type: standard
+Scope: Event
 
-Aggregation Window: Event, Session, Daily, Weekly
+Measurement Channels: [Backend / API, Mobile App, Web]
+
+GA4 Event Type: Recommended
+
+Adobe Event Type: Standard XDM
+
+Trigger Condition: WHEN a cart change confirms removal of one or more product units, THEN emit remove_from_cart.
 
 GA4 Event: |
   remove_from_cart
 
 Adobe Event: |
-  scRemove
+  commerce.productListRemovals
 
 W3 Data Layer: |
   {
-    "event": "remove_from_cart",
-    "cart": {
-      "cartID": "{{cart_id}}",
-      "eventID": "{{event_id}}",
-      "price": {
-        "currency": "{{currency}}"
-      },
-      "attributes": {
-        "removalValue": "{{value}}"
-      },
-      "removeMethod": "{{remove_method}}",
-      "pageType": "{{page_type}}",
-      "item": [
+    "digitalData": {
+      "event": [
         {
-          "productInfo": {
-            "productID": "{{item_id}}",
-            "productName": "{{item_name}}",
-            "category": "{{item_category}}"
-          },
-          "price": {
-            "basePrice": "{{price}}"
-          },
-          "quantity": "{{quantity}}"
+          "eventInfo": {
+            "eventName": "remove_from_cart",
+            "eventId": "removal-7f82c1",
+            "timeStamp": "2026-10-29T14:30:00Z"
+          }
         }
-      ]
+      ],
+      "cart": {
+        "cartID": "cart-a91d42",
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU-1042"
+            },
+            "quantity": 2
+          },
+          {
+            "productInfo": {
+              "productID": "SKU-2086"
+            },
+            "quantity": 3
+          }
+        ]
+      }
     }
   }
 
 GA4 Data Layer: |
-  {
-    "event": "remove_from_cart",
-    "ecommerce": {
-      "currency": "{{currency}}",
-      "value": "{{value}}",
-      "cart_id": "{{cart_id}}",
-      "remove_method": "{{remove_method}}",
-      "page_type": "{{page_type}}",
-      "event_id": "{{event_id}}",
-      "items": [
-        {
-          "item_id": "{{item_id}}",
-          "item_name": "{{item_name}}",
-          "item_category": "{{item_category}}",
-          "price": "{{price}}",
-          "quantity": "{{quantity}}"
-        }
-      ]
+  [
+    {
+      "event": "remove_from_cart",
+      "cart_id": "cart-a91d42",
+      "event_id": "removal-7f82c1",
+      "ecommerce": {
+        "items": [
+          {
+            "item_id": "SKU-1042",
+            "quantity": 2
+          },
+          {
+            "item_id": "SKU-2086",
+            "quantity": 3
+          }
+        ]
+      }
     }
-  }
+  ]
 
 Adobe Client Data Layer: |
-  {
-    "event": "scRemove",
-    "eventInfo": {
-      "cartId": "{{cart_id}}",
-      "removeMethod": "{{remove_method}}",
-      "pageType": "{{page_type}}",
-      "eventId": "{{event_id}}"
-    },
-    "commerce": {
-      "productListRemovals": {
-        "value": 1
-      }
-    },
-    "product": {
-      "currency": "{{currency}}",
-      "value": "{{value}}",
-      "items": [
+  [
+    {
+      "event": "commerce.productListRemovals",
+      "eventInfo": {
+        "cartId": "cart-a91d42",
+        "eventId": "removal-7f82c1",
+        "timestamp": "2026-10-29T14:30:00Z"
+      },
+      "commerce": {
+        "productListRemovals": {
+          "value": 1
+        }
+      },
+      "productListItems": [
         {
-          "itemId": "{{item_id}}",
-          "itemName": "{{item_name}}",
-          "itemCategory": "{{item_category}}",
-          "price": "{{price}}",
-          "quantity": "{{quantity}}"
+          "SKU": "SKU-1042",
+          "quantity": 2
+        },
+        {
+          "SKU": "SKU-2086",
+          "quantity": 3
         }
       ]
     }
-  }
+  ]
 
 XDM Mapping: |
-  {
-    "eventType": "commerce.productListRemovals",
-    "commerce": {
-      "productListRemovals": {
-        "value": 1
-      }
-    },
-    "productListItems": [
-      {
-        "SKU": "{{item_id}}",
-        "name": "{{item_name}}",
-        "category": "{{item_category}}",
-        "currencyCode": "{{currency}}",
-        "priceTotal": "{{price}} * {{quantity}}",
-        "quantity": "{{quantity}}"
-      }
-    ],
-    "_tenant": {
-      "cartId": "{{cart_id}}",
-      "removeMethod": "{{remove_method}}",
-      "pageType": "{{page_type}}",
-      "eventId": "{{event_id}}"
+  [
+    {
+      "_id": "removal-7f82c1",
+      "timestamp": "2026-10-29T14:30:00Z",
+      "eventType": "commerce.productListRemovals",
+      "commerce": {
+        "productListRemovals": {
+          "value": 1
+        },
+        "cart": {
+          "cartID": "cart-a91d42"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1042",
+          "quantity": 2
+        },
+        {
+          "SKU": "SKU-2086",
+          "quantity": 3
+        }
+      ]
     }
-  }
+  ]
 
 Parameters: |
   {
-    "items": "array - removed products with item_id, item_name, item_category, price and quantity (removed units only)",
-    "currency": "string - ISO 4217 code, matching the add_to_cart currency",
-    "value": "number - sum of price × removed quantity across items",
-    "cart_id": "string - opaque cart identifier shared with add_to_cart and begin_checkout",
-    "remove_method": "string - how the removal happened: remove_button, quantity_decrease, clear_cart, system",
-    "page_type": "string - page where the removal happened, e.g. cart, mini_cart, checkout",
-    "event_id": "string - unique id per confirmed removal, used for deduplication"
+    "cart_id": {
+      "type": "string",
+      "paths": {
+        "w3": "digitalData.cart.cartID",
+        "ga4": "cart_id",
+        "xdm": "commerce.cart.cartID",
+        "adobe": "eventInfo.cartId"
+      },
+      "meaning": "Anonymous identifier of the cart changed",
+      "purposes": [
+        "event_identity"
+      ],
+      "required": true,
+      "justification": "Identifies the cart affected by the confirmed removal action."
+    },
+    "item_id": {
+      "type": "string",
+      "paths": {
+        "w3": "digitalData.cart.item.0.productInfo.productID",
+        "ga4": "ecommerce.items.0.item_id",
+        "xdm": "productListItems.0.SKU",
+        "adobe": "productListItems.0.SKU"
+      },
+      "meaning": "Product or SKU identifier for each removed line",
+      "required": true
+    },
+    "event_id": {
+      "type": "string",
+      "paths": {
+        "w3": "digitalData.event.0.eventInfo.eventId",
+        "ga4": "event_id",
+        "xdm": "_id",
+        "adobe": "eventInfo.eventId"
+      },
+      "meaning": "Anonymous identifier of the confirmed action, unchanged across retries",
+      "purposes": [
+        "event_identity",
+        "deduplication"
+      ],
+      "required": true,
+      "justification": "Distinguishes completed removal actions and prevents retries from counting twice."
+    },
+    "quantity": {
+      "type": "integer",
+      "paths": {
+        "w3": "digitalData.cart.item.0.quantity",
+        "ga4": "ecommerce.items.0.quantity",
+        "xdm": "productListItems.0.quantity",
+        "adobe": "productListItems.0.quantity"
+      },
+      "meaning": "Positive integer units removed from the product line, not units remaining",
+      "required": true
+    }
   }
 
 Calculation Notes: |
-  ["1️⃣ Shopper removals fire in the client after the cart service confirms the change, not on click; a failed cart update sends nothing.","2️⃣ Serialization always: one hit per confirmed action; dedupe on event_id so a retried request or double-click counts once.","3️⃣ On a quantity decrease, items[].quantity and value cover removed units only; a cleared cart sends one event listing every line.","4️⃣ Required: items (item_id or item_name), currency, value. Optional: cart_id, remove_method, page_type, event_id.","5️⃣ System removals (out of stock, expired cart) go server-side via GA4 Measurement Protocol, remove_method=system, same event_id dedupe.","6️⃣ No PII in parameters; cart_id is an opaque token. Respect analytics_storage consent; denied hits are not queued for later replay.","7️⃣ Common mistakes: firing on mini-cart open, sending the full line value on a one-unit decrease, re-firing when the cart re-renders."]
+  1️⃣ Record only confirmed changes; failed requests and cart re-renders emit nothing.
+  2️⃣ Count each removal action once across delivery paths; retries reuse event_id.
+  3️⃣ Report positive integer quantities removed, not quantities remaining.
+  4️⃣ A clear-cart action includes every removed line in one event.
+  5️⃣ Use the confirmed change time; inactivity alone is not a removal.
 
 Business Use Case: |
-  ["1️⃣ Merchandising reviews products with a high removal share weekly and checks price, size or stock messaging on the PDP.","2️⃣ Product team sees removals spike after the shipping cost appears in cart and tests showing shipping estimates earlier.","3️⃣ CRM team sends a price-drop or low-stock reminder for items removed by opted-in shoppers who did not purchase."]
+  1️⃣ Merchandising teams investigate products with rising removals before revising product information.
+  2️⃣ Product teams compare removal patterns before changing cart design.
 
-Dependencies:
-  Events: [add-to-cart]
 
-Source Data: Digital Analytics (GA4)
+Source Data: [Commerce Platform, Digital Analytics]
 
-    Report Attributes: |
-  Product Name; Item Category; Page Type; Remove Method; Device Category
+Report Attributes: [Cart ID, Item ID]
 
-    Dashboard Usage: [Cart & Checkout Funnel, Product Performance]
+Segment Eligibility: |
+  Cart ID EXISTS
 
-    Segment Eligibility: |
-  true
 
-    Related Dimensions: [product-name, item-category, page-type, currency, device-category]
 
-    
-    Derived Metrics: [cart-removals]
+Derived Metrics: [cart-removals]
 
-    
-    Data Sensitivity: Internal
+Derived KPIs: [abandoned-cart-recovery-rate, average-abandoned-cart-value]
 
-    Contains PII: No
+Data Sensitivity: Internal
 
-    Status: published
+Contains PII: No
 
-    Contributed By: devyendarm
+Status: published
 
-    Created At: 2026-09-23T15:47:06.711+00:00
+Contributed By: devyendarm
 
-    Last Modified By: devyendarm
+Created At: 2026-09-23T15:47:06.711+00:00
 
-    Last Modified At: 2026-09-23T15:49:53.63+00:00
+Last Modified By: devyendarm
+
+Last Modified At: 2026-10-29T21:07:11.837+00:00
 
