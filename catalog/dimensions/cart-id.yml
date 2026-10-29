@@ -1,5 +1,5 @@
 # Dimension: Cart ID
-# Generated: 2026-10-29T15:55:49.226Z
+# Generated: 2026-10-29T19:23:25.839Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -9,11 +9,11 @@ Aliases: [Cart Identifier]
 Formula: Cart ID = Collected shopping cart identifier
 
 Description: |
-  An opaque shopping cart identifier that groups actions without identifying a person. It supports cart activity analysis and, with compatible outcome events, analysis of progression and outcomes.
+  An opaque identifier for a shopping cart, captured with its actions. It groups cart activity so teams can investigate how carts are used.
 
 Category: Conversion
 
-Tags: [shopping cart, cart activity, cart progression]
+Tags: [shopping cart, cart activity, cart identifier]
 
 Industry: [E-commerce, Retail]
 
@@ -37,19 +37,119 @@ Adobe Event: |
   commerce.productListAdds — supplies the shopping cart identifier
 
 W3 Data Layer: |
-  {"digitalData":{"event":[{"eventInfo":{"eventName":"add_to_cart","timeStamp":"2026-10-29T12:00:00Z"},"attributes":{"event_id":"cart-add-A123","cart_add_count":1}}],"cart":{"cartID":"C123","item":[{"productInfo":{"productID":"SKU123"},"quantity":2},{"productInfo":{"productID":"SKU456"},"quantity":1}]}}}
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "add_to_cart",
+            "timeStamp": "2026-10-29T12:00:00Z"
+          },
+          "attributes": {
+            "event_id": "cart-add-A123"
+          }
+        }
+      ],
+      "cart": {
+        "cartID": "C123",
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU123"
+            },
+            "quantity": 2
+          },
+          {
+            "productInfo": {
+              "productID": "SKU456"
+            },
+            "quantity": 1
+          }
+        ]
+      }
+    }
+  }
 
 GA4 Data Layer: |
-  [{"event":"add_to_cart","event_id":"cart-add-A123","event_timestamp":"2026-10-29T12:00:00Z","cart_id":"C123","cart_add_count":1,"ecommerce":{"items":[{"item_id":"SKU123","quantity":2},{"item_id":"SKU456","quantity":1}]}}]
+  [
+    {
+      "event": "add_to_cart",
+      "event_id": "cart-add-A123",
+      "cart_id": "C123",
+      "ecommerce": {
+        "items": [
+          {
+            "item_id": "SKU123",
+            "quantity": 2
+          },
+          {
+            "item_id": "SKU456",
+            "quantity": 1
+          }
+        ]
+      }
+    }
+  ]
 
 Adobe Client Data Layer: |
-  [{"event":"commerce.productListAdds","eventInfo":{"eventId":"cart-add-A123","timestamp":"2026-10-29T12:00:00Z"},"commerce":{"productListAdds":{"value":1},"cart":{"cartID":"C123"}},"productListItems":[{"SKU":"SKU123","quantity":2},{"SKU":"SKU456","quantity":1}]}]
+  [
+    {
+      "event": "commerce.productListAdds",
+      "eventInfo": {
+        "eventId": "cart-add-A123",
+        "timestamp": "2026-10-29T12:00:00Z"
+      },
+      "commerce": {
+        "productListAdds": {
+          "value": 1
+        },
+        "cart": {
+          "cartID": "C123"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU123",
+          "quantity": 2
+        },
+        {
+          "SKU": "SKU456",
+          "quantity": 1
+        }
+      ]
+    }
+  ]
 
 XDM Mapping: |
-  [{"_id":"cart-add-A123","timestamp":"2026-10-29T12:00:00Z","eventType":"commerce.productListAdds","commerce":{"productListAdds":{"value":1},"cart":{"cartID":"C123"}},"productListItems":[{"SKU":"SKU123","quantity":2},{"SKU":"SKU456","quantity":1}]}]
+  [
+    {
+      "_id": "cart-add-A123",
+      "timestamp": "2026-10-29T12:00:00Z",
+      "eventType": "commerce.productListAdds",
+      "commerce": {
+        "productListAdds": {
+          "value": 1
+        },
+        "cart": {
+          "cartID": "C123"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU123",
+          "quantity": 2
+        },
+        {
+          "SKU": "SKU456",
+          "quantity": 1
+        }
+      ]
+    }
+  ]
 
 Google Analytics SQL: |
   -- Bind report_start and report_end as UTC TIMESTAMP parameters.
+  -- Source action uniqueness and replay-conflict resolution are integration prerequisites.
   WITH cart_actions AS (
     SELECT
       (SELECT p.value.string_value FROM UNNEST(event_params) AS p
@@ -71,6 +171,7 @@ Google Analytics SQL: |
 
 AEP Query Service SQL: |
   -- Substitute report bounds as UTC timestamp literals; use a UTC query session.
+  -- Source action uniqueness and replay-conflict resolution are integration prerequisites.
   SELECT
     _id AS event_id,
     timestamp AS action_time,
@@ -82,22 +183,22 @@ AEP Query Service SQL: |
     AND commerce.cart.cartID IS NOT NULL;
 
 Calculation Notes: |
-  1️⃣ Return the collected Cart ID unchanged on each qualifying action.
-  2️⃣ Repeated Cart IDs group cart actions; they do not identify people.
+  1️⃣ Return the collected Cart ID unchanged on each qualifying add-to-cart action.
+  2️⃣ Repeated Cart IDs group actions; they do not identify people.
   3️⃣ Missing Cart IDs do not qualify for the segment population.
-  4️⃣ Document identifier replacement when anonymous and signed-in carts merge.
-  5️⃣ Preserve historical action values when a cart identifier changes.
+  4️⃣ Preserve historical action values when carts merge or identifiers change.
+  5️⃣ Include actions from report start up to, but excluding, report end.
 
 Business Use Case: |
-  1️⃣ E-commerce teams group cart additions to investigate repeated cart activity.
-  2️⃣ Checkout teams investigate drop-offs when checkout and purchase activity carry the same Cart ID.
+  1️⃣ E-commerce teams group additions by cart to investigate repeated cart activity.
+  2️⃣ Cart teams inspect a cart's additions when investigating reported shopping issues.
 
 Dependencies:
   Events: [add-to-cart]
 
 Source Data: [Digital Analytics, Commerce Platform]
 
-Report Attributes: [Cart ID, Item ID]
+Report Attributes: [Cart ID]
 
 Segment Eligibility: |
   Cart ID EXISTS
@@ -113,9 +214,9 @@ Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-10-29T15:51:34.786+00:00
+Created At: 2026-10-29T19:22:54.132+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-10-29T15:55:48.5+00:00
+Last Modified At: 2026-10-29T19:23:25.033+00:00
 
