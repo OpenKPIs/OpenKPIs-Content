@@ -1,5 +1,5 @@
 # KPI: Multi-Item Cart Rate
-# Generated: 2026-10-29T16:14:24.026Z
+# Generated: 2026-10-29T17:24:34.719Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -37,37 +37,136 @@ Adobe Event: |
   commerce.productListAdds — records successful product additions to carts
 
 W3 Data Layer: |
-  {"digitalData":{"event":[{"eventInfo":{"eventName":"add_to_cart","timeStamp":"2026-10-29T12:00:00Z"},"attributes":{"event_id":"cart-add-A123","cart_add_count":1}}],"cart":{"cartID":"C123","item":[{"productInfo":{"productID":"SKU123"},"quantity":2},{"productInfo":{"productID":"SKU456"},"quantity":1}]}}}
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "add_to_cart",
+            "timeStamp": "2026-10-29T12:00:00Z"
+          },
+          "attributes": {
+            "event_id": "cart-add-A123"
+          }
+        }
+      ],
+      "cart": {
+        "cartID": "C123",
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU123"
+            },
+            "quantity": 2
+          },
+          {
+            "productInfo": {
+              "productID": "SKU456"
+            },
+            "quantity": 1
+          }
+        ]
+      }
+    }
+  }
 
 GA4 Data Layer: |
-  [{"event":"add_to_cart","event_id":"cart-add-A123","event_timestamp":"2026-10-29T12:00:00Z","cart_id":"C123","cart_add_count":1,"ecommerce":{"items":[{"item_id":"SKU123","quantity":2},{"item_id":"SKU456","quantity":1}]}}]
+  [
+    {
+      "event": "add_to_cart",
+      "event_id": "cart-add-A123",
+      "cart_id": "C123",
+      "ecommerce": {
+        "items": [
+          {
+            "item_id": "SKU123",
+            "quantity": 2
+          },
+          {
+            "item_id": "SKU456",
+            "quantity": 1
+          }
+        ]
+      }
+    }
+  ]
 
 Adobe Client Data Layer: |
-  [{"event":"commerce.productListAdds","eventInfo":{"eventId":"cart-add-A123","timestamp":"2026-10-29T12:00:00Z"},"commerce":{"productListAdds":{"value":1},"cart":{"cartID":"C123"}},"productListItems":[{"SKU":"SKU123","quantity":2},{"SKU":"SKU456","quantity":1}]}]
+  [
+    {
+      "event": "commerce.productListAdds",
+      "eventInfo": {
+        "eventId": "cart-add-A123",
+        "timestamp": "2026-10-29T12:00:00Z"
+      },
+      "commerce": {
+        "productListAdds": {
+          "value": 1
+        },
+        "cart": {
+          "cartID": "C123"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU123",
+          "quantity": 2
+        },
+        {
+          "SKU": "SKU456",
+          "quantity": 1
+        }
+      ]
+    }
+  ]
 
 XDM Mapping: |
-  [{"_id":"cart-add-A123","timestamp":"2026-10-29T12:00:00Z","eventType":"commerce.productListAdds","commerce":{"productListAdds":{"value":1},"cart":{"cartID":"C123"}},"productListItems":[{"SKU":"SKU123","quantity":2},{"SKU":"SKU456","quantity":1}]}]
+  [
+    {
+      "_id": "cart-add-A123",
+      "timestamp": "2026-10-29T12:00:00Z",
+      "eventType": "commerce.productListAdds",
+      "commerce": {
+        "productListAdds": {
+          "value": 1
+        },
+        "cart": {
+          "cartID": "C123"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU123",
+          "quantity": 2
+        },
+        {
+          "SKU": "SKU456",
+          "quantity": 1
+        }
+      ]
+    }
+  ]
 
 Google Analytics SQL: |
-  -- Input: configured events_* export; @report_start and @report_end are UTC TIMESTAMP parameters.
-  -- Input: event_params.event_timestamp is the published ISO 8601 string for successful commitment time.
-  -- Scan all export partitions because no maximum delivery delay is established.
+  -- Input: configured events_* export; @report_start and @report_end are UTC TIMESTAMP bounds.
+  -- Native event_timestamp must represent the successful addition occurrence; suffix bounds buffer property dates.
   WITH cart_products AS (
     SELECT a.cart_id, COUNT(DISTINCT item.item_id) AS product_count
     FROM (
       SELECT
         (SELECT p.value.string_value FROM UNNEST(event_params) AS p
          WHERE p.key = 'cart_id') AS cart_id,
-        SAFE_CAST((SELECT p.value.string_value FROM UNNEST(event_params) AS p
-                   WHERE p.key = 'event_timestamp') AS TIMESTAMP) AS successful_time,
         items
       FROM `{{GA4_PROJECT}}.{{GA4_DATASET}}.events_*`
       WHERE event_name = 'add_to_cart'
+        AND _TABLE_SUFFIX BETWEEN
+          FORMAT_DATE('%Y%m%d', DATE_SUB(DATE(@report_start), INTERVAL 1 DAY))
+          AND FORMAT_DATE('%Y%m%d', DATE_ADD(DATE(@report_end), INTERVAL 1 DAY))
+        AND event_timestamp >= UNIX_MICROS(@report_start)
+        AND event_timestamp < UNIX_MICROS(@report_end)
     ) AS a
     CROSS JOIN UNNEST(a.items) AS item
-    WHERE a.successful_time >= @report_start
-      AND a.successful_time < @report_end
-      AND a.cart_id IS NOT NULL AND a.cart_id != ''
+    WHERE a.cart_id IS NOT NULL AND a.cart_id != ''
       AND item.item_id IS NOT NULL AND item.item_id != ''
     GROUP BY a.cart_id
   )
@@ -75,7 +174,8 @@ Google Analytics SQL: |
   FROM cart_products;
 
 AEP Query Service SQL: |
-  -- Input: substitute REPORT_START_UTC and REPORT_END_UTC with offset-bearing UTC reporting bounds.
+  -- Input: REPORT_START_UTC and REPORT_END_UTC are UTC bounds matching the GA4 reporting interval.
+  -- XDM timestamp must represent the same successful addition occurrence as native GA4 event_timestamp.
   WITH cart_products AS (
     SELECT expanded.cart_id, COUNT(DISTINCT expanded.item.SKU) AS product_count
     FROM (
@@ -94,10 +194,10 @@ AEP Query Service SQL: |
   FROM cart_products;
 
 Calculation Notes: |
-  1️⃣ Use successful additions from the reporting start up to, but excluding, the reporting end.
-  2️⃣ Count each distinct product ID once per cart; repeated additions or extra units do not add products.
-  3️⃣ Count products added in the period, regardless of later removal or purchase.
-  4️⃣ Use Cart ID as supplied; document cart replacement and merging behavior.
+  1️⃣ Include successful additions from reporting start up to, but excluding, reporting end.
+  2️⃣ Recount distinct product IDs per cart for each interval; retries and extra units do not increase the count.
+  3️⃣ Count products added in the interval, regardless of later removal or purchase.
+  4️⃣ Use Cart ID as supplied; document cart replacement and merging behavior before integration.
   5️⃣ Return null when no carts have a qualifying addition.
 
 Business Use Case: |
@@ -131,5 +231,5 @@ Created At: 2026-10-29T16:04:29.626+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-10-29T16:14:23.149+00:00
+Last Modified At: 2026-10-29T17:24:33.957+00:00
 
