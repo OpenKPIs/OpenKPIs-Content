@@ -1,12 +1,12 @@
 # Event: Add to cart
-# Generated: 2026-10-29T14:48:26.323Z
+# Generated: 2026-10-29T16:43:47.211Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Event Name: Add to cart
 Aliases: [Cart Addition, Add to Bag, Add to Basket]
 
-Event Serialization: Emit once after successful cart commitment; deduplicate by event_id and reuse it for retries.
+Event Serialization: Emit once after cart commitment; deduplicate by event_id. Retries reuse IDs; new actions use new IDs.
 
 Description: |
   Captures a confirmed addition of one or more product units to a shopping cart. It helps teams understand which products move shoppers toward purchase.
@@ -31,7 +31,7 @@ GA4 Event Type: Recommended
 
 Adobe Event Type: Standard XDM
 
-Trigger Condition: WHEN a shopper-initiated positive addition is successfully committed to the cart, including accepted partial success, THEN emit add_to_cart.
+Trigger Condition: WHEN a shopper-initiated positive cart addition is committed, including accepted partial success, THEN emit add_to_cart.
 
 GA4 Event: |
   add_to_cart
@@ -49,8 +49,7 @@ W3 Data Layer: |
             "timeStamp": "2026-10-29T12:00:00Z"
           },
           "attributes": {
-            "event_id": "cart-add-A123",
-            "cart_add_count": 1
+            "event_id": "cart-add-A123"
           }
         }
       ],
@@ -79,9 +78,7 @@ GA4 Data Layer: |
     {
       "event": "add_to_cart",
       "event_id": "cart-add-A123",
-      "event_timestamp": "2026-10-29T12:00:00Z",
       "cart_id": "C123",
-      "cart_add_count": 1,
       "ecommerce": {
         "items": [
           {
@@ -209,48 +206,18 @@ Parameters: |
       },
       "meaning": "Positive integer units added on each accepted line, not its resulting quantity",
       "required": true
-    },
-    "cart_add_count": {
-      "type": "number",
-      "paths": {
-        "w3": "digitalData.event.0.attributes.cart_add_count",
-        "ga4": "cart_add_count",
-        "xdm": "commerce.productListAdds.value",
-        "adobe": "commerce.productListAdds.value"
-      },
-      "meaning": "Commerce action measure; always 1 per successful addition",
-      "purposes": [
-        "calculation"
-      ],
-      "required": true,
-      "justification": "Carries the required Adobe commerce action measure consistently across platforms."
-    },
-    "event_timestamp": {
-      "type": "datetime",
-      "paths": {
-        "w3": "digitalData.event.0.eventInfo.timeStamp",
-        "ga4": "event_timestamp",
-        "xdm": "timestamp",
-        "adobe": "eventInfo.timestamp"
-      },
-      "meaning": "Successful cart commitment time in ISO 8601 format with UTC offset",
-      "purposes": [
-        "calculation"
-      ],
-      "required": true,
-      "justification": "Preserves the successful action time when collection or delivery is delayed."
     }
   }
 
 Calculation Notes: |
-  1️⃣ Emit only committed shopper additions; include accepted partial successes, never rejected or pending requests.
-  2️⃣ Send positive unit deltas for all accepted lines; exclude decreases, restores, merges, and price-only changes.
-  3️⃣ Count each action once across all lines; retries reuse event_id, and distinct successful actions use new IDs.
-  4️⃣ The custom GA4 event_timestamp carries business time; it does not set GA4 native collection time.
-  5️⃣ Use successful commitment time; reporting intervals include the start and exclude the end before deduplication.
+  1️⃣ Emit only committed shopper additions; partial successes include accepted lines only.
+  2️⃣ Send positive units added; exclude decreases, restores, merges, and price-only changes.
+  3️⃣ Deduplicate before collection by event_id across all transports; GA4 does not do this automatically.
+  4️⃣ Preserve commitment time through supported native timestamp transport, including delayed delivery.
+  5️⃣ Downstream intervals include the start and exclude the end before deduplication.
 
 Business Use Case: |
-  1️⃣ Merchandising teams compare product additions with product views to prioritize product-page improvements.
+  1️⃣ Merchandising teams compare additions with product views to prioritize product-page improvements.
   2️⃣ Commerce teams investigate falling confirmed additions to identify cart friction.
 
 
@@ -262,23 +229,23 @@ Segment Eligibility: |
   Cart ID EXISTS
 
 
-Derived Dimensions: [currency, item-category, item-coupon, price-band, product-area-interest, product-category-and-sport, product-name, store-inventory-status, store-zip-code-local-market]
+Derived Dimensions: [cart-id, currency, item-category, item-coupon, price-band, product-area-interest, product-category-and-sport, product-name, store-inventory-status, store-zip-code-local-market]
 
-Derived Metrics: [carts-created, payment-info-added]
+Derived Metrics: [add-to-cart, carts-created, payment-info-added]
 
-Derived KPIs: [add-to-cart-rate, average-abandoned-cart-value, cart-abandonment-rate, cart-conversion-rate, cart-to-checkout-rate, cart-to-purchase-rate, item-view-to-cart-rate, product-list-conversion-rate, search-exit-rate]
+Derived KPIs: [abandoned-cart-recovery-rate, add-to-cart-rate, average-abandoned-cart-value, cart-abandonment-rate, cart-conversion-rate, cart-to-checkout-rate, cart-to-purchase-rate, item-view-to-cart-rate, multi-item-cart-rate, product-list-conversion-rate, search-exit-rate]
 
 Data Sensitivity: Internal
 
-Contains PII: No
+Contains PII: Yes
 
 Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-10-29T14:48:21.532+00:00
+Created At: 2026-10-29T16:43:42.257+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-10-29T14:48:25.62+00:00
+Last Modified At: 2026-10-29T16:43:46.59+00:00
 
