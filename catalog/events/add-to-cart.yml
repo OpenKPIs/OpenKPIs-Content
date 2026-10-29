@@ -1,12 +1,12 @@
 # Event: Add to cart
-# Generated: 2026-10-29T16:43:47.211Z
+# Generated: 2026-10-29T20:14:09.027Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Event Name: Add to cart
 Aliases: [Cart Addition, Add to Bag, Add to Basket]
 
-Event Serialization: Emit once after cart commitment; deduplicate by event_id. Retries reuse IDs; new actions use new IDs.
+Event Serialization: Emit after commitment; deduplicate event_id across transports. Retries reuse IDs; new actions use new IDs.
 
 Description: |
   Captures a confirmed addition of one or more product units to a shopping cart. It helps teams understand which products move shoppers toward purchase.
@@ -163,8 +163,7 @@ Parameters: |
       "meaning": "Anonymous cart identifier associated with the successful addition",
       "purposes": [
         "event_identity",
-        "segmentation",
-        "breakdown"
+        "segmentation"
       ],
       "required": true,
       "justification": "Associates each accepted addition with the cart it changed."
@@ -210,11 +209,11 @@ Parameters: |
   }
 
 Calculation Notes: |
-  1️⃣ Emit only committed shopper additions; partial successes include accepted lines only.
-  2️⃣ Send positive units added; exclude decreases, restores, merges, and price-only changes.
-  3️⃣ Deduplicate before collection by event_id across all transports; GA4 does not do this automatically.
-  4️⃣ Preserve commitment time through supported native timestamp transport, including delayed delivery.
-  5️⃣ Downstream intervals include the start and exclude the end before deduplication.
+  1️⃣ Include only committed shopper additions; partial successes contain accepted lines only.
+  2️⃣ Record positive units added; exclude decreases, restores, merges, and price-only changes.
+  3️⃣ Deduplicate event_id across transports before collection; retries reuse IDs, new actions use new IDs.
+  4️⃣ Delayed GA4 delivery requires verified transport support for the original commitment timestamp.
+  5️⃣ Native analytics user/device identifiers are treated as person-linkable PII under ordinary access controls.
 
 Business Use Case: |
   1️⃣ Merchandising teams compare additions with product views to prioritize product-page improvements.
@@ -243,9 +242,9 @@ Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-10-29T16:43:42.257+00:00
+Created At: 2026-10-29T20:14:05.244+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-10-29T16:43:46.59+00:00
+Last Modified At: 2026-10-29T20:14:08.364+00:00
 
