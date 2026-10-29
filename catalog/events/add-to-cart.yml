@@ -1,275 +1,284 @@
 # Event: Add to cart
-# Generated: 2026-09-15T14:50:51.532Z
+# Generated: 2026-10-29T14:48:26.323Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Event Name: Add to cart
-Event Serialization: always
+Aliases: [Cart Addition, Add to Bag, Add to Basket]
+
+Event Serialization: Emit once after successful cart commitment; deduplicate by event_id and reuse it for retries.
 
 Description: |
-  Captures every confirmed addition of one or more units of a product to the shopping cart, aligned to the GA4 recommended add_to_cart event and the Adobe Analytics scAdd commerce event, carrying the items array, unit price, quantity added, cart value delta and the placement the add came from. It is the primary micro-conversion between product discovery and checkout, and the event-level foundation for Add-to-Cart Rate, Item View-to-Cart Rate, Cart-to-Purchase Rate, Cart Abandonment Rate and SKU-level merchandising funnels.
+  Captures a confirmed addition of one or more product units to a shopping cart. It helps teams understand which products move shoppers toward purchase.
 
 Category: Conversion
 
-Tags: [event, E-commerce: Cart & Checkout Funnel Analytics]
+Tags: [shopping cart, purchase intent, cart additions]
 
-Industry: E-commerce
+Industry: [E-commerce, Retail]
 
-Priority: High
+Business Criticality: High
 
-Core Area: Checkout
+Journey / Navigation Area: [Cart]
+
+Owning Function: E-commerce Operations
 
 Scope: Event
 
-Event Type: standard
+Measurement Channels: [Web, Mobile App, Backend / API]
 
-Aggregation Window: Event, Session, User, Daily, Weekly, Monthly
+GA4 Event Type: Recommended
+
+Adobe Event Type: Standard XDM
+
+Trigger Condition: WHEN a shopper-initiated positive addition is successfully committed to the cart, including accepted partial success, THEN emit add_to_cart.
 
 GA4 Event: |
   add_to_cart
 
 Adobe Event: |
-  scAdd
+  commerce.productListAdds
 
 W3 Data Layer: |
   {
-    "cart": {
-      "cartID": "c7f3a2e1-5b8d-4e9a-9c61-2d4f8b0e7a35",
-      "price": {
-        "basePrice": 119.98,
-        "voucherCode": "WINTERKNIT10",
-        "voucherDiscount": 20,
-        "currency": "USD",
-        "cartTotal": 99.98
-      },
-      "item": [
+    "digitalData": {
+      "event": [
         {
-          "productInfo": {
-            "productID": "KNT-20418",
-            "sku": "KNT-20418-NVY-M",
-            "productName": "Merino Crew Neck Sweater",
-            "manufacturer": "Northfield"
-          },
-          "category": {
-            "primaryCategory": "Womens",
-            "subCategory1": "Knitwear"
-          },
-          "quantity": 2,
-          "price": {
-            "basePrice": 59.99,
-            "voucherCode": "WINTERKNIT10",
-            "voucherDiscount": 10,
-            "currency": "USD"
+          "eventInfo": {
+            "eventName": "add_to_cart",
+            "timeStamp": "2026-10-29T12:00:00Z"
           },
           "attributes": {
-            "itemVariant": "Navy / M",
-            "sellingPrice": 49.99,
-            "itemListID": "plp_womens_knitwear",
-            "itemListName": "Womens Knitwear",
-            "index": 3
+            "event_id": "cart-add-A123",
+            "cart_add_count": 1
           }
         }
-      ]
-    },
-    "event": [
-      {
-        "eventInfo": {
-          "eventName": "add_to_cart",
-          "eventAction": "cart:add",
-          "type": "commerce"
-        },
-        "category": {
-          "primaryCategory": "Cart & Checkout"
-        },
-        "attributes": {
-          "cartID": "c7f3a2e1-5b8d-4e9a-9c61-2d4f8b0e7a35",
-          "addSource": "plp_quick_add",
-          "itemListID": "plp_womens_knitwear",
-          "itemListName": "Womens Knitwear",
-          "value": 99.98,
-          "currency": "USD"
-        }
+      ],
+      "cart": {
+        "cartID": "C123",
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU123"
+            },
+            "quantity": 2
+          },
+          {
+            "productInfo": {
+              "productID": "SKU456"
+            },
+            "quantity": 1
+          }
+        ]
       }
-    ]
-  }
-
-GA4 Data Layer: |
-  {
-    "event": "add_to_cart",
-    "cart_id": "c7f3a2e1-5b8d-4e9a-9c61-2d4f8b0e7a35",
-    "add_source": "plp_quick_add",
-    "ecommerce": {
-      "currency": "USD",
-      "value": 99.98,
-      "item_list_id": "plp_womens_knitwear",
-      "item_list_name": "Womens Knitwear",
-      "items": [
-        {
-          "item_id": "KNT-20418-NVY-M",
-          "item_name": "Merino Crew Neck Sweater",
-          "item_brand": "Northfield",
-          "item_category": "Womens",
-          "item_category2": "Knitwear",
-          "item_variant": "Navy / M",
-          "item_list_id": "plp_womens_knitwear",
-          "item_list_name": "Womens Knitwear",
-          "index": 3,
-          "price": 49.99,
-          "discount": 10,
-          "coupon": "WINTERKNIT10",
-          "quantity": 2
-        }
-      ]
     }
   }
 
-Adobe Client Data Layer: |
-  {
-    "event": "cart:add",
-    "eventInfo": {
-      "eventName": "scAdd",
-      "addSource": "plp_quick_add"
-    },
-    "cart": {
-      "cartID": "c7f3a2e1-5b8d-4e9a-9c61-2d4f8b0e7a35",
-      "currency": "USD",
-      "value": 99.98,
-      "addSource": "plp_quick_add",
-      "itemListID": "plp_womens_knitwear",
-      "itemListName": "Womens Knitwear"
-    },
-    "product": [
-      {
-        "productID": "KNT-20418-NVY-M",
-        "name": "Merino Crew Neck Sweater",
-        "brand": "Northfield",
-        "category": "Womens",
-        "subCategory": "Knitwear",
-        "variant": "Navy / M",
-        "price": 49.99,
-        "quantity": 2,
-        "discount": 10,
-        "coupon": "WINTERKNIT10",
-        "index": 3,
-        "itemListID": "plp_womens_knitwear",
-        "itemListName": "Womens Knitwear"
+GA4 Data Layer: |
+  [
+    {
+      "event": "add_to_cart",
+      "event_id": "cart-add-A123",
+      "event_timestamp": "2026-10-29T12:00:00Z",
+      "cart_id": "C123",
+      "cart_add_count": 1,
+      "ecommerce": {
+        "items": [
+          {
+            "item_id": "SKU123",
+            "quantity": 2
+          },
+          {
+            "item_id": "SKU456",
+            "quantity": 1
+          }
+        ]
       }
-    ]
-  }
+    }
+  ]
+
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "commerce.productListAdds",
+      "eventInfo": {
+        "eventId": "cart-add-A123",
+        "timestamp": "2026-10-29T12:00:00Z"
+      },
+      "commerce": {
+        "productListAdds": {
+          "value": 1
+        },
+        "cart": {
+          "cartID": "C123"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU123",
+          "quantity": 2
+        },
+        {
+          "SKU": "SKU456",
+          "quantity": 1
+        }
+      ]
+    }
+  ]
 
 XDM Mapping: |
-  {
-    "xdm": {
+  [
+    {
+      "_id": "cart-add-A123",
+      "timestamp": "2026-10-29T12:00:00Z",
       "eventType": "commerce.productListAdds",
       "commerce": {
         "productListAdds": {
           "value": 1
         },
         "cart": {
-          "cartID": "c7f3a2e1-5b8d-4e9a-9c61-2d4f8b0e7a35"
+          "cartID": "C123"
         }
       },
       "productListItems": [
         {
-          "SKU": "KNT-20418-NVY-M",
-          "name": "Merino Crew Neck Sweater",
-          "quantity": 2,
-          "priceTotal": 99.98,
-          "discountAmount": 20,
-          "currencyCode": "USD",
-          "productAddMethod": "plp_quick_add",
-          "selectedOptions": [
-            {
-              "attribute": "colour",
-              "value": "Navy"
-            },
-            {
-              "attribute": "size",
-              "value": "M"
-            }
-          ],
-          "productCategories": [
-            {
-              "categoryID": "womens-knitwear",
-              "categoryName": "Knitwear",
-              "categoryPath": "Womens/Knitwear"
-            }
-          ],
-          "_tenant": {
-            "itemBrand": "Northfield",
-            "itemVariant": "Navy / M",
-            "unitPrice": 49.99,
-            "couponCode": "WINTERKNIT10",
-            "itemListIndex": 3
-          }
+          "SKU": "SKU123",
+          "quantity": 2
+        },
+        {
+          "SKU": "SKU456",
+          "quantity": 1
         }
-      ],
-      "_tenant": {
-        "cartAdd": {
-          "addSource": "plp_quick_add",
-          "itemListID": "plp_womens_knitwear",
-          "itemListName": "Womens Knitwear",
-          "cartValueAdded": 99.98
-        }
-      }
+      ]
     }
-  }
+  ]
 
 Parameters: |
   {
-    "currency": "string - ISO 4217 currency code of value and item prices (e.g. USD); required whenever value is sent",
-    "value": "number - monetary value added in this event: sum of price × quantity added across all items, before order-level discounts, tax and shipping",
-    "cart_id": "string - platform cart or basket identifier; used for duplicate suppression and joins to cart and order records, never an email or customer identifier",
-    "add_source": "string - placement that triggered the add: pdp, plp_quick_add, search_results, recommendation, wishlist, cart_upsell, reorder, mini_cart",
-    "item_list_id": "string - identifier of the product list or recommendation module the item was selected from, persisted from select_item",
-    "item_list_name": "string - human-readable name of the originating product list or recommendation module (e.g. Search Results, You May Also Like)",
-    "items": "array - one object per product line added; each object carries the item_* fields below",
-    "items[].item_id": "string - SKU or product ID matching the product catalog feed",
-    "items[].item_name": "string - product display name",
-    "items[].item_brand": "string - product brand",
-    "items[].item_category": "string - top-level merchandise category; item_category2 to item_category5 carry the deeper hierarchy",
-    "items[].item_variant": "string - selected variant such as size, colour or pack size, or the variant SKU",
-    "items[].price": "number - unit selling price after item-level markdowns, in the event currency",
-    "items[].quantity": "integer - units added in this event (delta, not resulting line quantity)",
-    "items[].discount": "number - unit-level markdown amount applied to the item, if any",
-    "items[].coupon": "string - item-level coupon or promotion code active at the time of the add, if any",
-    "items[].index": "integer - position of the item within the originating list, when added from a list"
+    "cart_id": {
+      "type": "string",
+      "paths": {
+        "w3": "digitalData.cart.cartID",
+        "ga4": "cart_id",
+        "xdm": "commerce.cart.cartID",
+        "adobe": "commerce.cart.cartID"
+      },
+      "meaning": "Anonymous cart identifier associated with the successful addition",
+      "purposes": [
+        "event_identity",
+        "segmentation",
+        "breakdown"
+      ],
+      "required": true,
+      "justification": "Associates each accepted addition with the cart it changed."
+    },
+    "item_id": {
+      "type": "string",
+      "paths": {
+        "w3": "digitalData.cart.item.0.productInfo.productID",
+        "ga4": "ecommerce.items.0.item_id",
+        "xdm": "productListItems.0.SKU",
+        "adobe": "productListItems.0.SKU"
+      },
+      "meaning": "Nonempty product or SKU identifier for each accepted repeatable line",
+      "required": true
+    },
+    "event_id": {
+      "type": "string",
+      "paths": {
+        "w3": "digitalData.event.0.attributes.event_id",
+        "ga4": "event_id",
+        "xdm": "_id",
+        "adobe": "eventInfo.eventId"
+      },
+      "meaning": "Anonymous action identifier; retries reuse it, distinct actions use new IDs",
+      "purposes": [
+        "event_identity",
+        "deduplication"
+      ],
+      "required": true,
+      "justification": "Distinguishes successful additions and prevents duplicate counting of retries."
+    },
+    "quantity": {
+      "type": "integer",
+      "paths": {
+        "w3": "digitalData.cart.item.0.quantity",
+        "ga4": "ecommerce.items.0.quantity",
+        "xdm": "productListItems.0.quantity",
+        "adobe": "productListItems.0.quantity"
+      },
+      "meaning": "Positive integer units added on each accepted line, not its resulting quantity",
+      "required": true
+    },
+    "cart_add_count": {
+      "type": "number",
+      "paths": {
+        "w3": "digitalData.event.0.attributes.cart_add_count",
+        "ga4": "cart_add_count",
+        "xdm": "commerce.productListAdds.value",
+        "adobe": "commerce.productListAdds.value"
+      },
+      "meaning": "Commerce action measure; always 1 per successful addition",
+      "purposes": [
+        "calculation"
+      ],
+      "required": true,
+      "justification": "Carries the required Adobe commerce action measure consistently across platforms."
+    },
+    "event_timestamp": {
+      "type": "datetime",
+      "paths": {
+        "w3": "digitalData.event.0.eventInfo.timeStamp",
+        "ga4": "event_timestamp",
+        "xdm": "timestamp",
+        "adobe": "eventInfo.timestamp"
+      },
+      "meaning": "Successful cart commitment time in ISO 8601 format with UTC offset",
+      "purposes": [
+        "calculation"
+      ],
+      "required": true,
+      "justification": "Preserves the successful action time when collection or delivery is delayed."
+    }
   }
 
+Calculation Notes: |
+  1️⃣ Emit only committed shopper additions; include accepted partial successes, never rejected or pending requests.
+  2️⃣ Send positive unit deltas for all accepted lines; exclude decreases, restores, merges, and price-only changes.
+  3️⃣ Count each action once across all lines; retries reuse event_id, and distinct successful actions use new IDs.
+  4️⃣ The custom GA4 event_timestamp carries business time; it does not set GA4 native collection time.
+  5️⃣ Use successful commitment time; reporting intervals include the start and exclude the end before deduplication.
+
+Business Use Case: |
+  1️⃣ Merchandising teams compare product additions with product views to prioritize product-page improvements.
+  2️⃣ Commerce teams investigate falling confirmed additions to identify cart friction.
 
 
-Dependencies:
-  Dimensions: [product-name, item-category]
+Source Data: [Digital Analytics, Commerce Platform]
 
-Source Data: Digital Analytics (GA4 / Adobe Analytics)
+Report Attributes: [Cart ID, Item ID / SKU]
 
-    Report Attributes: |
-  Item ID / SKU; Item Name; Item Brand; Item Category; Item Variant; Item List Name; Add Source; Device Category; Session Source / Medium; New vs Returning User
+Segment Eligibility: |
+  Cart ID EXISTS
 
-    Dashboard Usage: [Cart & Checkout Funnel, Merchandising Product Performance, Onsite Recommendations Performance, Daily E-commerce Trading Report]
 
-    Segment Eligibility: |
-  true
+Derived Dimensions: [currency, item-category, item-coupon, price-band, product-area-interest, product-category-and-sport, product-name, store-inventory-status, store-zip-code-local-market]
 
-    Related Dimensions: [product-name, item-category, page-type, device-category, traffic-source, cart-size-band]
+Derived Metrics: [carts-created, payment-info-added]
 
-    Derived Dimensions: [cart-size-band]
+Derived KPIs: [add-to-cart-rate, average-abandoned-cart-value, cart-abandonment-rate, cart-conversion-rate, cart-to-checkout-rate, cart-to-purchase-rate, item-view-to-cart-rate, product-list-conversion-rate, search-exit-rate]
 
-    Derived Metrics: [add-to-cart]
+Data Sensitivity: Internal
 
-    Derived KPIs: [add-to-cart-rate, item-view-to-cart-rate, cart-to-purchase-rate, cart-abandonment-rate, cart-conversion-rate, cart-to-view-rate, merchandising-conversion-rate]
+Contains PII: No
 
-    Data Sensitivity: Internal
+Status: draft
 
-    Contains PII: No
+Contributed By: devyendarm
 
-    Status: draft
+Created At: 2026-10-29T14:48:21.532+00:00
 
-    Contributed By: devyendarm
+Last Modified By: devyendarm
 
-    Created At: 2026-09-15T14:50:33.545+00:00
-
-    Last Modified By: devyendarm
-
-    Last Modified At: 2026-09-15T14:50:51.08+00:00
+Last Modified At: 2026-10-29T14:48:25.62+00:00
 
