@@ -1,346 +1,217 @@
 # Metric: Add to cart
-# Generated: 2026-09-18T22:39:49.990Z
+# Generated: 2026-10-29T15:30:09.718Z
 # Contributed by: swapnamagantius
 # Last modified by: devyendarm
 
 Metric Name: Add to cart
-Formula: Add to cart = COUNT(DISTINCT dedupe_key) over qualifying add_to_cart events, where dedupe_key = event_id, or when event_id is missing the fallback key user_pseudo_id + ga_session_id + event_timestamp + item list hash (Adobe: XDM _id); excluding add_method values login_rehydration, cart_merge, saved_cart_restore and promo_auto_gift, internal traffic, QA/staging/dev hostnames and bot traffic (GA4: add_to_cart events; Adobe: scAdd / commerce.productListAdds.value = 1 per hit)
+Aliases: [Add to Carts, Cart Additions, Cart Adds, Adds to Cart]
+
+Formula: Count of successful add-to-cart actions
 
 Description: |
-  Count of deduplicated add-to-cart interactions, equivalent to the GA4 add_to_cart event (reported as Add to carts) and the Adobe Analytics scAdd success event (Cart Additions), where each interaction counts once regardless of how many units or SKUs it carries. It is the primary mid-funnel intent signal between product detail views and checkout initiation. It is the numerator of Add-to-Cart Rate (adds / item views or sessions) and Cart-to-Detail Rate (adds / product detail views), the base population of Cart Abandonment Rate (1 − purchases / carts, the share of carts not ending in a purchase), and the denominator of Cart-to-Checkout Rate (begin_checkout / adds) and of Revenue per Add to Cart (revenue / adds), analysed across products, categories, campaigns and devices.
+  Number of successful actions that add products to a shopping cart, counting each action once regardless of products or units. It shows shopping activity moving toward purchase.
 
 Category: Conversion
 
-Tags: [metric, E-commerce: Cart & Checkout, Funnel Analytics, Purchase Intent, Merchandising, GA4 Ecommerce, Adobe Analytics Commerce]
+Tags: [shopping cart, purchase intent, merchandising, conversion funnel]
 
-Industry: E-commerce
+Industry: [E-commerce, Retail]
 
-Priority: High
+Business Criticality: High
 
-Core Area: Checkout
+Journey / Navigation Area: [Cart]
+
+Owning Function: Merchandising
 
 Scope: Event
 
+Measurement Channels: [Web, Mobile App]
+
 Measure Type: Counter
 
-Aggregation Window: Hourly, Daily, Weekly, Monthly
+Aggregation Window: [Selected Reporting Period, Hourly, Daily, Weekly, Monthly]
 
 GA4 Event: |
-  add_to_cart
+  add_to_cart — identifies successful cart additions
 
 Adobe Event: |
-  scAdd
+  commerce.productListAdds — identifies successful cart additions
 
 W3 Data Layer: |
   {
-    "page": {
-      "pageInfo": {
-        "pageID": "pdp:SKU-12345",
-        "pageName": "product detail: classic running shoe"
-      },
-      "category": {
-        "primaryCategory": "Footwear",
-        "pageType": "product detail"
-      }
-    },
-    "cart": {
-      "cartID": "cart_98765",
-      "price": {
-        "basePrice": 79.98,
-        "currency": "USD",
-        "cartTotal": 79.98
-      },
-      "item": [
+    "digitalData": {
+      "event": [
         {
-          "productInfo": {
-            "productID": "SKU-12345",
-            "sku": "SKU-12345-BLU-10",
-            "productName": "Classic Running Shoe",
-            "manufacturer": "Acme",
-            "color": "Blue",
-            "size": "10"
+          "eventInfo": {
+            "eventName": "add_to_cart",
+            "timeStamp": "2026-10-29T12:00:00Z"
           },
-          "category": {
-            "primaryCategory": "Footwear"
-          },
-          "quantity": 2,
-          "price": {
-            "basePrice": 39.99,
-            "currency": "USD"
+          "attributes": {
+            "event_id": "cart-add-A123",
+            "cart_add_count": 1
           }
         }
-      ]
-    },
-    "event": [
-      {
-        "eventInfo": {
-          "eventName": "add_to_cart",
-          "eventAction": "scAdd",
-          "eventID": "a1f3c9e2-7b4d-4e8a-9c21-5d6f0b8e1a47",
-          "type": "commerce",
-          "timeStamp": "2026-09-18T14:32:05.123Z"
-        },
-        "category": {
-          "primaryCategory": "cart",
-          "subCategory1": "product detail"
-        },
-        "attributes": {
-          "addMethod": "pdp_button",
-          "itemListName": "Running Shoes",
-          "cartID": "cart_98765",
-          "lineCount": 1,
-          "unitCount": 2
-        }
+      ],
+      "cart": {
+        "cartID": "C123",
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU123"
+            },
+            "quantity": 2
+          },
+          {
+            "productInfo": {
+              "productID": "SKU456"
+            },
+            "quantity": 1
+          }
+        ]
       }
-    ]
+    }
   }
 
 GA4 Data Layer: |
-  {
-    "event": "add_to_cart",
-    "event_id": "a1f3c9e2-7b4d-4e8a-9c21-5d6f0b8e1a47",
-    "cart_id": "cart_98765",
-    "add_method": "pdp_button",
-    "page_type": "product detail",
-    "ecommerce": {
-      "currency": "USD",
-      "value": 79.98,
-      "items": [
+  [
+    {
+      "event": "add_to_cart",
+      "event_id": "cart-add-A123",
+      "event_timestamp": "2026-10-29T12:00:00Z",
+      "cart_id": "C123",
+      "cart_add_count": 1,
+      "ecommerce": {
+        "items": [
+          {
+            "item_id": "SKU123",
+            "quantity": 2
+          },
+          {
+            "item_id": "SKU456",
+            "quantity": 1
+          }
+        ]
+      }
+    }
+  ]
+
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "commerce.productListAdds",
+      "eventInfo": {
+        "eventId": "cart-add-A123",
+        "timestamp": "2026-10-29T12:00:00Z"
+      },
+      "commerce": {
+        "productListAdds": {
+          "value": 1
+        },
+        "cart": {
+          "cartID": "C123"
+        }
+      },
+      "productListItems": [
         {
-          "item_id": "SKU-12345",
-          "item_name": "Classic Running Shoe",
-          "item_brand": "Acme",
-          "item_category": "Footwear",
-          "item_category2": "Running",
-          "item_variant": "Blue-10",
-          "item_list_id": "plp_running_shoes",
-          "item_list_name": "Running Shoes",
-          "index": 0,
-          "price": 39.99,
+          "SKU": "SKU123",
           "quantity": 2
+        },
+        {
+          "SKU": "SKU456",
+          "quantity": 1
         }
       ]
     }
-  }
-
-Adobe Client Data Layer: |
-  {
-    "event": "add_to_cart",
-    "eventInfo": {
-      "eventId": "a1f3c9e2-7b4d-4e8a-9c21-5d6f0b8e1a47",
-      "eventName": "scAdd",
-      "addMethod": "pdp_button",
-      "pageType": "product detail"
-    },
-    "cart": {
-      "cartID": "cart_98765",
-      "currencyCode": "USD"
-    },
-    "product": [
-      {
-        "SKU": "SKU-12345",
-        "name": "Classic Running Shoe",
-        "brand": "Acme",
-        "category": "Footwear",
-        "variant": "Blue-10",
-        "listName": "Running Shoes",
-        "quantity": 2,
-        "price": 39.99,
-        "priceTotal": 79.98,
-        "currencyCode": "USD"
-      }
-    ]
-  }
+  ]
 
 XDM Mapping: |
-  {
-    "_id": "a1f3c9e2-7b4d-4e8a-9c21-5d6f0b8e1a47",
-    "eventType": "commerce.productListAdds",
-    "timestamp": "2026-09-18T14:32:05.123Z",
-    "commerce": {
-      "productListAdds": {
-        "value": 1
+  [
+    {
+      "_id": "cart-add-A123",
+      "timestamp": "2026-10-29T12:00:00Z",
+      "eventType": "commerce.productListAdds",
+      "commerce": {
+        "productListAdds": {
+          "value": 1
+        },
+        "cart": {
+          "cartID": "C123"
+        }
       },
-      "cart": {
-        "cartID": "cart_98765"
-      }
-    },
-    "productListItems": [
-      {
-        "SKU": "SKU-12345",
-        "name": "Classic Running Shoe",
-        "quantity": 2,
-        "priceTotal": 79.98,
-        "currencyCode": "USD",
-        "productAddMethod": "pdp_button"
-      }
-    ],
-    "web": {
-      "webPageDetails": {
-        "name": "product detail: classic running shoe"
-      }
+      "productListItems": [
+        {
+          "SKU": "SKU123",
+          "quantity": 2
+        },
+        {
+          "SKU": "SKU456",
+          "quantity": 1
+        }
+      ]
     }
-  }
+  ]
 
 Google Analytics SQL: |
-  -- ==========================================
-  -- 1. GOOGLE BIGQUERY SQL
-  -- ==========================================
-  -- Add to cart: one count per deduplicated add_to_cart event, independent of units or SKUs.
-  -- Events are counted at event grain; items are only aggregated inside a scalar subquery, never joined.
-  WITH atc_events AS (
+  -- Bind @report_start and @report_end as UTC timestamps; replace the configured export table template.
+  -- Parse the custom action timestamp; scan all export dates because delivery delay has no declared bound.
+  -- Optional breakdown: project and GROUP BY DATE(action_time), TIMESTAMP_TRUNC(action_time, HOUR), or cart_id.
+  -- For Item ID, also project items in the CTE, CROSS JOIN UNNEST(items) AS item, then group COUNT(DISTINCT event_id) by item.item_id.
+  WITH additions AS (
     SELECT
-      PARSE_DATE('%Y%m%d', event_date) AS event_date,
-      user_pseudo_id,
-      event_timestamp,
-      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'event_id') AS event_id,
-      (SELECT ep.value.int_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'ga_session_id') AS ga_session_id,
-      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'traffic_type') AS traffic_type,
-      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'add_method') AS add_method,
-      (SELECT ep.value.string_value FROM UNNEST(event_params) AS ep WHERE ep.key = 'page_location') AS page_location,
-      device.web_info.hostname AS hostname,
-      (SELECT STRING_AGG(CONCAT(IFNULL(i.item_id, ''), ':', CAST(COALESCE(NULLIF(i.quantity, 0), 1) AS STRING)), '|' ORDER BY i.item_id)
-         FROM UNNEST(items) AS i) AS items_signature,
-      (SELECT IFNULL(SUM(COALESCE(NULLIF(i.quantity, 0), 1)), 0) FROM UNNEST(items) AS i) AS units_added
-    FROM `your-project.analytics_123456789.events_*`
-    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
-                            AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
-      AND event_name = 'add_to_cart'
-  ),
-  filtered AS (
-    SELECT
-      event_date,
-      CONCAT(IFNULL(user_pseudo_id, 'na'), '.', IFNULL(CAST(ga_session_id AS STRING), 'na')) AS session_key,
-      -- Dedupe on event_id; fallback key wraps every nullable part so NULLs never collapse distinct events.
-      COALESCE(
-        NULLIF(event_id, ''),
-        CONCAT(IFNULL(user_pseudo_id, 'na'), '.', IFNULL(CAST(ga_session_id AS STRING), 'na'), '.',
-               IFNULL(CAST(event_timestamp AS STRING), 'na'), '.',
-               TO_HEX(MD5(IFNULL(items_signature, ''))))
-      ) AS dedupe_key,
-      event_timestamp,
-      units_added
-    FROM atc_events
-    WHERE IFNULL(traffic_type, '') NOT IN ('internal', 'developer', 'test')
-      -- Non-shopper adds: login rehydration, cart merges, saved-cart restoration, promotion auto-injected gifts.
-      AND LOWER(IFNULL(add_method, '')) NOT IN ('login_rehydration', 'cart_merge', 'saved_cart_restore', 'promo_auto_gift')
-      -- QA / staging / dev hostnames (hostname from device.web_info, falling back to the page_location host).
-      AND NOT REGEXP_CONTAINS(
-        LOWER(COALESCE(hostname, NET.HOST(page_location), '')),
-        r'(^|[.-])(qa|staging|stage|dev|test|uat|preview)([.-]|$)|localhost'
-      )
-  ),
-  deduped AS (
-    SELECT *
-    FROM filtered
-    WHERE TRUE
-    QUALIFY ROW_NUMBER() OVER (PARTITION BY dedupe_key ORDER BY event_timestamp) = 1
+      (SELECT p.value.string_value FROM UNNEST(event_params) AS p WHERE p.key = 'event_id') AS event_id,
+      (SELECT p.value.string_value FROM UNNEST(event_params) AS p WHERE p.key = 'cart_id') AS cart_id,
+      SAFE_CAST((SELECT p.value.string_value FROM UNNEST(event_params) AS p WHERE p.key = 'event_timestamp') AS TIMESTAMP) AS action_time
+    FROM `{{GA4_PROJECT}}.{{GA4_DATASET}}.events_*`
+    WHERE event_name = 'add_to_cart'
   )
-  SELECT
-    event_date,
-    COUNT(*) AS add_to_cart,
-    COUNT(DISTINCT session_key) AS sessions_with_add_to_cart,
-    SUM(units_added) AS items_added_to_cart
-  FROM deduped
-  GROUP BY event_date
-  ORDER BY event_date;
+  SELECT COUNT(DISTINCT event_id) AS add_to_cart
+  FROM additions
+  WHERE action_time >= @report_start
+    AND action_time < @report_end
+    AND cart_id IS NOT NULL AND cart_id <> ''
+    AND event_id IS NOT NULL AND event_id <> '';
 
 AEP Query Service SQL: |
-  -- ==========================================
-  -- 2. ADOBE AEP QUERY SERVICE SQL
-  -- ==========================================
-  -- Add to cart: one count per deduplicated commerce.productListAdds experience event (_id), independent of units.
-  -- Sessions are rebuilt over all web activity per ECID with a 30-minute inactivity timeout, then filtered to adds.
-  WITH web_events AS (
-    SELECT
-      _id,
-      timestamp,
-      eventType,
-      identityMap['ECID'][0].id AS ecid,
-      productListItems
-    FROM aep_web_events_dataset
-    WHERE timestamp >= date_sub(current_date(), 30)
-      AND timestamp < current_date()
-      AND identityMap['ECID'][0].id IS NOT NULL
-      AND NOT (LOWER(COALESCE(environment.browserDetails.userAgent, '')) RLIKE 'bot|crawler|spider|headless|slurp|monitor')
-      -- Internal traffic flagged at collection (office IP ranges on environment.ipV4 are mapped to trafficType upstream).
-      AND COALESCE(_tenant.trafficType, '') <> 'internal'
-      -- QA / staging / dev hostnames.
-      AND NOT (LOWER(COALESCE(parse_url(web.webPageDetails.URL, 'HOST'), '')) RLIKE '(^|[.-])(qa|staging|stage|dev|test|uat|preview)([.-]|$)|localhost')
-  ),
-  sessionized AS (
-    SELECT
-      _id,
-      timestamp,
-      eventType,
-      ecid,
-      productListItems,
-      SESS_TIMEOUT(timestamp, 60 * 30) OVER (
-        PARTITION BY ecid ORDER BY timestamp
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-      ) AS session
-    FROM web_events
-  ),
-  atc_ranked AS (
-    SELECT
-      to_date(timestamp) AS event_date,
-      CONCAT(ecid, '.', CAST(session.num AS STRING)) AS session_key,
-      COALESCE(aggregate(
-        productListItems,
-        CAST(0 AS BIGINT),
-        (acc, x) -> acc + CAST(COALESCE(NULLIF(x.quantity, 0), 1) AS BIGINT)
-      ), CAST(0 AS BIGINT)) AS units_added,
-      ROW_NUMBER() OVER (PARTITION BY _id ORDER BY timestamp) AS rn
-    FROM sessionized
-    WHERE eventType = 'commerce.productListAdds'
-      -- Non-shopper adds: login rehydration, cart merges, saved-cart restoration, promotion auto-injected gifts.
-      AND (productListItems IS NULL OR NOT exists(
-        productListItems,
-        x -> LOWER(COALESCE(x.productAddMethod, '')) IN ('login_rehydration', 'cart_merge', 'saved_cart_restore', 'promo_auto_gift')
-      ))
-  )
-  SELECT
-    event_date,
-    COUNT(*) AS add_to_cart,
-    COUNT(DISTINCT session_key) AS sessions_with_add_to_cart,
-    SUM(units_added) AS items_added_to_cart
-  FROM atc_ranked
-  WHERE rn = 1
-  GROUP BY event_date
-  ORDER BY event_date;
+  -- Bind :report_start and :report_end as UTC timestamps; timestamp is the successful action time.
+  -- Optional breakdown: project and GROUP BY CAST(timestamp AS DATE), date_trunc('HOUR', timestamp), or commerce.cart.cartID.
+  -- For Item ID, use a subquery projecting _id and explode(productListItems) AS item after the same filters.
+  -- Group the item subquery by item.SKU and count DISTINCT _id; retain every repeatable product line.
+  SELECT COUNT(DISTINCT _id) AS add_to_cart
+  FROM {{AEP_EXPERIENCE_EVENT_DATASET}}
+  WHERE eventType = 'commerce.productListAdds'
+    AND timestamp >= CAST(:report_start AS TIMESTAMP)
+    AND timestamp < CAST(:report_end AS TIMESTAMP)
+    AND commerce.cart.cartID IS NOT NULL
+    AND commerce.cart.cartID <> ''
+    AND _id IS NOT NULL AND _id <> '';
 
 Calculation Notes: |
-  1️⃣ Unit of count is the interaction: each qualifying add_to_cart event (Adobe scAdd / XDM commerce.productListAdds) adds exactly 1, whether the payload holds one SKU at quantity 1 or several SKUs at higher quantities. Unit volume is reported separately as Items Added to Cart (SUM(items.quantity), missing quantity coerced to 1), and reach as Sessions with Add to Cart (COUNT DISTINCT session key); the three must never be mixed in one column.  
-  2️⃣ Deduplicate on event_id (or on user_pseudo_id + ga_session_id + event_timestamp + item list hash when no event_id is sent) to remove double fires from page reloads, SPA re-renders, retry logic and duplicate tag deployments; in Adobe, rely on the scAdd event serialisation or a merchandising-level dedupe key where configured.  
-  3️⃣ Qualifying adds originate on PDP, PLP quick-add, search results, recommendation carousels, wishlist-to-cart and quick-reorder surfaces; exclude automatic cart rehydration on login, cart merges between anonymous and authenticated carts, server-side restoration of saved carts and promotion-engine auto-injected gifts (add_method / addMethod / productAddMethod values login_rehydration, cart_merge, saved_cart_restore and promo_auto_gift), and quantity edits made inside the cart page (those are update_cart, not add_to_cart).  
-  4️⃣ remove_from_cart is never netted against this metric; it is a gross intent counter, and net cart activity belongs to a separate derived measure.  
-  5️⃣ Currency and value are irrelevant to the count: the value and price parameters are carried for revenue-per-add analysis but play no part in the calculation, and zero-priced or free-gift adds still count unless the gift is auto-injected by a promotion engine without a shopper action.  
-  6️⃣ Exclude internal IP ranges, QA and staging hostnames, known bots and spiders (GA4 built-in bot filtering, Adobe bot rules / IAB list) and synthetic monitoring traffic; do not exclude users who never reach checkout.  
-  7️⃣ Timestamps are bucketed in the reporting property time zone; GA4 sessions end after 30 minutes of inactivity (Adobe visits after 30 minutes, 12-hour cap), so an add landing after a timeout starts a new session for any session-scoped ratio, while the raw event count itself is unaffected.
+  1️⃣ Count each successful addition once by action ID; retries reuse it, and missing IDs require source correction.
+  2️⃣ Count one action regardless of products or units; removals do not reduce the count.
+  3️⃣ Use successful action time: start inclusive, end exclusive; calendar breakdowns use UTC on both platforms.
+  4️⃣ Count each action once per Item ID; product groups overlap and must not be summed.
+  5️⃣ Return zero when no qualifying actions exist.
 
 Business Use Case: |
-  1️⃣ Merchandising: when a product's Add to cart count per 100 PDP views drops more than 20% week over week against its category median, the category merchandiser reviews price, imagery, size availability and reviews for that SKU and escalates out-of-stock variants to Inventory Planning within the same trading week.  
-  2️⃣ Performance Marketing: when a paid campaign's landing sessions generate fewer Add to cart events per 100 sessions than the channel benchmark for 7 consecutive days, the paid media manager reallocates budget to higher-intent ad groups or swaps the landing page before the next bid cycle.  
-  3️⃣ Product (Digital Experience): when Add to cart on mobile falls more than 15% below desktop for the same SKUs after a release, the product manager opens a defect against the add-to-cart component (sticky button, variant selector, quick-add modal) and gates the next release on recovery.  
-  4️⃣ E-commerce Trading: during promotions and peak events, the trading lead monitors hourly Add to cart against forecast and, when adds rise without a matching rise in begin_checkout, triggers checkout-friction checks and cart-recovery messaging within the hour.
+  1️⃣ Merchandisers investigate falling product cart additions before changing offers or product content.
+  2️⃣ Commerce teams compare hourly additions to decide when to adjust trading activity.
+  3️⃣ Product teams investigate sudden declines after cart experience changes.
 
 Dependencies:
   Events: [add-to-cart]
-  Dimensions: [item-id]
 
-Source Data: Digital Analytics (GA4, Adobe Analytics)
+Source Data: [Digital Analytics, Commerce Platform]
 
-Report Attributes: |
-  Date; Hour; Item ID; Item Name; Item Brand; Item Category; Item Variant; Item List Name; Page Type; Device Category; Platform; Session Source / Medium; Campaign; New vs Returning User; Country; Region
+Report Attributes: [Action date, Action hour, Cart ID, Item ID]
 
-Dashboard Usage: [E-commerce Funnel Dashboard, Product Performance Dashboard, Merchandising Dashboard, Campaign Landing Page Dashboard]
+Recommended Reporting Views: [Shopping Cart Activity, Product Purchase Intent, Commerce Funnel]
 
 Segment Eligibility: |
-  true
+  Cart ID EXISTS
 
-Related Metrics: [items-added-to-cart, sessions-with-add-to-cart, view-item, remove-from-cart, begin-checkout, purchase]
+Related Metrics: [product-view, cart-removals, begin-checkout, carts-created]
 
-Derived KPIs: [add-to-cart-rate, cart-to-detail-rate, cart-abandonment-rate, cart-to-checkout-rate, revenue-per-add-to-cart]
+Derived KPIs: [add-to-cart-rate, average-abandoned-cart-value, cart-abandonment-rate, cart-conversion-rate, cart-to-checkout-rate, cart-to-purchase-rate, item-view-to-cart-rate]
 
 Data Sensitivity: Internal
 
@@ -354,5 +225,5 @@ Created At: 2026-04-29T22:29:06.073+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-18T22:39:49.518+00:00
+Last Modified At: 2026-10-29T15:30:08.514+00:00
 
