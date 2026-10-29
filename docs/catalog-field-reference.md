@@ -1,6 +1,6 @@
 # OpenKPIs catalog field reference v3
 
-Status: canonical contract v3 for the database, site, GitHub content, and CGPT workflow. Production activation still requires the coordinated migration, application deployment, and headed-Chrome pilot; this document does not itself migrate data.
+Status: canonical contract for the production database, site, GitHub content, and CGPT workflow. The coordinated schema and application cutover was completed on October 26, 2026. A headed-Chrome 1/1/1/1 workflow-quality pilot remains a separate operational gate.
 
 ## Contract outcome
 
