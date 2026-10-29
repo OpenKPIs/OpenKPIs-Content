@@ -1,29 +1,34 @@
 # KPI: Return Exchange Rate
-# Generated: 2026-09-30T17:58:29.764Z
+# Generated: 2026-10-29T18:43:59.281Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 KPI Name: Return Exchange Rate
-Formula: (Return Lines Resolved by Exchange / Total Return Lines Closed) × 100
+
+Formula: (Return lines closed by exchange / Return lines closed by exchange, refund, or store credit) × 100
 
 Description: |
-  Share of return lines closed in the period that were resolved by an exchange for another size, colour or item instead of a refund. Higher values mean more returned revenue stays with the business.
+  Percentage of completed customer return lines resolved through an exchange rather than a refund or store credit. It helps Returns teams assess exchange uptake.
 
-Category: Retention
+Category: Operational Efficiency
 
-Tags: [kpi, E-commerce: Returns, Refunds & Customer Support]
+Tags: [returns, exchanges, return resolution]
 
-Industry: [["E-commerce"]]
+Industry: [E-commerce, Retail]
 
-Priority: Medium
+Business Criticality: Medium
 
-Core Area: Monetization
+Journey / Navigation Area: [Returns & Refunds]
+
+Owning Function: Returns
 
 Scope: Event
 
+Measurement Channels: [Store / POS, Backend / API]
+
 Measure Type: Percentage
 
-Aggregation Window: Weekly, Monthly, Quarterly
+Aggregation Window: [Weekly, Monthly, Quarterly]
 
 
 
@@ -31,75 +36,28 @@ Aggregation Window: Weekly, Monthly, Quarterly
 
 
 
-Google Analytics SQL: |
-  -- ==========================================
-  -- 1. GOOGLE BIGQUERY SQL
-  -- ==========================================
-  -- Final resolution and RMA close date exist only in the order management system (the web submit_form carries the requested resolution), so the value is read from the OMS backend tables; in-store returns of online orders are included there.
-  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
-  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
-  
-  -- Return lines closed in the period as exchange, refund or store credit (open, rejected, cancelled and untyped lines drop out), excluding test, fraud-flagged and carrier return-to-origin lines; exchange lines over all closed lines
-  SELECT
-    COUNT(DISTINCT IF(r.resolution_type = 'exchange', r.rma_line_id, NULL)) AS return_lines_resolved_by_exchange,
-    COUNT(DISTINCT r.rma_line_id) AS total_return_lines_closed,
-    ROUND(100 * SAFE_DIVIDE(
-      COUNT(DISTINCT IF(r.resolution_type = 'exchange', r.rma_line_id, NULL)),
-      COUNT(DISTINCT r.rma_line_id)), 2) AS return_exchange_rate
-  FROM `your-project.oms_backend.return_lines` AS r
-  JOIN `your-project.oms_backend.orders` AS o
-    ON o.order_id = r.order_id
-  WHERE r.rma_status = 'closed'
-    AND r.resolution_type IN ('exchange', 'refund', 'store_credit')
-    AND DATE(r.closed_at) BETWEEN start_date AND end_date
-    AND COALESCE(r.return_source, '') != 'carrier_rto'
-    AND NOT COALESCE(o.is_test, FALSE)
-    AND NOT COALESCE(o.is_fraud_flagged, FALSE);
 
-AEP Query Service SQL: |
-  -- ==========================================
-  -- 2. ADOBE AEP QUERY SERVICE SQL
-  -- ==========================================
-  -- Final resolution and RMA close date exist only in the order management system (the web form_submit carries the requested resolution), so the value is read from the OMS backend datasets; in-store returns of online orders are included there.
-  -- Reporting window: the last 90 complete days
-  WITH params AS (
-    SELECT DATE_SUB(CURRENT_DATE, 90) AS start_date, DATE_SUB(CURRENT_DATE, 1) AS end_date
-  )
-  -- Return lines closed in the period as exchange, refund or store credit (open, rejected, cancelled and untyped lines drop out), excluding test, fraud-flagged and carrier return-to-origin lines; exchange lines over all closed lines
-  SELECT
-    COUNT(DISTINCT CASE WHEN r.resolution_type = 'exchange' THEN r.rma_line_id END) AS return_lines_resolved_by_exchange,
-    COUNT(DISTINCT r.rma_line_id) AS total_return_lines_closed,
-    ROUND(100.0 * COUNT(DISTINCT CASE WHEN r.resolution_type = 'exchange' THEN r.rma_line_id END)
-      / NULLIF(COUNT(DISTINCT r.rma_line_id), 0), 2) AS return_exchange_rate
-  FROM aep_backend_oms_return_lines AS r
-  JOIN aep_backend_oms_orders AS o
-    ON o.order_id = r.order_id
-  CROSS JOIN params AS p
-  WHERE r.rma_status = 'closed'
-    AND r.resolution_type IN ('exchange', 'refund', 'store_credit')
-    AND CAST(r.closed_at AS DATE) BETWEEN p.start_date AND p.end_date
-    AND COALESCE(r.return_source, '') <> 'carrier_rto'
-    AND NOT COALESCE(o.is_test, FALSE)
-    AND NOT COALESCE(o.is_fraud_flagged, FALSE);
 
 Calculation Notes: |
-  1️⃣ Unit is the returned line (RMA line), not the order: one exchanged and one refunded line on the same RMA count once each.,2️⃣ Denominator: return lines closed in the period as exchange, refund or store credit. Open, rejected and cancelled RMAs are excluded.,3️⃣ Exchange = replacement item or variant shipped against the RMA. Store credit is not an exchange; it stays in the denominator only.,4️⃣ Uneven exchanges with a price difference charged or partly refunded count as exchanges, not as refunds.,5️⃣ Date by resolution (RMA close) date, not order or initiation date. An exchange cancelled before shipping takes its final resolution.,6️⃣ Exclude test and fraud-flagged orders and carrier returns to origin (tracked in Return to Origin Rate); these are not customer returns.,7️⃣ Computed from OMS RMA line resolutions, in-store returns included; the web return form only logs the requested resolution and is not counted.
+  1️⃣ Count each return line once at final closure as exchange, refund, or store credit; include store returns.
+  2️⃣ Exchange requires replacement shipment; if cancelled before shipment, use the final resolution.
+  3️⃣ Price-difference refunds remain exchanges; store credit counts only in the denominator.
+  4️⃣ Exclude open, rejected, cancelled, test, fraud-flagged, and carrier-return-to-origin lines.
+  5️⃣ Use closure time with inclusive start and exclusive end; return null when no lines qualify.
 
 Business Use Case: |
-  1️⃣ Customer Service: exchange rate on size-related returns drops → promote instant size exchange in the returns portal.,2️⃣ Merchandising: SKU with high returns and low exchange share → review its fit guidance, size chart and imagery.,3️⃣ Finance: monthly exchange rate shifts → adjust the refund liability accrual and net revenue forecast.
+  1️⃣ Returns teams investigate a falling exchange share before changing exchange options.
+  2️⃣ Merchandising teams use exchange trends to investigate replacement availability.
 
-Dependencies:
-  Dimensions: [resolution-type, return-reason, return-method]
 
-Source Data: ERP
+Source Data: [Offline Operational System, Finance or ERP, Order Management]
 
-Report Attributes: |
-  Return Reason; Return Method; Resolution Type; Item Category; Fulfillment Method; Device Category
+Report Attributes: [Return Resolution Type]
 
-Dashboard Usage: [Returns & Refunds Overview, Customer Service Operations, Merchandise Returns by Category]
+Recommended Reporting Views: [Returns Resolution Mix, Exchange Uptake Trends]
 
 Segment Eligibility: |
-  true
+  Return Line Status EQUALS "Closed" AND Return Resolution Type IN ("Exchange", "Refund", "Store credit")
 
 Related KPIs: [refund-rate, return-initiation-rate, return-to-origin-rate]
 
@@ -115,5 +73,5 @@ Created At: 2026-09-30T17:44:12.168+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-30T17:58:29.461+00:00
+Last Modified At: 2026-10-29T18:43:58.385+00:00
 
