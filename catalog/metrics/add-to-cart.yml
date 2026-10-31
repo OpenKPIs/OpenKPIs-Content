@@ -1,5 +1,5 @@
 # Metric: Add to cart
-# Generated: 2026-10-29T15:30:09.718Z
+# Generated: 2026-10-31T17:43:41.064Z
 # Contributed by: swapnamagantius
 # Last modified by: devyendarm
 
@@ -47,8 +47,7 @@ W3 Data Layer: |
             "timeStamp": "2026-10-29T12:00:00Z"
           },
           "attributes": {
-            "event_id": "cart-add-A123",
-            "cart_add_count": 1
+            "event_id": "cart-add-A123"
           }
         }
       ],
@@ -77,9 +76,7 @@ GA4 Data Layer: |
     {
       "event": "add_to_cart",
       "event_id": "cart-add-A123",
-      "event_timestamp": "2026-10-29T12:00:00Z",
       "cart_id": "C123",
-      "cart_add_count": 1,
       "ecommerce": {
         "items": [
           {
@@ -152,30 +149,29 @@ XDM Mapping: |
   ]
 
 Google Analytics SQL: |
-  -- Bind @report_start and @report_end as UTC timestamps; replace the configured export table template.
-  -- Parse the custom action timestamp; scan all export dates because delivery delay has no declared bound.
-  -- Optional breakdown: project and GROUP BY DATE(action_time), TIMESTAMP_TRUNC(action_time, HOUR), or cart_id.
-  -- For Item ID, also project items in the CTE, CROSS JOIN UNNEST(items) AS item, then group COUNT(DISTINCT event_id) by item.item_id.
+  -- Bind @report_start and @report_end as UTC timestamps; native event time must represent the successful action.
+  -- The one-day suffix buffer accommodates the property's unspecified reporting timezone.
+  -- Item breakdowns expand items and count distinct action IDs per item; use UTC for date/hour groups.
   WITH additions AS (
     SELECT
       (SELECT p.value.string_value FROM UNNEST(event_params) AS p WHERE p.key = 'event_id') AS event_id,
-      (SELECT p.value.string_value FROM UNNEST(event_params) AS p WHERE p.key = 'cart_id') AS cart_id,
-      SAFE_CAST((SELECT p.value.string_value FROM UNNEST(event_params) AS p WHERE p.key = 'event_timestamp') AS TIMESTAMP) AS action_time
+      (SELECT p.value.string_value FROM UNNEST(event_params) AS p WHERE p.key = 'cart_id') AS cart_id
     FROM `{{GA4_PROJECT}}.{{GA4_DATASET}}.events_*`
     WHERE event_name = 'add_to_cart'
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(DATE(@report_start), INTERVAL 1 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_ADD(DATE(@report_end), INTERVAL 1 DAY))
+      AND event_timestamp >= UNIX_MICROS(@report_start)
+      AND event_timestamp < UNIX_MICROS(@report_end)
   )
   SELECT COUNT(DISTINCT event_id) AS add_to_cart
   FROM additions
-  WHERE action_time >= @report_start
-    AND action_time < @report_end
-    AND cart_id IS NOT NULL AND cart_id <> ''
+  WHERE cart_id IS NOT NULL AND cart_id <> ''
     AND event_id IS NOT NULL AND event_id <> '';
 
 AEP Query Service SQL: |
-  -- Bind :report_start and :report_end as UTC timestamps; timestamp is the successful action time.
-  -- Optional breakdown: project and GROUP BY CAST(timestamp AS DATE), date_trunc('HOUR', timestamp), or commerce.cart.cartID.
-  -- For Item ID, use a subquery projecting _id and explode(productListItems) AS item after the same filters.
-  -- Group the item subquery by item.SKU and count DISTINCT _id; retain every repeatable product line.
+  -- Bind :report_start and :report_end as UTC timestamps; timestamp must represent the successful action.
+  -- Item breakdowns use explode(productListItems) in a bounded subquery and count distinct _id per item.SKU.
+  -- Use UTC for date/hour groups; overlapping item groups must not be summed.
   SELECT COUNT(DISTINCT _id) AS add_to_cart
   FROM {{AEP_EXPERIENCE_EVENT_DATASET}}
   WHERE eventType = 'commerce.productListAdds'
@@ -186,9 +182,9 @@ AEP Query Service SQL: |
     AND _id IS NOT NULL AND _id <> '';
 
 Calculation Notes: |
-  1️⃣ Count each successful addition once by action ID; retries reuse it, and missing IDs require source correction.
+  1️⃣ Count each successful action ID once; retries reuse it, and missing IDs require source correction.
   2️⃣ Count one action regardless of products or units; removals do not reduce the count.
-  3️⃣ Use successful action time: start inclusive, end exclusive; calendar breakdowns use UTC on both platforms.
+  3️⃣ Use action time: start inclusive, end exclusive; calendar breakdowns use UTC on both platforms.
   4️⃣ Count each action once per Item ID; product groups overlap and must not be summed.
   5️⃣ Return zero when no qualifying actions exist.
 
@@ -225,5 +221,5 @@ Created At: 2026-04-29T22:29:06.073+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-10-29T15:30:08.514+00:00
+Last Modified At: 2026-10-31T17:43:40.355+00:00
 
