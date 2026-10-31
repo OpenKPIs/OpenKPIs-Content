@@ -1,5 +1,5 @@
 # KPI: Multi-Item Cart Rate
-# Generated: 2026-10-29T17:24:34.719Z
+# Generated: 2026-10-31T17:44:43.995Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -8,7 +8,7 @@ KPI Name: Multi-Item Cart Rate
 Formula: (Carts with two or more distinct products added / Carts with at least one product added) × 100
 
 Description: |
-  Percentage of carts with successful additions that receive two or more distinct products during the reporting period. It helps assess cross-sell and cart-building effectiveness.
+  Percentage of carts with successful product additions that receive at least two distinct products during the reporting period. It helps assess cross-sell and cart-building effectiveness.
 
 Category: Conversion
 
@@ -149,7 +149,7 @@ XDM Mapping: |
 
 Google Analytics SQL: |
   -- Input: configured events_* export; @report_start and @report_end are UTC TIMESTAMP bounds.
-  -- Native event_timestamp must represent the successful addition occurrence; suffix bounds buffer property dates.
+  -- event_timestamp is addition occurrence time; suffix pruning buffers property-timezone dates.
   WITH cart_products AS (
     SELECT a.cart_id, COUNT(DISTINCT item.item_id) AS product_count
     FROM (
@@ -174,8 +174,8 @@ Google Analytics SQL: |
   FROM cart_products;
 
 AEP Query Service SQL: |
-  -- Input: REPORT_START_UTC and REPORT_END_UTC are UTC bounds matching the GA4 reporting interval.
-  -- XDM timestamp must represent the same successful addition occurrence as native GA4 event_timestamp.
+  -- Input: REPORT_START_UTC and REPORT_END_UTC match the GA4 UTC reporting bounds.
+  -- timestamp represents the successful addition occurrence.
   WITH cart_products AS (
     SELECT expanded.cart_id, COUNT(DISTINCT expanded.item.SKU) AS product_count
     FROM (
@@ -194,10 +194,10 @@ AEP Query Service SQL: |
   FROM cart_products;
 
 Calculation Notes: |
-  1️⃣ Include successful additions from reporting start up to, but excluding, reporting end.
-  2️⃣ Recount distinct product IDs per cart for each interval; retries and extra units do not increase the count.
-  3️⃣ Count products added in the interval, regardless of later removal or purchase.
-  4️⃣ Use Cart ID as supplied; document cart replacement and merging behavior before integration.
+  1️⃣ Include successful additions with nonempty cart and product IDs from reporting start to before reporting end.
+  2️⃣ Recount distinct product IDs per cart each interval; retries and extra units do not increase the count.
+  3️⃣ Count only products added in the interval, regardless of later removal or purchase.
+  4️⃣ Use stable Cart IDs as supplied; document cart reuse, replacement, and merging before integration.
   5️⃣ Return null when no carts have a qualifying addition.
 
 Business Use Case: |
@@ -231,5 +231,5 @@ Created At: 2026-10-29T16:04:29.626+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-10-29T17:24:33.957+00:00
+Last Modified At: 2026-10-31T17:44:43.317+00:00
 
