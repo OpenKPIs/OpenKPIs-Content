@@ -1,12 +1,12 @@
 # Event: Add to cart
-# Generated: 2026-10-29T20:14:09.027Z
+# Generated: 2026-10-31T07:01:33.551Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Event Name: Add to cart
 Aliases: [Cart Addition, Add to Bag, Add to Basket]
 
-Event Serialization: Emit after commitment; deduplicate event_id across transports. Retries reuse IDs; new actions use new IDs.
+Event Serialization: Emit on commitment; deduplicate event_id before collection. Retry: same ID; new action: new ID.
 
 Description: |
   Captures a confirmed addition of one or more product units to a shopping cart. It helps teams understand which products move shoppers toward purchase.
@@ -27,11 +27,11 @@ Scope: Event
 
 Measurement Channels: [Web, Mobile App, Backend / API]
 
-GA4 Event Type: Recommended
+GA4 Collection Classification: Recommended
 
-Adobe Event Type: Standard XDM
+Adobe XDM Classification: Standard XDM
 
-Trigger Condition: WHEN a shopper-initiated positive cart addition is committed, including accepted partial success, THEN emit add_to_cart.
+Trigger Condition: WHEN a shopper-initiated addition commits at least one product line with a positive quantity increment, THEN emit add_to_cart.
 
 GA4 Event: |
   add_to_cart
@@ -150,70 +150,12 @@ XDM Mapping: |
     }
   ]
 
-Parameters: |
-  {
-    "cart_id": {
-      "type": "string",
-      "paths": {
-        "w3": "digitalData.cart.cartID",
-        "ga4": "cart_id",
-        "xdm": "commerce.cart.cartID",
-        "adobe": "commerce.cart.cartID"
-      },
-      "meaning": "Anonymous cart identifier associated with the successful addition",
-      "purposes": [
-        "event_identity",
-        "segmentation"
-      ],
-      "required": true,
-      "justification": "Associates each accepted addition with the cart it changed."
-    },
-    "item_id": {
-      "type": "string",
-      "paths": {
-        "w3": "digitalData.cart.item.0.productInfo.productID",
-        "ga4": "ecommerce.items.0.item_id",
-        "xdm": "productListItems.0.SKU",
-        "adobe": "productListItems.0.SKU"
-      },
-      "meaning": "Nonempty product or SKU identifier for each accepted repeatable line",
-      "required": true
-    },
-    "event_id": {
-      "type": "string",
-      "paths": {
-        "w3": "digitalData.event.0.attributes.event_id",
-        "ga4": "event_id",
-        "xdm": "_id",
-        "adobe": "eventInfo.eventId"
-      },
-      "meaning": "Anonymous action identifier; retries reuse it, distinct actions use new IDs",
-      "purposes": [
-        "event_identity",
-        "deduplication"
-      ],
-      "required": true,
-      "justification": "Distinguishes successful additions and prevents duplicate counting of retries."
-    },
-    "quantity": {
-      "type": "integer",
-      "paths": {
-        "w3": "digitalData.cart.item.0.quantity",
-        "ga4": "ecommerce.items.0.quantity",
-        "xdm": "productListItems.0.quantity",
-        "adobe": "productListItems.0.quantity"
-      },
-      "meaning": "Positive integer units added on each accepted line, not its resulting quantity",
-      "required": true
-    }
-  }
-
 Calculation Notes: |
-  1️⃣ Include only committed shopper additions; partial successes contain accepted lines only.
-  2️⃣ Record positive units added; exclude decreases, restores, merges, and price-only changes.
-  3️⃣ Deduplicate event_id across transports before collection; retries reuse IDs, new actions use new IDs.
-  4️⃣ Delayed GA4 delivery requires verified transport support for the original commitment timestamp.
-  5️⃣ Native analytics user/device identifiers are treated as person-linkable PII under ordinary access controls.
+  1️⃣ Count one committed shopper addition once, regardless of products or units added.
+  2️⃣ Include only accepted lines and positive quantity increments, not the resulting cart contents.
+  3️⃣ Exclude failed attempts, decreases, restores, merges, and price-only changes.
+  4️⃣ Retries reuse event_id; prevent duplicate collection across transports before sending.
+  5️⃣ Collect at commitment time; delayed delivery requires supported transport preserving that time.
 
 Business Use Case: |
   1️⃣ Merchandising teams compare additions with product views to prioritize product-page improvements.
@@ -242,9 +184,9 @@ Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-10-29T20:14:05.244+00:00
+Created At: 2026-10-31T07:01:10.144+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-10-29T20:14:08.364+00:00
+Last Modified At: 2026-10-31T07:01:33.01+00:00
 
