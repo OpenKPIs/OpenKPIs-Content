@@ -1,5 +1,5 @@
 # Event: Purchase
-# Generated: 2026-10-30T03:10:24.622Z
+# Generated: 2026-11-01T00:36:24.891Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
@@ -9,7 +9,7 @@ Aliases: [Completed Purchase, Order Completed, Order Confirmation]
 Event Serialization: Emit once after authoritative purchase confirmation; deduplicate by transaction_id.
 
 Description: |
-  Records an accepted order whose payment requirement has been satisfied, including its purchased items and merchandise value. It supports analysis of completed purchases and product sales.
+  Records an accepted order whose applicable payment requirement is satisfied, including purchased items and merchandise value. It supports analysis of completed purchases and product sales.
 
 Category: Conversion
 
@@ -27,11 +27,11 @@ Scope: Event
 
 Measurement Channels: [Backend / API, Mobile App, Web]
 
-GA4 Event Type: Recommended
+GA4 Collection Classification: Recommended
 
-Adobe Event Type: Standard XDM
+Adobe XDM Classification: Standard XDM
 
-Trigger Condition: WHEN the commerce platform accepts an order and its payment requirement is satisfied, THEN emit purchase.
+Trigger Condition: WHEN the commerce platform accepts an order and its applicable payment requirement is satisfied, THEN emit purchase.
 
 GA4 Event: |
   purchase
@@ -164,105 +164,15 @@ XDM Mapping: |
     }
   ]
 
-Parameters: |
-  {
-    "price": {
-      "type": "number",
-      "paths": {
-        "w3": "digitalData.transaction.item.0.price",
-        "ga4": "ecommerce.items.0.price",
-        "xdm": "productListItems.0.priceTotal",
-        "adobe": "productListItems.0.priceTotal"
-      },
-      "meaning": "Nonnegative discounted unit price; divide mapped line total by its quantity",
-      "required": true,
-      "transforms": {
-        "xdm": "line_total_to_unit_price",
-        "adobe": "line_total_to_unit_price"
-      }
-    },
-    "value": {
-      "type": "number",
-      "paths": {
-        "w3": "digitalData.transaction.attributes.merchandiseValue",
-        "ga4": "ecommerce.value",
-        "xdm": "productListItems.0.priceTotal",
-        "adobe": "productListItems.0.priceTotal"
-      },
-      "meaning": "Nonnegative sum of every Adobe/XDM merchandise line total; excludes tax/shipping",
-      "required": true
-    },
-    "item_id": {
-      "type": "string",
-      "paths": {
-        "w3": "digitalData.transaction.item.0.productInfo.productID",
-        "ga4": "ecommerce.items.0.item_id",
-        "xdm": "productListItems.0.SKU",
-        "adobe": "productListItems.0.SKU"
-      },
-      "meaning": "Nonempty product identifier on every purchased line",
-      "required": true
-    },
-    "currency": {
-      "type": "string",
-      "paths": {
-        "w3": "digitalData.transaction.attributes.currency",
-        "ga4": "ecommerce.currency",
-        "xdm": "commerce.order.currencyCode",
-        "adobe": "commerce.order.currencyCode"
-      },
-      "meaning": "Uppercase ISO 4217 transaction currency for all merchandise amounts",
-      "required": true
-    },
-    "event_id": {
-      "type": "string",
-      "paths": {
-        "w3": "digitalData.event.0.eventInfo.eventID",
-        "ga4": "event_id",
-        "xdm": "_id",
-        "adobe": "eventInfo.eventId"
-      },
-      "meaning": "Nonempty anonymous purchase occurrence identifier, unchanged on retries",
-      "purposes": [
-        "event_identity",
-        "deduplication"
-      ],
-      "required": true,
-      "justification": "Identifies the same purchase occurrence across retries and browser or server copies."
-    },
-    "quantity": {
-      "type": "integer",
-      "paths": {
-        "w3": "digitalData.transaction.item.0.quantity",
-        "ga4": "ecommerce.items.0.quantity",
-        "xdm": "productListItems.0.quantity",
-        "adobe": "productListItems.0.quantity"
-      },
-      "meaning": "Positive whole number of purchased units on the same line",
-      "required": true
-    },
-    "transaction_id": {
-      "type": "string",
-      "paths": {
-        "w3": "digitalData.transaction.transactionID",
-        "ga4": "ecommerce.transaction_id",
-        "xdm": "commerce.order.purchaseID",
-        "adobe": "eventInfo.transactionId"
-      },
-      "meaning": "Nonempty source order identifier, unique within the collection domain",
-      "required": true
-    }
-  }
-
 Calculation Notes: |
-  1️⃣ Record one purchase per confirmed order; retries reuse the same transaction and event identifiers.
-  2️⃣ Use the purchase completion time, not page-render or ingestion time.
-  3️⃣ Merchandise value sums discounted unit price × quantity across all lines, excluding tax and shipping.
-  4️⃣ Exclude test orders and incomplete payment attempts; valid completed zero-value orders remain eligible.
-  5️⃣ Record refunds and cancellations separately; do not rewrite the original purchase.
+  1️⃣ Count each order once; transaction IDs must be unique across collection; retries reuse transaction and event IDs.
+  2️⃣ Use purchase completion time, not page-render or ingestion time.
+  3️⃣ Merchandise value sums discounted unit price × quantity across all lines; exclude tax and shipping.
+  4️⃣ Exclude test orders and incomplete payment attempts; include valid completed zero-value orders.
+  5️⃣ Record refunds and cancellations separately; retain the original purchase.
 
 Business Use Case: |
-  1️⃣ E-commerce Operations investigates missing purchases by comparing captured orders with commerce confirmations.
+  1️⃣ E-commerce Operations compares captured purchases with commerce confirmations to investigate missing orders.
   2️⃣ Merchandising compares purchased items before changing product placement or promotions.
   3️⃣ Finance reconciles merchandise totals with commerce records before using them in sales reporting.
 
@@ -289,9 +199,9 @@ Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-10-30T03:10:18.797+00:00
+Created At: 2026-10-31T22:11:09.323+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-10-30T03:10:24.053+00:00
+Last Modified At: 2026-11-01T00:36:23.983+00:00
 
