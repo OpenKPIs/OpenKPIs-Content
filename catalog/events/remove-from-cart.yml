@@ -1,12 +1,12 @@
 # Event: Remove from Cart
-# Generated: 2026-10-29T21:07:01.236Z
+# Generated: 2026-11-01T04:03:00.404Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Event Name: Remove from Cart
 Aliases: [Cart Removal, Remove from Bag, Remove from Basket]
 
-Event Serialization: Fire once per confirmed removal; deduplicate by event_id. Reuse on retry; new ID for each new action.
+Event Serialization: Fire once per confirmed removal action; deduplicate by event_id and reuse that ID on retries.
 
 Description: |
   Records a confirmed removal of one or more product units from a shopping cart. It helps teams understand changes to cart contents and investigate removal patterns.
@@ -27,9 +27,9 @@ Scope: Event
 
 Measurement Channels: [Backend / API, Mobile App, Web]
 
-GA4 Event Type: Recommended
+GA4 Collection Classification: Recommended
 
-Adobe Event Type: Standard XDM
+Adobe XDM Classification: Standard XDM
 
 Trigger Condition: WHEN a cart change confirms removal of one or more product units, THEN emit remove_from_cart.
 
@@ -40,175 +40,23 @@ Adobe Event: |
   commerce.productListRemovals
 
 W3 Data Layer: |
-  {
-    "digitalData": {
-      "event": [
-        {
-          "eventInfo": {
-            "eventName": "remove_from_cart",
-            "eventId": "removal-7f82c1",
-            "timeStamp": "2026-10-29T14:30:00Z"
-          }
-        }
-      ],
-      "cart": {
-        "cartID": "cart-a91d42",
-        "item": [
-          {
-            "productInfo": {
-              "productID": "SKU-1042"
-            },
-            "quantity": 2
-          },
-          {
-            "productInfo": {
-              "productID": "SKU-2086"
-            },
-            "quantity": 3
-          }
-        ]
-      }
-    }
-  }
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"remove_from_cart","eventId":"removal-7f82c1","timeStamp":"2026-10-29T14:30:00Z"}}],"cart":{"cartID":"cart-a91d42","item":[{"productInfo":{"productID":"SKU-1042"},"quantity":2}]}}}
 
 GA4 Data Layer: |
-  [
-    {
-      "event": "remove_from_cart",
-      "cart_id": "cart-a91d42",
-      "event_id": "removal-7f82c1",
-      "ecommerce": {
-        "items": [
-          {
-            "item_id": "SKU-1042",
-            "quantity": 2
-          },
-          {
-            "item_id": "SKU-2086",
-            "quantity": 3
-          }
-        ]
-      }
-    }
-  ]
+  [{"event":"remove_from_cart","cart_id":"cart-a91d42","event_id":"removal-7f82c1","ecommerce":{"items":[{"item_id":"SKU-1042","quantity":2}]}}]
 
 Adobe Client Data Layer: |
-  [
-    {
-      "event": "commerce.productListRemovals",
-      "eventInfo": {
-        "cartId": "cart-a91d42",
-        "eventId": "removal-7f82c1",
-        "timestamp": "2026-10-29T14:30:00Z"
-      },
-      "commerce": {
-        "productListRemovals": {
-          "value": 1
-        }
-      },
-      "productListItems": [
-        {
-          "SKU": "SKU-1042",
-          "quantity": 2
-        },
-        {
-          "SKU": "SKU-2086",
-          "quantity": 3
-        }
-      ]
-    }
-  ]
+  [{"event":"commerce.productListRemovals","eventInfo":{"cartId":"cart-a91d42","eventId":"removal-7f82c1","timestamp":"2026-10-29T14:30:00Z"},"commerce":{"productListRemovals":{"value":1}},"productListItems":[{"SKU":"SKU-1042","quantity":2}]}]
 
 XDM Mapping: |
-  [
-    {
-      "_id": "removal-7f82c1",
-      "timestamp": "2026-10-29T14:30:00Z",
-      "eventType": "commerce.productListRemovals",
-      "commerce": {
-        "productListRemovals": {
-          "value": 1
-        },
-        "cart": {
-          "cartID": "cart-a91d42"
-        }
-      },
-      "productListItems": [
-        {
-          "SKU": "SKU-1042",
-          "quantity": 2
-        },
-        {
-          "SKU": "SKU-2086",
-          "quantity": 3
-        }
-      ]
-    }
-  ]
-
-Parameters: |
-  {
-    "cart_id": {
-      "type": "string",
-      "paths": {
-        "w3": "digitalData.cart.cartID",
-        "ga4": "cart_id",
-        "xdm": "commerce.cart.cartID",
-        "adobe": "eventInfo.cartId"
-      },
-      "meaning": "Anonymous identifier of the cart changed",
-      "purposes": [
-        "event_identity"
-      ],
-      "required": true,
-      "justification": "Identifies the cart affected by the confirmed removal action."
-    },
-    "item_id": {
-      "type": "string",
-      "paths": {
-        "w3": "digitalData.cart.item.0.productInfo.productID",
-        "ga4": "ecommerce.items.0.item_id",
-        "xdm": "productListItems.0.SKU",
-        "adobe": "productListItems.0.SKU"
-      },
-      "meaning": "Product or SKU identifier for each removed line",
-      "required": true
-    },
-    "event_id": {
-      "type": "string",
-      "paths": {
-        "w3": "digitalData.event.0.eventInfo.eventId",
-        "ga4": "event_id",
-        "xdm": "_id",
-        "adobe": "eventInfo.eventId"
-      },
-      "meaning": "Anonymous identifier of the confirmed action, unchanged across retries",
-      "purposes": [
-        "event_identity",
-        "deduplication"
-      ],
-      "required": true,
-      "justification": "Distinguishes completed removal actions and prevents retries from counting twice."
-    },
-    "quantity": {
-      "type": "integer",
-      "paths": {
-        "w3": "digitalData.cart.item.0.quantity",
-        "ga4": "ecommerce.items.0.quantity",
-        "xdm": "productListItems.0.quantity",
-        "adobe": "productListItems.0.quantity"
-      },
-      "meaning": "Positive integer units removed from the product line, not units remaining",
-      "required": true
-    }
-  }
+  [{"_id":"removal-7f82c1","timestamp":"2026-10-29T14:30:00Z","eventType":"commerce.productListRemovals","commerce":{"productListRemovals":{"value":1},"cart":{"cartID":"cart-a91d42"}},"productListItems":[{"SKU":"SKU-1042","quantity":2}]}]
 
 Calculation Notes: |
-  1️⃣ Record only confirmed changes; failed requests and cart re-renders emit nothing.
-  2️⃣ Count each removal action once across delivery paths; retries reuse event_id.
-  3️⃣ Report positive integer quantities removed, not quantities remaining.
-  4️⃣ A clear-cart action includes every removed line in one event.
-  5️⃣ Use the confirmed change time; inactivity alone is not a removal.
+  1️⃣ Record confirmed changes at confirmation time; exclude failed requests, re-renders, and inactivity.
+  2️⃣ One event represents one removal action; retries across delivery paths reuse the same event_id.
+  3️⃣ Quantities are positive integers removed from each line, not quantities remaining.
+  4️⃣ A clear-cart action includes every removed line in one event; item arrays are repeatable.
+  5️⃣ Reports use confirmation time with an inclusive start and exclusive end, applied before deduplication.
 
 Business Use Case: |
   1️⃣ Merchandising teams investigate products with rising removals before revising product information.
@@ -236,9 +84,9 @@ Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-10-29T21:06:54.319+00:00
+Created At: 2026-11-01T04:02:13.743+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-10-29T21:07:00.497+00:00
+Last Modified At: 2026-11-01T04:02:59.791+00:00
 
