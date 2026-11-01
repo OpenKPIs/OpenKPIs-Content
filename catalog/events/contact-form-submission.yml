@@ -1,15 +1,15 @@
 # Event: Contact Form Submission
-# Generated: 2026-10-30T02:09:47.882Z
+# Generated: 2026-11-01T00:37:11.523Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Event Name: Contact Form Submission
 Aliases: [Contact Us Submission, Support Form Submission, Help Form Submission]
 
-Event Serialization: Emit after support acknowledgement; persist event_id and deduplicate retries by that key.
+Event Serialization: Emit once after successful acceptance; deduplicate retries and repeated acknowledgements by event_id.
 
 Description: |
-  Records a contact or help form submission successfully accepted by the support system. It helps support teams understand incoming requests and improve self-service.
+  Records a new contact or help form submission successfully accepted by the support system. It helps support teams understand incoming requests and assess help content.
 
 Category: Conversion
 
@@ -27,11 +27,11 @@ Scope: Event
 
 Measurement Channels: [Backend / API, Web]
 
-GA4 Event Type: Custom
+GA4 Collection Classification: Custom
 
-Adobe Event Type: Standard XDM
+Adobe XDM Classification: Standard XDM
 
-Trigger Condition: WHEN the support system accepts a new contact-form submission and creates its ticket, THEN emit contact_form_submission.
+Trigger Condition: WHEN the support system successfully accepts a new contact-form submission, THEN emit contact_form_submission.
 
 GA4 Event: |
   contact_form_submission
@@ -84,39 +84,19 @@ XDM Mapping: |
     }
   ]
 
-Parameters: |
-  {
-    "event_id": {
-      "type": "string",
-      "paths": {
-        "w3": "digitalData.event.0.attributes.event_id",
-        "ga4": "event_id",
-        "xdm": "_id",
-        "adobe": "eventInfo.eventId"
-      },
-      "meaning": "Opaque identifier for one accepted contact-form submission",
-      "purposes": [
-        "event_identity",
-        "deduplication"
-      ],
-      "required": true,
-      "justification": "Keeps retries and repeated acknowledgements from counting one submission more than once."
-    }
-  }
-
 Calculation Notes: |
-  1️⃣ Include only acknowledged new submissions; exclude failed attempts and updates to existing tickets.
-  2️⃣ Count each accepted submission once by event_id; reuse the key for retries and repeated displays.
-  3️⃣ Count separate accepted enquiries separately, even from the same person.
-  4️⃣ Integration must preserve original acceptance time across platforms, including GA4 retransmissions.
-  5️⃣ Analytics may miss accepted requests; reconcile totals with the support system.
+  1️⃣ Include newly accepted submissions; exclude failures and updates to existing requests.
+  2️⃣ Count each submission once by event_id; reuse the identifier for retries and repeated acknowledgements.
+  3️⃣ Count separate accepted enquiries separately, including those from the same person.
+  4️⃣ Use original acceptance time; delayed delivery must not shift the reporting period.
+  5️⃣ Analytics can miss accepted requests; reconcile totals with support-system records.
 
 Business Use Case: |
   1️⃣ Support managers use submission trends to adjust staffing for incoming requests.
-  2️⃣ Customer experience teams compare submission trends before and after help-content changes.
+  2️⃣ Customer experience teams compare submission trends to decide which help content to improve.
 
 
-Source Data: [Customer Support, Digital Analytics]
+Source Data: [Customer Support, Digital Analytics, Offline Operational System]
 
 Report Attributes: [Submission Identifier]
 
@@ -138,9 +118,9 @@ Status: draft
 
 Contributed By: devyendarm
 
-Created At: 2026-10-30T02:09:43.051+00:00
+Created At: 2026-11-01T00:36:50.282+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-10-30T02:09:47.293+00:00
+Last Modified At: 2026-11-01T00:37:10.992+00:00
 
