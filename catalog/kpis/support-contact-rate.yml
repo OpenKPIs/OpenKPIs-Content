@@ -1,139 +1,115 @@
 # KPI: Support Contact Rate
-# Generated: 2026-09-30T17:45:19.217Z
+# Generated: 2026-11-04T02:12:05.550Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 KPI Name: Support Contact Rate
-Formula: (Inbound Support Contacts in Period / Orders Placed in Period) × 100
+Aliases: [Contact Rate, Contacts per 100 Orders, Ticket-to-Order Ratio]
+
+Formula: Inbound support contacts ÷ Confirmed orders × 100
 
 Description: |
-  Inbound customer support contacts (email, chat, phone, social, contact form) per 100 orders placed in the period. The standard measure of support demand; a rise points to order, delivery or product issues.
+  Inbound support contacts per 100 confirmed orders across channels, including pre-sale inquiries. It helps support teams assess workload and investigate changes in customer support demand.
 
-Category: Experience
+Category: Operational Efficiency
 
-Tags: [kpi, E-commerce: Returns, Refunds & Customer Support]
+Tags: [customer support, support demand, orders]
 
-Industry: [["E-commerce"]]
+Industry: [E-commerce, Retail]
 
-Priority: High
+Business Criticality: High
 
-Core Area: Generic
+Journey / Navigation Area: [Customer Service]
 
-Scope: Global
+Owning Function: Customer Support
+
+Scope: Event
+
+Measurement Channels: [Web, Mobile App, Backend / API, Store / POS, Call Center / Support, External Platform / Partner]
 
 Measure Type: Rate
 
-Aggregation Window: Daily, Weekly, Monthly
+Aggregation Window: [Daily, Weekly, Monthly, Selected Reporting Period]
 
+GA4 Event: |
+  inbound_support_contact_created — records an eligible new inbound ticket or conversation
+  purchase — records a confirmed order
 
+Adobe Event: |
+  inbound_support_contact_created — records an eligible new inbound ticket or conversation
+  commerce.purchases — records a confirmed order
 
+W3 Data Layer: |
+  {"digitalData":{"event":[{"eventInfo":{"eventName":"inbound_support_contact_created","eventID":"support-contact-8b91","timeStamp":"2026-10-29T12:00:00Z"},"attributes":{"contact_id":"contact-8b91","support_channel":"Contact form"}},{"eventInfo":{"eventName":"purchase","eventID":"purchase-ORD12345","timeStamp":"2026-10-29T12:05:00Z"}}],"transaction":{"transactionID":"ORD12345","attributes":{"is_test_order":false,"is_fraud_order":false},"item":[{"productInfo":{"productID":"SKU123"},"quantity":1}]}}}
 
+GA4 Data Layer: |
+  [{"event":"inbound_support_contact_created","contact_id":"contact-8b91","support_channel":"Contact form"},{"event":"purchase","is_test_order":0,"is_fraud_order":0,"ecommerce":{"transaction_id":"ORD12345","items":[{"item_id":"SKU123","quantity":1}]}}]
 
+Adobe Client Data Layer: |
+  [{"event":"inbound_support_contact_created","eventInfo":{"eventId":"support-contact-8b91","timestamp":"2026-10-29T12:00:00Z"},"data":{"contact_id":"contact-8b91","support_channel":"Contact form"}},{"event":"commerce.purchases","eventInfo":{"eventId":"purchase-ORD12345","timestamp":"2026-10-29T12:05:00Z"},"data":{"is_test_order":false,"is_fraud_order":false},"commerce":{"purchases":{"value":1},"order":{"purchaseID":"ORD12345"}},"productListItems":[{"SKU":"SKU123","quantity":1}]}]
 
+XDM Mapping: |
+  [{"_id":"support-contact-8b91","timestamp":"2026-10-29T12:00:00Z","eventType":"inbound_support_contact_created","_openkpis":{"contact_id":"contact-8b91","support_channel":"Contact form"}},{"_id":"purchase-ORD12345","timestamp":"2026-10-29T12:05:00Z","eventType":"commerce.purchases","commerce":{"purchases":{"value":1},"order":{"purchaseID":"ORD12345"}},"productListItems":[{"SKU":"SKU123","quantity":1}],"_openkpis":{"is_test_order":false,"is_fraud_order":false}}]
 
 Google Analytics SQL: |
-  -- ==========================================
-  -- 1. GOOGLE BIGQUERY SQL
-  -- ==========================================
-  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
-  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
-  
-  -- Inbound contacts: one per surviving ticket, dated by creation; excludes merged, spam, auto-responder, outbound and internal tickets
-  WITH contacts AS (
-    SELECT COUNT(DISTINCT ticket_id) AS inbound_contacts
-    FROM `your-project.crm.support_tickets`
-    WHERE DATE(created_at) BETWEEN start_date AND end_date
-      AND direction = 'inbound'
-      AND merged_into_ticket_id IS NULL
-      AND is_spam = FALSE
-      AND is_auto_reply = FALSE
-      AND is_internal = FALSE
-  ),
-  -- Orders placed across all channels, excluding test orders and orders cancelled as fraud
-  orders AS (
-    SELECT COUNT(DISTINCT order_id) AS orders_placed
-    FROM `your-project.oms.orders`
-    WHERE DATE(order_created_at) BETWEEN start_date AND end_date
-      AND is_test_order = FALSE
-      AND NOT (order_status = 'cancelled' AND cancel_reason = 'fraud')
+  WITH inputs AS (
+    SELECT event_name, ecommerce.transaction_id AS transaction_id,
+      (SELECT p.value.string_value FROM UNNEST(event_params) p WHERE p.key = 'contact_id') AS contact_id,
+      (SELECT p.value.int_value FROM UNNEST(event_params) p WHERE p.key = 'is_test_order') AS is_test_order,
+      (SELECT p.value.int_value FROM UNNEST(event_params) p WHERE p.key = 'is_fraud_order') AS is_fraud_order
+    FROM `project.analytics.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(DATE(@report_start), INTERVAL 1 DAY))
+      AND FORMAT_DATE('%Y%m%d', DATE_ADD(DATE(@report_end), INTERVAL 1 DAY))
+      AND event_timestamp >= UNIX_MICROS(@report_start)
+      AND event_timestamp < UNIX_MICROS(@report_end)
+      AND event_name IN ('inbound_support_contact_created', 'purchase')
   )
-  -- Contacts per 100 orders, uncapped
-  SELECT
-    c.inbound_contacts,
-    o.orders_placed,
-    ROUND(SAFE_DIVIDE(c.inbound_contacts, o.orders_placed) * 100, 2) AS support_contact_rate
-  FROM contacts c
-  CROSS JOIN orders o;
+  SELECT SAFE_DIVIDE(
+    COUNT(DISTINCT IF(event_name = 'inbound_support_contact_created', contact_id, NULL)),
+    COUNT(DISTINCT IF(event_name = 'purchase' AND is_test_order = 0 AND is_fraud_order = 0, transaction_id, NULL))
+  ) * 100 AS support_contact_rate
+  FROM inputs;
 
 AEP Query Service SQL: |
-  -- ==========================================
-  -- 2. ADOBE AEP QUERY SERVICE SQL
-  -- ==========================================
-  -- Reporting window: last 90 complete days
-  WITH params AS (
-    SELECT DATE_SUB(CURRENT_DATE(), 90) AS start_date,
-           DATE_SUB(CURRENT_DATE(), 1) AS end_date
-  ),
-  -- Inbound contacts: one per surviving ticket, dated by creation; excludes merged, spam, auto-responder, outbound and internal tickets
-  contacts AS (
-    SELECT COUNT(DISTINCT t.ticket_id) AS inbound_contacts
-    FROM aep_backend_dataset.crm_support_tickets t
-    CROSS JOIN params p
-    WHERE TO_DATE(t.created_at) BETWEEN p.start_date AND p.end_date
-      AND t.direction = 'inbound'
-      AND t.merged_into_ticket_id IS NULL
-      AND t.is_spam = FALSE
-      AND t.is_auto_reply = FALSE
-      AND t.is_internal = FALSE
-  ),
-  -- Orders placed across all channels, excluding test orders and orders cancelled as fraud
-  orders AS (
-    SELECT COUNT(DISTINCT o.order_id) AS orders_placed
-    FROM aep_backend_dataset.oms_orders o
-    CROSS JOIN params p
-    WHERE TO_DATE(o.order_created_at) BETWEEN p.start_date AND p.end_date
-      AND o.is_test_order = FALSE
-      AND NOT (o.order_status = 'cancelled' AND o.cancel_reason = 'fraud')
-  )
-  -- Contacts per 100 orders, uncapped
   SELECT
-    c.inbound_contacts,
-    o.orders_placed,
-    ROUND(CAST(c.inbound_contacts AS DOUBLE) / NULLIF(o.orders_placed, 0) * 100, 2) AS support_contact_rate
-  FROM contacts c
-  CROSS JOIN orders o;
+    100.0 * COUNT(DISTINCT CASE
+      WHEN eventType = 'inbound_support_contact_created' THEN _openkpis.contact_id
+    END) / NULLIF(COUNT(DISTINCT CASE
+      WHEN eventType = 'commerce.purchases'
+        AND _openkpis.is_test_order = FALSE
+        AND _openkpis.is_fraud_order = FALSE
+      THEN commerce.order.purchaseID
+    END), 0) AS support_contact_rate
+  FROM {{AEP_EXPERIENCE_EVENT_DATASET}}
+  WHERE timestamp >= CAST('{{REPORT_START}}' AS TIMESTAMP)
+    AND timestamp < CAST('{{REPORT_END}}' AS TIMESTAMP)
+    AND eventType IN ('inbound_support_contact_created', 'commerce.purchases');
 
 Calculation Notes: |
-  1️⃣ Contact = one inbound ticket or conversation, any channel. Merged tickets count once; replies on an open ticket are not new contacts.
-  2️⃣ Exclude spam, auto-responder loops, outbound agent messages and internally created tickets.
-  3️⃣ Pre-sale questions with no order still count; split them out by contact reason instead of dropping them.
-  4️⃣ Denominator: all orders placed in the period across channels; exclude test orders and orders cancelled as fraud.
-  5️⃣ Date contacts by ticket creation, not resolution; a reopened ticket adds no contact.
-  6️⃣ A new ticket on an already handled issue is a new contact; track repeats through first contact resolution, not here.
-  7️⃣ Expressed per 100 orders, not per customer; peak weeks can exceed 100, so never cap the value.
+  1️⃣ Date contacts by creation and orders by confirmation; use one UTC interval, start included and end excluded.
+  2️⃣ Count each contact ID and order ID once; include pre-sale contacts, but exclude replies and reopened tickets.
+  3️⃣ Count new inbound tickets or conversations only; exclude spam, auto-replies, outbound and internal tickets.
+  4️⃣ Exclude orders identified as test or fraud at confirmation.
+  5️⃣ Require complete channel coverage and stable IDs; return null with no orders. The rate can exceed 100.
 
 Business Use Case: |
-  1️⃣ Customer Service: weekly rate above plan → adjust agent staffing and chat hours for the next two weeks.
-  2️⃣ Customer Service: WISMO share of contacts rising → add proactive shipping notifications and tracking links.
-  3️⃣ Product: rate jumps after a site release → review the changed checkout and account pages and fix defects.
-  4️⃣ Merchandising: one category drives most contacts per order → rewrite size guides and copy for its top SKUs.
+  1️⃣ Customer Support compares demand with staffing plans and adjusts agent coverage when the rate rises.
+  2️⃣ Customer Support investigates contact-channel changes before revising routing and self-service options.
+  3️⃣ E-commerce Operations investigates sustained increases before changing order and delivery communications.
 
 Dependencies:
-  Events: [contact-form-submission, purchase]
-  Dimensions: [support-channel]
-  KPIs: [orders]
+  Events: [purchase]
 
-Source Data: CRM
+Source Data: [Digital Analytics, Commerce Platform, Order Management, Customer Support, Offline Operational System]
 
-Report Attributes: |
-  support-channel; contact reason; ticket-priority; item-category; fulfillment-method; device-category
+Report Attributes: [Support channel (contact counts only)]
 
-Dashboard Usage: [Customer Support Operations, Customer Experience Overview, Peak Season Readiness]
+Recommended Reporting Views: [Support Demand Trends, Support Staffing Planning, Customer Service Operations]
 
 Segment Eligibility: |
-  true
+  Contact ID EXISTS OR Transaction ID EXISTS
 
-Related KPIs: [wismo-rate, self-service-resolution-rate, average-resolution-time, return-initiation-rate, refund-rate, delivery-exception-rate]
+Related KPIs: [wismo-rate, self-service-resolution-rate, average-resolution-time]
 
 Data Sensitivity: Internal
 
@@ -141,11 +117,15 @@ Contains PII: No
 
 Status: draft
 
+Version: 1.0.0
+
+Validation Status: qa_passed
+
 Contributed By: devyendarm
 
-Created At: 2026-09-30T17:45:09.665+00:00
+Created At: 2026-11-04T01:42:33.586+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-30T17:45:18.558+00:00
+Last Modified At: 2026-11-04T02:12:03.992+00:00
 
