@@ -1,28 +1,37 @@
 # Event: Coupon Applied
-# Generated: 2026-10-11T14:47:24.076Z
+# Generated: 2026-11-05T02:40:45.855Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Event Name: Coupon Applied
-Event Serialization: always
+Aliases: [Promo Code Applied, Voucher Applied]
+
+Event Serialization: One per confirmed coupon application
 
 Description: |
-  Custom coupon_apply event, fired when the store accepts a coupon or promo code a shopper submits in cart or checkout. Rejected codes do not fire; redemption is read from purchase.
+  Records when a store accepts a submitted coupon and applies its discount to a cart or checkout. It helps teams understand promotion use before purchase.
 
-Category: Conversion
+Category: Engagement
 
-Tags: [event, E-commerce: Cart & Checkout Funnel Analytics, cart, checkout, promotion]
+Tags: [coupons, promotions, cart, checkout]
 
-Industry: E-commerce
+Industry: [E-commerce, Retail]
 
-Priority: Medium
+Business Criticality: Medium
 
-Core Area: Checkout
+Journey / Navigation Area: [Checkout, Cart]
 
+Owning Function: Marketing
 
-Event Type: custom
+Scope: Event
 
-Aggregation Window: Event, Session, Daily
+Measurement Channels: [Web, Mobile App]
+
+GA4 Collection Classification: Custom
+
+Adobe XDM Classification: Custom XDM
+
+Trigger Condition: WHEN the store accepts a submitted coupon and applies its discount, THEN emit coupon_apply.
 
 GA4 Event: |
   coupon_apply
@@ -36,108 +45,105 @@ W3 Data Layer: |
       "event": [
         {
           "eventInfo": {
-            "eventName": "coupon_apply"
+            "eventName": "coupon_applied",
+            "timeStamp": "2026-10-29T12:00:00Z"
           },
           "attributes": {
-            "coupon": "CODE-1",
-            "discount_value": 10,
-            "value": 90,
-            "currency": "USD",
-            "cart_id": "cart-1",
-            "page_type": "checkout",
-            "checkout_step": 2
+            "event_id": "coupon-action-A123",
+            "coupon": "SAVE10"
           }
         }
-      ]
+      ],
+      "cart": {
+        "cartID": "C123"
+      }
     }
   }
 
 GA4 Data Layer: |
-  {
-    "event": "coupon_apply",
-    "coupon": "CODE-1",
-    "discount_value": 10,
-    "value": 90,
-    "currency": "USD",
-    "cart_id": "cart-1",
-    "page_type": "checkout",
-    "checkout_step": 2
-  }
+  [
+    {
+      "event": "coupon_apply",
+      "event_id": "coupon-action-A123",
+      "cart_id": "C123",
+      "coupon": "SAVE10"
+    }
+  ]
 
 Adobe Client Data Layer: |
-  {
-    "event": "coupon_apply",
-    "eventInfo": {
-      "coupon": "CODE-1",
-      "discount_value": 10,
-      "value": 90,
-      "currency": "USD",
-      "cart_id": "cart-1",
-      "page_type": "checkout",
-      "checkout_step": 2
+  [
+    {
+      "event": "coupon_apply",
+      "eventInfo": {
+        "eventId": "coupon-action-A123",
+        "timestamp": "2026-10-29T12:00:00Z"
+      },
+      "data": {
+        "coupon": "SAVE10"
+      },
+      "commerce": {
+        "cart": {
+          "cartID": "C123"
+        }
+      }
     }
-  }
+  ]
 
 XDM Mapping: |
-  {
-    "eventType": "coupon_apply",
-    "_tenantId": {
-      "coupon": "CODE-1",
-      "discount_value": 10,
-      "value": 90,
-      "currency": "USD",
-      "cart_id": "cart-1",
-      "page_type": "checkout",
-      "checkout_step": 2
+  [
+    {
+      "_id": "coupon-action-A123",
+      "timestamp": "2026-10-29T12:00:00Z",
+      "eventType": "coupon_apply",
+      "commerce": {
+        "cart": {
+          "cartID": "C123"
+        }
+      },
+      "_openkpis": {
+        "coupon": "SAVE10"
+      }
     }
-  }
+  ]
 
-Parameters: |
-  {
-    "coupon": "string - Code as submitted, uppercased and trimmed; same format as purchase.coupon",
-    "discount_value": "number - Discount granted by the accepted code in currency units",
-    "value": "number - Net cart value after the discount, as on add_to_cart and view_cart; pre-discount value = value + discount_value",
-    "currency": "string - ISO 4217 code of value and discount_value",
-    "cart_id": "string - Cart identifier, same as add_to_cart.cart_id",
-    "page_type": "string - cart | checkout",
-    "checkout_step": "number - Checkout step where the code was entered; checkout only"
-  }
+Calculation Notes: |
+  1️⃣ Emit on confirmed application, not typing, rejected codes, automatic promotions, removal, reloads or purchase.
+  2️⃣ Assign each completed application a unique event_id; reuse it on retries and deduplicate by that ID.
+  3️⃣ Filter occurrence times to the reporting interval, excluding its end, before deduplicating.
+  4️⃣ Collect only with analytics consent; use shared promotion codes and non-person-linked cart IDs, without user IDs.
+  5️⃣ Preserve the accepted code unchanged; application does not prove purchase redemption or later coupon validity.
+
+Business Use Case: |
+  1️⃣ Marketing compares accepted coupon activity before deciding which promotions to continue.
+  2️⃣ E-commerce Operations investigates unexpected changes in accepted applications for a promotion.
+
+
+Source Data: [Digital Analytics, Commerce Platform]
+
+Report Attributes: [Coupon Code, Cart ID]
+
+Segment Eligibility: |
+  Coupon Code EXISTS AND Cart ID EXISTS
 
 
 
-Dependencies:
-  Events: [add-to-cart, purchase, add-shipping-info]
-  Dimensions: [coupon-code, item-coupon]
-  KPIs: [coupon-redemption-rate]
 
-Source Data: Digital Analytics (GA4)
 
-    Report Attributes: |
-  Coupon Code; Page Type; Checkout Step; Device Category; Traffic Source
+Data Sensitivity: Internal
 
-    Dashboard Usage: [Promotion Performance, Cart & Checkout Funnel]
+Contains PII: No
 
-    Segment Eligibility: |
-  true
+Status: draft
 
-    Related Dimensions: [coupon-code, item-coupon, page-type, checkout-type]
+Version: 1.0.0
 
-    Derived Dimensions: [coupon-code]
+Validation Status: qa_passed
 
-    
-    Derived KPIs: [coupon-redemption-rate]
+Contributed By: devyendarm
 
-    Data Sensitivity: Internal
+Created At: 2026-11-04T17:17:20.192+00:00
 
-    Contains PII: No
+Last Modified By: devyendarm
 
-    Status: draft
-
-    Contributed By: devyendarm
-
-    Created At: 2026-10-11T14:47:14.983+00:00
-
-    Last Modified By: devyendarm
-
-    Last Modified At: 2026-10-11T14:47:23.75+00:00
+Last Modified At: 2026-11-05T02:40:44.469+00:00
 
