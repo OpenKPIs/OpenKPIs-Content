@@ -1,140 +1,199 @@
 # KPI: Average Resolution Time
-# Generated: 2026-09-30T17:58:17.354Z
+# Generated: 2026-11-18T00:06:48.939Z
 # Contributed by: devyendarm
-# Last modified by: devyendarm
+# Last modified by: devyendarm@gmail.com
 
 KPI Name: Average Resolution Time
-Formula: SUM(Final Solved Timestamp - Ticket Created Timestamp, in hours) / Tickets Solved in Period
+Aliases: [Mean Time to Resolution, Full Resolution Time, Ticket Resolution Time]
+
+Formula: Total ticket resolution hours ÷ Resolved tickets
 
 Description: |
-  Mean hours from support ticket creation to final solved status, for tickets solved in the period across email, chat, phone and social. Shows how fast order, return and refund issues get closed.
+  Average calendar hours from ticket creation to recorded final resolution. Support teams use it to identify slow case handling and adjust staffing or resolution procedures.
 
-Category: Operations
+Category: Operational Efficiency
 
-Tags: [kpi, E-commerce: Returns, Refunds & Customer Support]
+Tags: [customer support, ticket resolution, service speed]
 
-Industry: [["E-commerce"]]
+Industry: [E-commerce, Retail]
 
-Priority: High
+Business Criticality: High
 
-Core Area: Generic
+Journey / Navigation Area: [Customer Service]
 
-Scope: Global
+Owning Function: Customer Support
+
+Scope: Event
+
+Measurement Channels: [Backend / API]
 
 Measure Type: Average
 
-Aggregation Window: Daily, Weekly, Monthly
+Aggregation Window: [Daily, Weekly, Monthly, Selected Reporting Period]
 
+GA4 Event: |
+  support_ticket_created — records ticket creation
+  support_ticket_resolved — records final resolution and eligibility
 
+Adobe Event: |
+  support_ticket_created — records ticket creation
+  support_ticket_resolved — records final resolution and eligibility
 
+W3 Data Layer: |
+  {
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "support_ticket_created",
+            "timeStamp": "2026-10-16T12:00:00Z"
+          },
+          "attributes": {
+            "ticketId": "T-123"
+          }
+        },
+        {
+          "eventInfo": {
+            "eventName": "support_ticket_resolved",
+            "timeStamp": "2026-10-16T15:00:00Z"
+          },
+          "attributes": {
+            "ticketId": "T-123",
+            "resolutionEligibility": "Eligible",
+            "supportChannel": "Chat"
+          }
+        }
+      ]
+    }
+  }
 
+GA4 Data Layer: |
+  [
+    {
+      "event": "support_ticket_created",
+      "ticket_id": "T-123"
+    },
+    {
+      "event": "support_ticket_resolved",
+      "ticket_id": "T-123",
+      "resolution_eligibility": "Eligible",
+      "support_channel": "Chat"
+    }
+  ]
 
+Adobe Client Data Layer: |
+  [
+    {
+      "event": "support_ticket_created",
+      "eventInfo": {
+        "eventId": "ticket-created-T-123",
+        "timestamp": "2026-10-16T12:00:00Z"
+      },
+      "data": {
+        "ticketId": "T-123"
+      }
+    },
+    {
+      "event": "support_ticket_resolved",
+      "eventInfo": {
+        "eventId": "ticket-resolved-T-123",
+        "timestamp": "2026-10-16T15:00:00Z"
+      },
+      "data": {
+        "ticketId": "T-123",
+        "resolutionEligibility": "Eligible",
+        "supportChannel": "Chat"
+      }
+    }
+  ]
 
+XDM Mapping: |
+  [
+    {
+      "_id": "ticket-created-T-123",
+      "timestamp": "2026-10-16T12:00:00Z",
+      "eventType": "support_ticket_created",
+      "_openkpis": {
+        "ticketId": "T-123"
+      }
+    },
+    {
+      "_id": "ticket-resolved-T-123",
+      "timestamp": "2026-10-16T15:00:00Z",
+      "eventType": "support_ticket_resolved",
+      "_openkpis": {
+        "ticketId": "T-123",
+        "resolutionEligibility": "Eligible",
+        "supportChannel": "Chat"
+      }
+    }
+  ]
 
 Google Analytics SQL: |
-  -- ==========================================
-  -- 1. GOOGLE BIGQUERY SQL
-  -- ==========================================
-  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
-  DECLARE end_date DATE DEFAULT CURRENT_DATE();
-  
-  -- Final solve per ticket: the last transition to solved, so a reopened ticket is measured to its final solve
-  WITH final_solve AS (
-    SELECT
-      ticket_id,
-      MAX(changed_at) AS final_solved_at
-    FROM `your-project.crm.ticket_status_history`
-    WHERE new_status = 'solved'
-    GROUP BY ticket_id
-  ),
-  -- Cohort: tickets still solved/closed whose final solve falls in the period; spam, deleted and merged-away tickets excluded; calendar hours, pending time kept in the clock
-  resolved AS (
-    SELECT
-      TIMESTAMP_DIFF(f.final_solved_at, t.created_at, SECOND) / 3600.0 AS resolution_hours
-    FROM `your-project.crm.support_tickets` AS t
-    JOIN final_solve AS f USING (ticket_id)
-    WHERE t.current_status IN ('solved', 'closed')
-      AND t.is_spam = FALSE
-      AND t.is_deleted = FALSE
-      AND t.merged_into_ticket_id IS NULL
-      AND DATE(f.final_solved_at) BETWEEN start_date AND end_date
+  -- Bind report_start_utc and report_end_utc as UTC TIMESTAMP values.
+  WITH ticket_events AS (
+    SELECT event_name, event_timestamp,
+      (SELECT p.value.string_value FROM UNNEST(event_params) p WHERE p.key = 'ticket_id') AS ticket_id,
+      (SELECT p.value.string_value FROM UNNEST(event_params) p WHERE p.key = 'resolution_eligibility') AS eligibility
+    FROM `project.analytics.events_*`
+    WHERE event_name IN ('support_ticket_created', 'support_ticket_resolved')
+      AND _TABLE_SUFFIX <= FORMAT_DATE('%Y%m%d', DATE_ADD(DATE(@report_end_utc), INTERVAL 1 DAY))
+      AND event_timestamp < UNIX_MICROS(@report_end_utc)
   )
-  -- Mean resolution hours, with the median and 90th percentile the definition requires alongside it
-  SELECT
-    COUNT(*) AS tickets_solved,
-    SAFE_DIVIDE(SUM(resolution_hours), COUNT(*)) AS average_resolution_hours,
-    APPROX_QUANTILES(resolution_hours, 100)[OFFSET(50)] AS median_resolution_hours,
-    APPROX_QUANTILES(resolution_hours, 100)[OFFSET(90)] AS p90_resolution_hours
-  FROM resolved;
+  SELECT AVG((r.event_timestamp - c.event_timestamp) / 3600000000.0) AS average_resolution_hours
+  FROM ticket_events c
+  JOIN ticket_events r ON r.ticket_id = c.ticket_id
+  WHERE c.event_name = 'support_ticket_created'
+    AND r.event_name = 'support_ticket_resolved'
+    AND r.event_timestamp >= UNIX_MICROS(@report_start_utc)
+    AND r.event_timestamp > c.event_timestamp
+    AND r.eligibility = 'Eligible'
+    AND c.ticket_id IS NOT NULL AND c.ticket_id <> ''
 
 AEP Query Service SQL: |
-  -- ==========================================
-  -- 2. ADOBE AEP QUERY SERVICE SQL
-  -- ==========================================
-  -- Reporting window: last 90 days to today
-  WITH params AS (
-    SELECT
-      DATE_SUB(CURRENT_DATE, 90) AS start_date,
-      CURRENT_DATE AS end_date
-  ),
-  -- Final solve per ticket: the last transition to solved, so a reopened ticket is measured to its final solve
-  final_solve AS (
-    SELECT
-      ticket_id,
-      MAX(changed_at) AS final_solved_at
-    FROM crm_ticket_status_history
-    WHERE new_status = 'solved'
-    GROUP BY ticket_id
-  ),
-  -- Cohort: tickets still solved/closed whose final solve falls in the period; spam, deleted and merged-away tickets excluded; calendar hours, pending time kept in the clock
-  resolved AS (
-    SELECT
-      (UNIX_TIMESTAMP(f.final_solved_at) - UNIX_TIMESTAMP(t.created_at)) / 3600.0 AS resolution_hours
-    FROM crm_support_tickets AS t
-    JOIN final_solve AS f ON f.ticket_id = t.ticket_id
-    CROSS JOIN params AS p
-    WHERE t.current_status IN ('solved', 'closed')
-      AND t.is_spam = FALSE
-      AND t.is_deleted = FALSE
-      AND t.merged_into_ticket_id IS NULL
-      AND TO_DATE(f.final_solved_at) BETWEEN p.start_date AND p.end_date
+  -- Substitute UTC report bounds in the two timestamp templates.
+  WITH ticket_events AS (
+    SELECT eventType, timestamp,
+      _openkpis.ticketId AS ticket_id,
+      _openkpis.resolutionEligibility AS eligibility
+    FROM {{AEP_EXPERIENCE_EVENT_DATASET}}
+    WHERE eventType IN ('support_ticket_created', 'support_ticket_resolved')
+      AND timestamp < CAST('{{REPORT_END_UTC}}' AS TIMESTAMP)
   )
-  -- Mean resolution hours, with the median and 90th percentile the definition requires alongside it
-  SELECT
-    COUNT(*) AS tickets_solved,
-    SUM(resolution_hours) / NULLIF(COUNT(*), 0) AS average_resolution_hours,
-    PERCENTILE_APPROX(resolution_hours, 0.5) AS median_resolution_hours,
-    PERCENTILE_APPROX(resolution_hours, 0.9) AS p90_resolution_hours
-  FROM resolved;
+  SELECT AVG((UNIX_TIMESTAMP(r.timestamp) - UNIX_TIMESTAMP(c.timestamp)) / 3600.0) AS average_resolution_hours
+  FROM ticket_events c
+  JOIN ticket_events r ON r.ticket_id = c.ticket_id
+  WHERE c.eventType = 'support_ticket_created'
+    AND r.eventType = 'support_ticket_resolved'
+    AND r.timestamp >= CAST('{{REPORT_START_UTC}}' AS TIMESTAMP)
+    AND r.timestamp > c.timestamp
+    AND r.eligibility = 'Eligible'
+    AND c.ticket_id IS NOT NULL AND c.ticket_id <> ''
 
 Calculation Notes: |
-  1️⃣ Cohort: tickets whose final solved timestamp falls in the period; open, pending and on-hold tickets are excluded until solved.
-  2️⃣ Clock runs from ticket creation to the last solved status; a reopened ticket is measured to its final solve, not its first.
-  3️⃣ Exclude spam, deleted and merged-away tickets; a merged thread counts once, under the surviving ticket.
-  4️⃣ Headline is calendar hours; a business-hours version uses the helpdesk schedule and must be labelled as such.
-  5️⃣ Time pending on the customer stays in the clock; do not subtract it from the headline figure.
-  6️⃣ The mean is skewed by long-tail tickets: report median and 90th percentile alongside it.
-  7️⃣ Channel is the ticket source at creation; a chat that moves to email stays a chat ticket.
+  1️⃣ Use UTC times: final resolution falls in [start, end) and follows creation, which may predate start.
+  2️⃣ Supply one creation and one final resolution per anonymous ticket ID; remove transport retries upstream.
+  3️⃣ Exclude spam, deleted and merged-away tickets at resolution; later changes do not restate history.
+  4️⃣ Include customer waiting time in calendar hours; Support Channel is the channel recorded at creation.
+  5️⃣ Return null when no eligible tickets resolve.
 
 Business Use Case: |
-  1️⃣ Customer Service: weekly mean breaches SLA on one channel → move agents to that queue or adjust shift cover.
-  2️⃣ Customer Service: return-reason tickets resolve slowest → give tier-1 agents refund authority and return macros.
-  3️⃣ Operations: WISMO tickets drive resolution time up → push proactive delivery notifications for delayed orders.
+  1️⃣ Support managers compare channels and move staffing toward queues with persistently slow resolution.
+  2️⃣ Support leads investigate rising resolution time and revise escalation rules or agent guidance.
 
 Dependencies:
-  Dimensions: [ticket-status, ticket-priority, support-channel, resolution-type]
+  Dimensions: [support-channel]
 
-Source Data: CRM
+Source Data: [Customer Support, Digital Analytics]
 
-Report Attributes: |
-  Support Channel; Ticket Priority; Resolution Type; Return Reason; Ticket Status
+Report Attributes: [Support Channel]
 
-Dashboard Usage: [Customer Service Operations, Returns & Refunds Performance]
+Recommended Reporting Views: [Support Resolution Performance, Support Channel Comparison]
 
 Segment Eligibility: |
-  false
+  Resolution Eligibility EQUALS "Eligible"
 
-Related KPIs: [support-contact-rate, self-service-resolution-rate, wismo-rate, refund-rate, net-promoter-score]
+Related KPIs: [support-contact-rate, self-service-resolution-rate, wismo-rate]
 
 Data Sensitivity: Internal
 
@@ -142,11 +201,15 @@ Contains PII: No
 
 Status: published
 
+Version: 1.0.0
+
+Validation Status: qa_passed
+
 Contributed By: devyendarm
 
 Created At: 2026-09-30T17:43:48.435+00:00
 
-Last Modified By: devyendarm
+Last Modified By: devyendarm@gmail.com
 
-Last Modified At: 2026-09-30T17:58:16.912+00:00
+Last Modified At: 2026-11-18T00:06:48.307+00:00
 
