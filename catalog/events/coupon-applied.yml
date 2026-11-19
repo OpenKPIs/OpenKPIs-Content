@@ -1,34 +1,43 @@
 # Event: Coupon Applied
-# Generated: 2026-10-11T14:56:17.157Z
+# Generated: 2026-11-19T16:10:44.098Z
 # Contributed by: devyendarm
-# Last modified by: devyendarm
+# Last modified by: devyendarm@gmail.com
 
 Event Name: Coupon Applied
-Event Serialization: always
+Aliases: [Promo Code Applied, Voucher Applied]
+
+Event Serialization: One per confirmed coupon application
 
 Description: |
-  Custom coupon_apply event, fired when the store accepts a coupon or promo code a shopper submits in cart or checkout. Rejected codes do not fire; redemption is read from purchase.
+  Records when a store accepts a submitted coupon and newly applies its discount in cart or checkout. It shows which offers shoppers choose to use.
 
-Category: Conversion
+Category: Engagement
 
-Tags: [event, E-commerce: Cart & Checkout Funnel Analytics, cart, checkout, promotion]
+Tags: [coupons, promotions, cart, checkout]
 
-Industry: E-commerce
+Industry: [E-commerce, Retail]
 
-Priority: Medium
+Business Criticality: Medium
 
-Core Area: Checkout
+Journey / Navigation Area: [Checkout, Cart]
 
+Owning Function: Marketing
 
-Event Type: custom
+Scope: Event
 
-Aggregation Window: Event, Session, Daily
+Measurement Channels: [Web]
+
+GA4 Collection Classification: Custom
+
+Adobe XDM Classification: Custom XDM
+
+Trigger Condition: WHEN a submitted coupon changes from unapplied to applied in a committed cart or checkout update, THEN emit coupon_applied.
 
 GA4 Event: |
-  coupon_apply
+  coupon_applied
 
 Adobe Event: |
-  coupon_apply
+  coupon_applied
 
 W3 Data Layer: |
   {
@@ -36,16 +45,12 @@ W3 Data Layer: |
       "event": [
         {
           "eventInfo": {
-            "eventName": "coupon_apply"
+            "eventName": "coupon_applied",
+            "eventID": "coupon-app-741",
+            "timeStamp": "2026-11-18T16:24:00Z"
           },
           "attributes": {
-            "coupon": "CODE-1",
-            "discount_value": 10,
-            "value": 90,
-            "currency": "USD",
-            "cart_id": "cart-1",
-            "page_type": "checkout",
-            "checkout_step": 2
+            "offer_id": "offer-107"
           }
         }
       ]
@@ -53,95 +58,78 @@ W3 Data Layer: |
   }
 
 GA4 Data Layer: |
-  {
-    "event": "coupon_apply",
-    "coupon": "CODE-1",
-    "discount_value": 10,
-    "value": 90,
-    "currency": "USD",
-    "cart_id": "cart-1",
-    "page_type": "checkout",
-    "checkout_step": 2
-  }
+  [
+    {
+      "event": "coupon_applied",
+      "event_id": "coupon-app-741",
+      "occurred_at": "2026-11-18T16:24:00Z",
+      "offer_id": "offer-107"
+    }
+  ]
 
 Adobe Client Data Layer: |
-  {
-    "event": "coupon_apply",
-    "eventInfo": {
-      "coupon": "CODE-1",
-      "discount_value": 10,
-      "value": 90,
-      "currency": "USD",
-      "cart_id": "cart-1",
-      "page_type": "checkout",
-      "checkout_step": 2
+  [
+    {
+      "event": "coupon_applied",
+      "eventInfo": {
+        "eventId": "coupon-app-741",
+        "timestamp": "2026-11-18T16:24:00Z"
+      },
+      "data": {
+        "offer_id": "offer-107"
+      }
     }
-  }
+  ]
 
 XDM Mapping: |
-  {
-    "eventType": "coupon_apply",
-    "_tenantId": {
-      "coupon": "CODE-1",
-      "discount_value": 10,
-      "value": 90,
-      "currency": "USD",
-      "cart_id": "cart-1",
-      "page_type": "checkout",
-      "checkout_step": 2
+  [
+    {
+      "_id": "coupon-app-741",
+      "timestamp": "2026-11-18T16:24:00Z",
+      "eventType": "coupon_applied",
+      "_openkpis": {
+        "offer_id": "offer-107"
+      }
     }
-  }
-
-Parameters: |
-  {
-    "coupon": "string - Code as submitted, uppercased and trimmed; same format as purchase.coupon",
-    "discount_value": "number - Discount granted by the accepted code in currency units",
-    "value": "number - Net cart value after the discount, as on add_to_cart and view_cart; pre-discount value = value + discount_value",
-    "currency": "string - ISO 4217 code of value and discount_value",
-    "cart_id": "string - Cart identifier, same as add_to_cart.cart_id",
-    "page_type": "string - cart | checkout",
-    "checkout_step": "number - Checkout step where the code was entered; checkout only"
-  }
+  ]
 
 Calculation Notes: |
-  ["1️⃣ Fires only when the store accepts a submitted code and applies the discount; never on typing, field focus, a rejected code or the purchase.","2️⃣ Serialization always: each accepted code is a hit. Drop a repeat of the same coupon and cart_id within 2 seconds (Enter plus click).","3️⃣ Required: coupon, discount_value, currency, value, cart_id, page_type. Optional: checkout_step (checkout only).","4️⃣ Rejected codes are tracked on checkout_error (Checkout Error), not here. Code-free automatic promotions and clearing a code do not fire.","5️⃣ Uppercase and trim coupon to join purchase.coupon; mask single-use code suffixes the same way on purchase. No email or user data.","6️⃣ Sent only under analytics consent. Common mistake: firing on the success banner render, so a page reload re-sends the hit; push on the response."]
+  1️⃣ At commit, the commerce platform assigns one unique ID per transition and freezes the offer ID and commit time.
+  2️⃣ Skip requests that leave the coupon applied. Applying it again after removal is a new action.
+  3️⃣ Use one sender per platform. Retries reuse the ID and snapshot. Deduplicate by ID after the receipt cutoff.
+  4️⃣ With analytics consent, send a stable, nonpersonal ID unique to one offer per reporting scope. Omit private codes.
+  5️⃣ Count by commit time for events received by each analytics platform before the reporting period ended.
 
 Business Use Case: |
-  ["1️⃣ CRM Marketing: a campaign code is applied often but seldom reaches purchase → reviews checkout friction for that send.","2️⃣ Merchandising: average discount_value per applied code exceeds plan → tightens the code's cap or eligible items.","3️⃣ Finance: a leaked or unissued code spikes in applied hits → has the code revoked and checks the margin hit."]
+  1️⃣ Marketing compares confirmed applications by offer to decide which offers to run again.
 
-Dependencies:
-  Events: [add-to-cart, purchase, add-shipping-info]
-  Dimensions: [coupon-code, item-coupon]
-  KPIs: [coupon-redemption-rate]
 
-Source Data: Digital Analytics (GA4)
+Source Data: [Digital Analytics, Commerce Platform]
 
-    Report Attributes: |
-  Coupon Code; Page Type; Checkout Step; Device Category; Traffic Source
+Report Attributes: [Offer ID]
 
-    Dashboard Usage: [Promotion Performance, Cart & Checkout Funnel]
+Segment Eligibility: |
+  Offer ID EXISTS
 
-    Segment Eligibility: |
-  true
 
-    Related Dimensions: [coupon-code, item-coupon, page-type, checkout-type]
 
-    Derived Dimensions: [coupon-code]
 
-    
-    Derived KPIs: [coupon-redemption-rate]
 
-    Data Sensitivity: Internal
+Data Sensitivity: Internal
 
-    Contains PII: No
+Contains PII: No
 
-    Status: published
+Status: published
 
-    Contributed By: devyendarm
+Version: 1.0.0
 
-    Created At: 2026-10-11T14:47:14.983+00:00
+Validation Status: qa_passed
 
-    Last Modified By: devyendarm
+Contributed By: devyendarm
 
-    Last Modified At: 2026-10-11T14:56:16.817+00:00
+Created At: 2026-10-11T14:47:14.983+00:00
+
+Last Modified By: devyendarm@gmail.com
+
+Last Modified At: 2026-11-19T16:10:43.631+00:00
 
