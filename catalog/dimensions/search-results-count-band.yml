@@ -1,34 +1,40 @@
 # Dimension: Search Results Count Band
-# Generated: 2026-09-30T17:57:02.271Z
+# Generated: 2026-11-19T17:13:21.449Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Dimension Name: Search Results Count Band
+Aliases: [Search Result Count Band, Search Results Bucket]
+
+Formula: Search results count → Search Results Count Band
 
 Description: |
-  Buckets each submitted site search into 0, 1-10, 11-50 or 51+ results. Read from search_results_count on the first results page of view_search_results.
+  Groups submitted storefront searches by how many matches the search engine found. The bands show where shoppers find no matches, a short list, or a broad set of results.
 
-Category: Experience
+Category: Engagement
 
-Tags: [dimension, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+Tags: [site search, product discovery, search results]
 
-Industry: E-commerce
+Industry: [E-commerce, Retail]
 
-Priority: Medium
+Business Criticality: Medium
 
-Core Area: Discovery
+Journey / Navigation Area: [Discovery]
+
+Owning Function: Merchandising
 
 Scope: Event
 
+Measurement Channels: [Web]
+
 Data Type: string
 
-Aggregation Window: Event, Daily, Weekly, Monthly
 
 GA4 Event: |
-  view_search_results
+  search — Records the initial result count for a submitted storefront search
 
 Adobe Event: |
-  search
+  search — Records the initial result count for a submitted storefront search
 
 W3 Data Layer: |
   {
@@ -36,14 +42,13 @@ W3 Data Layer: |
       "event": [
         {
           "eventInfo": {
-            "eventName": "view_search_results"
+            "eventName": "site_search_completed",
+            "timeStamp": "2026-11-18T15:42:00Z"
           },
           "attributes": {
-            "search_term": "term",
-            "search_results_count": 25,
-            "page_number": 1,
-            "is_refire": false,
-            "traffic_type": "external"
+            "eventId": "search-7f82b94c",
+            "searchTerm": "running shoes",
+            "searchResultsCount": 24
           }
         }
       ]
@@ -51,76 +56,60 @@ W3 Data Layer: |
   }
 
 GA4 Data Layer: |
-  {
-    "event": "view_search_results",
-    "search_term": "term",
-    "search_results_count": 25,
-    "page_number": 1,
-    "is_refire": false,
-    "traffic_type": "external"
-  }
+  [
+    {
+      "event": "search",
+      "event_id": "search-7f82b94c",
+      "occurred_at": "2026-11-18T15:42:00Z",
+      "search_term": "running shoes",
+      "search_results_count": 24
+    }
+  ]
 
 Adobe Client Data Layer: |
-  {
-    "event": "search",
-    "eventInfo": {
-      "eventName": "search"
-    },
-    "search_term": "term",
-    "search_results_count": 25,
-    "page_number": 1,
-    "is_refire": false,
-    "traffic_type": "external"
-  }
-
-XDM Mapping: |
-  {
-    "eventType": "search",
-    "_<tenantId>": {
-      "siteSearch": {
-        "searchTerm": "term",
-        "searchResultsCount": 25,
-        "pageNumber": 1,
-        "isRefire": false,
-        "trafficType": "external"
+  [
+    {
+      "event": "search",
+      "eventInfo": {
+        "eventId": "search-7f82b94c",
+        "timestamp": "2026-11-18T15:42:00Z"
+      },
+      "data": {
+        "searchTerm": "running shoes",
+        "searchResultsCount": 24
       }
     }
-  }
+  ]
+
+XDM Mapping: |
+  [
+    {
+      "_id": "search-7f82b94c",
+      "timestamp": "2026-11-18T15:42:00Z",
+      "eventType": "search",
+      "_openkpis": {
+        "siteSearch": {
+          "searchTerm": "running shoes",
+          "searchResultsCount": 24
+        }
+      }
+    }
+  ]
 
 Google Analytics SQL: |
-  -- ==========================================
-  -- 1. GOOGLE BIGQUERY SQL
-  -- ==========================================
-  DECLARE start_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY);
-  DECLARE end_date DATE DEFAULT DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
-  
-  -- First results page of each view_search_results, refires and internal/bot traffic removed, parameters pivoted from event_params
-  WITH searches AS (
-    SELECT
-      user_pseudo_id,
-      event_timestamp,
-      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
-      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'search_term') AS search_term,
-      (SELECT SAFE_CAST(COALESCE(CAST(value.int_value AS STRING), CAST(value.double_value AS STRING), value.string_value) AS FLOAT64)
-         FROM UNNEST(event_params) WHERE key = 'search_results_count') AS results_count
-    FROM `your-project.analytics_123456789.events_*`
-    WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', start_date) AND FORMAT_DATE('%Y%m%d', end_date)
-      AND event_name = 'view_search_results'
-      AND (SELECT COALESCE(value.int_value, SAFE_CAST(value.double_value AS INT64), SAFE_CAST(value.string_value AS INT64)) FROM UNNEST(event_params) WHERE key = 'page_number') = 1
-      AND COALESCE((SELECT LOWER(COALESCE(value.string_value, CAST(value.int_value AS STRING))) FROM UNNEST(event_params) WHERE key = 'is_refire'), 'false') NOT IN ('true', '1')
-      AND COALESCE((SELECT LOWER(value.string_value) FROM UNNEST(event_params) WHERE key = 'traffic_type'), '') NOT IN ('internal', 'bot')
-  ),
-  -- Sort reloads: a first-page result view repeating the previous search term in the same session is the same search
-  first_views AS (
-    SELECT
-      search_term,
-      results_count,
-      LAG(search_term) OVER (PARTITION BY user_pseudo_id, ga_session_id ORDER BY event_timestamp) AS previous_term
-    FROM searches
+  WITH received_searches AS (
+    SELECT event_timestamp AS receipt_micros,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'event_id') AS search_id,
+      (SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'search_term') AS internal_search_term,
+      (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'search_results_count') AS results_count,
+      SAFE_CAST((SELECT value.string_value FROM UNNEST(event_params) WHERE key = 'occurred_at') AS TIMESTAMP) AS occurrence_time
+    FROM `project.analytics_dataset.events_*`
+    WHERE event_name = 'search'
+      AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(DATE(@report_start_utc), INTERVAL 1 DAY))
+                            AND FORMAT_DATE('%Y%m%d', DATE_ADD(DATE(@report_end_utc), INTERVAL 1 DAY))
+      AND event_timestamp < UNIX_MICROS(@report_end_utc)
   )
-  -- Band each search once; a missing, non-numeric or out-of-range count is (not set), never 0
-  SELECT
-    search_term,
+  SELECT search_id, internal_search_term,
     CASE
       WHEN results_count = 0 THEN '0'
       WHEN results_count BETWEEN 1 AND 10 THEN '1-10'
@@ -128,43 +117,27 @@ Google Analytics SQL: |
       WHEN results_count >= 51 THEN '51+'
       ELSE '(not set)'
     END AS search_results_count_band
-  FROM first_views
-  WHERE previous_term IS NULL OR previous_term IS DISTINCT FROM search_term;
+  FROM received_searches
+  WHERE occurrence_time >= @report_start_utc AND occurrence_time < @report_end_utc
+    AND search_id IS NOT NULL AND search_id <> ''
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY search_id ORDER BY receipt_micros) = 1
 
 AEP Query Service SQL: |
-  -- ==========================================
-  -- 2. ADOBE AEP QUERY SERVICE SQL
-  -- ==========================================
-  -- Events in the last 90 days to yesterday with a 30-minute-inactivity session per visitor
-  WITH events AS (
-    SELECT
-      identityMap['ECID'][0].id AS ecid,
-      timestamp,
-      eventType,
-      _tenantId.siteSearch.searchTerm AS search_term,
-      TRY_CAST(CAST(_tenantId.siteSearch.searchResultsCount AS STRING) AS DOUBLE) AS results_count,
-      TRY_CAST(CAST(_tenantId.siteSearch.pageNumber AS STRING) AS INT) AS page_number,
-      LOWER(CAST(_tenantId.siteSearch.isRefire AS STRING)) AS is_refire,
-      LOWER(_tenantId.siteSearch.trafficType) AS traffic_type,
-      SESS_TIMEOUT(timestamp, 60 * 30) OVER (PARTITION BY identityMap['ECID'][0].id ORDER BY timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session
-    FROM aep_web_events_dataset
-    WHERE CAST(timestamp AS DATE) BETWEEN DATE_SUB(CURRENT_DATE, 90) AND DATE_SUB(CURRENT_DATE, 1)
-  ),
-  -- First results page of each search, refires and internal/bot traffic removed; a first-page search repeating the previous term in the session is a sort reload
-  first_views AS (
-    SELECT
-      search_term,
-      results_count,
-      LAG(search_term) OVER (PARTITION BY ecid, session.num ORDER BY timestamp) AS previous_term
-    FROM events
+  -- Configure the Query Service session with drop_system_columns=false to expose Adobe-managed ingestTime.
+  -- Bind REPORT_END_EPOCH_MS to the same instant as REPORT_END_UTC.
+  WITH eligible_searches AS (
+    SELECT _id AS search_id,
+      _openkpis.siteSearch.searchTerm AS internal_search_term,
+      _openkpis.siteSearch.searchResultsCount AS results_count,
+      ROW_NUMBER() OVER (PARTITION BY _id ORDER BY _acp_system_metadata.ingestTime) AS receipt_rank
+    FROM {{AEP_EXPERIENCE_EVENT_DATASET}}
     WHERE eventType = 'search'
-      AND page_number = 1
-      AND COALESCE(is_refire, 'false') NOT IN ('true', '1')
-      AND COALESCE(traffic_type, '') NOT IN ('internal', 'bot')
+      AND _acp_system_metadata.ingestTime < CAST({{REPORT_END_EPOCH_MS}} AS BIGINT)
+      AND timestamp >= CAST('{{REPORT_START_UTC}}' AS TIMESTAMP)
+      AND timestamp < CAST('{{REPORT_END_UTC}}' AS TIMESTAMP)
+      AND _id IS NOT NULL AND _id <> ''
   )
-  -- Band each search once; a missing, non-numeric or out-of-range count is (not set), never 0
-  SELECT
-    search_term,
+  SELECT search_id, internal_search_term,
     CASE
       WHEN results_count = 0 THEN '0'
       WHEN results_count BETWEEN 1 AND 10 THEN '1-10'
@@ -172,37 +145,29 @@ AEP Query Service SQL: |
       WHEN results_count >= 51 THEN '51+'
       ELSE '(not set)'
     END AS search_results_count_band
-  FROM first_views
-  WHERE previous_term IS NULL OR previous_term IS DISTINCT FROM search_term;
+  FROM eligible_searches
+  WHERE receipt_rank = 1
 
 Calculation Notes: |
-  1️⃣ Source: search_results_count on view_search_results (GA4) or Adobe search; page_number = 1 only, refires (is_refire = true) excluded.
-  2️⃣ Values: 0, 1-10, 11-50, 51+ and (not set). A missing or non-numeric count is (not set), never 0.
-  3️⃣ Count = total matches the engine returned before pagination, not the number of tiles rendered on the page.
-  4️⃣ Sort reload: a first-page view repeating the previous search term in the same session is the same search and is not banded again.
-  5️⃣ Autocomplete suggestions shown while typing are not searches; only submitted searches carry a band.
-  6️⃣ The 0 band share of all searches equals Zero-Results Search Rate under the same filters.
-  7️⃣ Internal and bot traffic (traffic_type = internal or bot) is excluded before banding.
+  1️⃣ Use the total matches from the initial response to each submitted search, before pagination.
+  2️⃣ Exclude autocomplete displays, sort reloads, later pages, and internal and bot traffic at collection.
+  3️⃣ Use “(not set)” for missing or invalid counts. Reserve “0” for explicit zero matches.
+  4️⃣ Use occurrence time and events received by each analytics platform before the reporting period ended.
+  5️⃣ Keep one row per search ID. Retries reuse the ID and snapshot. A new submission of the same term gets a new ID.
 
 Business Use Case: |
-  1️⃣ Search merchandiser: when the 0 band share rises, reviews its top terms and adds synonyms, redirects or products.
-  2️⃣ Merchandising team: when 51+ searches convert below 1-10, tunes relevance ranking and default facets for those terms.
-  3️⃣ Product owner: after a search engine or index release, compares band mix week over week to catch recall regressions.
+  1️⃣ Search merchandisers review terms in the 0 band to decide where synonyms or redirects could help.
+  2️⃣ Search product owners review terms in the 51+ band to decide where to improve ranking or add filters.
 
 Dependencies:
   Events: [site-search]
-  Metrics: [site-searches, search-results-views]
-  Dimensions: [internal-search-term]
 
-Source Data: Digital Analytics (GA4 / Adobe Analytics)
+Source Data: [Commerce Platform, Digital Analytics]
 
-Report Attributes: |
-  Internal Search Term; Device Category; Page Type; Traffic Source
-
-Dashboard Usage: [Site Search Performance, Product Discovery & Merchandising]
+Report Attributes: [Search Results Count Band, Internal Search Term]
 
 Segment Eligibility: |
-  true
+  Search Results Count Band IN ("0", "1-10", "11-50", "51+", "(not set)")
 
 Related Dimensions: [internal-search-term, filter-value, sort-option]
 
@@ -213,11 +178,15 @@ Contains PII: No
 
 Status: draft
 
+Version: 1.0.0
+
+Validation Status: qa_passed
+
 Contributed By: devyendarm
 
-Created At: 2026-09-30T17:56:53.378+00:00
+Created At: 2026-11-19T17:13:16.742+00:00
 
 Last Modified By: devyendarm
 
-Last Modified At: 2026-09-30T17:57:01.778+00:00
+Last Modified At: 2026-11-19T17:13:20.813+00:00
 
