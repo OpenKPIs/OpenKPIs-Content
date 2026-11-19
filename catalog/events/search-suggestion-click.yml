@@ -1,147 +1,137 @@
 # Event: Search Suggestion Click
-# Generated: 2026-10-11T03:16:15.378Z
+# Generated: 2026-11-19T05:00:34.156Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Event Name: Search Suggestion Click
-Event Serialization: always
+Aliases: [Autocomplete Click, Typeahead Selection, Search Suggestion Selection]
+
+Event Serialization: One per confirmed search suggestion selection
 
 Description: |
-  Standard select_content event with content_type = search_suggestion, fired when a shopper picks a query, product or category from the search typeahead. A typed query submitted without a pick is a Site Search.
+  Records when a shopper selects a suggested query, product, or category from the site's search box. It shows which kinds of suggestions shoppers choose.
 
 Category: Engagement
 
-Tags: [event, E-commerce: Product Discovery & Merchandising (Search/Filters/PDP)]
+Tags: [site search, autocomplete, product discovery]
 
-Industry: E-commerce
+Industry: [E-commerce, Retail]
 
-Priority: Medium
+Business Criticality: Medium
 
-Core Area: Discovery
+Journey / Navigation Area: [Discovery]
 
+Owning Function: Merchandising
 
-Event Type: standard
+Scope: Event
 
-Aggregation Window: Event, Session, Daily
+Measurement Channels: [Web]
+
+GA4 Collection Classification: Recommended
+
+Adobe XDM Classification: Custom XDM
+
+Trigger Condition: WHEN the site accepts a shopper's selection of an autocomplete suggestion by click, tap, or keyboard, THEN emit search_suggestion_click.
 
 GA4 Event: |
   select_content
 
 Adobe Event: |
-  select_content
+  search_suggestion_click
 
 W3 Data Layer: |
   {
-    "event": [
-      {
-        "eventInfo": {
-          "eventName": "select_content",
-          "eventAction": "search_suggestion"
-        },
-        "attributes": {
-          "content_type": "search_suggestion",
-          "search_term": "ite",
-          "suggestion_text": "item",
-          "suggestion_type": "query",
-          "suggestion_position": 1,
-          "page_type": "home"
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "search_suggestion_click",
+            "eventAction": "search_suggestion",
+            "eventId": "suggestion-selection-001",
+            "timeStamp": "2026-11-18T15:00:00Z"
+          },
+          "attributes": {
+            "suggestion_type": "query"
+          }
         }
-      }
-    ]
+      ]
+    }
   }
 
 GA4 Data Layer: |
-  {
-    "event": "select_content",
-    "content_type": "search_suggestion",
-    "search_term": "ite",
-    "suggestion_text": "item",
-    "suggestion_type": "query",
-    "suggestion_position": 1,
-    "page_type": "home"
-  }
+  [
+    {
+      "event": "select_content",
+      "content_type": "search_suggestion",
+      "event_id": "suggestion-selection-001",
+      "suggestion_type": "query"
+    }
+  ]
 
 Adobe Client Data Layer: |
-  {
-    "event": "select_content",
-    "eventInfo": {
-      "content_type": "search_suggestion",
-      "search_term": "ite",
-      "suggestion_text": "item",
-      "suggestion_type": "query",
-      "suggestion_position": 1,
-      "page_type": "home"
+  [
+    {
+      "event": "search_suggestion_click",
+      "eventInfo": {
+        "eventId": "suggestion-selection-001",
+        "timestamp": "2026-11-18T15:00:00Z",
+        "suggestion_type": "query"
+      }
     }
-  }
+  ]
 
 XDM Mapping: |
-  {
-    "eventType": "web.webinteraction.linkClicks",
-    "web": {
-      "webInteraction": {
-        "name": "search_suggestion",
-        "type": "other",
-        "linkClicks": {
-          "value": 1
+  [
+    {
+      "_id": "suggestion-selection-001",
+      "timestamp": "2026-11-18T15:00:00Z",
+      "eventType": "search_suggestion_click",
+      "_openkpis": {
+        "searchSuggestion": {
+          "suggestionType": "query"
         }
       }
-    },
-    "_tenantId": {
-      "searchSuggestion": {
-        "contentType": "search_suggestion",
-        "searchTerm": "ite",
-        "suggestionText": "item",
-        "suggestionType": "query",
-        "suggestionPosition": 1,
-        "pageType": "home"
-      }
     }
-  }
+  ]
 
-Parameters: |
-  {
-    "content_type": "string - Fixed value search_suggestion; separates suggestion picks from other select_content hits",
-    "search_term": "string - Prefix the shopper had typed when picking, redacted for emails and phone numbers",
-    "suggestion_text": "string - Label of the picked suggestion exactly as displayed",
-    "suggestion_type": "string - query, product or category",
-    "suggestion_position": "number - 1-based rank of the picked suggestion in the panel",
-    "page_type": "string - Type of page the typeahead was used on (home, category, product, search_results)"
-  }
+Calculation Notes: |
+  1️⃣ Use the time the site confirms the selection.
+  2️⃣ Assign a new anonymous action ID to each distinct confirmed selection and reuse it for retries.
+  3️⃣ In BigQuery and Adobe Experience Platform reports, count each action ID once.
+  4️⃣ If the selection runs a search, record the search separately as Site Search.
+  5️⃣ Exclude shopper-entered text, suggestion labels, and user identifiers.
+
+Business Use Case: |
+  1️⃣ When category selections decline, merchandisers review where category suggestions appear in the search menu.
+  2️⃣ Search teams compare product selections before and after a layout change to decide whether to keep it.
+
+
+Source Data: [Digital Analytics]
+
+Report Attributes: [Suggestion Type]
+
+Segment Eligibility: |
+  Suggestion Type IN ("query", "product", "category")
 
 
 
-Dependencies:
-  Events: [site-search]
-  Dimensions: [device-category, page-type]
-  KPIs: [autocomplete-click-through-rate]
 
-Source Data: Digital Analytics (GA4)
 
-    Report Attributes: |
-  Suggestion Type; Suggestion Position; Device Category; Page Type
+Data Sensitivity: Internal
 
-    Dashboard Usage: [Site Search Performance, Product Discovery & Merchandising]
+Contains PII: No
 
-    Segment Eligibility: |
-  true
+Status: draft
 
-    Related Dimensions: [device-category, page-type]
+Version: 1.0.0
 
-    
-    
-    Derived KPIs: [autocomplete-click-through-rate]
+Validation Status: qa_passed
 
-    Data Sensitivity: Internal
+Contributed By: devyendarm
 
-    Contains PII: No
+Created At: 2026-11-18T20:08:42.613+00:00
 
-    Status: draft
+Last Modified By: devyendarm
 
-    Contributed By: devyendarm
-
-    Created At: 2026-10-11T03:16:05.033+00:00
-
-    Last Modified By: devyendarm
-
-    Last Modified At: 2026-10-11T03:16:15.129+00:00
+Last Modified At: 2026-11-19T05:00:33.612+00:00
 
