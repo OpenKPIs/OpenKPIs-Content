@@ -1,173 +1,140 @@
 # Event: Chat Session End
-# Generated: 2026-09-27T16:54:20.045Z
+# Generated: 2026-11-20T00:11:26.108Z
 # Contributed by: devyendarm
-# Last modified by: devyendarm
+# Last modified by: devyendarm@gmail.com
 
 Event Name: Chat Session End
-Event Serialization: always
+Aliases: [Chat End, Chat Closed, Live Chat End]
+
+Event Serialization: One per closed support chat
 
 Description: |
-  Fires when a customer support chat closes, whether the customer, agent or bot ends it or it times out. It carries chat_session_id, end_reason, handled_by and chat duration.
+  Records when a customer, agent, or bot closes a support chat or when the chat times out. Support teams use the closure reason and elapsed time to review staffing and routing.
 
-Category: Experience
+Category: Operational Efficiency
 
-Tags: [event, E-commerce: Returns, Refunds & Customer Support]
+Tags: [customer support, live chat, chat closure]
 
-Industry: E-commerce
+Industry: [E-commerce, Retail]
 
-Priority: Medium
+Business Criticality: Medium
 
-Core Area: Engagement
+Journey / Navigation Area: [Customer Service]
 
+Owning Function: Customer Support
 
-Event Type: custom
+Scope: Event
 
-Aggregation Window: Event, Daily, Weekly
+Measurement Channels: [Web]
+
+GA4 Collection Classification: Custom
+
+Adobe XDM Classification: Custom XDM
+
+Trigger Condition: WHEN the support platform records a chat as finally closed, THEN emit chat_session_end.
 
 GA4 Event: |
-  contact_support
+  chat_session_end
 
 Adobe Event: |
-  contact_support
+  chat_session_end
 
 W3 Data Layer: |
   {
-    "event": [
-      {
-        "eventInfo": {
-          "eventName": "contact_support",
-          "eventAction": "chat_end",
-          "timeStamp": "2026-09-27T14:32:00Z"
-        },
-        "category": {
-          "primaryCategory": "Customer Support"
-        },
-        "attributes": {
-          "interaction_type": "chat_end",
-          "chat_session_id": "chat-8f21ac",
-          "end_reason": "agent_closed",
-          "handled_by": "agent",
-          "chat_duration_sec": 342,
-          "ticket_id": "TCK-55210",
-          "contact_reason": "return_status",
-          "resolution_type": "resolved",
-          "agent_team": "returns_support",
-          "csat_prompted": true
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "chat_session_end",
+            "timeStamp": "2026-09-27T14:32:00Z"
+          },
+          "attributes": {
+            "event_id": "chat-end-8f21ac",
+            "end_reason": "agent_closed",
+            "chat_duration_sec": 342
+          }
         }
-      }
-    ]
+      ]
+    }
   }
 
 GA4 Data Layer: |
-  {
-    "event": "contact_support",
-    "interaction_type": "chat_end",
-    "chat_session_id": "chat-8f21ac",
-    "end_reason": "agent_closed",
-    "handled_by": "agent",
-    "chat_duration_sec": 342,
-    "ticket_id": "TCK-55210",
-    "contact_reason": "return_status",
-    "resolution_type": "resolved",
-    "agent_team": "returns_support",
-    "csat_prompted": true
-  }
+  [
+    {
+      "event": "chat_session_end",
+      "event_id": "chat-end-8f21ac",
+      "occurred_at": "2026-09-27T14:32:00Z",
+      "end_reason": "agent_closed",
+      "chat_duration_sec": 342
+    }
+  ]
 
 Adobe Client Data Layer: |
-  {
-    "event": "contact_support",
-    "chatSession": {
-      "interaction_type": "chat_end",
-      "chat_session_id": "chat-8f21ac",
-      "end_reason": "agent_closed",
-      "handled_by": "agent",
-      "chat_duration_sec": 342,
-      "ticket_id": "TCK-55210",
-      "contact_reason": "return_status",
-      "resolution_type": "resolved",
-      "agent_team": "returns_support",
-      "csat_prompted": true
-    }
-  }
-
-XDM Mapping: |
-  {
-    "_experience": {
-      "analytics": {
-        "customDimensions": {
-          "eVars": {
-            "eVar1": "chat_session_id",
-            "eVar2": "end_reason",
-            "eVar3": "handled_by",
-            "eVar4": "ticket_id",
-            "eVar5": "contact_reason",
-            "eVar6": "resolution_type",
-            "eVar7": "agent_team",
-            "eVar8": "interaction_type"
-          },
-          "props": {
-            "prop1": "csat_prompted"
-          }
-        },
-        "event1to100": {
-          "event1": {
-            "value": "chat_duration_sec"
-          }
-        }
+  [
+    {
+      "event": "chat_session_end",
+      "eventInfo": {
+        "event_id": "chat-end-8f21ac",
+        "timestamp": "2026-09-27T14:32:00Z"
+      },
+      "data": {
+        "end_reason": "agent_closed",
+        "chat_duration_sec": 342
       }
     }
-  }
+  ]
 
-Parameters: |
-  {
-    "interaction_type": "string - support-interaction phase carried by the unified contact_support event; 'chat_end' identifies this as the chat-closing hit",
-    "chat_session_id": "string - chat platform conversation ID; dedupe key",
-    "end_reason": "string - customer_closed, agent_closed, bot_closed or inactivity_timeout",
-    "handled_by": "string - bot, agent or bot_to_agent",
-    "chat_duration_sec": "integer - seconds from chat start to close, queue time included",
-    "ticket_id": "string - CRM ticket linked to the chat, if one was created",
-    "contact_reason": "string - reason the customer selected or the agent tagged, e.g. return_status",
-    "resolution_type": "string - resolution recorded at close, e.g. resolved, escalated, unresolved",
-    "agent_team": "string - team of the last agent on the chat; empty for bot-only chats",
-    "csat_prompted": "boolean - true when the post-chat survey was shown"
-  }
+XDM Mapping: |
+  [
+    {
+      "_id": "chat-end-8f21ac",
+      "timestamp": "2026-09-27T14:32:00Z",
+      "eventType": "chat_session_end",
+      "_openkpis": {
+        "end_reason": "agent_closed",
+        "chat_duration_sec": 342
+      }
+    }
+  ]
 
 Calculation Notes: |
-  ["1️⃣ Fires once when the chat widget or chat platform closes the conversation; never on widget minimise, page change or agent transfer.","2️⃣ Serialization always: every closed chat is a hit. Dedupe on chat_session_id; the widget and the platform webhook can both send the close.","3️⃣ Required: interaction_type = chat_end (the discriminator on contact_support), chat_session_id, end_reason, handled_by, chat_duration_sec.","4️⃣ Optional: ticket_id, contact_reason, resolution_type, agent_team, csat_prompted (true when the post-chat survey is shown).","5️⃣ end_reason: customer_closed, agent_closed, bot_closed, inactivity_timeout (platform idle rule, not GA4's). Duration includes queue time.","6️⃣ No transcript text, name or email in any parameter; ticket_id links to the CRM record. Send only with analytics consent granted.","7️⃣ Common mistake: firing on tab close or page unload. A chat that resumes on the next page is still open and must not end."]
+  1️⃣ At final closure, the support platform assigns a stable event ID and freezes the event details.
+  2️⃣ Minimized widgets, page changes, tab closures, and transfers leave the event unrecorded while the chat is open.
+  3️⃣ Use one sender per destination. Retry with the same ID and details. Deduplicate reports by event ID.
+  4️⃣ Count seconds from first queue entry to closure, or from chat start if no queue was used. Transfers keep that start.
+  5️⃣ Send only with analytics consent. Omit transcripts, contact details, and customer or ticket IDs.
 
 Business Use Case: |
-  ["1️⃣ Customer Service Lead: inactivity_timeout share rises for one agent_team → reviews staffing and first-response targets.","2️⃣ Support Operations: unresolved bot_closed chats climb for one contact_reason → adds that intent to the bot flow.","3️⃣ CX Manager: csat_prompted is false on many closed chats → fixes the post-chat survey trigger."]
+  1️⃣ Support managers review staffing and first-response targets when inactivity timeouts rise.
+  2️⃣ Support leads review triage and routing when chats take longer to close.
 
-Dependencies:
-  Events: [session-start]
-  Dimensions: [support-channel, resolution-type, agent-team, ticket-status, device-category]
 
-Source Data: Digital Analytics (GA4)
+Source Data: [Customer Support, Digital Analytics]
 
-    Report Attributes: |
-  end_reason; handled_by; agent_team; contact_reason; resolution_type; device_category
+Report Attributes: [Chat end reason, Chat duration in seconds]
 
-    Dashboard Usage: [Customer Support Operations, Chat Performance]
+Segment Eligibility: |
+  Chat End Reason IN ("customer_closed", "agent_closed", "bot_closed", "inactivity_timeout")
 
-    Segment Eligibility: |
-  true
 
-    Related Dimensions: [support-channel, resolution-type, agent-team, ticket-status, device-category]
 
-    
-    
-    
-    Data Sensitivity: Internal
 
-    Contains PII: No
 
-    Status: published
+Data Sensitivity: Internal
 
-    Contributed By: devyendarm
+Contains PII: No
 
-    Created At: 2026-09-27T15:55:17.045+00:00
+Status: published
 
-    Last Modified By: devyendarm
+Version: 1.0.0
 
-    Last Modified At: 2026-09-27T16:54:19.628+00:00
+Validation Status: qa_passed
+
+Contributed By: devyendarm
+
+Created At: 2026-09-27T15:55:17.045+00:00
+
+Last Modified By: devyendarm@gmail.com
+
+Last Modified At: 2026-11-20T00:11:25.579+00:00
 
