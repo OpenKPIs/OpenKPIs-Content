@@ -1,28 +1,37 @@
 # Event: Add Shipping Info
-# Generated: 2026-09-23T15:49:26.693Z
+# Generated: 2026-11-21T04:09:15.189Z
 # Contributed by: devyendarm
-# Last modified by: devyendarm
+# Last modified by: devyendarm@gmail.com
 
 Event Name: Add Shipping Info
-Event Serialization: always
+Aliases: [Shipping Step Completed]
+
+Event Serialization: One per accepted shipping submission
 
 Description: |
-  GA4 recommended add_shipping_info event, fired when a shopper submits a shipping method at checkout. It carries shipping_tier, cart value and items, and feeds shipping-step drop-off and delivery-mix analysis.
+  Records when checkout accepts a shopper’s shipping details and chosen shipping option. Teams use it to see which options shoppers successfully submit.
 
 Category: Conversion
 
-Tags: [event, E-commerce: Cart & Checkout Funnel Analytics]
+Tags: [checkout, shipping options, step completion]
 
-Industry: E-commerce
+Industry: [E-commerce, Retail]
 
-Priority: High
+Business Criticality: High
 
-Core Area: Checkout
+Journey / Navigation Area: [Checkout]
 
+Owning Function: Product Management
 
-Event Type: standard
+Scope: Event
 
-Aggregation Window: Event, Session, Daily
+Measurement Channels: [Mobile App, Web]
+
+GA4 Collection Classification: Recommended
+
+Adobe XDM Classification: Custom XDM
+
+Trigger Condition: WHEN checkout saves a submission after validating the required shipping details and chosen option, THEN emit add_shipping_info.
 
 GA4 Event: |
   add_shipping_info
@@ -36,143 +45,123 @@ W3 Data Layer: |
       "event": [
         {
           "eventInfo": {
-            "eventName": "Add Shipping Info",
-            "eventAction": "add_shipping_info",
-            "type": "checkout"
+            "eventName": "add_shipping_info",
+            "eventID": "ship-7f9b20c1",
+            "timeStamp": "2026-11-18T15:42:00Z"
           }
         }
       ],
       "cart": {
-        "cartID": "{cart_id}",
-        "price": {
-          "currency": "{currency}",
-          "basePrice": "{value}"
-        },
-        "item": "{items}",
         "attributes": {
-          "checkoutID": "{checkout_id}",
-          "shippingTier": "{shipping_tier}",
-          "fulfillmentMethod": "{fulfillment_method}",
-          "checkoutType": "{checkout_type}",
-          "coupon": "{coupon}"
-        }
+          "shippingTier": "standard"
+        },
+        "item": [
+          {
+            "productInfo": {
+              "productID": "SKU-1042"
+            }
+          }
+        ]
       }
     }
   }
 
 GA4 Data Layer: |
-  {
-    "event": "add_shipping_info",
-    "ecommerce": {
-      "currency": "{currency}",
-      "value": "{value}",
-      "coupon": "{coupon}",
-      "shipping_tier": "{shipping_tier}",
-      "checkout_id": "{checkout_id}",
-      "cart_id": "{cart_id}",
-      "fulfillment_method": "{fulfillment_method}",
-      "checkout_type": "{checkout_type}",
-      "items": "{items}"
+  [
+    {
+      "event": "add_shipping_info",
+      "event_id": "ship-7f9b20c1",
+      "occurred_at": "2026-11-18T15:42:00Z",
+      "ecommerce": {
+        "shipping_tier": "standard",
+        "items": [
+          {
+            "item_id": "SKU-1042"
+          }
+        ]
+      }
     }
-  }
+  ]
 
 Adobe Client Data Layer: |
-  {
-    "event": "add_shipping_info",
-    "shipping": {
-      "shippingTier": "{shipping_tier}",
-      "fulfillmentMethod": "{fulfillment_method}",
-      "checkoutType": "{checkout_type}",
-      "checkoutId": "{checkout_id}",
-      "cartId": "{cart_id}",
-      "coupon": "{coupon}"
-    },
-    "cart": {
-      "currency": "{currency}",
-      "value": "{value}",
-      "items": "{items}"
+  [
+    {
+      "event": "add_shipping_info",
+      "eventInfo": {
+        "eventID": "ship-7f9b20c1",
+        "timestamp": "2026-11-18T15:42:00Z"
+      },
+      "commerce": {
+        "shipping": {
+          "shippingMethod": "standard"
+        }
+      },
+      "productListItems": [
+        {
+          "SKU": "SKU-1042"
+        }
+      ]
     }
-  }
+  ]
 
 XDM Mapping: |
-  {
-    "eventType": "commerce.checkouts",
-    "commerce": {
-      "checkouts": {
-        "value": 1
+  [
+    {
+      "_id": "ship-7f9b20c1",
+      "timestamp": "2026-11-18T15:42:00Z",
+      "eventType": "add_shipping_info",
+      "commerce": {
+        "shipping": {
+          "shippingMethod": "standard"
+        }
       },
-      "cart": {
-        "cartID": "{cart_id}"
-      },
-      "order": {
-        "currencyCode": "{currency}"
-      },
-      "promotion": {
-        "couponCode": "{coupon}"
-      }
-    },
-    "productListItems": "{items}",
-    "_tenant": {
-      "checkoutStepName": "shipping_info",
-      "checkoutID": "{checkout_id}",
-      "merchandiseValue": "{value}",
-      "shippingTier": "{shipping_tier}",
-      "fulfillmentMethod": "{fulfillment_method}",
-      "checkoutType": "{checkout_type}"
+      "productListItems": [
+        {
+          "SKU": "SKU-1042"
+        }
+      ]
     }
-  }
-
-Parameters: |
-  {
-    "currency": "string - ISO 4217 code of the cart value, e.g. USD",
-    "value": "number - merchandise value of the cart, excluding shipping and tax",
-    "items": "array - cart line items (item_id, item_name, price, quantity, item_category)",
-    "shipping_tier": "string - selected shipping option, controlled lowercase value: standard, express, next_day or click_and_collect",
-    "coupon": "string - order-level coupon code applied at checkout, if any",
-    "checkout_id": "string - checkout identifier used to dedupe resubmissions",
-    "cart_id": "string - cart identifier linking to add_to_cart and begin_checkout",
-    "fulfillment_method": "string - delivery, click_and_collect or ship_to_store",
-    "checkout_type": "string - guest or registered checkout"
-  }
+  ]
 
 Calculation Notes: |
-  ["1️⃣ Fires when the shipping step is submitted and address and method pass validation; not on method clicks or on page load.","2️⃣ Serialization always: re-fires on each resubmission; dedupe on checkout_id within a session when counting shipping-step completions.","3️⃣ Required: currency, value, items. Recommended: shipping_tier, coupon, checkout_id. value is merchandise total, excluding shipping and tax.","4️⃣ shipping_tier takes lowercase controlled values (standard, express, next_day, click_and_collect), as in add_payment_info; never rate IDs.","5️⃣ No PII: never send name, street address, postcode, email or phone. Send only when analytics_storage consent is granted.","6️⃣ Express wallets (Apple Pay, Shop Pay) must fire it on shipping selection in the wallet sheet, or the funnel shows false drop-off.","7️⃣ Common mistakes: firing on begin_checkout load, items out of sync with the cart, value sent as a string, currency missing."]
+  1️⃣ At commit, the commerce platform assigns a stable event ID and saves an immutable snapshot.
+  2️⃣ Use one logical sender per destination and reuse the original ID and snapshot on retries.
+  3️⃣ Count each event ID once. Each new accepted submission gets a new ID.
+  4️⃣ Collect only with analytics consent and omit contact details and shipping addresses.
+  5️⃣ Report by commit time using only events each analytics platform received before the reporting period ended.
 
 Business Use Case: |
-  ["1️⃣ Checkout Product Manager: shipping-step drop-off rises week on week → audit address form errors.","2️⃣ Pricing team: Express share of shipping_tier falls after a rate change → retest the free-shipping threshold.","3️⃣ Fulfilment Operations: tier mix shifts toward Next Day before peak → rebook carrier capacity for the forecast.","4️⃣ CRO team: step completion differs by device → prioritise address autocomplete tests on the weakest device."]
+  1️⃣ Checkout teams compare submission counts with separate checkout-start counts to decide when to audit validation.
+  2️⃣ Fulfillment teams use shifts in shipping tier mix to decide where to adjust carrier capacity forecasts.
 
-Dependencies:
-  Dimensions: [shipping-tier, currency]
 
-Source Data: Digital Analytics (GA4)
+Source Data: [Commerce Platform, Digital Analytics]
 
-    Report Attributes: |
-  shipping_tier; fulfillment_method; checkout_type; device_category; coupon; traffic_source
+Report Attributes: [Shipping Tier, Product ID]
 
-    Dashboard Usage: [Checkout Funnel Performance, Shipping & Delivery Options Mix, Conversion Rate Optimisation]
+Segment Eligibility: |
+  Shipping Tier EXISTS
 
-    Segment Eligibility: |
-  true
 
-    Related Dimensions: [shipping-tier, fulfillment-method, checkout-type, coupon-code, currency, device-category]
+Derived Dimensions: [item-coupon, pickup-location-type, shipping-tier]
 
-    Derived Dimensions: [shipping-tier]
 
-    Derived Metrics: [shipping-info-added]
 
-    Derived KPIs: [checkout-completion-rate, checkout-conversion-rate, cart-to-purchase-rate]
+Data Sensitivity: Internal
 
-    Data Sensitivity: Internal
+Contains PII: No
 
-    Contains PII: No
+Status: published
 
-    Status: published
+Version: 1.0.0
 
-    Contributed By: devyendarm
+Validation Status: qa_passed
 
-    Created At: 2026-09-23T15:46:34.085+00:00
+Contributed By: devyendarm
 
-    Last Modified By: devyendarm
+Created At: 2026-09-23T15:46:34.085+00:00
 
-    Last Modified At: 2026-09-23T15:49:26.456+00:00
+Last Modified By: devyendarm@gmail.com
+
+Last Modified At: 2026-11-21T04:09:14.62+00:00
 
