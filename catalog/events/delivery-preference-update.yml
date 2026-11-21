@@ -1,170 +1,140 @@
 # Event: Delivery Preference Update
-# Generated: 2026-09-25T18:28:34.486Z
+# Generated: 2026-11-21T04:08:15.003Z
 # Contributed by: devyendarm
 # Last modified by: devyendarm
 
 Event Name: Delivery Preference Update
-Event Serialization: always
+Aliases: [Delivery Options Update]
+
+Event Serialization: One per preference type changed in a confirmed save
 
 Description: |
-  Fires when a placed order's delivery address, instructions or time window (preference_type) is changed via self-service, carrier portal or agent. Feeds failed-delivery and delivery-window analysis.
+  Records a confirmed change to the delivery address, instructions, or time window for a placed order. It shows what customers change and where each change starts.
 
-Category: Operations
+Category: Engagement
 
-Tags: [event, E-commerce: Post-Purchase Logistics & Fulfillment]
+Tags: [delivery preferences, delivery changes, post-purchase]
 
-Industry: E-commerce
+Industry: [E-commerce, Retail]
 
-Priority: Medium
+Business Criticality: Medium
 
-Core Area: Generic
+Journey / Navigation Area: [Fulfillment, Post-Purchase]
 
+Owning Function: Customer Support
 
-Event Type: custom
+Scope: Event
 
-Aggregation Window: Event, Daily, Weekly
+Measurement Channels: [External Platform / Partner, Call Center / Support, Web]
+
+GA4 Collection Classification: Custom
+
+Adobe XDM Classification: Custom XDM
+
+Trigger Condition: WHEN the order system saves a validated delivery preference change for a placed order after any required carrier acceptance, THEN emit delivery_preference_update.
 
 GA4 Event: |
-  submit_form
+  delivery_preference_update
 
 Adobe Event: |
-  form_submit
+  delivery_preference_update
 
 W3 Data Layer: |
   {
-    "event": [
-      {
-        "eventInfo": {
-          "eventName": "submit_form",
-          "eventAction": "submit_form",
-          "type": "other"
-        },
-        "category": {
-          "primaryCategory": "Post-Purchase Logistics"
+    "digitalData": {
+      "event": [
+        {
+          "eventInfo": {
+            "eventName": "delivery_preference_update",
+            "eventID": "dpu_01k5a4m7r2",
+            "timeStamp": "2026-11-18T16:20:00Z"
+          },
+          "attributes": {
+            "preferenceType": "time_window",
+            "changeSource": "self_service_web"
+          }
         }
-      }
-    ],
-    "transaction": {
-      "transactionID": "ORD-48213097",
-      "profile": {
-        "order": {
-          "orderStatus": "processing",
-          "fulfillmentMethod": "ship_to_home",
-          "trackingNumber": "1Z999AA10123456784"
-        }
-      },
-      "attributes": {
-        "formType": "delivery_preference_update",
-        "preferenceType": "time_window",
-        "changeID": "chg_2f88ac91",
-        "changeSource": "self_service_web",
-        "deliveryTimeWindow": "2026-09-27 14:00-16:00",
-        "deliveryRegion": "TX"
-      }
+      ]
     }
   }
 
 GA4 Data Layer: |
-  {
-    "event": "submit_form",
-    "form_type": "delivery_preference_update",
-    "transaction_id": "ORD-48213097",
-    "order_status": "processing",
-    "preference_type": "time_window",
-    "change_id": "chg_2f88ac91",
-    "change_source": "self_service_web",
-    "delivery_time_window": "2026-09-27 14:00-16:00",
-    "delivery_region": "TX",
-    "fulfillment_method": "ship_to_home",
-    "tracking_number": "1Z999AA10123456784"
-  }
+  [
+    {
+      "event": "delivery_preference_update",
+      "event_id": "dpu_01k5a4m7r2",
+      "occurred_at": "2026-11-18T16:20:00Z",
+      "preference_type": "time_window",
+      "change_source": "self_service_web"
+    }
+  ]
 
 Adobe Client Data Layer: |
-  {
-    "event": "form_submit",
-    "form_type": "delivery_preference_update",
-    "transaction_id": "ORD-48213097",
-    "order_status": "processing",
-    "preference_type": "time_window",
-    "change_id": "chg_2f88ac91",
-    "change_source": "self_service_web",
-    "delivery_time_window": "2026-09-27 14:00-16:00",
-    "delivery_region": "TX",
-    "fulfillment_method": "ship_to_home",
-    "tracking_number": "1Z999AA10123456784"
-  }
-
-XDM Mapping: |
-  {
-    "eventType": "web.formFilledOut",
-    "commerce": {
-      "order": {
-        "purchaseID": "transaction_id"
-      }
-    },
-    "_tenant": {
-      "ecommerce": {
-        "delivery": {
-          "formType": "form_type",
-          "preferenceType": "preference_type",
-          "changeId": "change_id",
-          "changeSource": "change_source",
-          "orderStatus": "order_status",
-          "deliveryTimeWindow": "delivery_time_window",
-          "deliveryRegion": "delivery_region",
-          "fulfillmentMethod": "fulfillment_method",
-          "trackingNumber": "tracking_number"
-        }
+  [
+    {
+      "event": "delivery_preference_update",
+      "eventInfo": {
+        "eventId": "dpu_01k5a4m7r2",
+        "timestamp": "2026-11-18T16:20:00Z"
+      },
+      "data": {
+        "preferenceType": "time_window",
+        "changeSource": "self_service_web"
       }
     }
-  }
+  ]
 
-Parameters: |
-  {
-    "form_type": "string - Always delivery_preference_update; identifies this submit_form hit among other forms.",
-    "transaction_id": "string - Order ID of the placed order being changed; joins to purchase.",
-    "preference_type": "string - address | instructions | time_window.",
-    "change_id": "string - ID of the saved change request; shared by all hits from one save; dedupe key.",
-    "change_source": "string - self_service_web | self_service_app | carrier_portal | agent.",
-    "order_status": "string - Order status at change time, e.g. processing, shipped, out_for_delivery.",
-    "delivery_time_window": "string - New window when preference_type = time_window, e.g. 2026-09-26 14:00-16:00.",
-    "delivery_region": "string - State/province of the new address when preference_type = address; no street or postcode.",
-    "fulfillment_method": "string - Fulfilment method of the order, e.g. ship_to_home, same_day_delivery.",
-    "tracking_number": "string - Carrier tracking number, when a shipment already exists."
-  }
+XDM Mapping: |
+  [
+    {
+      "_id": "dpu_01k5a4m7r2",
+      "timestamp": "2026-11-18T16:20:00Z",
+      "eventType": "delivery_preference_update",
+      "_openkpis": {
+        "preferenceType": "time_window",
+        "changeSource": "self_service_web"
+      }
+    }
+  ]
+
+Calculation Notes: |
+  1️⃣ At commit, the order system stores one durable event ID and fixed snapshot per save and changed preference type.
+  2️⃣ Save and carrier confirmation replays reuse the stored ID. A new confirmed save gets a new ID per changed type.
+  3️⃣ Use one sender per destination. Retries reuse the ID and snapshot. Deduplicate downstream by event ID.
+  4️⃣ Change Source records origin: self_service_web for web, agent_assisted for support, carrier_portal for partners.
+  5️⃣ Honor analytics consent and omit addresses, instruction text, contact details, and tracking numbers.
+
+Business Use Case: |
+  1️⃣ Customer Support adds self-service links to shipping emails when agents handle more address changes.
+  2️⃣ Delivery teams review how customers choose a time window when rescheduling becomes more common.
+
+
+Source Data: [Offline Operational System, Order Management, Digital Analytics]
+
+Report Attributes: [Delivery Preference Type, Change Source]
+
+Segment Eligibility: |
+  Delivery Preference Type IN ("address", "instructions", "time_window")
 
 
 
-Dependencies:
-  Events: [purchase]
-  Dimensions: [delivery-time-window, order-status]
 
-Source Data: Digital Analytics (GA4)
 
-    Report Attributes: |
-  preference_type; change_source; order_status; delivery_region; fulfillment_method; device_category
+Data Sensitivity: Internal
 
-    Dashboard Usage: [Post-Purchase Delivery Experience, Customer Service Contact Deflection, Last-Mile Delivery Operations]
+Contains PII: No
 
-    Segment Eligibility: |
-  true
+Status: draft
 
-    Related Dimensions: [delivery-time-window, delivery-region, order-status, fulfillment-method, delivery-promise-date, delivery-exception-type]
+Version: 1.0.0
 
-    
-    
-    
-    Data Sensitivity: Internal
+Validation Status: qa_passed
 
-    Contains PII: No
+Contributed By: devyendarm
 
-    Status: draft
+Created At: 2026-11-21T04:08:10.794+00:00
 
-    Contributed By: devyendarm
+Last Modified By: devyendarm
 
-    Created At: 2026-09-25T18:28:23.875+00:00
-
-    Last Modified By: devyendarm
-
-    Last Modified At: 2026-09-25T18:28:33.549+00:00
+Last Modified At: 2026-11-21T04:08:14.537+00:00
 
